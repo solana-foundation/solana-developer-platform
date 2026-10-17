@@ -4,6 +4,7 @@ import {
   createFundedIntegrationWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
+  requestAsOrganizationAdmin,
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
@@ -35,6 +36,8 @@ const DESTINATION_B = "7pL4J6N9d77qiy5iqfJ5z4T1mSx1FSa7o2r1K5vY7P4m";
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet Scope", () => {
   let apiKeyHash: string;
   const adminRequest = requestWithApiKey();
+  // Keys are created by a signed-in organization admin, never a key (HOO-2099).
+  let keyManager: Awaited<ReturnType<typeof requestAsOrganizationAdmin>>;
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -47,6 +50,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
 
   beforeEach(async () => {
     await resetIntegrationState(apiKeyHash);
+    keyManager = await requestAsOrganizationAdmin();
   });
 
   it("limits transfer list/get access to the API key wallet bindings", {
@@ -61,7 +65,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
       fundLamports: 12_000_000,
     });
 
-    const createKeyRes = await adminRequest("/v1/api-keys", {
+    const createKeyRes = await keyManager("/v1/api-keys", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

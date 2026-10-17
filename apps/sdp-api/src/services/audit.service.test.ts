@@ -94,6 +94,7 @@ function createAuditWriter(
           pendingSequence = null;
         }
         await afterCommit(result);
+        return result;
       }
     ),
   };

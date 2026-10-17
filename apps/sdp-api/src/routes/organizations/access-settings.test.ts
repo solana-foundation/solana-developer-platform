@@ -3,7 +3,7 @@ import type { OrganizationSettings } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
+import { API_KEY_PRE_READ_MAX_REQUESTS, apiKeyFloodGuardIdentifier } from "@/middleware/rate-limit";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -11,7 +11,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedApiKeyRowFor, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
 
 const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
 
@@ -31,9 +31,9 @@ async function seedOrganization(settings: OrganizationSettings | null): Promise<
       settings === null ? null : JSON.stringify(settings)
     )
     .run();
-  // The cached key is seeded before the organization exists; its row needs it.
-  await seedApiKeyRowFor(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+  await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
     ...TEST_CACHED_API_KEY,
+    projectId: PROJECT_ID,
     permissions: ["*"],
   });
 }
@@ -79,13 +79,21 @@ function get(headers: Record<string, string>) {
   return app.request(`/v1/organizations/${ORGANIZATION_ID}`, { headers }, env);
 }
 
+/** Settings are written by a signed-in organization admin, never a key (HOO-2099). */
+let adminToken: string;
+
+async function signInAdmin(): Promise<void> {
+  await seedMemberWithProject();
+  adminToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, ORGANIZATION_ID);
+}
+
 function patch(body: unknown, from: string) {
   return app.request(
     `/v1/organizations/${ORGANIZATION_ID}`,
     {
       method: "PATCH",
       headers: {
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        Authorization: `Bearer ${adminToken}`,
         "Content-Type": "application/json",
         "x-forwarded-for": from,
       },
@@ -100,7 +108,7 @@ describe("Organization access settings", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, permissions: ["*"] });
+    await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, permissions: ["*"] });
   });
   afterEach(async () => {
     await clearKVStores(env);
@@ -108,6 +116,7 @@ describe("Organization access settings", () => {
   describe("writing settings.allowedIpAddresses", () => {
     beforeEach(async () => {
       await seedOrganization(null);
+      await signInAdmin();
     });
     it("rejects an entry that is not an address or CIDR range", async () => {
       const res = await patch(
@@ -115,7 +124,7 @@ describe("Organization access settings", () => {
         "203.0.113.42"
       );
       expect(res.status).toBe(400);
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("rejects a prefix wider than the address family allows", async () => {
       const res = await patch(
@@ -123,7 +132,7 @@ describe("Organization access settings", () => {
         "203.0.113.42"
       );
       expect(res.status).toBe(400);
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("stores the range each entry actually selects", async () => {
       const res = await patch(
@@ -177,7 +186,7 @@ describe("Organization access settings", () => {
         };
       };
       expect(body.error.message).toContain("198.51.100.42");
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("refuses an allowlist when the caller's origin cannot be determined", async () => {
       const res = await app.request(
@@ -185,7 +194,7 @@ describe("Organization access settings", () => {
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${adminToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ settings: { allowedIpAddresses: ["203.0.113.0/24"] } }),
@@ -193,7 +202,7 @@ describe("Organization access settings", () => {
         env
       );
       expect(res.status).toBe(400);
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("clears the restriction when given an empty list", async () => {
       expect(
@@ -208,6 +217,7 @@ describe("Organization access settings", () => {
   describe("concurrent settings updates", () => {
     beforeEach(async () => {
       await seedOrganization({ defaultEnvironment: "sandbox" });
+      await signInAdmin();
     });
     it("keeps a security change that lands alongside an unrelated one", async () => {
       const [restriction, unrelated] = await Promise.all([
@@ -390,6 +400,8 @@ describe("Organization access settings", () => {
       );
       expect(allowed.status).toBe(200);
     });
+    // A key is admitted against the highest tier before its rows are read, so
+    // a flood is refused there; its own tier is judged after the read.
     it("dies at the rate limiter before the organization row is read", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       const headers = {
@@ -399,7 +411,14 @@ describe("Organization access settings", () => {
       const now = Date.now();
       const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
       try {
-        await seedRateLimit(env, TEST_CACHED_API_KEY.id, RATE_LIMIT_TIERS.standard);
+        await seedRateLimit(
+          env,
+          apiKeyFloodGuardIdentifier(
+            await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
+            "198.51.100.42"
+          ),
+          API_KEY_PRE_READ_MAX_REQUESTS
+        );
         expect((await get(headers)).status).toBe(429);
       } finally {
         nowSpy.mockRestore();
@@ -408,7 +427,7 @@ describe("Organization access settings", () => {
     it("intersects with the API key's own allowlist rather than replacing it", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await clearKVStores(env);
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["*"],
         allowedIps: ["203.0.113.7/32"],

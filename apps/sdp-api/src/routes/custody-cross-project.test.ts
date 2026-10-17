@@ -2,9 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
-import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
+import {
+  resetUnresolvedBindingWarningsForTesting,
+  upsertApiKeyWalletBinding,
+} from "@/services/api-key-wallets.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
@@ -163,7 +167,29 @@ function requestAsRequester(path: string, init: { method: string; body?: unknown
         "Content-Type": "application/json",
         Authorization: `Bearer ${API_KEY.raw}`,
       },
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    },
+    env
+  );
+}
+
+/** Keys are created by a signed-in organization admin, never a key (HOO-2099). */
+async function requestAsAdmin(path: string, init: { method: string; body?: unknown }) {
+  const { headers } = await authenticateTestClerkUser(env, getDb(env), {
+    userId: USER_ID,
+    email: "custody-cross-project@example.com",
+    clerkUserId: `clerk_${USER_ID}`,
+    organizationId: ORGANIZATION_ID,
+    clerkOrgId: `clerk_${ORGANIZATION_ID}`,
+    orgSlug: "custody-cross-project",
+    role: "admin",
+  });
+  return app.request(
+    path,
+    {
+      method: init.method,
+      headers: headers(REQUESTER_PROJECT_ID),
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
     },
     env
   );
@@ -246,7 +272,7 @@ describe("custody wallets across an organization's projects", () => {
   it.each(OWNER_WALLETS)(
     "refuses to bind a new API key to another project's $owner wallet",
     async ({ walletId }) => {
-      const response = await requestAsRequester("/v1/api-keys", {
+      const response = await requestAsAdmin("/v1/api-keys", {
         method: "POST",
         body: { name: "Cross-project key", walletScope: "selected", signingWalletId: walletId },
       });
@@ -268,6 +294,7 @@ describe("custody wallets across an organization's projects", () => {
         walletId,
         permissions: ["wallets:read"],
       });
+      resetUnresolvedBindingWarningsForTesting();
       const warn = vi.spyOn(getLogger(), "warn");
 
       for (const requestedWalletId of [walletId, REQUESTER_WALLET_ID]) {

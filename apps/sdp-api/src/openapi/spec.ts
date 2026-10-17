@@ -31,7 +31,7 @@ import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
-import { registerProjectPaths } from "./paths/projects";
+import { registerProjectAdministrationPaths, registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 import { registerTransactionsPaths } from "./paths/transactions";
 import {
@@ -52,7 +52,11 @@ const OPENAPI_TAG = {
     name: "Wallets",
     description: "Wallet signing provider configuration and wallet management.",
   },
-  PROJECTS: { name: "Projects", description: "Project and project member management." },
+  PROJECTS: {
+    name: "Projects",
+    description:
+      "Projects and their provider availability. Project members and keys are managed in the dashboard.",
+  },
   RPC: { name: "RPC", description: "Managed Solana RPC relay." },
   ISSUANCE: {
     name: "Issuance",
@@ -155,7 +159,6 @@ function usedTags(document: OpenAPIObject, tags: readonly { name: string }[]) {
 
 const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.HEALTH,
-  OPENAPI_TAG.API_KEYS,
   OPENAPI_TAG.WALLETS,
   OPENAPI_TAG.PROJECTS,
   OPENAPI_TAG.ISSUANCE,
@@ -215,9 +218,10 @@ function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
   });
 }
 
+// Key, member and organization administration answer a signed-in person only
+// (HOO-2099), so the public document, which an API key calls, omits them.
 function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerHealthPaths(registry);
-  registerApiKeyPaths(registry);
   registerCustodyPaths(registry);
   if (publishEarn) {
     registerPublicEarnPaths(registry);
@@ -240,6 +244,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerEarnPaths(registry);
   registerDvpPaths(registry);
   registerProjectPaths(registry, true);
+  registerProjectAdministrationPaths(registry);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);

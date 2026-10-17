@@ -1,24 +1,9 @@
-import {
-  type ApiKeyRole,
-  getPermissionsForApiKeyRole,
-  hasAllPermissions,
-  type MovementId,
-  PERMISSIONS,
-  type Permission,
-} from "@sdp/types";
-import { z } from "zod";
+import { type ApiKeyRole, hasAllPermissions, type MovementId } from "@sdp/types";
 import { getDb } from "@/db";
-import { parsePostgresJson } from "@/db/postgres-utils";
+import { parseStoredApiKeyPermissions } from "@/lib/api-key-permissions";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
-import {
-  AppError,
-  conflict,
-  forbidden,
-  internalError,
-  providerUnavailable,
-  walletNotFound,
-} from "@/lib/errors";
+import { AppError, conflict, forbidden, providerUnavailable, walletNotFound } from "@/lib/errors";
 import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -26,14 +11,17 @@ import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
-const explicitPermissionsSchema = z.array(z.enum(PERMISSIONS));
-
 /**
  * Refresh the key's role and permissions before authorizing a specific
  * operation or wallet, and its liveness from the same row, so a key revoked
- * between authentication and this read signs nothing. Wallet bindings need no
- * re-read: authentication read them fresh for this request.
+ * between authentication and this read signs nothing. Authentication already
+ * read all of it fresh (HOO-2099); this is the deliberate re-check right before
+ * a private-channel movement signs, not a cache workaround. Wallet bindings
+ * need no re-read: authentication read them fresh for this request.
  */
+// TODO(HOO-2099 PR 3): this second read of the key row in one request goes
+// when PR 3 replaces the private-channel re-check; it does not re-check the
+// organization or project status that authentication does.
 export async function refreshPrivateChannelAuth(
   env: Env,
   auth: ApiKeyContext,
@@ -54,20 +42,10 @@ export async function refreshPrivateChannelAuth(
   if (apiKeyRowRefusal(current, Date.now()) !== null) {
     throw forbidden("API key is no longer active");
   }
-  let permissions: Permission[];
-  try {
-    // SQL NULL inherits the current role; an explicit empty array grants nothing.
-    permissions =
-      current.permissions === null
-        ? getPermissionsForApiKeyRole(current.role)
-        : explicitPermissionsSchema.parse(parsePostgresJson<unknown>(current.permissions));
-  } catch {
-    throw internalError("Stored API key permissions are invalid");
-  }
   return {
     ...auth,
     role: current.role,
-    permissions,
+    permissions: parseStoredApiKeyPermissions(current.role, current.permissions),
   };
 }
 

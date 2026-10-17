@@ -16,14 +16,11 @@ import type {
   Permission,
 } from "@sdp/types";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
-import {
-  assertGrantableAllowedOperations,
-  assertGrantableApiKeyPermissions,
-} from "./api-key-scope.service";
-import { parseApiKeyWalletPermissionsColumn } from "./api-key-wallets.service";
+import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
   id: string;
@@ -54,18 +51,15 @@ export interface ApiKeyDetails extends ApiKeyListItem {
 export interface CreateApiKeyInput {
   organizationId: string;
   projectId: string;
-  createdByKeyId?: string;
-  createdByUserId?: string;
+  /** The signed-in person creating the key; API keys never manage keys. */
+  createdByUserId: string;
   actorPermissions: Permission[];
-  actorApiKeyRole: string | null;
   name: string;
   description?: string | null;
   role: ApiKeyRole;
   permissions?: Permission[] | null;
   allowedIps?: string[] | null;
   allowedOperations?: AllowedOperation[] | null;
-  /** The creating key's own list; null for a dashboard actor or an unrestricted key. */
-  actorAllowedOperations: AllowedOperation[] | null;
   expiresAt?: string | null;
   signingWalletId?: string | null;
   pepper?: string;
@@ -76,9 +70,7 @@ export interface UpdateApiKeyInput {
   organizationId: string;
   projectId: string;
   actorPermissions: Permission[];
-  actorApiKeyRole: string | null;
   currentRole: ApiKeyRole;
-  actorAllowedOperations: AllowedOperation[] | null;
   name?: string;
   description?: string | null;
   allowedIps?: string[] | null;
@@ -115,7 +107,6 @@ export interface RotateApiKeyResult {
     id: string;
     rotationDeadline: string;
   };
-  previousKeyHash: string;
 }
 
 /**
@@ -199,7 +190,6 @@ type RotationTargetRow = {
   id: string;
   name: string;
   description: string | null;
-  key_hash: string;
   role: ApiKeyRole;
   permissions: string | null;
   environment: ApiKeyEnvironment;
@@ -209,6 +199,8 @@ type RotationTargetRow = {
   signing_wallet_id: string | null;
   created_by: string;
   expires_at: string | null;
+  status: ApiKeyStatus;
+  rotation_deadline: string | null;
 };
 
 export class ApiKeyService {
@@ -341,13 +333,7 @@ export class ApiKeyService {
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     assertTenantClaim(this.scope, input, "ApiKeyService.createApiKey");
-    assertGrantableApiKeyPermissions(
-      input.actorPermissions,
-      input.role,
-      input.permissions,
-      input.actorApiKeyRole
-    );
-    assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
+    assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
 
     // The organization must still be active, and the share lock holds that
     // until this transaction commits: a concurrent deletion's
@@ -375,20 +361,7 @@ export class ApiKeyService {
     const { key, prefix } = createApiKeyMaterial(project.environment);
     const keyHash = await hashString(key, input.pepper);
 
-    let createdBy = input.createdByUserId?.trim() || "";
-
-    if (!createdBy && input.createdByKeyId) {
-      const creatorKey = await this.db
-        .prepare(
-          `SELECT created_by
-           FROM api_keys
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(input.createdByKeyId, this.scope.organizationId, this.scope.projectId)
-        .first<{ created_by: string }>();
-      createdBy = creatorKey?.created_by || "";
-    }
-
+    const createdBy = input.createdByUserId;
     const actor = await this.db
       .prepare("SELECT id FROM users WHERE id = ?")
       .bind(createdBy)
@@ -460,12 +433,8 @@ export class ApiKeyService {
       assertGrantableApiKeyPermissions(
         input.actorPermissions,
         input.currentRole,
-        input.permissions,
-        input.actorApiKeyRole
+        input.permissions
       );
-    }
-    if (input.allowedOperations !== undefined) {
-      assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
     }
 
     const updates: string[] = [];
@@ -513,302 +482,217 @@ export class ApiKeyService {
       .run();
   }
 
+  /**
+   * Rotate a key: mint a replacement that copies the target and give the target
+   * a grace deadline. Runs on the caller's transaction (the handler runs it
+   * with its audit record), and locks the target row first, so a concurrent
+   * rotation, revocation or update of the same key waits for this one and then
+   * judges the row it left (APE-345, APE-723).
+   *
+   * Refuses a target that can no longer authenticate: not active (null, a
+   * 404), or expired or past its rotation deadline (409), so a dead
+   * predecessor whose replacement was revoked is never revived (APE-354). The
+   * deadline only ever moves earlier: rotating again inside a grace period
+   * keeps the earlier deadline.
+   */
   async rotateApiKey(
     keyId: string,
     organizationId: string,
     projectId: string,
     gracePeriodHours: number,
     actorPermissions: Permission[],
-    actorApiKeyRole: string | null,
-    actorAllowedOperations: AllowedOperation[] | null,
-    pepper?: string,
-    guardTargetWalletScope?: (target: {
-      signingWalletId: string | null;
-      bindings: Array<{ walletId: string; permissions: Permission[] }>;
-    }) => void
+    pepper?: string
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
-    const existing = await this.db
-      .prepare(
-        `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
-                ak.signing_wallet_id, ak.created_by, ak.expires_at
+
+    // Lock order, shared by every writer of keys: the organization row first,
+    // then key rows. Organization deletion updates the organization and then
+    // its keys; createApiKey takes the organization share lock and then
+    // inserts; revoke and update touch only the key row. Taking them in two
+    // statements here keeps rotation in that order, so it can never hold a key
+    // row while waiting on an organization a deletion holds.
+    //
+    // The organization share lock is createApiKey's: a replacement can't
+    // commit under an organization a concurrent deletion has already revoked
+    // (APE-358).
+    const organization = await this.db.queryOne<{ id: string }>(
+      `SELECT id FROM organizations WHERE id = $1 AND status = 'active' FOR SHARE`,
+      [organizationId]
+    );
+    if (!organization) {
+      return null;
+    }
+    // The target's own row lock serializes every lifecycle change of this key
+    // behind this rotation.
+    const target = await this.db.queryOne<RotationTargetRow>(
+      `SELECT ak.id, ak.name, ak.description, ak.role, ak.permissions,
+              p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
+              ak.signing_wallet_id, ak.created_by, ak.expires_at,
+              ak.status, ak.rotation_deadline
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
-         WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?
-           AND ak.status = 'active' AND p.status = 'active'`
-      )
-      .bind(keyId, organizationId, projectId)
-      .first<RotationTargetRow>();
-
-    if (!existing) {
+        WHERE ak.id = $1 AND ak.organization_id = $2 AND ak.project_id = $3
+          AND p.status = 'active'
+        FOR UPDATE OF ak`,
+      [keyId, organizationId, projectId]
+    );
+    if (target?.status !== "active") {
       return null;
+    }
+    const now = Date.now();
+    if (apiKeyRowRefusal(target, now) !== null) {
+      throw conflict(
+        "This API key has expired or passed its rotation deadline and cannot be rotated; create a new key instead"
+      );
+    }
+
+    // Rotation is a create, not an idempotent update: every attempt mints a
+    // live credential whose secret exists only in that attempt's response. A
+    // retry after a lost response, or a second concurrent attempt, waited on
+    // the row lock above and finds the first one's replacement here.
+    const replacement = await this.db.queryOne<{ id: string }>(
+      `SELECT id FROM api_keys
+        WHERE rotated_from = $1 AND organization_id = $2 AND status = 'active'
+        LIMIT 1`,
+      [keyId, organizationId]
+    );
+    if (replacement) {
+      return { alreadyRotatedTo: replacement.id };
     }
 
     assertGrantableApiKeyPermissions(
       actorPermissions,
-      existing.role,
-      existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions),
-      actorApiKeyRole
-    );
-    assertGrantableAllowedOperations(
-      actorAllowedOperations,
-      parseAllowedOperationsColumn(existing.allowed_operations)
+      target.role,
+      target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions)
     );
 
     const newKeyId = `key_${crypto.randomUUID()}`;
-    const { key: newKey, prefix: newPrefix } = createApiKeyMaterial(existing.environment);
+    const { key: newKey, prefix: newPrefix } = createApiKeyMaterial(target.environment);
     const newKeyHash = await hashString(newKey, pepper);
 
-    const rotationDeadline = new Date(Date.now() + gracePeriodHours * 60 * 60 * 1000).toISOString();
+    const requestedDeadline = new Date(now + gracePeriodHours * 60 * 60 * 1000).toISOString();
+    // Never extend a deadline: a second rotation inside a grace period keeps
+    // the earlier one. The row lock makes this read-then-write monotonic.
+    const rotationDeadline =
+      target.rotation_deadline !== null &&
+      Date.parse(target.rotation_deadline) < Date.parse(requestedDeadline)
+        ? target.rotation_deadline
+        : requestedDeadline;
 
-    // Rotation is a create, not an idempotent update: every attempt mints a
-    // live credential whose secret exists only in that attempt's response.
-    // A retry after a lost response — or two concurrent attempts — would
-    // otherwise leave a second active key nobody holds the secret for and
-    // nothing distinguishes from a real one. The advisory lock serializes
-    // attempts on this key so the replacement check below decides, and the
-    // key material is hashed before the lock so no expensive work happens
-    // inside it.
-    const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(this.db);
-    if (!lockedTransactionWithPostCommit) {
-      throw new Error("Database client cannot serialize API key rotation");
-    }
-
-    let existingReplacementId: string | null = null;
-    let committedTarget: RotationTargetRow | null = null;
-
-    await lockedTransactionWithPostCommit(
-      `api-key-rotation:${keyId}`,
-      async (tx) => {
-        // Serialized by the lock: a competing rotation of this key has
-        // either not started or already committed its replacement.
-        const replacement = await tx.queryOne<{ id: string }>(
-          `SELECT id FROM api_keys
-           WHERE rotated_from = $1 AND status = 'active'
-           LIMIT 1`,
-          [keyId]
-        );
-        if (replacement) {
-          existingReplacementId = replacement.id;
-          return;
-        }
-
-        // Everything the clone copies is judged and read on the rows this
-        // transaction sees, not on what the caller read before the lock: a
-        // permissions, IP, expiry or binding change committed in that
-        // window would otherwise be cloned unchecked. The organization share
-        // lock is createApiKey's: a replacement can't commit under an
-        // organization a concurrent deletion has already revoked (APE-358).
-        const target = await tx.queryOne<RotationTargetRow>(
-          `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                  p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
-                  ak.signing_wallet_id, ak.created_by, ak.expires_at
-           FROM api_keys ak
-           JOIN projects p ON p.id = ak.project_id
-           JOIN organizations o ON o.id = ak.organization_id
-           WHERE ak.id = $1 AND ak.organization_id = $2 AND ak.project_id = $3
-             AND ak.status = 'active' AND o.status = 'active'
-           FOR SHARE OF o`,
-          [keyId, organizationId, projectId]
-        );
-        if (!target) {
-          return;
-        }
-        committedTarget = target;
-
-        assertGrantableApiKeyPermissions(
-          actorPermissions,
-          target.role,
-          target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions),
-          actorApiKeyRole
-        );
-        assertGrantableAllowedOperations(
-          actorAllowedOperations,
-          parseAllowedOperationsColumn(target.allowed_operations)
-        );
-
-        const signingWalletId = target.signing_wallet_id;
-        const bindingRows = await tx.queryMany<{ wallet_id: string; permissions: unknown }>(
-          `SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = $1`,
-          [keyId]
-        );
-        guardTargetWalletScope?.({
-          signingWalletId,
-          bindings: bindingRows.map((row) => ({
-            walletId: row.wallet_id,
-            permissions: parseApiKeyWalletPermissionsColumn(row.permissions),
-          })),
-        });
-
-        await tx
-          .prepare(
-            `INSERT INTO api_keys (
-            id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, allowed_operations, signing_wallet_id, rotated_from, status, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
-          )
-          .bind(
-            newKeyId,
-            organizationId,
-            target.project_id,
-            target.created_by,
-            target.name,
-            target.description,
-            newPrefix,
-            newKeyHash,
-            target.role,
-            target.permissions,
-            target.allowed_ips,
-            target.allowed_operations,
-            signingWalletId,
-            keyId,
-            target.expires_at
-          )
-          .run();
-
-        await tx
-          .prepare(
-            `UPDATE api_keys
-           SET rotation_deadline = ?
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-          )
-          .bind(rotationDeadline, keyId, this.scope.organizationId, this.scope.projectId)
-          .run();
-
-        // The clone inserts the rows the guard judged, not a re-read of the
-        // table — under READ COMMITTED an INSERT … SELECT would see rows
-        // committed after the guard ran.
-        for (const row of bindingRows) {
-          await tx
-            .prepare(
-              `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-             VALUES (?, ?, ?, ?)`
-            )
-            .bind(
-              `akw_${crypto.randomUUID()}`,
-              newKeyId,
-              row.wallet_id,
-              // Preserve the column verbatim: NULL stays the historical
-              // unrestricted marker, and a driver-parsed array re-serializes.
-              row.permissions == null ? null : stringifyJsonb(row.permissions, [])
-            )
-            .run();
-        }
-      },
-      // The caller owns the post-commit cache refresh (it holds the KV
-      // handle) and must never fail the response over it, so nothing runs
-      // here. The lock is what this helper is used for.
-      async () => {}
+    // Everything the replacement copies comes from the locked row and the
+    // bindings read under it: an update to this key waits for the lock, so it
+    // cannot commit between this read and the copy.
+    const bindingRows = await this.db.queryMany<{ wallet_id: string; permissions: unknown }>(
+      "SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = $1",
+      [keyId]
     );
 
-    if (existingReplacementId) {
-      return { alreadyRotatedTo: existingReplacementId };
-    }
+    await this.db.execute(
+      `INSERT INTO api_keys (
+         id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
+         role, permissions, allowed_ips, allowed_operations, signing_wallet_id, rotated_from,
+         status, expires_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+      [
+        newKeyId,
+        organizationId,
+        target.project_id,
+        target.created_by,
+        target.name,
+        target.description,
+        newPrefix,
+        newKeyHash,
+        target.role,
+        target.permissions,
+        target.allowed_ips,
+        target.allowed_operations,
+        target.signing_wallet_id,
+        keyId,
+        target.expires_at,
+      ]
+    );
 
-    // The assignment happens inside the transaction callback, which TS's
-    // control-flow analysis does not track.
-    const rotated = committedTarget as RotationTargetRow | null;
-    if (!rotated) {
-      // The key was revoked or moved between the pre-flight read and the lock.
-      return null;
+    await this.db.execute(
+      `UPDATE api_keys
+          SET rotation_deadline = ?
+        WHERE id = ? AND organization_id = ? AND project_id = ?`,
+      [rotationDeadline, keyId, this.scope.organizationId, this.scope.projectId]
+    );
+
+    for (const row of bindingRows) {
+      await this.db.execute(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES (?, ?, ?, ?)`,
+        [
+          `akw_${crypto.randomUUID()}`,
+          newKeyId,
+          row.wallet_id,
+          // Preserve the column verbatim: NULL stays the historical
+          // unrestricted marker, and a driver-parsed array re-serializes.
+          row.permissions == null ? null : stringifyJsonb(row.permissions, []),
+        ]
+      );
     }
 
     return {
       apiKey: {
         id: newKeyId,
-        name: rotated.name,
+        name: target.name,
         key: newKey,
         keyPrefix: newPrefix,
-        role: rotated.role,
-        environment: rotated.environment,
-        expiresAt: rotated.expires_at,
-        createdAt: new Date().toISOString(),
+        role: target.role,
+        environment: target.environment,
+        expiresAt: target.expires_at,
+        createdAt: new Date(now).toISOString(),
       },
       previousKey: {
         id: keyId,
         rotationDeadline,
       },
-      previousKeyHash: rotated.key_hash,
     };
   }
 
   /**
-   * Compensating undo for a rotation whose cache invalidation could not be
-   * applied. The stale cached entry describes the PRE-rotation key — active,
-   * no deadline — so rather than leave the old key authorizing past a
-   * deadline the cache will never carry, put Postgres back into the state
-   * that entry already describes: clear the deadline and retire the
-   * replacement nobody received a secret for.
+   * Revoke one key, and only that key: a replacement minted by rotating it
+   * stays alive, so a user can rotate, deploy the replacement and then retire
+   * the predecessor before its grace deadline. Runs on the caller's
+   * transaction. The conditional update takes the key's row lock, so a
+   * rotation of the same key either finished before it (its replacement
+   * survives, as intended) or waits and then finds no active key to rotate.
+   * Keys cannot manage keys (HOO-2099), so only a signed-in person reaches
+   * either side of that race.
    *
-   * The rotation becomes a no-op instead of a half-applied one, and because
-   * the replacement is no longer active the caller's retry is admitted by
-   * the duplicate guard rather than refused.
+   * @returns The revocation, `alreadyRevoked` for a key no longer active, or
+   *   null when no such key exists in this project.
    */
-  async undoRotation(keyId: string, replacementKeyId: string): Promise<void> {
-    assertTenantClaim(
-      this.scope,
-      { organizationId: this.scope.organizationId, projectId: this.scope.projectId },
-      "ApiKeyService.undoRotation"
-    );
-
-    await this.db.transaction(async (tx) => {
-      await tx
-        .prepare(
-          `UPDATE api_keys
-           SET rotation_deadline = NULL
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(keyId, this.scope.organizationId, this.scope.projectId)
-        .run();
-
-      await tx
-        .prepare(
-          `UPDATE api_keys
-           SET status = 'revoked', revoked_at = ?
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(
-          new Date().toISOString(),
-          replacementKeyId,
-          this.scope.organizationId,
-          this.scope.projectId
-        )
-        .run();
-    });
-  }
-
   async revokeApiKey(
     keyId: string,
     organizationId: string,
     projectId: string
-  ): Promise<{
-    keyHash: string;
-    revokedAt: string;
-  } | null> {
+  ): Promise<
+    | { revokedAt: string; alreadyRevoked: false }
+    | { revokedAt: string | null; alreadyRevoked: true }
+    | null
+  > {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.revokeApiKey");
-    const key = await this.db
-      .prepare(
-        "SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
-      )
-      .bind(keyId, organizationId, projectId)
-      .first<{ id: string; key_hash: string }>();
+    const revokedAt = new Date().toISOString();
+    const revoked = await this.db.queryOne<{ id: string }>(
+      `UPDATE api_keys
+          SET status = 'deactivated', revoked_at = ?
+        WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+        RETURNING id`,
+      [revokedAt, keyId, organizationId, projectId]
+    );
 
-    if (!key) {
-      return null;
+    if (!revoked) {
+      const existing = await this.db.queryOne<{ revoked_at: string | null }>(
+        "SELECT revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?",
+        [keyId, organizationId, projectId]
+      );
+      return existing ? { revokedAt: existing.revoked_at, alreadyRevoked: true } : null;
     }
 
-    const now = new Date().toISOString();
-    await this.db
-      .prepare(
-        `UPDATE api_keys
-         SET status = 'deactivated', revoked_at = ?
-         WHERE id = ? AND organization_id = ? AND project_id = ?`
-      )
-      .bind(now, keyId, this.scope.organizationId, this.scope.projectId)
-      .run();
-
-    return { keyHash: key.key_hash, revokedAt: now };
+    return { revokedAt, alreadyRevoked: false };
   }
 
   private mapListRow(row: ApiKeyListRow): ApiKeyListItem {

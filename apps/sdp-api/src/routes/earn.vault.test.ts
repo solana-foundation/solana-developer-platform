@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import type { CustodyProvider } from "@sdp/custody";
 import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { required } from "@/test/helpers/required";
@@ -42,7 +41,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const depositIntoVault = vi.hoisted(() => vi.fn());
 
@@ -88,7 +87,7 @@ const PROD_API_KEY = {
   raw: "sk_live_earn_vault",
   prefix: "sk_live_ear",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -101,7 +100,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
-const PROD_CACHED_API_KEY: CachedApiKey = {
+const PROD_CACHED_API_KEY: SeededApiKey = {
   ...TEST_CACHED_API_KEY,
   id: PROD_API_KEY.id,
   projectId: TEST_PRODUCTION_PROJECT.id,
@@ -249,9 +248,9 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
   const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, prodKeyHash, PROD_CACHED_API_KEY);
+  await seedApiKeyRow(env, prodKeyHash, PROD_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -1030,7 +1029,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       projectId: TEST_PROJECT.id,
     });
     const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       ...TEST_CACHED_API_KEY,
       signingWalletId: "privy_earn_vault_bound_duplicate",
       walletBindings: [

@@ -1,15 +1,16 @@
-import type { CachedApiKey, CustodyProvider } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -28,7 +29,7 @@ const API_KEY = {
   raw: "sk_test_managed_release_channel",
   prefix: "sk_test_mrc",
 };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
@@ -50,7 +51,15 @@ const PUBLIC_KEYS = {
 describe("Managed custody out of the release channel", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
-    vi.stubGlobal("fetch", vi.fn());
+    // A dashboard session's token verifies against the local test issuer; every
+    // other outbound call is a Provider call the tests assert never happens.
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        isJwksRequest(input) ? realFetch(input, init) : Promise.resolve(new Response(null))
+      )
+    );
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
@@ -121,7 +130,17 @@ describe("Managed custody out of the release channel", () => {
   });
 
   it("refuses API-key Config wallet provisioning before any Provider call or row", async () => {
-    const response = await send(`/v1/projects/${PROJECT_ID}/api-keys`, "POST", {
+    // Keys are created by a signed-in organization admin (HOO-2099).
+    const { headers } = await authenticateTestClerkUser(env, getDb(env), {
+      userId: USER_ID,
+      email: "managed-release-channel@example.com",
+      clerkUserId: `clerk_${USER_ID}`,
+      organizationId: ORGANIZATION_ID,
+      clerkOrgId: `clerk_${ORGANIZATION_ID}`,
+      orgSlug: "managed-release-channel",
+      role: "admin",
+    });
+    const response = await sendAs(headers(PROJECT_ID), `/v1/projects/${PROJECT_ID}/api-keys`, {
       name: "Managed out of channel key",
       walletScope: "selected",
       provisionWallet: { provider: "privy" },
@@ -139,9 +158,25 @@ describe("Managed custody out of the release channel", () => {
         "Managed out of channel key",
       ])
     ).toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !isJwksRequest(input))).toEqual([]);
   });
 });
+
+function isJwksRequest(input: Parameters<typeof fetch>[0]): boolean {
+  const jwksUrl = env.CLERK_JWKS_URL;
+  return (
+    jwksUrl !== undefined &&
+    String(input instanceof Request ? input.url : input).startsWith(jwksUrl)
+  );
+}
+
+async function sendAs(
+  headers: Record<string, string>,
+  path: string,
+  body: Record<string, unknown>
+) {
+  return app.request(path, { method: "POST", headers, body: JSON.stringify(body) }, env);
+}
 
 async function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${API_KEY.raw}` } }, env);
@@ -219,7 +254,7 @@ async function seedFixture(): Promise<void> {
     role: "api_admin",
     permissions: ["*"],
   });
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await seedTestCustodyRows(env, {
     configs: [
       {

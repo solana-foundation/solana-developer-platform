@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -17,30 +18,20 @@ import type { acceptSchema, inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+/** The signed-in person; the router refuses API keys first (HOO-2099). */
 function resolveActor(c: AppContext): {
   organizationId: string;
-  userId: string | null;
-  apiKeyId: string | null;
+  userId: string;
+  clerkUserId: string;
+  permissions: Permission[];
 } {
-  const apiKey = c.get("apiKey");
-  if (apiKey) {
-    return {
-      organizationId: apiKey.organizationId,
-      userId: null,
-      apiKeyId: apiKey.id,
-    };
-  }
-
-  const clerk = c.get("clerk");
-  if (clerk) {
-    return {
-      organizationId: clerk.organizationId,
-      userId: clerk.userId,
-      apiKeyId: null,
-    };
-  }
-
-  throw new AppError("UNAUTHORIZED", "Authentication required");
+  const clerk = requireHumanActor(c);
+  return {
+    organizationId: clerk.organizationId,
+    userId: clerk.userId,
+    clerkUserId: clerk.clerkUserId,
+    permissions: clerk.permissions,
+  };
 }
 
 /**
@@ -52,12 +43,7 @@ function resolveActor(c: AppContext): {
  * in-handler gate from drifting away from the route-level one.
  */
 function callerHasPermission(c: AppContext, permission: Permission): boolean {
-  const permissions = c.get("apiKey")?.permissions ?? c.get("clerk")?.permissions ?? null;
-
-  if (!permissions) {
-    return false;
-  }
-
+  const { permissions } = resolveActor(c);
   return permissions.includes("*") || permissions.includes(permission);
 }
 
@@ -90,37 +76,6 @@ async function getClerkUserId(db: DatabaseClient, userId: string): Promise<strin
         WHERE provider = 'clerk' AND user_id = ?`
     )
     .bind(userId)
-    .first<{ provider_user_id: string }>();
-
-  return row?.provider_user_id ?? null;
-}
-
-/**
- * Clerk user id of any active administrator of the organisation.
- *
- * Clerk requires a `requesting_user_id` to revoke an invitation, and the more
- * specific sources can all come up empty: an API key carries no Clerk user of
- * its own, `invited_by` may be the `"system"` sentinel with no identity row,
- * and Clerk's own `inviter_id` is optional on its invitation object. An
- * administrator is entitled to revoke, so attributing it to one keeps the
- * revocation possible rather than failing it. The local audit trail still
- * records the real actor; this only decides who Clerk is told asked.
- */
-async function getAnyOrgAdminClerkUserId(
-  db: DatabaseClient,
-  organizationId: string
-): Promise<string | null> {
-  const row = await db
-    .prepare(
-      `SELECT i.provider_user_id
-         FROM organization_members m
-         JOIN auth_user_identities i
-           ON i.user_id = m.user_id AND i.provider = 'clerk'
-        WHERE m.organization_id = ? AND m.role = 'admin' AND m.status = 'active'
-        ORDER BY m.user_id
-        LIMIT 1`
-    )
-    .bind(organizationId)
     .first<{ provider_user_id: string }>();
 
   return row?.provider_user_id ?? null;
@@ -425,8 +380,7 @@ async function resolveClerkInvitations(
 }
 
 export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>) => {
-  const { organizationId, userId, apiKeyId } = resolveActor(c);
-  const clerk = c.get("clerk");
+  const { organizationId, userId, clerkUserId } = resolveActor(c);
 
   const body = c.req.valid("json");
 
@@ -462,30 +416,16 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     throw new AppError("CONFLICT", "Invitation already sent to this email");
   }
 
-  if (!clerk?.clerkUserId) {
-    throw new AppError("UNAUTHORIZED", "Clerk user required to send invites");
-  }
-
   const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
   if (!clerkOrgId) {
     throw badRequest("Organization is not linked to Clerk");
   }
 
-  const inviterKey =
-    apiKeyId !== null
-      ? await getDb(c.env)
-          .prepare("SELECT created_by FROM api_keys WHERE id = ?")
-          .bind(apiKeyId)
-          .first<{ created_by: string }>()
-      : null;
-
-  const inviterUserId = userId || inviterKey?.created_by || null;
-
   const clerkService = new ClerkOrganizationsService(c.env);
   const redirectUrl = resolveInviteRedirectUrl(c.env);
   const clerkInvitation = await clerkService.createOrganizationInvitation({
     organizationId: clerkOrgId,
-    inviterUserId: clerk.clerkUserId,
+    inviterUserId: clerkUserId,
     emailAddress: normalizedEmail,
     role: clerkRole,
     redirectUrl,
@@ -515,7 +455,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       organizationId,
       normalizedEmail,
       role,
-      inviterUserId || "system",
+      userId,
       tokenHash,
       expiresAt,
       clerkInvitation.id
@@ -535,8 +475,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       clerkRole,
     },
     organizationId: organizationId,
-    userId: inviterUserId || undefined,
-    apiKeyId: apiKeyId || undefined,
+    userId,
   });
 
   const response = {
@@ -585,15 +524,6 @@ async function resolveActorEmail(c: AppContext, userId: string): Promise<string 
 export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSchema>) => {
   const { userId: actorUserId } = resolveActor(c);
   const { token, name } = c.req.valid("json");
-
-  // An API key has no identity to be the invitee — letting it redeem a token
-  // would let any key holder enrol somebody else or burn their invitation.
-  if (!actorUserId) {
-    throw new AppError(
-      "FORBIDDEN",
-      "An invitation can only be accepted by the invited user, not by an API key"
-    );
-  }
 
   const actorEmail = await resolveActorEmail(c, actorUserId);
   if (!actorEmail) {
@@ -766,7 +696,7 @@ export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSche
 
 export const removeMember = async (c: AppContext) => {
   const { memberId } = c.req.param();
-  const { organizationId, userId, apiKeyId } = resolveActor(c);
+  const { organizationId, userId } = resolveActor(c);
 
   // Ensure member belongs to same org
   const member = await getDb(c.env)
@@ -884,8 +814,7 @@ export const removeMember = async (c: AppContext) => {
     resourceId: memberId,
     metadata: { userId: member.user_id },
     organizationId,
-    userId: userId || undefined,
-    apiKeyId: apiKeyId || undefined,
+    userId,
   });
 
   return noContent(c);
@@ -907,7 +836,7 @@ function clerkDefinitivelyRefused(error: unknown): boolean {
 
 export const revokeInvitation = async (c: AppContext) => {
   const { invitationId } = c.req.param();
-  const { organizationId, userId, apiKeyId } = resolveActor(c);
+  const { organizationId, userId, clerkUserId } = resolveActor(c);
 
   const invitation = await getDb(c.env)
     .prepare(
@@ -952,7 +881,6 @@ export const revokeInvitation = async (c: AppContext) => {
   let clerkOrgId: string | null = null;
 
   try {
-    const clerk = c.get("clerk");
     clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
     if (!clerkOrgId) {
       throw badRequest("Organization is not linked to Clerk");
@@ -967,32 +895,12 @@ export const revokeInvitation = async (c: AppContext) => {
     const matches = pending.filter(matchesClerkInvitation(invitation));
 
     for (const match of matches) {
-      // An API key has no Clerk user of its own. Clerk's own inviter_id is the
-      // most reliable fallback: it is a valid Clerk user by construction, so it
-      // holds even when invited_by has no matching auth_user_identities row.
-      // `||` rather than `??` on purpose: Clerk returns `inviter_id` as an
-      // empty string rather than omitting it when an invitation has no inviter,
-      // and an empty id is as unusable as a missing one.
-      const requestingUserId =
-        clerk?.clerkUserId ||
-        match.inviter_id ||
-        (await getClerkUserId(getDb(c.env), invitation.invited_by)) ||
-        // Last resort so an invitation is never unrevokable: any active admin
-        // is entitled to revoke, and Clerk demands some requesting user.
-        (await getAnyOrgAdminClerkUserId(getDb(c.env), organizationId));
-
-      if (!requestingUserId) {
-        throw new AppError(
-          "INTERNAL_ERROR",
-          "Cannot revoke this invitation: no Clerk user is available to attribute the revocation to"
-        );
-      }
-
       clerkRevocationAttempted = true;
+      // The signed-in caller is the revoking user Clerk is told about.
       await clerkService.revokeOrganizationInvitation({
         organizationId: clerkOrgId,
         invitationId: match.id,
-        requestingUserId,
+        requestingUserId: clerkUserId,
       });
     }
   } catch (error) {
@@ -1050,8 +958,7 @@ export const revokeInvitation = async (c: AppContext) => {
     resourceId: invitation.id,
     metadata: { email: invitation.email },
     organizationId,
-    userId: userId || undefined,
-    apiKeyId: apiKeyId || undefined,
+    userId,
   });
 
   return noContent(c);

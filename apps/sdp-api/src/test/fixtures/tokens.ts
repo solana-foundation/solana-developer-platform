@@ -2,7 +2,8 @@
  * Token test fixtures
  */
 
-import type { CachedApiKey, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { SeededApiKey } from "@/test/mocks/kv";
 import { TEST_ORG, TEST_USER } from "./organizations";
 
 export const TEST_PROJECT = {
@@ -35,7 +36,7 @@ export const TEST_PROJECT_API_KEY = {
   prefix: "sk_test_pro",
 };
 
-export const TEST_PROJECT_CACHED_KEY: CachedApiKey = {
+export const TEST_PROJECT_CACHED_KEY: SeededApiKey = {
   id: TEST_PROJECT_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,

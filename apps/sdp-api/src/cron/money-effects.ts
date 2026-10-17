@@ -40,7 +40,6 @@ export const CRON_MONITOR_MONEY_EFFECTS = {
   "sdp-api-detect-orphaned-earn-split-swaps": { effect: "observes" },
   "sdp-api-sync-earn-catalogue": { effect: "observes" },
   "sdp-api-refresh-earn-metrics": { effect: "observes" },
-  "sdp-api-reconcile-revoked-api-key-cache": { effect: "observes" },
   "sdp-api-retire-secrets": { effect: "observes" },
   "sdp-api-cleanup-provider-credential-secrets": { effect: "observes" },
   // Deletes expired Idempotency-Key records (HOO-1918); touches no money row.

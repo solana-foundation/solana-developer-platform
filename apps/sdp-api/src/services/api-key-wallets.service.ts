@@ -22,12 +22,6 @@ export interface ApiKeyWalletPermissionRow {
   permissions: unknown;
 }
 
-interface CustodyWalletCandidateRow {
-  custody_wallet_id: string;
-  wallet_id: string;
-  status: string;
-}
-
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
 
 export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
@@ -111,7 +105,8 @@ function resolveBindingCandidate(candidates: ApiKeyWalletCandidate[]): string | 
  * Resolve binding rows to exact custody wallets. A binding that names no
  * wallet, or is ambiguous, hydrates as deny-only: the key stays selected
  * scope, with no usable wallet there. Pure, because authentication runs it on
- * every request; the cache fill reports unresolved bindings to operators.
+ * every request; {@link warnUnresolvedApiKeyWalletBindings} reports unresolved
+ * bindings to operators.
  */
 export function resolveApiKeyWalletAuthorization(
   rows: ApiKeyWalletBindingCandidates[],
@@ -129,85 +124,59 @@ export function resolveApiKeyWalletAuthorization(
   );
 }
 
-export async function loadApiKeyWalletAuthorization(
-  db: DatabaseClient,
-  apiKeyId: string,
-  organizationId: string,
-  projectId: string,
-  preferredSigningWalletId: string | null
-) {
-  const permissionResult = await db
-    .prepare(
-      `SELECT wallet_id, permissions
-       FROM api_key_wallet_permissions
-       WHERE api_key_id = ?
-       ORDER BY created_at ASC`
-    )
-    .bind(apiKeyId)
-    .all<Omit<ApiKeyWalletPermissionRow, "custody_wallet_id">>();
+/** How long one key's unresolved-binding warning stays quiet once logged. */
+export const UNRESOLVED_BINDING_WARNING_INTERVAL_MS = 10 * 60_000;
 
-  const permissionRows = permissionResult.results ?? [];
-  if (permissionRows.length === 0 && preferredSigningWalletId) {
-    permissionRows.push({ wallet_id: preferredSigningWalletId, permissions: ["*"] });
+/** When each key last logged an unresolved-binding warning, in this process. */
+const lastUnresolvedBindingWarningAt = new Map<string, number>();
+let nextUnresolvedBindingWarningSweepAt = 0;
+
+/**
+ * Report each binding that names no single custody wallet: it hydrates as
+ * deny-only, so the key silently loses that wallet. Authentication calls it on
+ * every request that reads such a binding, so a key logs at most once per
+ * {@link UNRESOLVED_BINDING_WARNING_INTERVAL_MS} in each process, however often
+ * it is used.
+ */
+export function warnUnresolvedApiKeyWalletBindings(
+  rows: ApiKeyWalletBindingCandidates[],
+  key: { apiKeyId: string; organizationId: string; projectId: string },
+  now = Date.now()
+): void {
+  const unresolved = rows.filter((row) => resolveBindingCandidate(row.candidates) === null);
+  if (unresolved.length === 0) {
+    return;
   }
-  if (permissionRows.length === 0) {
-    return hydrateApiKeyWalletAuthorization([], preferredSigningWalletId);
+  sweepUnresolvedBindingWarnings(now);
+  const lastWarnedAt = lastUnresolvedBindingWarningAt.get(key.apiKeyId);
+  if (lastWarnedAt !== undefined && now - lastWarnedAt < UNRESOLVED_BINDING_WARNING_INTERVAL_MS) {
+    return;
   }
-
-  const walletIds = permissionRows.map((row) => row.wallet_id);
-  const placeholders = walletIds.map(() => "?").join(", ");
-  const candidates = await db
-    .prepare(
-      `SELECT w.id AS custody_wallet_id, w.wallet_id, w.status
-       FROM custody_wallets w
-       JOIN custody_configs c ON c.id = w.custody_config_id
-       WHERE c.organization_id = ?
-         AND c.project_id = ?
-         AND c.status = 'active'
-         AND w.wallet_id IN (${placeholders})
-
-       UNION ALL
-
-       SELECT w.id AS custody_wallet_id, w.wallet_id, w.status
-       FROM custody_wallets w
-       JOIN custody_connections c ON c.id = w.custody_connection_id
-       WHERE c.organization_id = ?
-         AND c.project_id = ?
-         AND c.status = 'active'
-         AND w.wallet_id IN (${placeholders})`
-    )
-    .bind(organizationId, projectId, ...walletIds, organizationId, projectId, ...walletIds)
-    .all<CustodyWalletCandidateRow>();
-
-  const candidatesByWalletId = new Map<string, ApiKeyWalletCandidate[]>();
-  for (const candidate of candidates.results ?? []) {
-    const matches = candidatesByWalletId.get(candidate.wallet_id) ?? [];
-    matches.push({ id: candidate.custody_wallet_id, status: candidate.status });
-    candidatesByWalletId.set(candidate.wallet_id, matches);
+  lastUnresolvedBindingWarningAt.set(key.apiKeyId, now);
+  for (const row of unresolved) {
+    getLogger().warn(
+      { ...key, walletId: row.wallet_id, candidateCount: row.candidates.length },
+      "api_key_wallet_binding_unresolved"
+    );
   }
+}
 
-  const rows = permissionRows.map((row) => ({
-    wallet_id: row.wallet_id,
-    permissions: row.permissions,
-    candidates: candidatesByWalletId.get(row.wallet_id) ?? [],
-  }));
-  // Once per cache fill, not per request: the binding hydrates as deny-only, so
-  // the key silently loses that wallet.
-  for (const row of rows) {
-    if (resolveBindingCandidate(row.candidates) === null) {
-      getLogger().warn(
-        {
-          apiKeyId,
-          organizationId,
-          projectId,
-          walletId: row.wallet_id,
-          candidateCount: row.candidates.length,
-        },
-        "api_key_wallet_binding_unresolved"
-      );
+function sweepUnresolvedBindingWarnings(now: number): void {
+  if (now < nextUnresolvedBindingWarningSweepAt) {
+    return;
+  }
+  for (const [apiKeyId, warnedAt] of lastUnresolvedBindingWarningAt) {
+    if (now - warnedAt >= UNRESOLVED_BINDING_WARNING_INTERVAL_MS) {
+      lastUnresolvedBindingWarningAt.delete(apiKeyId);
     }
   }
-  return resolveApiKeyWalletAuthorization(rows, preferredSigningWalletId);
+  nextUnresolvedBindingWarningSweepAt = now + UNRESOLVED_BINDING_WARNING_INTERVAL_MS;
+}
+
+/** Forget every key's last warning, so a test starts from a quiet process. */
+export function resetUnresolvedBindingWarningsForTesting(): void {
+  lastUnresolvedBindingWarningAt.clear();
+  nextUnresolvedBindingWarningSweepAt = 0;
 }
 
 export async function listApiKeyWalletBindings(

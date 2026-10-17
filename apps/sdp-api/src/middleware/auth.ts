@@ -4,9 +4,9 @@
  * Flow:
  * 1. Extract API key from Authorization header
  * 2. Hash the key
- * 3. Look up in KV (fast path)
- * 4. If KV misses, look up in Postgres and cache to KV
- * 5. Validate key status, expiration
+ * 3. Flood guard per key hash at the highest rate-limit tier
+ * 4. Read and judge the key's live rows in one Postgres statement
+ * 5. Enforce the key's own tier per key id
  * 6. Set auth context for downstream handlers
  */
 
@@ -17,32 +17,36 @@ import type {
   ApiKeyRole,
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
-  CachedApiKey,
   Permission,
 } from "@sdp/types";
-import { organizationStatusMayAuthenticate } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
-import {
-  apiKeyCacheKey,
-  fillApiKeyCache,
-  isTrustedCachedApiKey,
-  loadCachedApiKeyFromDb,
-} from "@/lib/api-key-cache";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
-import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
+import { assertNoCachedTerminalRefusal } from "@/lib/api-key-refusal-cache";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
-import { isClientIpAllowed } from "@/lib/ip-allowlist";
-import { enforceApiKeyOrganizationAccess } from "@/lib/organization-access";
+import { authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
-import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
-import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
+import {
+  API_KEY_PRE_READ_MAX_REQUESTS,
+  apiKeyFloodGuardIdentifier,
+  enforceRateLimit,
+  InProcessRateLimiter,
+  RATE_LIMIT_TIERS,
+} from "./rate-limit";
 
-const INVALID_KEY_CACHE_TTL_SECONDS = 30;
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
+
+/** Distinct (key hash, client IP) pairs the fallback flood guard remembers. */
+const FLOOD_GUARD_FALLBACK_MAX_TRACKED = 10_000;
+
+/** The flood guard's in-process stand-in while the shared counter store is down. */
+export const apiKeyFloodGuardFallback = new InProcessRateLimiter(
+  "api_key_flood_guard",
+  FLOOD_GUARD_FALLBACK_MAX_TRACKED
+);
 
 interface LastUsedWriteState {
   lastSucceededAt: number | null;
@@ -85,50 +89,6 @@ function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
 
 function looksLikeJwt(token: string): boolean {
   return token.split(".").length === 3;
-}
-
-/** Look up API key in KV cache */
-async function getFromKV(kv: KVStore, keyHash: string): Promise<CachedApiKey | null> {
-  const cached = await kv.get<CachedApiKey>(apiKeyCacheKey(keyHash), "json");
-  // The shared predicate treats legacy payloads (pre rotation-deadline,
-  // organization-status, or wallet-scope enforcement) and pending installs
-  // as misses, so a deploy cannot extend an old key's validity and a fill's
-  // not-yet-verified snapshot never authenticates a cache-hit reader.
-  return cached && isTrustedCachedApiKey(cached) ? cached : null;
-}
-
-async function isKnownInvalidKey(kv: KVStore, keyHash: string): Promise<boolean> {
-  const marker = await kv.get<{ invalid: true }>(`invalid:${keyHash}`, "json");
-  return marker?.invalid === true;
-}
-
-async function cacheInvalidKey(kv: KVStore, keyHash: string): Promise<void> {
-  try {
-    await kv.put(`invalid:${keyHash}`, JSON.stringify({ invalid: true }), {
-      expirationTtl: INVALID_KEY_CACHE_TTL_SECONDS,
-    });
-  } catch (err) {
-    getLogger().error({ error: err }, "Failed to cache invalid api key");
-  }
-}
-
-/** Look up API key in Postgres and cache to KV */
-async function getFromDatabaseAndCache(
-  db: DatabaseClient,
-  kv: KVStore,
-  keyHash: string
-): Promise<CachedApiKey | null> {
-  const cached = await loadCachedApiKeyFromDb(db, keyHash);
-
-  if (!cached) {
-    return null;
-  }
-
-  // Write-if-absent: a fill must never overwrite authoritative state a
-  // concurrent revocation wrote after this function's DB read — and if that
-  // happened, this request must authenticate against the newer state, not
-  // the snapshot it read.
-  return await fillApiKeyCache(db, kv, keyHash, cached);
 }
 
 function writeLastUsed(db: DatabaseClient, keyId: string): Promise<void> {
@@ -258,81 +218,48 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   const pepper = c.env.API_KEY_PEPPER;
   const keyHash = await hashString(apiKey, pepper);
 
-  // Try KV first, then Postgres
-  const apiKeysKV = c.var.kv.apiKeys;
-  let cachedKey = await getFromKV(apiKeysKV, keyHash);
-  if (!cachedKey) {
-    if (await isKnownInvalidKey(apiKeysKV, keyHash)) {
-      throw new AppError("INVALID_API_KEY", "Invalid API key");
-    }
-    cachedKey = await getFromDatabaseAndCache(getDb(c.env), apiKeysKV, keyHash);
-    if (!cachedKey) {
-      await cacheInvalidKey(apiKeysKV, keyHash);
-    }
-  }
+  // A hash this instance recently refused for good (unknown, revoked,
+  // expired) is refused again from memory, with no Redis call or DB read.
+  assertNoCachedTerminalRefusal(keyHash);
 
-  if (!cachedKey) {
-    throw new AppError("INVALID_API_KEY", "Invalid API key");
-  }
-
-  // Reject on organization status before key status: even when the key
-  // row still says active, a key created or rotated after an organization
-  // deletion enumerated that org's keys is covered by neither the
-  // deletion's revocation nor its cache refresh.
-  // A legacy entry without an organization status is refused, as before.
-  if (
-    cachedKey.organizationStatus === undefined ||
-    !organizationStatusMayAuthenticate(cachedKey.organizationStatus)
-  ) {
-    throw new AppError("REVOKED_API_KEY");
-  }
-
-  // The same predicate as the live re-check below, so a malformed expiry
-  // fails closed here too.
-  const cachedRefusal = apiKeyRowRefusal(
-    {
-      status: cachedKey.status,
-      expires_at: cachedKey.expiresAt,
-      rotation_deadline: cachedKey.rotationDeadline,
-    },
-    Date.now()
+  // A flood guard per key hash and client IP before the row is read, at the
+  // highest tier since the key's own is not known yet: a flooding credential,
+  // valid or not, is bounded before it costs a DB read. It is keyed by the
+  // client IP too, so a leaked key used from outside its IP allowlist only
+  // ever exhausts its own bucket, never the owner's. Random-key spray (a
+  // fresh hash each time) is bounded by the per-IP backstop in front of auth.
+  // While Redis is down both count in this instance's memory instead, so the
+  // auth read below never goes unbounded.
+  await enforceRateLimit(
+    c,
+    apiKeyFloodGuardIdentifier(keyHash, getClientIp(c)),
+    API_KEY_PRE_READ_MAX_REQUESTS,
+    { metricTier: "api_key_flood_guard", fallback: apiKeyFloodGuardFallback }
   );
-  if (cachedRefusal === "revoked") {
-    throw new AppError("REVOKED_API_KEY");
-  }
-  if (cachedRefusal === "expired") {
-    throw new AppError("EXPIRED_API_KEY");
-  }
 
-  if (!isClientIpAllowed(getClientIp(c), cachedKey.allowedIps)) {
-    throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
-  }
+  // The authoritative read: every authorization field from the key's live
+  // rows, in one statement, so a change to any of them applies on this
+  // request. It refuses an unknown, revoked, expired or out-of-scope key.
+  const key = await authorizeApiKey(c, keyHash);
 
-  await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
+  // The key's own tier, per key id. Only admitted requests count, so a client
+  // above its tier still gets its tier's worth through.
+  await enforceRateLimit(c, key.id, RATE_LIMIT_TIERS[key.rateLimitTier]);
 
-  // The authoritative check: one uncached Postgres read of the organization and
-  // this key's own row, so a deletion or revocation the cache has not caught up
-  // with (a failed refresh, APE-387) still refuses this request. The cached
-  // checks above only reject cheaply. It must sit behind the KV-backed limiter:
-  // ahead of it, a flooding key costs one DB read per rejected request. Behind
-  // it, reads are capped at the tier; the quota belongs to whoever holds the key.
-  const access = await enforceApiKeyOrganizationAccess(c, cachedKey.organizationId, cachedKey.id);
-  recordOrganizationEntitlements(c, access.settings);
+  recordOrganizationEntitlements(c, key.settings);
 
-  // Wallet scope comes from that same fresh read, never the cache: a key
-  // narrowed to selected wallets, or a removed binding, applies on this request.
   const authContext: ApiKeyContext = {
-    id: cachedKey.id,
-    organizationId: cachedKey.organizationId,
-    projectId: cachedKey.projectId,
-    role: cachedKey.role,
-    permissions: cachedKey.permissions,
-    environment: cachedKey.environment,
-    allowedOperations: cachedKey.allowedOperations ?? null,
-    walletScope: access.walletAuthorization.walletScope,
-    signingWalletId: access.walletAuthorization.signingWalletId,
-    signingWalletIds: access.walletAuthorization.signingWalletIds,
-    walletBindings: access.walletAuthorization.walletBindings,
+    id: key.id,
+    organizationId: key.organizationId,
+    projectId: key.projectId,
+    role: key.role,
+    permissions: key.permissions,
+    environment: key.environment,
+    allowedOperations: key.allowedOperations,
+    walletScope: key.walletAuthorization.walletScope,
+    signingWalletId: key.walletAuthorization.signingWalletId,
+    signingWalletIds: key.walletAuthorization.signingWalletIds,
+    walletBindings: key.walletAuthorization.walletBindings,
   };
 
   c.set("apiKey", authContext);
@@ -340,7 +267,7 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // Update last used (fire and forget). Node coalesces this write per key.
   // Started inside the system identity frame so the deferred write keeps
   // its cross-tenant grant after the request narrows to the tenant.
-  void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id);
+  void scheduleApiKeyLastUsedUpdate(getDb(c.env), key.id);
 
   return authContext;
 }

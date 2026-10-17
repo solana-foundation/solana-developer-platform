@@ -18,8 +18,7 @@ export function isRotationDeadlineReached(
 export interface ApiKeyLifecycleColumns {
   status: ApiKeyStatus;
   expires_at: string | null;
-  /** Undefined only on a legacy cache entry written before deadlines were enforced. */
-  rotation_deadline: string | null | undefined;
+  rotation_deadline: string | null;
 }
 
 /**

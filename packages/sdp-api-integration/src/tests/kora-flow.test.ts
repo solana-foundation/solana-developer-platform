@@ -5,6 +5,7 @@ import {
   cleanupIntegrationSuite,
   env,
   initIntegrationApiSuite,
+  requestAsOrganizationAdmin,
   requestWithApiKey,
 } from "../helpers/integration";
 import { KORA_URL_ENV_KEY, koraEndpoint } from "../helpers/kora";
@@ -213,7 +214,9 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     const walletId = createWalletBody.data.wallet.walletId;
     const walletAddress = createWalletBody.data.wallet.publicKey;
 
-    const createKeyRes = await request("/v1/api-keys", {
+    // Keys are managed by a signed-in organization admin, never a key (HOO-2099).
+    const keyManager = await requestAsOrganizationAdmin();
+    const createKeyRes = await keyManager("/v1/api-keys", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -276,7 +279,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       expect(onChain).toBeNull();
       signerCheckPassed = true;
     } finally {
-      const deleteScopedKeyRes = await request(`/v1/api-keys/${scopedApiKeyId}`, {
+      const deleteScopedKeyRes = await keyManager(`/v1/api-keys/${scopedApiKeyId}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",

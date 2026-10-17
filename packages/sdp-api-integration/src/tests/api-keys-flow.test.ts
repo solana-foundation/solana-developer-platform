@@ -5,6 +5,7 @@ import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
+  requestAsOrganizationAdmin,
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
@@ -49,6 +50,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
   let apiKeyHash: string;
   let custodyWalletId = "";
   const adminRequest = requestWithApiKey();
+  // Keys are created by a signed-in organization admin, never a key (HOO-2099).
+  let keyManager: Awaited<ReturnType<typeof requestAsOrganizationAdmin>>;
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -63,6 +66,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
     custodyWalletId = state.custodyWallet.id;
+    keyManager = await requestAsOrganizationAdmin();
   });
 
   it("onboarded actor creates a key and uses it to issue, mint, and transfer", {
@@ -78,7 +82,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
       throw new Error("Expected at least one active custody wallet for integration flow");
     }
 
-    const createKeyRes = await adminRequest(`/v1/projects/${TEST_PROJECT.id}/api-keys`, {
+    const createKeyRes = await keyManager(`/v1/projects/${TEST_PROJECT.id}/api-keys`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

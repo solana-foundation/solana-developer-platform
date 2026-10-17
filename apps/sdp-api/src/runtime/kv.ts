@@ -61,7 +61,6 @@ export interface KVStore {
 }
 
 export interface KVStoreSet {
-  apiKeys: KVStore;
   rateLimits: KVStore;
   cache: KVStore;
 }

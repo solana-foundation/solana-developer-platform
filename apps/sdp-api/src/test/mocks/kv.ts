@@ -5,98 +5,67 @@
  * valid once a Redis-backed implementation lands (HOO-510).
  */
 
-import type { CachedApiKey } from "@sdp/types";
+import type {
+  AllowedOperation,
+  ApiKeyEnvironment,
+  ApiKeyRole,
+  ApiKeyStatus,
+  ApiKeyWalletAuthorizationBinding,
+  ApiKeyWalletScope,
+  Permission,
+  RateLimitTier,
+} from "@sdp/types";
 import { getDb } from "@/db/client";
+import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
+import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_SLUG } from "@/test/helpers/projects";
 import type { Env } from "@/types/env";
 
 /**
- * Seeds a cached API key into KV for testing auth, and its `api_keys` row when
- * the suite has not inserted one: authentication re-reads the key's live row
- * on every request and refuses a cached key that has none (HOO-1955). A row
- * the suite already inserted is left as it is, so a test can still make the
- * cache and the row disagree on purpose.
+ * The state of an API key a suite seeds: the `api_keys` columns authentication
+ * reads, plus the wallet bindings to store. Authentication reads all of it from
+ * Postgres on every request, so this is exactly what a request sees.
  */
-export async function seedCachedApiKey(
-  env: Env,
-  keyHash: string,
-  data: CachedApiKey
-): Promise<void> {
-  await seedApiKeyRowFor(env, keyHash, data);
-  const kv = createKVStoreSet(env);
-  const walletBindings = await Promise.all(
-    (data.walletBindings ?? []).map(async (binding) => {
-      if (binding.custodyWalletId) {
-        return binding;
-      }
-
-      const matches = await getDb(env).queryMany<{ id: string }>(
-        `SELECT w.id
-           FROM custody_wallets w
-           LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
-           LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
-          WHERE w.wallet_id = ?
-            AND w.status = 'active'
-            AND (
-              (
-                cfg.status = 'active'
-                AND cfg.organization_id = ?
-                AND cfg.project_id = ?
-              )
-              OR (
-                conn.status = 'active'
-                AND conn.organization_id = ?
-                AND conn.project_id = ?
-              )
-            )
-          ORDER BY w.id
-          LIMIT 2`,
-        [binding.walletId, data.organizationId, data.projectId, data.organizationId, data.projectId]
-      );
-
-      // ponytail: legacy execution fixtures still use Provider IDs; HOO-1023 will make them exact.
-      return {
-        ...binding,
-        custodyWalletId: matches.length === 1 && matches[0] ? matches[0].id : binding.walletId,
-      };
-    })
-  );
-  await kv.apiKeys.put(
-    `key:${keyHash}`,
-    JSON.stringify({
-      ...data,
-      rotationDeadline: data.rotationDeadline ?? null,
-      organizationStatus: data.organizationStatus ?? "active",
-      walletScope:
-        data.walletScope ??
-        ((data.walletBindings?.length ?? 0) > 0 || data.signingWalletId ? "selected" : "all"),
-      walletBindings,
-    }),
-    {
-      expirationTtl: 3600,
-    }
-  );
+export interface SeededApiKey {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  role: ApiKeyRole;
+  permissions: Permission[];
+  environment: ApiKeyEnvironment;
+  rateLimitTier: RateLimitTier;
+  allowedIps: string[] | null;
+  allowedOperations?: AllowedOperation[] | null;
+  signingWalletId: string | null;
+  /** Ignored: a key's scope follows from its stored bindings. */
+  walletScope?: ApiKeyWalletScope;
+  signingWalletIds?: string[];
+  walletBindings?: ApiKeyWalletAuthorizationBinding[];
+  status: ApiKeyStatus;
+  expiresAt: string | null;
+  rotationDeadline?: string | null;
+  /** Ignored: authentication reads the organization row's own status. */
+  organizationStatus?: string;
 }
 
 /** Creates the user a seeded key row needs when the suite has none. */
 const SEEDED_KEY_CREATOR_ID = "usr_seeded_key_creator";
 
 /**
- * Inserts the `api_keys` row a cached key stands for, mirroring the cached
- * lifecycle columns. Authentication matches the row by key and organization
- * only, so when the suite has not seeded the key's project the row hangs off
- * an inactive placeholder project, which the one-active-project-per-
- * environment rule ignores and no request ever selects. Skipped when the row
- * (or its hash) already exists, or when the organization does not.
+ * Writes the `api_keys` row for a seeded key, inserting it or overwriting the
+ * columns authentication reads, so a second seed of the same key changes what
+ * its next request sees. The key joins `projectId` when the organization has
+ * it; otherwise the organization's active project in the key's environment
+ * (one per environment), which is created as `projectId`, with the default
+ * project's name and slug, when there is none.
+ * Skipped when the organization does not exist.
  */
-export async function seedApiKeyRowFor(
-  env: Env,
-  keyHash: string,
-  data: CachedApiKey
-): Promise<void> {
+export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKey): Promise<void> {
+  // A seed can bring a refused key back to life within a test; the
+  // instance's refusal cache must not outlive that.
+  resetTerminalRefusalsForTesting();
   const db = getDb(env);
-  const placeholderProjectId = `${data.organizationId}_seeded_key_project`;
   await db
     .prepare(
       `INSERT INTO users (id, email, email_verified, status)
@@ -109,32 +78,49 @@ export async function seedApiKeyRowFor(
   await db
     .prepare(
       `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       SELECT ?, o.id, 'Seeded key project', ?, ?, 'inactive', (SELECT id FROM users ORDER BY id LIMIT 1)
+       SELECT ?, o.id, ?, ?, ?, 'active',
+              (SELECT id FROM users ORDER BY id LIMIT 1)
          FROM organizations o
         WHERE o.id = ?
-          AND NOT EXISTS (SELECT 1 FROM projects WHERE id = ? AND organization_id = o.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM projects
+             WHERE organization_id = o.id AND environment = ? AND status = 'active'
+          )
        ON CONFLICT DO NOTHING`
     )
     .bind(
-      placeholderProjectId,
-      placeholderProjectId,
+      data.projectId,
+      DEFAULT_PROJECT_NAME[data.environment],
+      DEFAULT_PROJECT_SLUG[data.environment],
       data.environment,
       data.organizationId,
-      data.projectId
+      data.environment
     )
     .run();
   await db
     .prepare(
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-          role, permissions, status, expires_at, rotation_deadline, signing_wallet_id)
+          role, permissions, status, expires_at, rotation_deadline, signing_wallet_id,
+          allowed_ips, allowed_operations, rate_limit_tier)
        SELECT ?, p.organization_id, p.id, (SELECT id FROM users ORDER BY id LIMIT 1),
-              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?
+              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          FROM projects p
-        WHERE p.organization_id = ? AND p.id IN (?, ?)
+        WHERE p.organization_id = ?
+          AND (p.id = ? OR (p.environment = ? AND p.status = 'active'))
         ORDER BY (p.id = ?) DESC
         LIMIT 1
-       ON CONFLICT DO NOTHING`
+       ON CONFLICT (id) DO UPDATE SET
+         key_hash = EXCLUDED.key_hash,
+         role = EXCLUDED.role,
+         permissions = EXCLUDED.permissions,
+         status = EXCLUDED.status,
+         expires_at = EXCLUDED.expires_at,
+         rotation_deadline = EXCLUDED.rotation_deadline,
+         signing_wallet_id = EXCLUDED.signing_wallet_id,
+         allowed_ips = EXCLUDED.allowed_ips,
+         allowed_operations = EXCLUDED.allowed_operations,
+         rate_limit_tier = EXCLUDED.rate_limit_tier`
     )
     .bind(
       data.id,
@@ -143,18 +129,21 @@ export async function seedApiKeyRowFor(
       JSON.stringify(data.permissions),
       data.status,
       data.expiresAt,
-      data.rotationDeadline === undefined ? null : data.rotationDeadline,
+      data.rotationDeadline ?? null,
       data.signingWalletId,
+      data.allowedIps === null ? null : JSON.stringify(data.allowedIps),
+      data.allowedOperations ? JSON.stringify(data.allowedOperations) : null,
+      data.rateLimitTier,
       data.organizationId,
       data.projectId,
-      placeholderProjectId,
+      data.environment,
       data.projectId
     )
     .run();
 
-  // Authentication reads wallet bindings from Postgres on every request
-  // (HOO-2048), so an entry that names bindings replaces the key's rows with
-  // them. One that names none leaves rows a test inserted itself.
+  // Wallet bindings live in their own table: a key that names bindings
+  // replaces the key's rows with them. One that names none leaves rows a test
+  // inserted itself.
   if (data.walletBindings === undefined && data.signingWalletIds === undefined) {
     return;
   }
@@ -191,7 +180,7 @@ export async function seedApiKeyRowFor(
  */
 export async function clearKVStores(env: Env): Promise<void> {
   const kv = createKVStoreSet(env);
-  const stores = [kv.apiKeys, kv.rateLimits, kv.cache];
+  const stores = [kv.rateLimits, kv.cache];
 
   for (const store of stores) {
     const list = await store.list();
@@ -219,7 +208,7 @@ export async function flushWorkerRedis(env: Env): Promise<void> {
  * Seeds a rate limit counter bucket.
  *
  * @param env - Test environment bindings.
- * @param identifier - Counter scope (client IP or API key id).
+ * @param identifier - Counter scope (client IP, `api-key:<hash>`, actor, org).
  * @param count - Request count to seed the bucket with.
  * @param windowsAgo - How many whole windows before the current one to seed
  *   (0 = current bucket, 1 = previous bucket for sliding-window overlap).
@@ -245,7 +234,7 @@ export async function seedRateLimit(
  * Reads a rate limit bucket's current count.
  *
  * @param env - Test environment bindings.
- * @param identifier - Counter scope (client IP or API key id).
+ * @param identifier - Counter scope (client IP, `api-key:<hash>`, actor, org).
  * @returns The current bucket's count, or 0 when the bucket does not exist.
  */
 export async function readRateLimitCount(env: Env, identifier: string): Promise<number> {

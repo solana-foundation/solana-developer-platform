@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -25,12 +26,20 @@ organizations.get(
   requirePermissions("org:read"),
   getOrganizationProviderAccess
 );
+// Organization administration (settings, including the IP allowlist, and
+// deletion) is for a signed-in person only, never an API key (HOO-2099).
 organizations.patch(
   "/:orgId",
+  requireHumanSession(),
   requirePermissions("org:write"),
   validateBody(updateOrgSchema),
   updateOrganization
 );
-organizations.delete("/:orgId", requirePermissions("org:admin"), deleteOrganization);
+organizations.delete(
+  "/:orgId",
+  requireHumanSession(),
+  requirePermissions("org:admin"),
+  deleteOrganization
+);
 
 export default organizations;

@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
@@ -24,6 +25,16 @@ const projects = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 projects.use("*", unifiedAuthMiddleware());
+// Project members and API keys are managed by a signed-in person only, never
+// an API key (HOO-2099).
+for (const humanOnly of [
+  "/:projectId/members",
+  "/:projectId/members/*",
+  "/:projectId/api-keys",
+  "/:projectId/api-keys/*",
+]) {
+  projects.use(humanOnly, requireHumanSession());
+}
 
 // API keys are bound to one project. Apply this at the router boundary so
 // every current and future path-scoped project handler inherits the check.

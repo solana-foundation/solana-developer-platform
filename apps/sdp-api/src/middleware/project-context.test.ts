@@ -17,7 +17,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { projectContextMiddleware } from "./project-context";
 
@@ -107,7 +107,7 @@ describe("projectContextMiddleware", () => {
   });
 
   it("pins the API key project and ignores the project header", async () => {
-    await seedCachedApiKey(
+    await seedApiKeyRow(
       env,
       await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
       TEST_CACHED_API_KEY
@@ -197,7 +197,7 @@ describe("projectContextMiddleware", () => {
     }
 
     beforeEach(async () => {
-      await seedCachedApiKey(
+      await seedApiKeyRow(
         env,
         await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
         PRODUCTION_CACHED_API_KEY

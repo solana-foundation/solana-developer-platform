@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -24,8 +25,10 @@ import {
 
 const apiKeys = new Hono<{ Bindings: Env }>();
 
-// All routes require authentication
+// All routes require authentication, by a signed-in person: an API key is a
+// credential, not an administrator, so it cannot manage keys (HOO-2099).
 apiKeys.use("*", unifiedAuthMiddleware());
+apiKeys.use("*", requireHumanSession());
 apiKeys.use("*", projectContextMiddleware());
 
 apiKeys.get("/", requirePermissions("api-keys:read"), listApiKeys);

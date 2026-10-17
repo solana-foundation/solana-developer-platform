@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
-import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
@@ -22,7 +21,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { provisionApiKeyWallet } from "./api-key-wallet-provisioning.service";
 
@@ -44,7 +43,7 @@ const USER_ID = "usr_api_key_provisioning";
 const CREDENTIAL_ID = "pcred_api_key_provisioning";
 const FOREIGN_CREDENTIAL_ID = "pcred_api_key_provisioning_foreign";
 const API_KEY = { id: "key_api_key_provisioning", raw: "sk_test_api_key_provisioning" };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
@@ -199,7 +198,7 @@ describe("provisionApiKeyWallet", () => {
           path,
           {
             method: "POST",
-            headers: { Authorization: `Bearer ${API_KEY.raw}`, "Content-Type": "application/json" },
+            headers: adminHeaders(),
             body: JSON.stringify({
               name: "Rejected key",
               walletScope: "selected",
@@ -242,10 +241,7 @@ describe("provisionApiKeyWallet", () => {
         path,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${API_KEY.raw}`,
-            "Content-Type": "application/json",
-          },
+          headers: adminHeaders(),
           body: JSON.stringify({
             name: `Connection key ${path}`,
             walletScope: "selected",
@@ -256,11 +252,11 @@ describe("provisionApiKeyWallet", () => {
       );
 
       expect(response.status).toBe(201);
-      const walletAudit = await getDb(env).queryOne<{ api_key_id: string; metadata: string }>(
-        "SELECT api_key_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
+      const walletAudit = await getDb(env).queryOne<{ user_id: string; metadata: string }>(
+        "SELECT user_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
       );
       assert(walletAudit, "Expected wallet creation audit");
-      expect(walletAudit.api_key_id).toBe(API_KEY.id);
+      expect(walletAudit.user_id).toBe(USER_ID);
       const metadata = z
         .object({
           event: z.string(),
@@ -292,23 +288,6 @@ describe("provisionApiKeyWallet", () => {
         resolved_custody_wallet_id: expect.any(String),
         custody_connection_id: CONNECTION_ID,
       });
-      await expect(
-        loadApiKeyWalletAuthorization(
-          getDb(env),
-          body.data.apiKey.id,
-          ORGANIZATION_ID,
-          PROJECT_ID,
-          "privy_endpoint_api_key_wallet"
-        )
-      ).resolves.toMatchObject({
-        walletScope: "selected",
-        walletBindings: [
-          {
-            walletId: "privy_endpoint_api_key_wallet",
-            custodyWalletId: binding?.resolved_custody_wallet_id,
-          },
-        ],
-      });
       expect(createConfigWalletMock).not.toHaveBeenCalled();
     }
   );
@@ -337,10 +316,7 @@ describe("provisionApiKeyWallet", () => {
         path,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${API_KEY.raw}`,
-            "Content-Type": "application/json",
-          },
+          headers: adminHeaders(),
           body: JSON.stringify({
             name: "Ownerless provisioning key",
             walletScope: "selected",
@@ -376,10 +352,7 @@ describe("provisionApiKeyWallet", () => {
         path,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${API_KEY.raw}`,
-            "Content-Type": "application/json",
-          },
+          headers: adminHeaders(),
           body: JSON.stringify({
             name: `Rejected Connection key ${connectionId}`,
             walletScope: "selected",
@@ -419,10 +392,7 @@ describe("provisionApiKeyWallet", () => {
       `/v1/projects/${PROJECT_ID}/api-keys`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${API_KEY.raw}`,
-          "Content-Type": "application/json",
-        },
+        headers: adminHeaders(),
         body: JSON.stringify({
           name: "Unusable Connection key",
           walletScope: "selected",
@@ -443,10 +413,7 @@ describe("provisionApiKeyWallet", () => {
       "/v1/api-keys",
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${API_KEY.raw}`,
-          "Content-Type": "application/json",
-        },
+        headers: adminHeaders(),
         body: JSON.stringify({
           name: "Existing Connection wallet key",
           walletScope: "selected",
@@ -499,10 +466,7 @@ describe("provisionApiKeyWallet", () => {
         path,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${API_KEY.raw}`,
-            "Content-Type": "application/json",
-          },
+          headers: adminHeaders(),
           body: JSON.stringify({
             name: `Managed provider key ${path}`,
             walletScope: "selected",
@@ -522,39 +486,33 @@ describe("provisionApiKeyWallet", () => {
       expect(
         await db
           .prepare(
-            `SELECT wallet_id
-           FROM api_key_wallet_permissions
-           WHERE api_key_id = ?`
+            `SELECT p.wallet_id, w.id AS custody_wallet_id
+           FROM api_key_wallet_permissions p
+           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
+           WHERE p.api_key_id = ?`
           )
           .bind(body.data.apiKey.id)
           .first()
-      ).toEqual({ wallet_id: "para_api_key_config_provisioned" });
-      await expect(
-        loadApiKeyWalletAuthorization(
-          db,
-          body.data.apiKey.id,
-          ORGANIZATION_ID,
-          PROJECT_ID,
-          "para_api_key_config_provisioned"
-        )
-      ).resolves.toMatchObject({
-        walletScope: "selected",
-        walletBindings: [
-          {
-            walletId: "para_api_key_config_provisioned",
-            custodyWalletId: "cwlt_api_key_config_provisioned",
-          },
-        ],
+      ).toEqual({
+        wallet_id: "para_api_key_config_provisioned",
+        custody_wallet_id: "cwlt_api_key_config_provisioned",
       });
       expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
     }
   );
 });
 
+/** Keys are created by a signed-in organization admin, never a key (HOO-2099). */
+let adminToken: string;
+
+function adminHeaders(): Record<string, string> {
+  return clerkHeaders(adminToken, PROJECT_ID);
+}
+
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await db.batch([
     db
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -569,10 +527,19 @@ async function seedFixture(): Promise<void> {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER_ID, "api-key-provisioning@example.com"),
   ]);
+  ({ token: adminToken } = await authenticateTestClerkUser(env, db, {
+    userId: USER_ID,
+    email: "api-key-provisioning@example.com",
+    clerkUserId: `clerk_${USER_ID}`,
+    organizationId: ORGANIZATION_ID,
+    clerkOrgId: `clerk_${ORGANIZATION_ID}`,
+    orgSlug: "api-key-provisioning",
+    role: "admin",
+  }));
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,
-    members: [],
+    members: [USER_ID],
     ids: { sandbox: PROJECT_ID, production: FOREIGN_PROJECT_ID },
   });
   const stored = await writeTestPrivyCredentialSecret(env, {

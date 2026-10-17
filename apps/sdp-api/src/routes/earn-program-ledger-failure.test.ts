@@ -1,6 +1,6 @@
 import type { EarnPortfolioWalletProvider } from "@sdp/earn";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, EarnPortfolioWithdrawal } from "@sdp/types";
+import type { EarnPortfolioWithdrawal } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository, type EarnProviderWalletRow } from "@/db/repositories";
@@ -9,7 +9,7 @@ import { applyEarnWithdrawalObservationToRow } from "@/services/earn-withdrawal-
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 /**
  * Portfolio-capable test double installed under `upshift`, a registered stub id
@@ -73,7 +73,7 @@ const TEST_API_KEY = {
   raw: "sk_test_earn_ledger_fail",
   prefix: "sk_test_elf",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -113,7 +113,7 @@ beforeEach(async () => {
   await seedTestDatabase(env);
 
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(

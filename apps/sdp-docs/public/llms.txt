@@ -36,9 +36,8 @@
 - [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
 - [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
 - [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
-- [API Keys](https://platform.solana.com/docs/reference/api/api-keys): API key management endpoints.
 - [Wallets](https://platform.solana.com/docs/reference/api/wallets): Wallet signing provider configuration and wallet management.
-- [Projects](https://platform.solana.com/docs/reference/api/projects): Project and project member management.
+- [Projects](https://platform.solana.com/docs/reference/api/projects): Projects and their provider availability. Project members and keys are managed in the dashboard.
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfers, and payment flows.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.

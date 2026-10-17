@@ -35,7 +35,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Update organization",
     operationId: "updateOrganization",
     description: "Updates organization name or settings.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         orgId: orgIdParamSchema,
@@ -61,7 +61,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Delete organization",
     operationId: "deleteOrganization",
     description: "Soft deletes the organization and revokes all API keys.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         orgId: orgIdParamSchema,

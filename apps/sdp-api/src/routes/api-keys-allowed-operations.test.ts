@@ -1,12 +1,13 @@
 import { hashString } from "@sdp/payments/hash";
-import type { AllowedOperation, CachedApiKey } from "@sdp/types";
+import type { AllowedOperation } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const TEST_ORG = { id: "org_allowed_ops", name: "Allowed Ops Org", slug: "allowed-ops-org" };
 const TEST_PROJECT = { id: "prj_allowed_ops", slug: "allowed-ops-project" };
@@ -30,7 +31,7 @@ const ISSUANCE_ONLY_KEY = {
   allowedOperations: ["issuance"] as AllowedOperation[],
 };
 
-function cachedKey(id: string, allowedOperations: AllowedOperation[] | null): CachedApiKey {
+function cachedKey(id: string, allowedOperations: AllowedOperation[] | null): SeededApiKey {
   return {
     id,
     organizationId: TEST_ORG.id,
@@ -52,7 +53,7 @@ async function seedKey(
   allowedOperations: AllowedOperation[] | null
 ): Promise<void> {
   const keyHash = await hashString(key.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey(key.id, allowedOperations));
+  await seedApiKeyRow(env, keyHash, cachedKey(key.id, allowedOperations));
   await getDb(env)
     .prepare(
       `INSERT INTO api_keys
@@ -85,10 +86,19 @@ async function seedTenant(): Promise<void> {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
   ]);
+  ({ token: managerToken } = await authenticateTestClerkUser(env, getDb(env), {
+    userId: TEST_USER.id,
+    email: TEST_USER.email,
+    clerkUserId: `clerk_${TEST_USER.id}`,
+    organizationId: TEST_ORG.id,
+    clerkOrgId: `clerk_${TEST_ORG.id}`,
+    orgSlug: TEST_ORG.slug,
+    role: "admin",
+  }));
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
-    members: [],
+    members: [TEST_USER.id],
     ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
   });
   await seedKey(ADMIN_KEY, null);
@@ -100,6 +110,13 @@ function headers(raw: string) {
   return { "Content-Type": "application/json", Authorization: `Bearer ${raw}` };
 }
 
+/** Keys are managed by a signed-in organization admin, never by a key (HOO-2099). */
+let managerToken: string;
+
+function managerHeaders() {
+  return clerkHeaders(managerToken, TEST_PROJECT.id);
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
@@ -107,12 +124,12 @@ async function readJson<T>(response: Response): Promise<T> {
 type KeyDetail = { data: { id: string; allowedOperations: AllowedOperation[] } };
 type ErrorBody = { error: { code: string } };
 
-async function createKey(raw: string, body: Record<string, unknown>): Promise<Response> {
+async function createKey(body: Record<string, unknown>): Promise<Response> {
   return app.request(
     "/v1/api-keys",
     {
       method: "POST",
-      headers: headers(raw),
+      headers: managerHeaders(),
       body: JSON.stringify({ walletScope: "all", ...body }),
     },
     env
@@ -122,7 +139,7 @@ async function createKey(raw: string, body: Record<string, unknown>): Promise<Re
 async function getKey(keyId: string): Promise<KeyDetail> {
   const response = await app.request(
     `/v1/api-keys/${keyId}`,
-    { method: "GET", headers: headers(ADMIN_KEY.raw) },
+    { method: "GET", headers: managerHeaders() },
     env
   );
   expect(response.status).toBe(200);
@@ -141,7 +158,7 @@ describe("API key allowed operations", () => {
   });
 
   it("stores the list on create, returns it sorted and deduplicated, and lists it", async () => {
-    const response = await createKey(ADMIN_KEY.raw, {
+    const response = await createKey({
       name: "Payouts worker",
       allowedOperations: ["payment", "issuance_mint_execute", "payment"],
     });
@@ -153,7 +170,7 @@ describe("API key allowed operations", () => {
 
     const list = await app.request(
       "/v1/api-keys",
-      { method: "GET", headers: headers(ADMIN_KEY.raw) },
+      { method: "GET", headers: managerHeaders() },
       env
     );
     const listBody = await readJson<{
@@ -166,7 +183,7 @@ describe("API key allowed operations", () => {
   });
 
   it("replaces or clears the list on update and refreshes enforcement", async () => {
-    const created = await createKey(ADMIN_KEY.raw, {
+    const created = await createKey({
       name: "Mutable",
       allowedOperations: ["ramp"],
     });
@@ -176,7 +193,7 @@ describe("API key allowed operations", () => {
       `/v1/api-keys/${data.apiKey.id}`,
       {
         method: "PATCH",
-        headers: headers(ADMIN_KEY.raw),
+        headers: managerHeaders(),
         body: JSON.stringify({ allowedOperations: ["ramp", "dvp_fund"] }),
       },
       env
@@ -188,7 +205,7 @@ describe("API key allowed operations", () => {
       `/v1/api-keys/${data.apiKey.id}`,
       {
         method: "PATCH",
-        headers: headers(ADMIN_KEY.raw),
+        headers: managerHeaders(),
         body: JSON.stringify({ allowedOperations: null }),
       },
       env
@@ -198,7 +215,7 @@ describe("API key allowed operations", () => {
   });
 
   it("rejects an unknown operation", async () => {
-    const response = await createKey(ADMIN_KEY.raw, {
+    const response = await createKey({
       name: "Bad list",
       allowedOperations: ["payment", "teleport"],
     });
@@ -235,65 +252,8 @@ describe("API key allowed operations", () => {
     expect(response.status).toBe(400);
   });
 
-  it("refuses a restricted key minting a key with wider or no restrictions", async () => {
-    const wider = await createKey(PAYMENTS_ONLY_KEY.raw, {
-      name: "Wider",
-      allowedOperations: ["issuance"],
-    });
-    expect(wider.status).toBe(403);
-    expect((await readJson<ErrorBody>(wider)).error.code).toBe("INSUFFICIENT_PERMISSIONS");
-
-    const unrestricted = await createKey(PAYMENTS_ONLY_KEY.raw, { name: "Unrestricted" });
-    expect(unrestricted.status).toBe(403);
-
-    const narrower = await createKey(PAYMENTS_ONLY_KEY.raw, {
-      name: "Narrower",
-      allowedOperations: ["payment_transfer_execute"],
-    });
-    expect(narrower.status).toBe(201);
-  });
-
-  it("judges a wider grant before provisioning a wallet, so a refusal leaves nothing behind", async () => {
-    const walletsBefore = await getDb(env)
-      .prepare("SELECT COUNT(*) AS count FROM custody_wallets")
-      .first<{ count: number | string }>();
-
-    const response = await createKey(PAYMENTS_ONLY_KEY.raw, {
-      name: "Provisioned and wider",
-      walletScope: "selected",
-      provisionWallet: { provider: "privy" },
-      allowedOperations: ["issuance"],
-    });
-    expect(response.status).toBe(403);
-    expect((await readJson<ErrorBody>(response)).error.code).toBe("INSUFFICIENT_PERMISSIONS");
-
-    const walletsAfter = await getDb(env)
-      .prepare("SELECT COUNT(*) AS count FROM custody_wallets")
-      .first<{ count: number | string }>();
-    expect(Number(walletsAfter?.count)).toBe(Number(walletsBefore?.count));
-  });
-
-  it("refuses a restricted key widening another key's list", async () => {
-    const created = await createKey(ADMIN_KEY.raw, {
-      name: "Target",
-      allowedOperations: ["payment"],
-    });
-    const { data } = await readJson<{ data: { apiKey: { id: string } } }>(created);
-
-    const response = await app.request(
-      `/v1/api-keys/${data.apiKey.id}`,
-      {
-        method: "PATCH",
-        headers: headers(PAYMENTS_ONLY_KEY.raw),
-        body: JSON.stringify({ allowedOperations: ["payment", "ramp"] }),
-      },
-      env
-    );
-    expect(response.status).toBe(403);
-  });
-
   it("carries the list onto a rotated key", async () => {
-    const created = await createKey(ADMIN_KEY.raw, {
+    const created = await createKey({
       name: "Rotating",
       allowedOperations: ["ramp"],
     });
@@ -301,7 +261,7 @@ describe("API key allowed operations", () => {
 
     const rotated = await app.request(
       `/v1/api-keys/${data.apiKey.id}/rotate`,
-      { method: "POST", headers: headers(ADMIN_KEY.raw), body: JSON.stringify({}) },
+      { method: "POST", headers: managerHeaders(), body: JSON.stringify({}) },
       env
     );
     expect(rotated.status).toBe(201);

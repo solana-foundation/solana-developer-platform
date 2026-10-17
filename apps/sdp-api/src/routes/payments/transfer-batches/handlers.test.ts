@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   address,
   createNoopSigner,
@@ -46,7 +46,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -81,7 +81,7 @@ const TEST_API_KEY = {
   raw: "sk_test_batch_payments",
   prefix: "sk_test_bat",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -136,7 +136,7 @@ function ownedSubmissionAdapter(
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
 
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(
@@ -301,7 +301,7 @@ async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise
     { walletId: TEST_WALLET_ID, permissions: ["payments:write"] },
   ]);
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     walletScope: "selected",
     signingWalletId: TEST_WALLET_ID,
@@ -959,7 +959,7 @@ describe("payment transfer batches", () => {
         .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_SOLANA_ADDRESSES.wallet2),
     ]);
     const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       ...TEST_CACHED_API_KEY,
       walletScope: "selected",
       walletBindings: [
@@ -2041,7 +2041,7 @@ describe("payment transfer batches", () => {
       .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
       .bind(productionProjectId, TEST_API_KEY.id)
       .run();
-    await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
       ...TEST_CACHED_API_KEY,
       projectId: productionProjectId,
       environment: "production",

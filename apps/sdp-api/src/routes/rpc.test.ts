@@ -118,7 +118,6 @@ describe("RPC Relay Routes", () => {
 
     await clearKvStore(kv.rateLimits);
     await clearKvStore(kv.cache);
-    await clearKvStore(kv.apiKeys);
 
     await db
       .prepare("DELETE FROM api_keys")
@@ -180,22 +179,6 @@ describe("RPC Relay Routes", () => {
       )
       .run();
 
-    await kv.apiKeys.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify({
-        id: TEST_API_KEY_ID,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        role: "api_admin",
-        permissions: ["*"],
-        environment: "sandbox",
-        rateLimitTier: "standard",
-        allowedIps: null,
-        signingWalletId: null,
-        status: "active",
-        expiresAt: null,
-      })
-    );
     resetManagedRpcEnv();
   });
 
