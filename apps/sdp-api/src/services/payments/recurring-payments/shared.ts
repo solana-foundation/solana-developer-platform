@@ -304,35 +304,28 @@ export interface ResumedStepLogContext {
 }
 
 /**
- * What the chain says about a step an earlier run reached (HOO-2044):
- * - `landed`: its effect is on chain at `finalized`; it is done and is not sent again;
- * - `absent`: no effect and no saved send; send it (`account` is the `finalized` read);
- * - `failed`: its saved send failed, or never landed before its blockhash expired.
+ * What the chain says about a step an earlier run reached (HOO-2044): `landed`
+ * when its effect is on chain at `finalized`, so it is not sent again; `absent`
+ * when there is no effect and no saved send, so it is sent (`account` is the
+ * `finalized` read, for building it).
  */
-export type ResumedStep<T> =
-  | { kind: "landed"; account: T }
-  | { kind: "absent"; account: T }
-  | { kind: "failed" };
-
-const FINALITY_WAIT_MS = 30_000;
-const FINALITY_POLL_MS = 2_000;
+export type ResumedStep<T> = { kind: "landed" | "absent"; account: T };
 
 /**
- * Settles a step an earlier run reached before this run sends it again. A step's
+ * Settles a step an earlier run reached before this run sends it. A step's
  * signature is saved only after its send returns, so the attempt alone cannot
  * say whether that send landed; the step's account can, because only this
- * attempt causes its effect. Saved signatures are looked up with transaction
- * history: recovery runs long after the RPC status cache (about 2 minutes) has
- * dropped them.
+ * attempt causes its effect.
  *
  * - The effect at `finalized`: landed.
- * - The effect at `confirmed` only: it is landing. Wait for finality instead of
- *   sending; still not final after the wait, throw so the attempt is retried.
+ * - The effect at `confirmed` only (a fresh retry; a stale send is long final):
+ *   it is landing, so this throws for a retry instead of sending.
  * - No effect, no saved signature: absent. A stale attempt's earlier send can no
  *   longer land; a fresh retry's still could, and a duplicate then fails on chain.
- * - No effect, saved signature: its status decides. Failed, or unknown on a stale
- *   attempt (its blockhash expired), is `failed`; succeeded but not yet visible
- *   throws for a retry; unknown on a fresh retry waits for it.
+ * - No effect, saved signature: looked up with transaction history, since
+ *   recovery runs long after the status cache dropped it. Failed, or unknown on a
+ *   stale attempt (its blockhash expired), fails the step; succeeded but not yet
+ *   visible throws for a retry; unknown on a fresh retry waits for it.
  */
 export async function settleResumedStep<T extends { exists: boolean }>(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
@@ -343,14 +336,22 @@ export async function settleResumedStep<T extends { exists: boolean }>(input: {
   savedSignature: Signature | null;
   /** The attempt is past the operation's stale window, so any earlier send's blockhash expired. */
   stale: boolean;
+  /** The TRANSACTION_FAILED message when the step's saved send failed. */
+  failureMessage: string;
   logContext: ResumedStepLogContext;
 }): Promise<ResumedStep<T>> {
   const finalized = await input.read("finalized");
   if (input.landed(finalized)) {
-    return landedStep(input, finalized);
+    if (input.savedSignature === null) {
+      getLogger().warn(
+        input.logContext,
+        "Recurring payment step found on chain without its saved signature"
+      );
+    }
+    return { kind: "landed", account: finalized };
   }
-  if (input.landed(await input.read("confirmed"))) {
-    return landedStep(input, await waitForFinalized(input));
+  if (!input.stale && input.landed(await input.read("confirmed"))) {
+    throw stepStillLanding();
   }
   if (input.savedSignature === null) {
     return { kind: "absent", account: finalized };
@@ -359,53 +360,42 @@ export async function settleResumedStep<T extends { exists: boolean }>(input: {
   const [status] = await solanaRpc.getSignatureStatuses(input.rpc, [input.savedSignature], {
     searchTransactionHistory: true,
   });
-  if (status?.err) {
-    return { kind: "failed" };
+  if (status === null || status === undefined) {
+    if (input.stale) {
+      throw transactionFailed(input.failureMessage);
+    }
+    const confirmation = await solanaRpc.confirmTransaction(input.rpc, input.savedSignature, {
+      commitment: "confirmed",
+    });
+    if (confirmation.err) {
+      throw transactionFailed(input.failureMessage);
+    }
+    throw stepStillLanding();
   }
-  if (status) {
-    throw conflict("Recurring payment step landed but is not visible on chain yet; retry");
+  if (status.err) {
+    throw transactionFailed(input.failureMessage);
   }
-  if (input.stale) {
-    return { kind: "failed" };
-  }
-  const confirmation = await solanaRpc.confirmTransaction(input.rpc, input.savedSignature, {
-    commitment: "confirmed",
-  });
-  if (confirmation.err) {
-    return { kind: "failed" };
-  }
-  return landedStep(input, await waitForFinalized(input));
-}
-
-function landedStep<T>(
-  input: { savedSignature: Signature | null; logContext: ResumedStepLogContext },
-  account: T
-): ResumedStep<T> {
-  if (input.savedSignature === null) {
-    getLogger().warn(
-      input.logContext,
-      "Recurring payment step found on chain without its saved signature"
-    );
-  }
-  return { kind: "landed", account };
+  throw stepStillLanding();
 }
 
 /**
- * Re-reads the step's account at `finalized` until its effect shows, within
- * FINALITY_WAIT_MS. The caller has just read `finalized`, so each read waits first.
+ * {@link settleResumedStep} for a step only some runs resume: null when this run
+ * starts the step, or when the chain says to send it; the account when it landed.
  */
-async function waitForFinalized<T>(input: {
-  read: (commitment: "finalized" | "confirmed") => Promise<T>;
-  landed: (account: T) => boolean;
-}): Promise<T> {
-  for (let waited = 0; waited < FINALITY_WAIT_MS; waited += FINALITY_POLL_MS) {
-    await new Promise((resolve) => setTimeout(resolve, FINALITY_POLL_MS));
-    const account = await input.read("finalized");
-    if (input.landed(account)) {
-      return account;
-    }
+export async function settleStepIfResumed<T extends { exists: boolean }>(
+  resumed: boolean,
+  input: Parameters<typeof settleResumedStep<T>>[0]
+): Promise<T | null> {
+  if (!resumed) {
+    return null;
   }
-  throw conflict("Recurring payment step is still finalizing on chain; retry");
+  const step = await settleResumedStep(input);
+  return step.kind === "landed" ? step.account : null;
+}
+
+/** A step that landed, or may have, but is not final or not visible yet: retry it. */
+function stepStillLanding(): AppError {
+  return conflict("Recurring payment step has landed but is not final on chain yet; retry");
 }
 
 export async function confirmSubscriptionSignature(

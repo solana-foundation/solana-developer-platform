@@ -128,27 +128,13 @@ Neither resumes or re-sends: a recipient with a transfer row is settled from tha
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Collection saves its signed transaction before
-broadcast. Activation, lifecycle and update save a step's signature only after its send returns
-(HOO-2044). A run that resumes a step an earlier run reached (an activation whose plan or
-subscription address or signature is recorded, a lifecycle attempt at `submit`, an update attempt
-past `claim`) settles it from the chain before sending, with `settleResumedStep`. Each step's effect
-is a PDA state only that attempt causes: the plan or subscription exists, `expiresAtTs` is set
-(canceled) or cleared (resumed), or the plan holds the new metadata URI.
-
-- The effect at `finalized`: the step is done and is not sent again.
-- The effect at `confirmed` only: it is landing. The run waits for finality instead of sending, and
-  if it is still not final, it fails retryably, leaving the attempt to recover.
-- No effect and no saved signature: the step is sent. A stale attempt (lifecycle and update always,
-  an activation recovered from `activating`) is past its earlier send's blockhash, so that send
-  can no longer land. An activation reset after a failed save can be retried at once, and its
-  earlier send may still land after the retry sends; the duplicate then fails on chain because the
-  account exists, and the next retry finds it.
-- No effect and a saved signature: the signature is looked up with transaction history, because
-  recovery runs long after the RPC status cache (about two minutes) dropped it. A failed status, or
-  no status on a stale attempt, fails the step; a successful status the account does not show yet
-  fails retryably; no status on a fresh retry waits for confirmation.
-
-Runs that send a step themselves confirm it as before and read nothing extra.
+broadcast. Activation, lifecycle and update save a step's signature only after its send returns,
+so a run that resumes a step an earlier run reached settles it from the step's account first
+(`settleResumedStep`, HOO-2044): the effect at `finalized` means it landed and is not sent again;
+only at `confirmed` means it is landing, and the request fails retryably; a saved signature is
+looked up with transaction history, since recovery runs long after the status cache dropped it.
+An activation reset after a failed save can be retried at once, before its earlier send lands;
+that duplicate fails on chain because the account exists, and the next retry finds it.
 
 A replay of activate, cancel, resume or collect finds the attempt its key claimed and returns the
 schedule as it stands now, which may still be mid-transition (the cron finishes it); clients poll

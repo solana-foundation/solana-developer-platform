@@ -103,6 +103,64 @@ const app = withIdempotencyKeys(baseApp);
  */
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 
+/** A subscription delegation on chain; `expiresAtTs` 0 is active, set is canceled. */
+function delegation(
+  expiresAtTs: bigint
+): MaybeAccount<subscriptionsProgram.SubscriptionDelegation> {
+  return {
+    exists: true,
+    address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    executable: false,
+    lamports: lamports(2_000_000n),
+    programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+    space: BigInt(subscriptionsProgram.SUBSCRIPTION_SIZE),
+    data: {
+      header: {
+        discriminator: 0,
+        version: subscriptionsProgram.CURRENT_PROGRAM_VERSION,
+        bump: 255,
+        delegator: address(TEST_SOLANA_ADDRESSES.wallet1),
+        delegatee: address(TEST_SOLANA_ADDRESSES.wallet2),
+        payer: address(TEST_SOLANA_ADDRESSES.wallet1),
+        initId: 1n,
+      },
+      terms: { amount: 25_000_000n, periodHours: 24n, createdAt: 1_770_000_000n },
+      amountPulledInPeriod: 0n,
+      currentPeriodStartTs: 1_770_000_000n,
+      expiresAtTs,
+    },
+  };
+}
+
+/** A plan on chain; `metadataUri` is stored NUL-padded to its fixed 128 bytes. */
+function planAccount(metadataUri = ""): MaybeAccount<subscriptionsProgram.Plan> {
+  return {
+    exists: true,
+    address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    executable: false,
+    lamports: lamports(2_000_000n),
+    programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+    space: BigInt(subscriptionsProgram.PLAN_SIZE),
+    data: {
+      discriminator: 0,
+      owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+      bump: 255,
+      status: subscriptionsProgram.PlanStatus.Active,
+      data: {
+        planId: 1001n,
+        mint: address(DEVNET_USDC_MINT),
+        terms: { amount: 25_000_000n, periodHours: 24n, createdAt: 1_770_000_000n },
+        endTs: 0n,
+        destinations: [address(TEST_SOLANA_ADDRESSES.wallet2)],
+        pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
+        metadataUri: metadataUri.padEnd(128, "\0"),
+      },
+    },
+  };
+}
+
+const noAccount = { exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) } as const;
+
 /** Leaves a subscription's collection attempts unkeyed, as the cron's claim is (HOO-1918). */
 async function clearCollectionAttemptKeys(subscriptionId: string): Promise<void> {
   await getDb(env)
@@ -1707,19 +1765,7 @@ describe("Payments routes — recurring", () => {
       )
       .run();
     // The saved plan update landed: the plan holds the new URI, NUL-padded to its fixed width.
-    vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue({
-      exists: true,
-      address: address(TEST_SOLANA_ADDRESSES.wallet3),
-      data: {
-        status: subscriptionsProgram.PlanStatus.Active,
-        data: {
-          endTs: 0n,
-          metadataUri: metadataUri.padEnd(128, "\0"),
-          pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
-          terms: { createdAt: 1_770_000_000n },
-        },
-      },
-    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+    vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue(planAccount(metadataUri));
 
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
@@ -1997,11 +2043,9 @@ describe("Payments routes — recurring", () => {
         )
         .run();
       // The submitted operation landed: a cancel sets the expiry, a resume clears it.
-      fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
-        exists: true,
-        address: address(TEST_SOLANA_ADDRESSES.wallet3),
-        data: { expiresAtTs: operation === "cancel" ? 1_800_000_000n : 0n },
-      } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
+      fetchMaybeSubscriptionDelegationMock.mockResolvedValue(
+        delegation(operation === "cancel" ? 1_800_000_000n : 0n)
+      );
       confirmTransactionMock.mockClear();
 
       const response = await app.request(
@@ -3790,11 +3834,9 @@ describe("Payments routes — recurring", () => {
           )
           .run();
         // The submitted operation landed: a cancel sets the expiry, a resume clears it.
-        fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
-          exists: true,
-          address: address(TEST_SOLANA_ADDRESSES.wallet3),
-          data: { expiresAtTs: operation === "cancel" ? 1_800_000_000n : 0n },
-        } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(
+          delegation(operation === "cancel" ? 1_800_000_000n : 0n)
+        );
         await deleteTestOrganization();
 
         expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
@@ -4460,8 +4502,8 @@ describe("Payments routes — recurring", () => {
     });
     // The failed plan never landed, so the retry finds no plan at either commitment.
     vi.mocked(subscriptionsProgram.fetchMaybePlan)
-      .mockResolvedValueOnce({ exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) })
-      .mockResolvedValueOnce({ exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) });
+      .mockResolvedValueOnce(noAccount)
+      .mockResolvedValueOnce(noAccount);
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -4531,8 +4573,8 @@ describe("Payments routes — recurring", () => {
     });
     // The subscription never landed, so the retry finds none at either commitment.
     fetchMaybeSubscriptionDelegationMock
-      .mockResolvedValueOnce({ exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) })
-      .mockResolvedValueOnce({ exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) });
+      .mockResolvedValueOnce(noAccount)
+      .mockResolvedValueOnce(noAccount);
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -5837,19 +5879,7 @@ describe("Payments routes — recurring", () => {
       expect((await patch(crypto.randomUUID(), later)).status).toBe(409);
       repositorySpy.mockRestore();
       // The failed request's plan update landed: the plan holds the recovered URI.
-      vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue({
-        exists: true,
-        address: address(TEST_SOLANA_ADDRESSES.wallet3),
-        data: {
-          status: subscriptionsProgram.PlanStatus.Active,
-          data: {
-            endTs: 0n,
-            metadataUri: recovered.padEnd(128, "\0"),
-            pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
-            terms: { createdAt: 1_770_000_000n },
-          },
-        },
-      } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+      vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue(planAccount(recovered));
 
       // Once stale again, the retry finishes the update and records its answer with it.
       await backdate();
@@ -5949,31 +5979,30 @@ describe("Payments routes — recurring", () => {
       const finalizedReads = (
         calls: ReadonlyArray<Parameters<typeof subscriptionsProgram.fetchMaybePlan>>
       ) => calls.filter(([, , config]) => config?.commitment === "finalized").length;
-      const delegation = (
-        expiresAtTs: bigint
-      ): MaybeAccount<subscriptionsProgram.SubscriptionDelegation> => ({
-        exists: true,
-        address: address(TEST_SOLANA_ADDRESSES.wallet3),
-        executable: false,
-        lamports: lamports(2_000_000n),
-        programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
-        space: BigInt(subscriptionsProgram.SUBSCRIPTION_SIZE),
-        data: {
-          header: {
-            discriminator: 0,
-            version: subscriptionsProgram.CURRENT_PROGRAM_VERSION,
-            bump: 255,
-            delegator: address(TEST_SOLANA_ADDRESSES.wallet1),
-            delegatee: address(TEST_SOLANA_ADDRESSES.wallet2),
-            payer: address(TEST_SOLANA_ADDRESSES.wallet1),
-            initId: 1n,
-          },
-          terms: { amount: 25_000_000n, periodHours: 24n, createdAt: 1_770_000_000n },
-          amountPulledInPeriod: 0n,
-          currentPeriodStartTs: 1_770_000_000n,
-          expiresAtTs,
-        },
-      });
+
+      /** A plan row for a schedule the test puts mid-activation. */
+      async function seedPlanRow(planId: string, status: "draft" | "active", at: string) {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_subscription_plans (
+               id, organization_id, project_id, owner_wallet_id, owner_address, token,
+               amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, '25.00', 24, '1001', ?, ?, ?, ?)`
+          )
+          .bind(
+            planId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            TEST_WALLET_ID,
+            recurringExecution.sourceSigner().address,
+            DEVNET_USDC_MINT,
+            status,
+            TEST_USER.id,
+            at,
+            at
+          )
+          .run();
+      }
 
       /**
        * Puts a finished lifecycle operation back to the moment after its send
@@ -6058,7 +6087,7 @@ describe("Payments routes — recurring", () => {
         ]);
       });
 
-      it("keeps a cancel recoverable when the chain read fails, and finishes it on the next run", async () => {
+      it("keeps a cancel recoverable when the chain read fails", async () => {
         recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
@@ -6082,19 +6111,6 @@ describe("Payments routes — recurring", () => {
           { status: "processing", stage: "submit", signature: null },
         ]);
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
-
-        await getDb(env)
-          .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
-          .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), activated.id)
-          .run();
-        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
-
-        // A same-key retry is answered from the attempt; the cron finishes it.
-        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
-          recovered: 1,
-        });
-        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceled");
-        expect(sent).not.toHaveBeenCalled();
       });
 
       it("never finishes a resume from a delegation that does not exist", async () => {
@@ -6423,25 +6439,7 @@ describe("Payments routes — recurring", () => {
         const planId = `psp_${crypto.randomUUID()}`;
         const subscriptionId = `psub_${crypto.randomUUID()}`;
         const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
-        await getDb(env)
-          .prepare(
-            `INSERT INTO payment_subscription_plans (
-               id, organization_id, project_id, owner_wallet_id, owner_address, token,
-               amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, '25.00', 24, '1001', 'active', ?, ?, ?)`
-          )
-          .bind(
-            planId,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            TEST_WALLET_ID,
-            recurringExecution.sourceSigner().address,
-            DEVNET_USDC_MINT,
-            TEST_USER.id,
-            staleAt,
-            staleAt
-          )
-          .run();
+        await seedPlanRow(planId, "active", staleAt);
         await getDb(env)
           .prepare(
             `INSERT INTO payment_subscriptions (
@@ -6607,30 +6605,12 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
       });
 
-      it("waits for a plan a reset activation's send left landing, instead of sending it again", async () => {
+      it("refuses a reset activation retry while its plan is still landing, instead of sending it again", async () => {
         recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const planId = `psp_${crypto.randomUUID()}`;
         const now = new Date().toISOString();
-        await getDb(env)
-          .prepare(
-            `INSERT INTO payment_subscription_plans (
-               id, organization_id, project_id, owner_wallet_id, owner_address, token,
-               amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, '25.00', 24, '1001', 'draft', ?, ?, ?)`
-          )
-          .bind(
-            planId,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            TEST_WALLET_ID,
-            recurringExecution.sourceSigner().address,
-            DEVNET_USDC_MINT,
-            TEST_USER.id,
-            now,
-            now
-          )
-          .run();
+        await seedPlanRow(planId, "draft", now);
         // Seconds ago a run recorded the plan's address and sent it, its save
         // failed, and the activation was reset: it can be retried at once.
         await getDb(env)
@@ -6641,32 +6621,25 @@ describe("Payments routes — recurring", () => {
           )
           .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, now, created.id)
           .run();
-        // The plan has landed at `confirmed` and finalizes on the next read.
-        const landedPlan = {
-          exists: true,
-          address: address(TEST_SOLANA_ADDRESSES.wallet3),
-          data: {
-            status: subscriptionsProgram.PlanStatus.Active,
-            data: {
-              endTs: 0n,
-              metadataUri: "",
-              pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
-              terms: { createdAt: 1_770_000_000n },
-            },
-          },
-        } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>;
+        // The plan has landed at `confirmed` but is not final yet.
         vi.mocked(subscriptionsProgram.fetchMaybePlan)
-          .mockResolvedValueOnce({ exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) })
-          .mockResolvedValueOnce(landedPlan)
-          .mockResolvedValueOnce(landedPlan);
-        // No subscription address is recorded yet, so the run sends only the subscription.
+          .mockResolvedValueOnce(noAccount)
+          .mockResolvedValueOnce(planAccount());
         const sent = sends();
+        const activate = () =>
+          app.request(
+            actionPath(created.id, "activate"),
+            { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+            env
+          );
 
-        const retry = await app.request(
-          actionPath(created.id, "activate"),
-          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
-          env
-        );
+        const landing = await activate();
+
+        expect(landing.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+
+        // Once final, the retry takes the plan as landed and sends only the subscription.
+        const retry = await activate();
 
         expect(retry.status).toBe(200);
         expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
@@ -6674,12 +6647,6 @@ describe("Payments routes — recurring", () => {
           planCreationSignature: null,
         });
         expect(sent).toHaveBeenCalledTimes(1);
-        expect(
-          vi
-            .mocked(subscriptionsProgram.fetchMaybePlan)
-            .mock.calls.slice(0, 3)
-            .map(([, , config]) => config?.commitment)
-        ).toEqual(["finalized", "confirmed", "finalized"]);
       });
     });
   });

@@ -55,12 +55,11 @@ import {
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
-  type ResumedStepLogContext,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
   sendSubscriptionInstructions,
-  settleResumedStep,
+  settleStepIfResumed,
   subscriptionProgramMetadataUri,
 } from "./shared";
 
@@ -472,40 +471,7 @@ async function settleActiveActivationAttempt(input: {
   }
 }
 
-/**
- * The plan or subscription an earlier run's send left on chain; null when the
- * step is still to send. An earlier run records the step's address before it
- * sends and its signature only after, so a recorded address or a saved signature
- * is a send that may have landed, whether that run died or failed to save and
- * was reset (HOO-2044).
- * A reset activation can be retried at once: it is stale only when recovered
- * from `activating`.
- */
-async function settleActivationStep<T extends { exists: boolean }>(input: {
-  /** The step's address as an earlier run recorded it before sending. */
-  recordedAddress: string | null;
-  stale: boolean;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
-  read: (commitment: "finalized" | "confirmed") => Promise<T>;
-  savedSignature: Signature | null;
-  logContext: ResumedStepLogContext;
-}): Promise<T | null> {
-  if (input.recordedAddress === null && input.savedSignature === null) {
-    return null;
-  }
-  const settled = await settleResumedStep({
-    rpc: input.rpc,
-    read: input.read,
-    landed: (onChain) => onChain.exists,
-    savedSignature: input.savedSignature,
-    stale: input.stale,
-    logContext: input.logContext,
-  });
-  if (settled.kind === "failed") {
-    throw transactionFailed("Recurring payment activation failed on-chain");
-  }
-  return settled.kind === "landed" ? settled.account : null;
-}
+const ACTIVATION_FAILED_ON_CHAIN = "Recurring payment activation failed on-chain";
 
 /** Confirms the plan this run sent, then reads it. */
 async function confirmActivationPlan(input: {
@@ -513,10 +479,7 @@ async function confirmActivationPlan(input: {
   planPda: Address;
   planCreationSignature: Signature;
 }) {
-  await confirmSubscriptionSignature(
-    input.planCreationSignature,
-    "Recurring payment activation failed on-chain"
-  );
+  await confirmSubscriptionSignature(input.planCreationSignature, ACTIVATION_FAILED_ON_CHAIN);
   return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, { commitment: "confirmed" });
 }
 
@@ -526,10 +489,7 @@ async function confirmActivationSubscription(input: {
   subscriptionPda: Address;
   authorizationSignature: Signature;
 }) {
-  await confirmSubscriptionSignature(
-    input.authorizationSignature,
-    "Recurring payment activation failed on-chain"
-  );
+  await confirmSubscriptionSignature(input.authorizationSignature, ACTIVATION_FAILED_ON_CHAIN);
   return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
     commitment: "confirmed",
   });
@@ -771,67 +731,73 @@ export async function activateRecurringPayment(input: {
       stage: currentStage,
       updatedAt: new Date().toISOString(),
     });
-    // An earlier run records the plan's address before it sends the plan and
-    // its signature only after, so a recorded address is a send that may have
-    // landed, whether that run died or failed to save and was reset (HOO-2044).
-    // A reset activation can be retried at once, so it is stale only when it
-    // was recovered from `activating`.
-    let onChainPlan = await settleActivationStep({
-      recordedAddress: claimed.plan_pda,
-      stale: recoveringStaleActivation,
-      rpc,
-      read: (commitment) => subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment }),
-      savedSignature: planCreationSignature,
-      logContext: { recurring_payment_id: claimed.id, attempt_id: attempt.id, step: "create_plan" },
-    });
+    // A step's address is recorded before its send and its signature after, so
+    // either one is a send that may have landed, whether that run died or failed
+    // to save and was reset (HOO-2044). A reset activation can be retried at
+    // once: it is stale only when recovered from `activating`.
+    let onChainPlan = await settleStepIfResumed(
+      claimed.plan_pda !== null || planCreationSignature !== null,
+      {
+        rpc,
+        read: (commitment) => subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment }),
+        landed: (onChain) => onChain.exists,
+        savedSignature: planCreationSignature,
+        stale: recoveringStaleActivation,
+        failureMessage: ACTIVATION_FAILED_ON_CHAIN,
+        logContext: {
+          recurring_payment_id: claimed.id,
+          attempt_id: attempt.id,
+          step: "create_plan",
+        },
+      }
+    );
     if (!onChainPlan) {
-      if (!planCreationSignature) {
-        const createPlanInstruction =
-          await subscriptionsProgram.getCreatePlanOverlayInstructionAsync({
-            amount: amountBaseUnits,
-            destinations: [destination],
-            endTs: 0n,
-            metadataUri: subscriptionProgramMetadataUri(claimed.metadata_uri),
-            mint,
-            owner: sourceSigner,
-            periodHours: BigInt(claimed.period_hours),
-            planId: programPlanId,
-            pullers: [owner],
-            tokenProgram,
-          });
-        planCreationSignature = await sendSubscriptionInstructions({
-          movement: "recurring.activate",
-          env: input.env,
+      const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
+        {
+          amount: amountBaseUnits,
+          destinations: [destination],
+          endTs: 0n,
+          metadataUri: subscriptionProgramMetadataUri(claimed.metadata_uri),
+          mint,
+          owner: sourceSigner,
+          periodHours: BigInt(claimed.period_hours),
+          planId: programPlanId,
+          pullers: [owner],
+          tokenProgram,
+        }
+      );
+      planCreationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.activate",
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.sourceWallet,
+        sourceSigner,
+        instructions: [createPlanInstruction],
+      });
+      const signatureUpdatedAt = new Date().toISOString();
+      await getDb(input.env).transaction(async (tx) => {
+        const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+        const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
+          recurringPaymentId: claimed.id,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          sourceWallet: input.sourceWallet,
-          sourceSigner,
-          instructions: [createPlanInstruction],
+          planCreationSignature,
+          updatedAt: signatureUpdatedAt,
         });
-        const signatureUpdatedAt = new Date().toISOString();
-        await getDb(input.env).transaction(async (tx) => {
-          const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-          const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
-            recurringPaymentId: claimed.id,
+        if (updatedRecurringPayment === null) {
+          throw conflict("Recurring payment activation changed concurrently");
+        }
+        requireUpdatedAttempt(
+          await txRecurringRepo.updateActivationAttempt({
+            attemptId: attempt.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
             planCreationSignature,
             updatedAt: signatureUpdatedAt,
-          });
-          if (updatedRecurringPayment === null) {
-            throw conflict("Recurring payment activation changed concurrently");
-          }
-          requireUpdatedAttempt(
-            await txRecurringRepo.updateActivationAttempt({
-              attemptId: attempt.id,
-              organizationId: input.organizationId,
-              projectId: input.projectId,
-              planCreationSignature,
-              updatedAt: signatureUpdatedAt,
-            })
-          );
-        });
-      }
+          })
+        );
+      });
       onChainPlan = await confirmActivationPlan({ rpc, planPda, planCreationSignature });
     }
     if (!onChainPlan.exists) {
@@ -902,107 +868,108 @@ export async function activateRecurringPayment(input: {
       updatedAt: authorizationUpdatedAt,
     });
 
-    // The subscription's address is recorded before its send, as the plan's is.
-    let onChainSubscription = await settleActivationStep({
-      recordedAddress: claimed.subscription_pda,
-      stale: recoveringStaleActivation,
-      rpc,
-      read: (commitment) =>
-        subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment }),
-      savedSignature: authorizationSignature,
-      logContext: {
-        recurring_payment_id: claimed.id,
-        attempt_id: attempt.id,
-        step: "authorize_subscription",
-      },
-    });
-    if (!onChainSubscription) {
-      if (!authorizationSignature) {
-        let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-          rpc,
-          subscriptionAuthorityAddress,
-          { commitment: "confirmed" }
-        );
-        const feePayment = createSponsorshipFeePayment(
-          input.env,
-          await resolveProjectSponsorshipScope(input.env, {
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            actor: { type: "wallet", id: input.sourceWallet.walletId },
+    let onChainSubscription = await settleStepIfResumed(
+      claimed.subscription_pda !== null || authorizationSignature !== null,
+      {
+        rpc,
+        read: (commitment) =>
+          subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, {
+            commitment,
           }),
-          "recurring.activate"
-        );
-        const feePayer = await feePayment.getFeePayer();
-        const payer = createNoopSigner(feePayer);
-
-        subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
-          env: input.env,
-          recurringRepo,
-          attempt,
+        landed: (onChain) => onChain.exists,
+        savedSignature: authorizationSignature,
+        stale: recoveringStaleActivation,
+        failureMessage: ACTIVATION_FAILED_ON_CHAIN,
+        logContext: {
+          recurring_payment_id: claimed.id,
+          attempt_id: attempt.id,
+          step: "authorize_subscription",
+        },
+      }
+    );
+    if (!onChainSubscription) {
+      let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
+        rpc,
+        subscriptionAuthorityAddress,
+        { commitment: "confirmed" }
+      );
+      const feePayment = createSponsorshipFeePayment(
+        input.env,
+        await resolveProjectSponsorshipScope(input.env, {
           organizationId: input.organizationId,
           projectId: input.projectId,
-          rpc,
-          sourceWallet: input.sourceWallet,
-          sourceSigner,
-          sourceTokenAccount,
-          subscriptionAuthority,
-          subscriptionAuthorityAddress,
-          owner,
-          mint,
-          tokenProgram,
-          feePayer,
+          actor: { type: "wallet", id: input.sourceWallet.walletId },
+        }),
+        "recurring.activate"
+      );
+      const feePayer = await feePayment.getFeePayer();
+      const payer = createNoopSigner(feePayer);
+
+      subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
+        env: input.env,
+        recurringRepo,
+        attempt,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        rpc,
+        sourceWallet: input.sourceWallet,
+        sourceSigner,
+        sourceTokenAccount,
+        subscriptionAuthority,
+        subscriptionAuthorityAddress,
+        owner,
+        mint,
+        tokenProgram,
+        feePayer,
+      });
+      if (!subscriptionAuthority.exists) {
+        throw transactionFailed("Subscription authority was not found on-chain");
+      }
+
+      const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
+        expectedAmount: amountBaseUnits,
+        expectedCreatedAt: BigInt(planCreatedAt),
+        expectedPeriodHours: BigInt(claimed.period_hours),
+        expectedSubscriptionAuthorityInitId: subscriptionAuthority.data.initId,
+        merchant: owner,
+        payer,
+        planId: programPlanId,
+        subscriber: sourceSigner,
+        tokenMint: mint,
+      });
+      authorizationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.activate",
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.sourceWallet,
+        sourceSigner,
+        instructions: [subscribeInstruction],
+        feePayer,
+      });
+      const signatureUpdatedAt = new Date().toISOString();
+      await getDb(input.env).transaction(async (tx) => {
+        const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+        const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
+          recurringPaymentId: claimed.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          authorizationSignature,
+          updatedAt: signatureUpdatedAt,
         });
-        if (!subscriptionAuthority.exists) {
-          throw transactionFailed("Subscription authority was not found on-chain");
+        if (updatedRecurringPayment === null) {
+          throw conflict("Recurring payment activation changed concurrently");
         }
-
-        const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync(
-          {
-            expectedAmount: amountBaseUnits,
-            expectedCreatedAt: BigInt(planCreatedAt),
-            expectedPeriodHours: BigInt(claimed.period_hours),
-            expectedSubscriptionAuthorityInitId: subscriptionAuthority.data.initId,
-            merchant: owner,
-            payer,
-            planId: programPlanId,
-            subscriber: sourceSigner,
-            tokenMint: mint,
-          }
-        );
-        authorizationSignature = await sendSubscriptionInstructions({
-          movement: "recurring.activate",
-          env: input.env,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          sourceWallet: input.sourceWallet,
-          sourceSigner,
-          instructions: [subscribeInstruction],
-          feePayer,
-        });
-        const signatureUpdatedAt = new Date().toISOString();
-        await getDb(input.env).transaction(async (tx) => {
-          const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-          const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
-            recurringPaymentId: claimed.id,
+        requireUpdatedAttempt(
+          await txRecurringRepo.updateActivationAttempt({
+            attemptId: attempt.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
             authorizationSignature,
             updatedAt: signatureUpdatedAt,
-          });
-          if (updatedRecurringPayment === null) {
-            throw conflict("Recurring payment activation changed concurrently");
-          }
-          requireUpdatedAttempt(
-            await txRecurringRepo.updateActivationAttempt({
-              attemptId: attempt.id,
-              organizationId: input.organizationId,
-              projectId: input.projectId,
-              authorizationSignature,
-              updatedAt: signatureUpdatedAt,
-            })
-          );
-        });
-      }
+          })
+        );
+      });
       currentStage = "finalize";
       onChainSubscription = await confirmActivationSubscription({
         rpc,

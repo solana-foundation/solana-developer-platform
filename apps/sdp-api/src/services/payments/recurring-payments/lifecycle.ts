@@ -27,14 +27,7 @@ import {
   type PaymentRecurringPaymentsRepository,
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
-import {
-  AppError,
-  badRequest,
-  conflict,
-  internalError,
-  notFound,
-  transactionFailed,
-} from "@/lib/errors";
+import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -589,6 +582,7 @@ async function runRecurringPaymentLifecycle(
           isSubscriptionDelegationCanceled(delegation) === (input.operation === "cancel"),
         savedSignature: signature,
         stale: true,
+        failureMessage: lifecycleConfirmationMessage(input.operation),
         logContext: {
           recurring_payment_id: claimed.id,
           attempt_id: attempt.id,
@@ -596,9 +590,6 @@ async function runRecurringPaymentLifecycle(
         },
       });
       chainUnread = false;
-      if (step.kind === "failed") {
-        throw transactionFailed(lifecycleConfirmationMessage(input.operation));
-      }
       if (step.kind === "landed") {
         confirmedOnChain = true;
         return await finalizeRecurringPaymentLifecycle({
@@ -615,11 +606,11 @@ async function runRecurringPaymentLifecycle(
       onChainSubscription = step.account;
     }
 
-    // Admission runs only before a new signature. An attempt that already
-    // submitted only confirms below, so a refusal never strands an operation
-    // that is on chain. A refused resume goes back to `canceled` through the
-    // failure reset, which matches the subscription on chain.
-    if (!signature && input.operation === "resume") {
+    // Admission runs only before a new signature: a resumed attempt that the
+    // chain shows landed has already returned, so a refusal never strands an
+    // operation that is on chain. A refused resume goes back to `canceled`
+    // through the failure reset, which matches the subscription on chain.
+    if (input.operation === "resume") {
       await input.admitStart();
     }
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
@@ -633,58 +624,56 @@ async function runRecurringPaymentLifecycle(
       throw badRequest("Resolved signing wallet does not match source wallet");
     }
 
-    if (!signature) {
-      currentStage = "submit";
-      await recurringRepo.updateLifecycleAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        stage: currentStage,
-        updatedAt: new Date().toISOString(),
-      });
+    currentStage = "submit";
+    await recurringRepo.updateLifecycleAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stage: currentStage,
+      updatedAt: new Date().toISOString(),
+    });
 
-      const instruction =
-        input.operation === "cancel"
-          ? await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
-              planPda,
-              subscriber: sourceSigner,
-              subscriptionPda,
-            })
-          : await buildResumeInstruction({
-              planPda,
-              subscriber: sourceSigner,
-              subscriptionPda,
-              tokenMint,
-              onChainSubscription:
-                onChainSubscription === null
-                  ? await readDelegation("confirmed")
-                  : onChainSubscription,
-            });
+    const instruction =
+      input.operation === "cancel"
+        ? await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
+            planPda,
+            subscriber: sourceSigner,
+            subscriptionPda,
+          })
+        : await buildResumeInstruction({
+            planPda,
+            subscriber: sourceSigner,
+            subscriptionPda,
+            tokenMint,
+            onChainSubscription:
+              onChainSubscription === null
+                ? await readDelegation("confirmed")
+                : onChainSubscription,
+          });
 
-      signature = await sendSubscriptionInstructions({
-        movement: LIFECYCLE_MOVEMENTS[input.operation],
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [instruction],
-      });
+    signature = await sendSubscriptionInstructions({
+      movement: LIFECYCLE_MOVEMENTS[input.operation],
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWallet: input.sourceWallet,
+      sourceSigner,
+      instructions: [instruction],
+    });
 
-      const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        stage: currentStage,
-        signature,
-        error: null,
-        updatedAt: new Date().toISOString(),
-      });
-      if (updatedAttempt === null) {
-        throw conflict("Recurring payment lifecycle attempt changed concurrently");
-      }
-      attempt = updatedAttempt;
+    const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stage: currentStage,
+      signature,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+    if (updatedAttempt === null) {
+      throw conflict("Recurring payment lifecycle attempt changed concurrently");
     }
+    attempt = updatedAttempt;
 
     await confirmSubscriptionSignature(signature, lifecycleConfirmationMessage(input.operation));
     confirmedOnChain = true;
