@@ -53,14 +53,11 @@ describe("payment request public tokens", () => {
   // Reads reconcile an awaiting request on chain; nothing has paid it, so
   // every read returns the stored row.
   const rpc = installClusterRpcStub();
-  beforeEach(() => {
-    rpc.answer("getSignaturesForAddress", []);
-  });
-
   let requestId: string;
   let publicToken: string;
 
   beforeEach(async () => {
+    rpc.answer("getSignaturesForAddress", []);
     await seedTestDatabase(env);
     const db = getDb(env);
     await db
