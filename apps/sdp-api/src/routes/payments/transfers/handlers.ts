@@ -46,6 +46,7 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { appErrorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
@@ -310,6 +311,11 @@ export async function authorizeTransfer(
     token: body.token,
     amount: body.amount,
   });
+  // The custody signer refuses a wallet outside the key's scope (HOO-2099).
+  // Refusing here as well, before the key is claimed, keeps a refused start
+  // from writing a failed transfer row and an Idempotency-Key that would
+  // replay that failure after the scope is fixed.
+  assertCallerWalletInScope(scope.auth.walletAccess, operation.sourceWallet.id);
   // A ramp deposit the request funds is named by id: it must be in the
   // project before the key is claimed, so a wrong id is never stored as a 404.
   let rampTransfer: TransferRow | null = null;

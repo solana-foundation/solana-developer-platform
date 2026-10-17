@@ -88,6 +88,17 @@ included:
 - Routes that record a movement or call a gateway before they sign (Private
   Channels, Rings) make the same scope refusal up front, from the
   authenticated request, so a refused withdrawal leaves nothing behind.
+  So do the Idempotency-Key routes that name a source wallet (transfers,
+  transfer batches, signer check), in `authorize`: there the refusal also
+  keeps a failed row and its key out of the store, so a retry after the
+  scope is fixed runs. `assertCallerWalletInScope` reads the scope from
+  authentication (ADR 0009) and is a fast refusal only; the waist still
+  decides every signature.
+- **A claim the job can finish is ordered against revocation.** A fresh
+  recurring activation or resume is admitted before its claim, and the claim
+  re-reads the activating key under a share lock (`lockLiveActivatingKey`).
+  Revocation locks the key row and lists what it started after it commits,
+  so revoke-and-cancel either refuses the claim or sees it.
 
 ## Alternatives considered
 

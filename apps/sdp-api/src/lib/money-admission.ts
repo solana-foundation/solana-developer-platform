@@ -157,8 +157,10 @@ export class MoneyMovementRefusedError extends AppError {
 /**
  * Refuses, before any work, a request that names a custody wallet outside
  * the caller's wallet scope as read at authentication (HOO-2099): the custody
- * signer's own refusal, made early so a flow that records or calls a gateway
- * before it signs (Private Channels, Rings) does neither. Same 403.
+ * signer's own refusal, made early so a flow that records, claims an
+ * Idempotency-Key or calls a gateway before it signs (Private Channels,
+ * Rings, transfers, transfer batches, signer check) does none of it. Same
+ * 403; the waist still decides every signature (ADR 0007 addendum).
  */
 export function assertCallerWalletInScope(
   walletAccess: WalletAccess,
