@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { TERMINAL_REFUSAL_TTL_MS } from "@/lib/api-key-refusal-cache";
@@ -23,6 +24,11 @@ import { env } from "@/test/helpers/env";
 import { archiveProject, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
+
+const errorBodySchema = z.object({
+  error: z.object({ code: z.string(), message: z.string() }),
+});
+
 import type { Env } from "@/types/env";
 
 describe("Auth Middleware", () => {
@@ -89,7 +95,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("UNAUTHORIZED");
     });
 
@@ -121,7 +127,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("INVALID_API_KEY");
     });
 
@@ -139,7 +145,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("INVALID_API_KEY");
     });
 
@@ -177,7 +183,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("FORBIDDEN");
     });
 
@@ -342,7 +348,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("REVOKED_API_KEY");
     });
 
@@ -361,7 +367,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
@@ -383,7 +389,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
@@ -404,7 +410,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
@@ -518,6 +524,7 @@ describe("Auth Middleware", () => {
       const mini = new Hono<{ Bindings: Env }>();
       mini.onError((err, c) => {
         if (err instanceof AppError) {
+          // SAFETY: AppError status codes are the API's own error statuses.
           return c.json(err.toResponse(), err.statusCode as 401 | 403);
         }
         throw err;
@@ -578,7 +585,7 @@ describe("Auth Middleware", () => {
 
       const res = await orgRequest();
       expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
     });
 
@@ -601,7 +608,7 @@ describe("Auth Middleware", () => {
 
       const res = await keyed("/context", origin);
       expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("FORBIDDEN");
     });
 
@@ -612,7 +619,7 @@ describe("Auth Middleware", () => {
 
       const res = await keyed("/context");
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("REVOKED_API_KEY");
     });
 
@@ -621,7 +628,7 @@ describe("Auth Middleware", () => {
 
       await updateKey("status", "revoked");
 
-      const body = (await (await keyed("/context")).json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await (await keyed("/context")).json());
       expect(body.error.code).toBe("REVOKED_API_KEY");
     });
 
@@ -630,7 +637,7 @@ describe("Auth Middleware", () => {
 
       await updateKey("rotation_deadline", new Date(Date.now() - 1_000).toISOString());
 
-      const body = (await (await keyed("/context")).json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await (await keyed("/context")).json());
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
@@ -642,7 +649,7 @@ describe("Auth Middleware", () => {
 
       const res = await keyed("/context");
       expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("REVOKED_API_KEY");
     });
 
@@ -653,11 +660,11 @@ describe("Auth Middleware", () => {
       await updateKey("status", "revoked");
       const prepare = vi.spyOn(getDb(env), "prepare");
 
-      const first = (await (await keyed("/context")).json()) as { error: { code: string } };
+      const first = errorBodySchema.parse(await (await keyed("/context")).json());
       expect(first.error.code).toBe("REVOKED_API_KEY");
       expect(authReads(prepare)).toBe(1);
 
-      const second = (await (await keyed("/context")).json()) as { error: { code: string } };
+      const second = errorBodySchema.parse(await (await keyed("/context")).json());
       expect(second.error.code).toBe("REVOKED_API_KEY");
       expect(authReads(prepare)).toBe(1);
     });
@@ -766,7 +773,7 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string; message: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
     });
   });
