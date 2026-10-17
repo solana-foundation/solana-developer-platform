@@ -6184,6 +6184,40 @@ describe("Payments routes — recurring", () => {
         expect(attempt?.status).toBe("processing");
       });
 
+      it("keeps a stale cancel in flight when only a lagging `confirmed` view shows it", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        expect(
+          (
+            await app.request(
+              actionPath(activated.id, "cancel"),
+              { method: "POST", headers: keyed(key), body: "{}" },
+              env
+            )
+          ).status
+        ).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        // Finality stalled: the cancel shows at `confirmed`, not yet at `finalized`.
+        fetchMaybeSubscriptionDelegationMock.mockImplementation(async (_rpc, _pda, config) =>
+          delegation(config?.commitment === "confirmed" ? 1_800_000_000n : 0n)
+        );
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "processing", stage: "submit", signature: null },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
+      });
+
       it("sends a cancel the chain does not show", async () => {
         recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);

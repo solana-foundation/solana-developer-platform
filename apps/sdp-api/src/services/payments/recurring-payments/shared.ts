@@ -318,8 +318,8 @@ export type ResumedStep<T> = { kind: "landed" | "absent"; account: T };
  * attempt causes its effect.
  *
  * - The effect at `finalized`: landed.
- * - The effect at `confirmed` only (a fresh retry; a stale send is long final):
- *   it is landing, so this throws for a retry instead of sending.
+ * - The effect at `confirmed` only: it is landing, or the `finalized` view lags
+ *   (stale attempts too), so this throws for a retry instead of sending.
  * - No effect, no saved signature: absent. A stale attempt's earlier send can no
  *   longer land; a fresh retry's still could, and a duplicate then fails on chain.
  * - No effect, saved signature: looked up with transaction history, since
@@ -383,7 +383,7 @@ async function readResumedStep<T extends { exists: boolean }>(
     }
     return { kind: "landed", account: finalized };
   }
-  if (!input.stale && input.landed(await input.read("confirmed"))) {
+  if (input.landed(await input.read("confirmed"))) {
     throw stepStillLanding();
   }
   if (input.savedSignature === null) {
