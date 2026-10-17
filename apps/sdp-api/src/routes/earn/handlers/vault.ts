@@ -21,14 +21,7 @@ import {
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import {
-  AppError,
-  badRequest,
-  conflict,
-  internalError,
-  notFound,
-  walletNotFound,
-} from "@/lib/errors";
+import { badRequest, conflict, internalError, notFound, walletNotFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import {
   buildEarnVaultDepositFingerprint,
@@ -40,10 +33,6 @@ import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
-import {
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIdsForPermissions,
-} from "@/services/api-key-scope.service";
 import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
@@ -298,8 +287,9 @@ interface EarnVaultDepositResolved {
  * Parse and resolve a vault deposit for the request gate.
  *
  * Everything the handler needs is resolved HERE, before the handler runs, so
- * the wallet binding, the strategy admission and the swap normalization are all
- * decided BEFORE `createOrgSignerForCustodyWallet` is reached.
+ * the wallet, the strategy admission and the swap normalization are all
+ * decided BEFORE `createOrgSignerForCustodyWallet` is reached; the signer then
+ * decides whether this caller may sign with the wallet (HOO-2099).
  */
 export async function extractEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
@@ -392,18 +382,12 @@ export async function extractEarnVaultDeposit(
   // custody-shaped work.
   const swap = resolveDepositSwapRequest(body, environment, tokenMint);
 
-  // The wallet must be one SDP can sign for, and the binding must carry a WRITE
-  // scope. `wallets:read` on a binding only proves the key may LOOK at the
-  // wallet — a read-only-bound key was previously able to spend from it. Global
-  // `wallets:read` is required at the router for the same reason payments does
-  // it: for a key with NO bindings the per-wallet assertion is a no-op, so the
-  // router permission is the only gate that key ever meets.
+  // The wallet must be one SDP can sign for; whether this caller may sign with
+  // it is the custody signer's decision (HOO-2099).
   // Resolve only the exposed custody row id. Provider wallet ids are unique
   // only within one custody configuration, and public keys may also repeat, so
   // neither is a safe identifier for this money-in route.
   const wallet = resolveEarnVaultCustodyWallet(wallets, body.custodyWalletId);
-  assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
-  assertApiKeyWalletAccess(auth, wallet.walletId, ["earn:write"]);
 
   const resolved: EarnVaultDepositResolved = {
     strategy,
@@ -510,44 +494,11 @@ export function resolveEarnVaultCustodyWallet(
   throw walletNotFound();
 }
 
-export function assertBoundWalletIdentifierIsUnique(
-  auth: EarnVaultDepositResolved["auth"],
-  wallets: readonly CustodyRuntimeWalletProjection[],
-  wallet: CustodyRuntimeWalletProjection
-): void {
-  const selectedScope =
-    auth.authType === "api_key" &&
-    (auth.walletBindings.length > 0 ||
-      auth.signingWalletId !== null ||
-      auth.signingWalletIds.length > 0);
-  if (!selectedScope) return;
-
-  if (wallets.filter((candidate) => candidate.walletId === wallet.walletId).length !== 1) {
-    throw new AppError(
-      "FORBIDDEN",
-      "The selected API-key wallet binding is ambiguous across custody configurations"
-    );
-  }
-}
-
 /**
- * The custody wallets an earn READ may see, already narrowed to the caller's
- * API-key wallet bindings.
- *
- * Shared by every vault read so the binding rule cannot drift between them: a
- * selected-wallet key that may not read wallet B's position must not be able to
- * read wallet B's deposits either.
- *
- * The id spaces differ and that is the trap. `getAllowedApiKeyWalletIdsForPermissions`
- * returns PROVIDER wallet ids (`privy_…`), while `earn_positions.custody_wallet_id`
- * and `earn_movements.custody_wallet_id` are `custody_wallets` row ids
- * (`cwlt_…`). The projection carries both, so it is the translation table;
- * comparing the allow-list directly against a stored id matches nothing and
- * silently answers "you hold none of this", which is a filter that looks like
- * it works and hides money.
- *
- * A provider wallet id that maps to more than one scoped custody row is
- * dropped: the binding cannot say which row it meant, so it authorizes neither.
+ * The custody wallets an earn read may see: every wallet of the project
+ * (HOO-2099). Only the wallet list and wallet detail reads narrow to a
+ * selected key's list; spending from a wallet is decided by the custody
+ * signer. Shared by every vault read so they cannot drift.
  */
 export async function listReadableEarnVaultWallets(
   c: AppContext,
@@ -559,21 +510,7 @@ export async function listReadableEarnVaultWallets(
     projectId,
   });
 
-  const allowedProviderWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["earn:read"]);
-  if (allowedProviderWalletIds === null) return wallets;
-
-  const allowed = new Set(allowedProviderWalletIds);
-  const scopedProviderWalletCounts = new Map<string, number>();
-  for (const wallet of wallets) {
-    scopedProviderWalletCounts.set(
-      wallet.walletId,
-      (scopedProviderWalletCounts.get(wallet.walletId) ?? 0) + 1
-    );
-  }
-  return wallets.filter(
-    (wallet) =>
-      allowed.has(wallet.walletId) && scopedProviderWalletCounts.get(wallet.walletId) === 1
-  );
+  return wallets;
 }
 
 /**
@@ -1107,8 +1044,6 @@ export async function extractEarnVaultWithdrawal(
     projectId,
   });
   const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
-  assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
-  assertApiKeyWalletAccess(auth, wallet.walletId, ["earn:write"]);
 
   const resolved: EarnVaultWithdrawalResolved = {
     position,

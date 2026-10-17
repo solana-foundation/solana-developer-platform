@@ -1651,151 +1651,6 @@ describe("Issuance Routes", () => {
       });
     });
 
-    it("scopes omitted wallet filters to all token-readable selected-wallet bindings", async () => {
-      const token = await seedIssuedToken();
-      const walletA = await seedIssuanceActivityWallet(
-        "wal_selected_tokens_a",
-        TEST_SOLANA_ADDRESSES.wallet1
-      );
-      const walletB = await seedIssuanceActivityWallet(
-        "wal_selected_tokens_b",
-        TEST_SOLANA_ADDRESSES.wallet2
-      );
-      const walletC = await seedIssuanceActivityWallet(
-        "wal_selected_tokens_c",
-        TEST_SOLANA_ADDRESSES.wallet3
-      );
-      const walletATokenAccount = await deriveAssociatedTokenAccount(
-        walletA.publicKey,
-        token.mintAddress ?? TEST_SOLANA_ADDRESSES.mint
-      );
-
-      await seedIssuanceTransaction({
-        id: "ttx_selected_wallet_a",
-        type: "burn",
-        params: { source: walletATokenAccount, amount: "1" },
-        createdAt: "2024-01-05T00:00:00.000Z",
-      });
-      await seedIssuanceTransaction({
-        id: "ttx_selected_wallet_b",
-        type: "burn",
-        params: { source: walletB.publicKey, amount: "2" },
-        createdAt: "2024-01-04T00:00:00.000Z",
-      });
-      await seedIssuanceTransaction({
-        id: "ttx_selected_wallet_c",
-        type: "burn",
-        params: { source: walletC.publicKey, amount: "3" },
-        createdAt: "2024-01-06T00:00:00.000Z",
-      });
-      await cacheProjectApiKey({
-        grants: ["issuance.read"],
-        walletBindings: [
-          { walletId: walletA.walletId, permissions: ["tokens:read"] },
-          { walletId: walletB.walletId, permissions: ["tokens:read"] },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/issuance/transactions?type=burn&page=1&pageSize=10",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.meta.total).toBe(2);
-      expect(
-        body.data.map((entry: { transaction: { id: string } }) => entry.transaction.id)
-      ).toEqual(["ttx_selected_wallet_a", "ttx_selected_wallet_b"]);
-    });
-
-    it("omits selected-wallet bindings that lack wallet-level tokens:read", async () => {
-      await seedIssuedToken();
-      const walletA = await seedIssuanceActivityWallet(
-        "wal_mixed_tokens_a",
-        TEST_SOLANA_ADDRESSES.wallet1
-      );
-      const walletB = await seedIssuanceActivityWallet(
-        "wal_mixed_tokens_b",
-        TEST_SOLANA_ADDRESSES.wallet2
-      );
-
-      await seedIssuanceTransaction({
-        id: "ttx_mixed_tokens_read",
-        type: "burn",
-        params: { source: walletA.publicKey, amount: "1" },
-        createdAt: "2024-01-05T00:00:00.000Z",
-      });
-      await seedIssuanceTransaction({
-        id: "ttx_mixed_payments_only",
-        type: "burn",
-        params: { source: walletB.publicKey, amount: "2" },
-        createdAt: "2024-01-06T00:00:00.000Z",
-      });
-      await cacheProjectApiKey({
-        grants: ["issuance.read"],
-        walletBindings: [
-          { walletId: walletA.walletId, permissions: ["tokens:read"] },
-          { walletId: walletB.walletId, permissions: ["payments:read"] },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/issuance/transactions?type=burn&page=1&pageSize=10",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.meta.total).toBe(1);
-      expect(body.data[0].transaction.id).toBe("ttx_mixed_tokens_read");
-    });
-
-    it("returns an empty page for selected-wallet keys with no token-readable bindings", async () => {
-      await seedIssuedToken();
-      const wallet = await seedIssuanceActivityWallet(
-        "wal_issuance_activity",
-        TEST_SOLANA_ADDRESSES.wallet1
-      );
-      await seedIssuanceTransaction({
-        id: "ttx_no_token_binding",
-        type: "burn",
-        params: { source: wallet.publicKey, amount: "1" },
-      });
-      await cacheProjectApiKey({
-        grants: ["issuance.read"],
-        walletBindings: [{ walletId: wallet.walletId, permissions: ["payments:read"] }],
-      });
-
-      const res = await app.request(
-        "/v1/issuance/transactions?type=burn&page=1&pageSize=10",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.meta.total).toBe(0);
-      expect(body.data).toEqual([]);
-    });
-
     it("keeps unrestricted project keys org/project scoped when walletId is omitted", async () => {
       const token = await seedIssuedToken();
       await seedOrganization({
@@ -2175,7 +2030,7 @@ describe("Issuance Routes", () => {
       expect(body.error.message).toBe("Invalid type query parameter");
     });
 
-    it("allows explicit wallet filters for selected-wallet keys with wallet-level tokens:read", async () => {
+    it("filters by an explicit wallet for a key holding issuance.read", async () => {
       await seedIssuedToken();
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_activity",
@@ -2188,7 +2043,6 @@ describe("Issuance Routes", () => {
       });
       await cacheProjectApiKey({
         grants: ["issuance.read"],
-        walletBindings: [{ walletId: wallet.walletId, permissions: ["tokens:read"] }],
       });
 
       const res = await app.request(
@@ -2224,58 +2078,6 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.error.code).toBe("NOT_FOUND");
       expect(body.error.message).toMatch(/^Wallet not found\./);
-    });
-
-    it("enforces wallet-level tokens:read for wallet filters", async () => {
-      const wallet = await seedIssuanceActivityWallet(
-        "wal_issuance_activity",
-        TEST_SOLANA_ADDRESSES.wallet1
-      );
-      await cacheProjectApiKey({
-        grants: ["issuance.read"],
-        walletBindings: [{ walletId: wallet.walletId, permissions: ["payments:read"] }],
-      });
-
-      const res = await app.request(
-        `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-    });
-
-    it("rejects explicit wallet filters for unbound selected-wallet keys", async () => {
-      const boundWallet = await seedIssuanceActivityWallet(
-        "wal_bound_tokens_read",
-        TEST_SOLANA_ADDRESSES.wallet1
-      );
-      const requestedWallet = await seedIssuanceActivityWallet(
-        "wal_unbound_tokens_read",
-        TEST_SOLANA_ADDRESSES.wallet2
-      );
-      await cacheProjectApiKey({
-        grants: ["issuance.read"],
-        walletBindings: [{ walletId: boundWallet.walletId, permissions: ["tokens:read"] }],
-      });
-
-      const res = await app.request(
-        `/v1/issuance/transactions?walletId=${requestedWallet.walletId}&type=burn`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
     });
   });
 
@@ -3417,7 +3219,6 @@ describe("Issuance Routes", () => {
           expect.objectContaining({
             auth: expect.objectContaining({ organizationId: TEST_ORG.id }),
             currentAuthority: TEST_SOLANA_ADDRESSES.wallet3,
-            requiredWalletPermissions: ["tokens:write"],
           })
         );
         expect(createResolvedAuthoritySignerSpy).toHaveBeenCalledWith(
@@ -3425,7 +3226,6 @@ describe("Issuance Routes", () => {
             auth: expect.objectContaining({ organizationId: TEST_ORG.id }),
             custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
             currentAuthority: TEST_SOLANA_ADDRESSES.wallet3,
-            requiredWalletPermissions: ["tokens:write"],
           })
         );
         expect(updateMetadataSpy).toHaveBeenCalledWith({
@@ -4575,70 +4375,6 @@ describe("Issuance Routes", () => {
           });
         } finally {
           addToListSpy.mockRestore();
-        }
-      });
-
-      it("refuses a wallet-scoped key that does not hold the list authority wallet", async () => {
-        const db = getDb(env);
-        await db
-          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
-          .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
-          .run();
-        await db
-          .prepare(
-            `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT (id) DO NOTHING`
-          )
-          .bind(
-            "akw_issuance_allowlist_scope",
-            TEST_PROJECT_API_KEY.id,
-            "wal_other",
-            JSON.stringify(["tokens:write"])
-          )
-          .run();
-        await seedApiKeyRow(env, apiKeyHash, {
-          ...TEST_PROJECT_CACHED_KEY,
-          walletScope: "selected",
-          signingWalletIds: ["wal_other"],
-          walletBindings: [{ walletId: "wal_other", permissions: ["tokens:write"] }],
-        });
-
-        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
-        signerSpy.mockClear();
-        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
-
-        try {
-          const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-              },
-              body: JSON.stringify({ address: TEST_SOLANA_ADDRESSES.wallet1 }),
-            },
-            env
-          );
-
-          expect(res.status).toBe(403);
-          const body = (await res.json()) as { error: { message: string } };
-          expect(body.error.message).toContain("not authorized for the requested wallet");
-          expect(signerSpy).not.toHaveBeenCalled();
-          expect(addToListSpy).not.toHaveBeenCalled();
-          const row = await db
-            .prepare("SELECT id FROM token_allowlists WHERE token_id = ? AND address = ?")
-            .bind(tokenId, TEST_SOLANA_ADDRESSES.wallet1)
-            .first<{ id: string }>();
-          expect(row).toBeNull();
-        } finally {
-          addToListSpy.mockRestore();
-          await db
-            .prepare("DELETE FROM api_key_wallet_permissions WHERE id = ?")
-            .bind("akw_issuance_allowlist_scope")
-            .run();
-          await seedApiKeyRow(env, apiKeyHash, TEST_PROJECT_CACHED_KEY);
         }
       });
 

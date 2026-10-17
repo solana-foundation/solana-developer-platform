@@ -33,6 +33,7 @@ const {
   ensureTestClerkIssuer,
   getDb,
   hashString,
+  runAsMoneyPrincipal,
   seedTestDatabase,
   signTestClerkJwt,
   TEST_ORG,
@@ -294,6 +295,28 @@ export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
   };
 }
 
+async function seedOrganizationAdminMembership(): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+       VALUES (?, ?, ?, 'admin', 'active')
+       ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin', status = 'active'`
+    )
+    .bind(`mem_integration_${TEST_USER.id}`, TEST_ORG.id, TEST_USER.id)
+    .run();
+}
+
+/**
+ * Runs a direct service call (no HTTP request) as the test organization's
+ * admin, the money principal a signed-in request would carry: the signing
+ * waists refuse work with no principal (HOO-2099). Wrap only the service
+ * call; an API request inside it would set its own principal.
+ */
+export async function asOrganizationAdmin<T>(work: () => Promise<T>): Promise<T> {
+  await seedOrganizationAdminMembership();
+  return runAsMoneyPrincipal({ kind: "member", userId: TEST_USER.id }, work);
+}
+
 /**
  * Requests as a signed-in organization admin of the test organization, scoped
  * to the test project. Key management answers a signed-in person only, never
@@ -305,14 +328,7 @@ export async function requestAsOrganizationAdmin() {
   const db = getDb(env);
   const clerkUserId = `clerk_${TEST_USER.id}`;
   const clerkOrgId = `clerk_${TEST_ORG.id}`;
-  await db
-    .prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-       VALUES (?, ?, ?, 'admin', 'active')
-       ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin', status = 'active'`
-    )
-    .bind(`mem_integration_${TEST_USER.id}`, TEST_ORG.id, TEST_USER.id)
-    .run();
+  await seedOrganizationAdminMembership();
   await db
     .prepare(
       `INSERT INTO project_members (id, project_id, user_id, role)

@@ -138,9 +138,8 @@ export async function resolveVerifiedSourceWallet(
     allowAddress
   );
   // Enrolment answers whether the wallet may move value on this instance at
-  // all; the key's wallet bindings answer whether THIS credential may spend
-  // from it. Every other money route holds the second line too, and skipping
-  // it here would let a key bound to one wallet spend any enrolled wallet.
+  // all; the key's wallet scope, checked as the wallet resolves, answers
+  // whether THIS credential may spend from it.
 
   const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
     context.actor.id,

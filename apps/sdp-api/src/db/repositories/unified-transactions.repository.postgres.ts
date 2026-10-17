@@ -123,26 +123,6 @@ export function createPostgresUnifiedTransactionsRepository(
         clauses.push("created_at <= ?");
         values.push(input.createdAtTo);
       }
-      if (input.moduleWalletScopes !== undefined) {
-        const scoped = input.moduleWalletScopes.filter(
-          (scope) => scope.custodyWalletIds.length > 0
-        );
-        if (scoped.length === 0) {
-          clauses.push("FALSE");
-        } else {
-          clauses.push(
-            `(${scoped
-              .map(
-                (scope) =>
-                  `(module = ? AND custody_wallet_id IN (${buildInClause(scope.custodyWalletIds.length)}))`
-              )
-              .join(" OR ")})`
-          );
-          for (const scope of scoped) {
-            values.push(scope.module, ...scope.custodyWalletIds);
-          }
-        }
-      }
       if (input.cursor !== undefined) {
         const cursor = parseCursor(input.cursor);
         clauses.push("(created_at, module, id) < (?, ?, ?)");

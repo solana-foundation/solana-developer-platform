@@ -35,6 +35,7 @@ import {
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -54,6 +55,7 @@ import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
+  lockLiveActivatingKey,
   parseNullableStoredSignature,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
@@ -623,10 +625,14 @@ export async function activateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
   /**
-   * Money admission (HOO-1955), run once, and only when the plan or the
-   * authorization still has to be signed. A refusal fails the attempt and
-   * returns the row to `pending_activation`, keeping any stored signatures so
-   * a later activation confirms or adopts them instead of signing again.
+   * Money admission (HOO-1955), run once. A fresh activation runs it before
+   * the claim commits, so a refusal leaves the row untouched: the job
+   * recovers a claimed activation as its mandate, and a claim must never
+   * exist for a caller the waist would refuse (HOO-2099). A stale one runs it
+   * after the claim, only when the plan or the authorization still has to be
+   * signed; a refusal then fails the attempt and returns the row to
+   * `pending_activation`, keeping any stored signatures so a later activation
+   * confirms or adopts them instead of signing again.
    */
   admitStart: () => Promise<void>;
   /** The request's Idempotency-Key, written on the attempt it claims; null for the cron. */
@@ -664,7 +670,18 @@ export async function activateRecurringPayment(input: {
   const recoveringStaleActivation = isActivatingRecurringPaymentStatus(
     input.recurringPayment.status
   );
+  if (!recoveringStaleActivation) {
+    await input.admitStart();
+  }
+  const activatedBy = currentMandateActivator();
   const claimResult = await getDb(input.env).transaction(async (tx) => {
+    await lockLiveActivatingKey(tx, {
+      activator: activatedBy,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      movement: "recurring.activate",
+      recurringPaymentId: input.recurringPayment.id,
+    });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentActivation({
       recurringPaymentId: input.recurringPayment.id,
@@ -672,6 +689,7 @@ export async function activateRecurringPayment(input: {
       projectId: input.projectId,
       updatedAt: nowIso,
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
+      activatedBy,
     });
     if (!claimed) return null;
     const attempt = await createClaimedActivationAttempt({
@@ -711,7 +729,7 @@ export async function activateRecurringPayment(input: {
   );
 
   try {
-    if (!planCreationSignature || !authorizationSignature) {
+    if (recoveringStaleActivation && (!planCreationSignature || !authorizationSignature)) {
       await input.admitStart();
     }
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");

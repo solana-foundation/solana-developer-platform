@@ -133,13 +133,8 @@ export type DeletePaymentTransferBatchInput = GetPaymentTransferBatchInput;
 export interface ListPaymentTransferBatchesInput {
   organizationId: string;
   projectId: string;
-  walletAuthorization?: {
-    custodyWalletIds: string[];
-    providerWalletIds: string[];
-  };
   sourceCustodyWalletId?: string;
   walletId?: string;
-  walletIds?: string[];
   token?: string;
   status?: PaymentTransferBatchStatus;
   externalId?: string;

@@ -52,7 +52,7 @@ export async function getPrivateChannelBalance(c: AppContext) {
     const instance = mapPrivateChannelInstanceRow(row);
 
     const { wallets } = await resolveScope(c);
-    const owner = resolveWalletAddress(wallets, parsed.data.owner, "owner", auth, ["wallets:read"]);
+    const owner = resolveWalletAddress(wallets, parsed.data.owner, "owner");
 
     // Auth-enabled instances JWT-gate balance reads; mint the caller's SPC session.
     const gatewayAuth = await resolveGatewayAuth(c.env, {

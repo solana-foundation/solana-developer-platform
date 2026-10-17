@@ -1,367 +1,57 @@
 import { API_KEY_FORBIDDEN_ACTIONS, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import type { ApiKeyContext } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-import {
-  assertApiKeyCustodyWalletAccess,
-  assertApiKeyWalletAccess,
-  assertGrantableApiKeyGrants,
-  filterApiKeyWallets,
-  getAllowedApiKeyCustodyWalletIdsForPermissions,
-  getAllowedApiKeyWalletAuthorizationForPermissions,
-  getAllowedApiKeyWalletIds,
-  getAllowedApiKeyWalletIdsForPermissions,
-  parseWalletBindingPatch,
-  resolveApiKeyCustodyWalletId,
-  resolveApiKeySigningWalletId,
-  resolveCreateWalletScope,
-  resolveUpdateWalletScope,
-} from "./api-key-scope.service";
+import { assertGrantableApiKeyGrants, parseRequestedWalletScope } from "./api-key-scope.service";
 
-describe("api key scope service", () => {
-  it("keeps all-wallet scope unbound and selected scope explicitly wallet-bound", () => {
+describe("parseRequestedWalletScope", () => {
+  it("keeps an all-wallets key unlisted", () => {
     expect(
-      resolveCreateWalletScope({
+      parseRequestedWalletScope({
         walletScope: "all",
+        walletIds: undefined,
       })
-    ).toEqual({
-      walletScope: "all",
-      defaultSigningWalletId: null,
-      bindings: [],
-    });
+    ).toEqual({ scope: "all", walletIds: [] });
+  });
 
+  it("lists exactly the named wallets for a selected key", () => {
     expect(
-      resolveUpdateWalletScope({
+      parseRequestedWalletScope({
         walletScope: "selected",
-        walletBindings: [{ walletId: "wal_selected", permissions: ["payments:write"] }],
+        walletIds: ["cwlt_a", "cwlt_b"],
       })
-    ).toMatchObject({
-      walletScope: "selected",
-      defaultSigningWalletId: "wal_selected",
-      bindings: [{ walletId: "wal_selected", permissions: ["payments:write"] }],
-      touched: true,
-    });
+    ).toEqual({ scope: "selected", walletIds: ["cwlt_a", "cwlt_b"] });
   });
 
-  it("treats an explicitly empty permissions list as deny-all, never wildcard", () => {
-    // Regression (Hacktron): an admin restricting a wallet binding to zero
-    // permissions must not silently grant full wildcard access instead.
-    const auth = createApiKeyAuth({
-      walletBindings: [{ walletId: "wal_restricted", permissions: [] }],
-    });
-
-    expect(() => assertApiKeyWalletAccess(auth, "wal_restricted", ["payments:read"])).toThrowError(
-      AppError
-    );
-    expect(() => assertApiKeyWalletAccess(auth, "wal_restricted", ["custody:admin"])).toThrowError(
-      AppError
-    );
-  });
-
-  it("stores an explicitly empty permissions list instead of widening it to wildcard", () => {
+  it("keeps a selected key with no wallets selected: it signs nothing, never everything", () => {
     expect(
-      resolveUpdateWalletScope({
+      parseRequestedWalletScope({
         walletScope: "selected",
-        walletBindings: [{ walletId: "wal_restricted", permissions: [] }],
+        walletIds: undefined,
       })
-    ).toMatchObject({
-      bindings: [{ walletId: "wal_restricted", permissions: [] }],
-    });
-
-    // Omitting permissions entirely keeps the historical unrestricted default.
-    expect(
-      resolveUpdateWalletScope({
-        walletScope: "selected",
-        signingWalletIds: ["wal_default"],
-      })
-    ).toMatchObject({
-      bindings: [{ walletId: "wal_default", permissions: ["*"] }],
-    });
+    ).toEqual({ scope: "selected", walletIds: [] });
   });
 
-  it("enforces wallet-level permissions for selected-scope API keys", () => {
-    const auth = createApiKeyAuth({
-      walletBindings: [{ walletId: "wal_selected", permissions: ["payments:read"] }],
-    });
-
-    expect(() => assertApiKeyWalletAccess(auth, "wal_selected", ["payments:read"])).not.toThrow();
-    expect(() => assertApiKeyWalletAccess(auth, "wal_selected", ["payments:write"])).toThrowError(
-      AppError
-    );
-  });
-
-  it("allows unbound keys to access wallets for legacy all-wallet behavior", () => {
-    const auth = createApiKeyAuth();
-    expect(() => assertApiKeyWalletAccess(auth, "any_wallet", ["payments:write"])).not.toThrow();
-  });
-
-  it("rejects wallets that are not bound to the API key", () => {
-    const auth = createApiKeyAuth({
-      walletBindings: [{ walletId: "wal_a", permissions: ["*"] }],
-    });
-
-    expect(() => assertApiKeyWalletAccess(auth, "wal_b")).toThrowError(AppError);
-  });
-
-  it("resolves the requested signing wallet when authorized", () => {
-    const auth = createApiKeyAuth({
-      signingWalletId: "wal_default",
-      walletBindings: [{ walletId: "wal_default", permissions: ["*"] }],
-    });
-
-    expect(resolveApiKeySigningWalletId(auth, "wal_default")).toBe("wal_default");
-  });
-
-  it("requires explicit walletId when multiple bindings exist without a default", () => {
-    const auth = createApiKeyAuth({
-      walletBindings: [
-        { walletId: "wal_a", permissions: ["*"] },
-        { walletId: "wal_b", permissions: ["*"] },
-      ],
-      signingWalletId: null,
-    });
-
-    expect(() => resolveApiKeySigningWalletId(auth, undefined)).toThrowError(AppError);
-  });
-
-  it("lists and filters allowed wallet IDs for API key auth", () => {
-    const auth = createApiKeyAuth({
-      walletBindings: [
-        { walletId: "wal_read", permissions: ["wallets:read"] },
-        { walletId: "wal_write", permissions: ["wallets:write"] },
-      ],
-    });
-
-    expect(getAllowedApiKeyWalletIds(auth)).toEqual(["wal_read", "wal_write"]);
-    expect(getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"])).toEqual(["wal_read"]);
-  });
-
-  it("filters wallet collections to the bound wallet set", () => {
-    const auth = createApiKeyAuth({
-      walletBindings: [{ walletId: "wal_a", permissions: ["wallets:read"] }],
-    });
-
-    expect(
-      filterApiKeyWallets(
-        auth,
-        [
-          { walletId: "wal_a", label: "A" },
-          { walletId: "wal_b", label: "B" },
-        ],
-        ["wallets:read"]
-      )
-    ).toEqual([{ walletId: "wal_a", label: "A" }]);
-  });
-
-  it("keeps selected authorization pinned to exact custody wallet IDs", () => {
-    const auth = createApiKeyAuth({
-      walletScope: "selected",
-      walletBindings: [
-        {
-          walletId: "wal_shared",
-          custodyWalletId: "cwal_exact",
-          permissions: ["wallets:read"],
-        },
-      ],
-    });
-
-    expect(getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["wallets:read"])).toEqual([
-      "cwal_exact",
-    ]);
-    expect(resolveApiKeyCustodyWalletId(auth, "wal_shared", ["wallets:read"])).toBe("cwal_exact");
-  });
-
-  it("fails loudly when paired wallet authorization lacks an exact custody wallet ID", () => {
-    const auth = createApiKeyAuth({
-      walletScope: "selected",
-      walletBindings: [{ walletId: "wal_legacy", permissions: ["payments:read"] }],
-    });
-
+  it("refuses wallets on an all-wallets key", () => {
     expect(() =>
-      getAllowedApiKeyWalletAuthorizationForPermissions(auth, ["payments:read"])
-    ).toThrowError(AppError);
-  });
-
-  it("fails closed when selected scope has no usable exact binding", () => {
-    const auth = createApiKeyAuth({
-      walletScope: "selected",
-      signingWalletId: "wal_unresolved",
-      walletBindings: [],
-    });
-
-    expect(getAllowedApiKeyCustodyWalletIdsForPermissions(auth)).toEqual([]);
-    expect(() => resolveApiKeyCustodyWalletId(auth, "wal_unresolved")).toThrowError(AppError);
-    expect(() => resolveApiKeySigningWalletId(auth, undefined)).toThrowError(AppError);
-  });
-
-  // Authentication reads the bindings fresh (HOO-2048), so the per-route check
-  // is a pure check against the request's snapshot.
-  it("refuses a custody wallet outside the key's bindings", () => {
-    const auth = createApiKeyAuth({
-      walletScope: "selected",
-      signingWalletId: "wal_exact",
-      signingWalletIds: ["wal_exact"],
-      walletBindings: [
-        { walletId: "wal_exact", custodyWalletId: "cwlt_exact", permissions: ["payments:write"] },
-      ],
-    });
-
-    expect(() => assertApiKeyCustodyWalletAccess(auth, "cwlt_other", ["payments:write"])).toThrow(
-      expect.objectContaining({ code: "FORBIDDEN" })
-    );
-    expect(() =>
-      assertApiKeyCustodyWalletAccess(auth, "cwlt_exact", ["payments:write"])
-    ).not.toThrow();
-  });
-
-  it("refuses a bound custody wallet without the required permission", () => {
-    const auth = createApiKeyAuth({
-      walletScope: "selected",
-      signingWalletId: "wal_exact",
-      signingWalletIds: ["wal_exact"],
-      walletBindings: [
-        { walletId: "wal_exact", custodyWalletId: "cwlt_exact", permissions: ["payments:read"] },
-      ],
-    });
-
-    expect(() => assertApiKeyCustodyWalletAccess(auth, "cwlt_exact", ["payments:write"])).toThrow(
-      expect.objectContaining({ code: "FORBIDDEN" })
-    );
-  });
-
-  it("does not authorize an exact row through a colliding Provider wallet ID", () => {
-    const auth = createApiKeyAuth({
-      walletScope: "selected",
-      signingWalletId: "cwlt_exact",
-      signingWalletIds: ["cwlt_exact"],
-      walletBindings: [
-        { walletId: "cwlt_exact", custodyWalletId: "cwlt_other", permissions: ["payments:write"] },
-      ],
-    });
-
-    expect(() => assertApiKeyCustodyWalletAccess(auth, "cwlt_exact", ["payments:write"])).toThrow(
-      expect.objectContaining({ code: "FORBIDDEN" })
-    );
-  });
-
-  it("leaves an all-wallet key unconstrained", () => {
-    const auth = createApiKeyAuth({ walletScope: "all", signingWalletId: null });
-
-    expect(() =>
-      assertApiKeyCustodyWalletAccess(auth, "cwlt_any", ["payments:write"])
-    ).not.toThrow();
-  });
-
-  it("requires an explicit wallet when the preferred binding is unresolved", () => {
-    const auth = createApiKeyAuth({
-      walletScope: "selected",
-      signingWalletId: "wal_preferred",
-      walletBindings: [
-        {
-          walletId: "wal_other",
-          custodyWalletId: "cwal_other",
-          permissions: ["wallets:read"],
-        },
-      ],
-    });
-
-    expect(() => resolveApiKeySigningWalletId(auth, undefined, ["wallets:read"])).toThrowError(
-      AppError
-    );
-    expect(() => resolveApiKeyCustodyWalletId(auth, undefined, ["wallets:read"])).toThrowError(
-      AppError
-    );
-    expect(resolveApiKeySigningWalletId(auth, "wal_other", ["wallets:read"])).toBe("wal_other");
-    expect(resolveApiKeyCustodyWalletId(auth, "wal_other", ["wallets:read"])).toBe("cwal_other");
-  });
-
-  it("supports legacy single signingWalletId payloads", () => {
-    const parsed = parseWalletBindingPatch({
-      signingWalletId: "wal_legacy",
-    });
-
-    expect(parsed.defaultSigningWalletId).toBe("wal_legacy");
-    expect(parsed.bindings).toEqual([{ walletId: "wal_legacy", permissions: ["*"] }]);
-  });
-
-  it("merges signingWalletIds and walletBindings", () => {
-    const parsed = parseWalletBindingPatch({
-      signingWalletIds: ["wal_a", "wal_b"],
-      walletBindings: [
-        { walletId: "wal_b", permissions: ["payments:write"] },
-        { walletId: "wal_c", permissions: ["tokens:write"] },
-      ],
-    });
-
-    expect(parsed.defaultSigningWalletId).toBe("wal_b");
-    expect(parsed.bindings).toEqual([
-      { walletId: "wal_b", permissions: ["payments:write"] },
-      { walletId: "wal_c", permissions: ["tokens:write"] },
-      { walletId: "wal_a", permissions: ["*"] },
-    ]);
-  });
-
-  it("clears all wallet bindings when a null patch is provided", () => {
-    const parsed = parseWalletBindingPatch({
-      signingWalletIds: null,
-    });
-
-    expect(parsed.defaultSigningWalletId).toBeNull();
-    expect(parsed.bindings).toEqual([]);
-  });
-
-  it("rejects conflicting null and non-null wallet patch fields", () => {
-    expect(() =>
-      parseWalletBindingPatch({
-        signingWalletIds: null,
-        signingWalletId: "wal_conflict",
-      })
-    ).toThrowError(AppError);
-  });
-
-  it("requires wallet bindings when walletScope is selected on create", () => {
-    expect(() =>
-      resolveCreateWalletScope({
-        walletScope: "selected",
-      })
-    ).toThrowError(AppError);
-  });
-
-  it("accepts selected wallet provisioning without wallet bindings", () => {
-    expect(
-      resolveCreateWalletScope({
-        walletScope: "selected",
-        provisionWallet: true,
-      })
-    ).toMatchObject({ walletScope: "selected", bindings: [] });
-  });
-
-  it("rejects wallet binding fields when walletScope is all on create", () => {
-    expect(() =>
-      resolveCreateWalletScope({
+      parseRequestedWalletScope({
         walletScope: "all",
-        signingWalletId: "wal_all_conflict",
+        walletIds: ["cwlt_a"],
       })
-    ).toThrowError(AppError);
+    ).toThrowError(expect.objectContaining({ code: "BAD_REQUEST" }));
   });
 
-  it("treats walletScope all as a wallet binding reset on update", () => {
-    const parsed = resolveUpdateWalletScope({
-      walletScope: "all",
-    });
-
-    expect(parsed.touched).toBe(true);
-    expect(parsed.defaultSigningWalletId).toBeNull();
-    expect(parsed.bindings).toEqual([]);
-  });
-
-  it("requires walletScope when updating wallet bindings", () => {
+  it("leaves the scope alone when an update names neither, and refuses wallets without a scope", () => {
+    expect(
+      parseRequestedWalletScope({
+        walletScope: undefined,
+        walletIds: undefined,
+      })
+    ).toBeUndefined();
     expect(() =>
-      resolveUpdateWalletScope({
-        signingWalletId: "wal_missing_scope",
+      parseRequestedWalletScope({
+        walletScope: undefined,
+        walletIds: ["cwlt_a"],
       })
-    ).toThrowError(AppError);
+    ).toThrowError(expect.objectContaining({ code: "BAD_REQUEST" }));
   });
 });
 
@@ -394,25 +84,3 @@ describe("assertGrantableApiKeyGrants", () => {
     expect(() => assertGrantableApiKeyGrants("member", [])).not.toThrow();
   });
 });
-
-function createApiKeyAuth(
-  overrides: Partial<
-    Omit<ApiKeyContext, "authType" | "apiKeyId" | "userId" | "grants" | "role">
-  > = {}
-): ApiKeyContext {
-  return {
-    id: "key_scope_test",
-    organizationId: "org_scope_test",
-    projectId: null,
-    grants: ALL_API_KEY_GRANTS,
-    role: null,
-    environment: "sandbox",
-    signingWalletId: null,
-    signingWalletIds: [],
-    walletBindings: [],
-    authType: "api_key",
-    userId: null,
-    apiKeyId: "key_scope_test",
-    ...overrides,
-  };
-}

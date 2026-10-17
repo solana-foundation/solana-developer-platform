@@ -254,7 +254,6 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     type: "freeze",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -297,7 +296,6 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
   const requestedAddress = assertValidAddress(body.accountAddress, "accountAddress");
   const { tokenAccount } = await resolveFreezeTarget(
@@ -356,7 +354,6 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     auth,
     custodyWalletId,
     currentAuthority: currentAuthorityRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const signer = authority.signer;
@@ -507,7 +504,6 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     type: "unfreeze",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -553,7 +549,6 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
@@ -603,7 +598,6 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     auth,
     custodyWalletId,
     currentAuthority: currentAuthorityRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const signer = authority.signer;

@@ -3,7 +3,6 @@ import type {
   PrivateChannelTransferRow,
   PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
-import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
 import {
   buildPrivateChannelDepositFingerprint,
@@ -11,18 +10,15 @@ import {
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { callerMayPerform } from "@/middleware/require-action";
-import { refreshPrivateChannelAuth } from "@/services/private-channels/wallet-access";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
-/** Every movement POST, including replay, requires `private_channels.execute`, re-read now. */
+/**
+ * Every movement POST, including replay, requires `private_channels.execute`.
+ * The custody signer re-reads the key (live, holding the action, wallet in
+ * scope) whenever a start signs (HOO-2099), so nothing is re-read here.
+ */
 export async function requireMovementWrite(c: AppContext): Promise<void> {
-  const auth = getAuth(c);
-  if (auth.authType === "api_key") {
-    const current = await refreshPrivateChannelAuth(c.env, auth, requireProjectId(c));
-    const key = c.get("apiKey");
-    if (key && current.grants) c.set("apiKey", { ...key, grants: current.grants });
-  }
   if (!callerMayPerform(c, "private_channels.execute")) {
     throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
       action: "private_channels.execute",

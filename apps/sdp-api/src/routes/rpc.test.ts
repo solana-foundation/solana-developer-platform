@@ -416,7 +416,7 @@ describe("RPC Relay Routes", () => {
 
       expect(response.status).toBe(403);
       const body = await response.json();
-      expect(body.error.message).toContain("not a wallet of this organization");
+      expect(body.error.message).toContain("not a wallet of this project");
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 

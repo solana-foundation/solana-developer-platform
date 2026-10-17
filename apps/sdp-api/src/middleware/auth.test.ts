@@ -483,13 +483,11 @@ describe("Auth Middleware", () => {
       await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, walletScope: "all" });
       expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
 
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-           VALUES ('akw_fresh_narrowed', ?, 'wallet_fresh_a', '["*"]')`
-        )
-        .bind(TEST_API_KEY.id)
-        .run();
+      await seedApiKeyRow(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        walletScope: "selected",
+        walletIds: ["cwlt_fresh_a"],
+      });
       expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
       expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
     });
@@ -498,17 +496,13 @@ describe("Auth Middleware", () => {
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         walletScope: "selected",
-        signingWalletId: "wallet_fresh_a",
-        walletBindings: [
-          { walletId: "wallet_fresh_a", custodyWalletId: "cwlt_fresh_a", permissions: ["*"] },
-          { walletId: "wallet_fresh_b", custodyWalletId: "cwlt_fresh_b", permissions: ["*"] },
-        ],
+        walletIds: ["cwlt_fresh_a", "cwlt_fresh_b"],
       });
       expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
 
       await getDb(env)
         .prepare(
-          "DELETE FROM api_key_wallet_permissions WHERE api_key_id = ? AND wallet_id = 'wallet_fresh_b'"
+          "UPDATE api_key_signing_wallets SET status = 'archived', archived_at = sdp_iso_now() WHERE api_key_id = ? AND custody_wallet_id = 'cwlt_fresh_b'"
         )
         .bind(TEST_API_KEY.id)
         .run();
@@ -570,7 +564,7 @@ describe("Auth Middleware", () => {
         projectId: TEST_PROJECT.id,
         grants: ["organizations.read"],
         environment: "sandbox",
-        walletScope: "all",
+        walletAccess: { scope: "all" },
       });
     });
 

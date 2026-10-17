@@ -1,4 +1,3 @@
-import { SigningError } from "@sdp/custody/signing";
 import type {
   CreateApiKeyResponse,
   ListApiKeysResponse,
@@ -12,32 +11,29 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
-import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
   assertApiKeyGrantsInReleaseChannel,
   assertGrantableApiKeyGrants,
+  parseRequestedWalletScope,
   requestApiKeyGrantChannel,
-  resolveCreateWalletScope,
-  resolveUpdateWalletScope,
-  resolveWalletBindingsInScope,
+  resolveSigningWalletsInProject,
 } from "@/services/api-key-scope.service";
-import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
-import {
-  type ExactApiKeyWalletBinding,
-  replaceApiKeyWalletBindings,
-} from "@/services/api-key-wallets.service";
 import { type AuditLogEntry, AuditService } from "@/services/audit.service";
+import {
+  type CancelActivatedByKeyResult,
+  cancelRecurringPaymentsActivatedByKey,
+} from "@/services/payments/recurring-payments";
 import type { Env } from "@/types/env";
-import { buildApiKeyAccessSummaries } from "./access-response";
 import type {
   apiKeyCreateSchema,
   apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
 } from "./schemas";
+import { resolveCreateWalletScope, walletScopeAuditMetadata } from "./wallet-scope";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -82,35 +78,24 @@ export const listApiKeys = async (c: AppContext) => {
   resolveActor(c);
   const projectId = requireProjectId(c);
 
-  const db = getDb(c.env);
-  const apiKeyService = new ApiKeyService(db, getRequestTenantScope(c));
+  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const apiKeys = await apiKeyService.listForProject(projectId);
-  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
-    db,
-    apiKeys.map((key) => key.id)
-  );
 
   const response: ListApiKeysResponse = {
-    apiKeys: apiKeys.map((key) => {
-      const accessSummary = accessSummaryByKeyId.get(key.id);
-      const walletBindings = accessSummary?.walletBindings ?? [];
-
-      return {
-        id: key.id,
-        name: key.name,
-        keyPrefix: key.keyPrefix,
-        grants: key.grants,
-        environment: key.environment as "sandbox" | "production",
-        status: key.status,
-        walletScope: key.walletScope,
-        signingWalletId: key.signingWalletId,
-        signingWalletIds: walletBindings.map((binding) => binding.walletId),
-        walletBindings,
-        lastUsedAt: key.lastUsedAt,
-        expiresAt: key.expiresAt,
-        createdAt: key.createdAt,
-      };
-    }),
+    apiKeys: apiKeys.map((key) => ({
+      id: key.id,
+      name: key.name,
+      keyPrefix: key.keyPrefix,
+      grants: key.grants,
+      environment: key.environment,
+      status: key.status,
+      walletScope: key.walletScope,
+      walletIds: key.walletIds,
+      lastUsedAt: key.lastUsedAt,
+      expiresAt: key.expiresAt,
+      rotationDeadline: key.rotationDeadline,
+      createdAt: key.createdAt,
+    })),
   };
 
   return success(c, response);
@@ -120,82 +105,21 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   const actor = resolveActor(c);
   const orgId = actor.organizationId;
 
-  const {
-    name,
-    description,
-    grants,
-    walletScope,
-    allowedIps,
-    expiresAt,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    provisionWallet,
-    walletLabel,
-    walletPurpose,
-  } = c.req.valid("json");
+  const body = c.req.valid("json");
 
-  // Refused before any wallet is provisioned; the service refuses them again.
-  assertGrantableApiKeyGrants(actor.role, grants);
-  assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), grants);
-
-  const provisionWalletRequested = provisionWallet !== undefined;
+  // Refused before anything is written; the service refuses them again.
+  assertGrantableApiKeyGrants(actor.role, body.grants);
+  assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), body.grants);
 
   const projectId = requireProjectId(c);
+  const walletScope = await resolveCreateWalletScope(
+    c,
+    { organizationId: actor.organizationId, projectId },
+    body
+  );
 
-  const walletSelection = resolveCreateWalletScope({
-    walletScope,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    provisionWallet: provisionWalletRequested,
-  });
-
-  let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
-  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
-
-  if (provisionWalletRequested) {
-    // Provisioning creates a custody wallet, which is wallet lifecycle.
-    if (!callerMayPerform(c, "wallets.manage")) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: wallets.manage", {
-        action: "wallets.manage",
-      });
-    }
-
-    try {
-      const wallet = await provisionApiKeyWallet(getDb(c.env), c.env, {
-        auditContext: c,
-        creationReason: "api_key",
-        organizationId: actor.organizationId,
-        projectId,
-        owner: provisionWallet,
-        label: walletLabel,
-        purpose: walletPurpose,
-      });
-      resolvedSigningWalletId = wallet.walletId;
-      resolvedWalletBindings = [
-        { walletId: wallet.walletId, custodyWalletId: wallet.id, permissions: ["*"] },
-      ];
-    } catch (error) {
-      if (error instanceof SigningError) {
-        if (error.code === "NOT_FOUND") {
-          throw new AppError("CONFLICT", error.message);
-        }
-        throw badRequest(error.message);
-      }
-      throw error;
-    }
-  } else {
-    resolvedWalletBindings = await resolveWalletBindingsInScope(
-      getDb(c.env),
-      orgId,
-      projectId,
-      walletSelection.bindings
-    );
-  }
-
-  // The key, its bindings and its audit record commit together: if the audit
-  // write fails nothing commits, and the secret is never returned.
+  // The key, its wallet list and its audit record commit together: if the
+  // audit write fails nothing commits, and the secret is never returned.
   const createdKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     const key = await new ApiKeyService(txDb, getRequestTenantScope(c)).createApiKey({
       organizationId: orgId,
@@ -203,17 +127,14 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       createdByUserId: actor.userId,
       actorRole: actor.role,
       grantChannel: requestApiKeyGrantChannel(c),
-      name,
-      description,
-      grants,
-      allowedIps,
-      expiresAt,
-      signingWalletId: resolvedSigningWalletId,
+      name: body.name,
+      description: body.description,
+      grants: body.grants,
+      allowedIps: body.allowedIps,
+      expiresAt: body.expiresAt,
+      walletScope,
       pepper: c.env.API_KEY_PEPPER,
     });
-    if (resolvedWalletBindings.length > 0) {
-      await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
-    }
     return {
       result: key,
       entry: {
@@ -221,13 +142,10 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
         resourceType: "api_key",
         resourceId: key.id,
         metadata: {
-          name,
+          name: body.name,
           grants: key.grants,
           environment: key.environment,
-          walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
-          signingWalletId: resolvedSigningWalletId,
-          signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-          provisionedWallet: provisionWalletRequested,
+          ...walletScopeAuditMetadata(walletScope),
         },
       },
     };
@@ -261,10 +179,6 @@ export const getApiKey = async (c: AppContext) => {
     throw notFound("API key");
   }
 
-  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(getDb(c.env), [key.id]);
-  const accessSummary = accessSummaryByKeyId.get(key.id);
-  const walletBindings = accessSummary?.walletBindings ?? [];
-
   return success(c, {
     id: key.id,
     name: key.name,
@@ -276,9 +190,7 @@ export const getApiKey = async (c: AppContext) => {
     projectId: key.projectId,
     allowedIps: key.allowedIps,
     walletScope: key.walletScope,
-    signingWalletId: key.signingWalletId,
-    signingWalletIds: walletBindings.map((binding) => binding.walletId),
-    walletBindings,
+    walletIds: key.walletIds,
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
     rotatedFrom: key.rotatedFrom,
@@ -306,25 +218,20 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
     throw notFound("API key");
   }
 
-  const walletSelection = resolveUpdateWalletScope({
+  const requestedWalletScope = parseRequestedWalletScope({
     walletScope: body.walletScope,
-    signingWalletId: body.signingWalletId,
-    signingWalletIds: body.signingWalletIds,
-    walletBindings: body.walletBindings,
+    walletIds: body.walletIds,
   });
+  const walletScope =
+    requestedWalletScope === undefined
+      ? undefined
+      : await resolveSigningWalletsInProject(
+          getDb(c.env),
+          { organizationId: actor.organizationId, projectId: existing.project_id },
+          requestedWalletScope
+        );
 
-  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
-
-  if (walletSelection.touched) {
-    resolvedWalletBindings = await resolveWalletBindingsInScope(
-      getDb(c.env),
-      actor.organizationId,
-      existing.project_id,
-      walletSelection.bindings
-    );
-  }
-
-  // The change and its audit record commit together.
+  // The change, the key's wallet list and its audit record commit together.
   await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     await new ApiKeyService(txDb, getRequestTenantScope(c)).updateApiKey({
       keyId,
@@ -337,13 +244,8 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
       grants: body.grants,
       allowedIps: body.allowedIps,
       expiresAt: body.expiresAt,
-      signingWallet: walletSelection.touched
-        ? { walletId: walletSelection.defaultSigningWalletId }
-        : undefined,
+      walletScope,
     });
-    if (walletSelection.touched) {
-      await replaceApiKeyWalletBindings(txDb, keyId, resolvedWalletBindings);
-    }
     return {
       result: undefined,
       entry: { action: "update", resourceType: "api_key", resourceId: keyId, metadata: body },
@@ -420,7 +322,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  const { confirmation } = c.req.valid("json");
+  const { confirmation, cancelRecurringPayments } = c.req.valid("json");
 
   const existing = await getDb(c.env)
     .prepare(
@@ -442,6 +344,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     return success(c, {
       success: true,
       revokedAt: existing.revoked_at ?? new Date().toISOString(),
+      recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
     });
   }
 
@@ -478,5 +381,33 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   return success(c, {
     success: true,
     revokedAt: revokedKey.revokedAt ?? new Date().toISOString(),
+    recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
   });
 };
+
+/**
+ * After the revocation committed, and only when asked: cancel the recurring
+ * payments the key activated (APE-343). Each cancel is audited by its own
+ * lifecycle; a failure is reported, never undoes the revocation.
+ */
+async function cancelActivatedRecurringPayments(
+  c: AppContext,
+  requested: boolean | undefined,
+  apiKeyId: string
+): Promise<CancelActivatedByKeyResult | null> {
+  if (requested !== true) {
+    return null;
+  }
+  const recurringPayments = await cancelRecurringPaymentsActivatedByKey(c.env, {
+    organizationId: requireHumanActor(c).organizationId,
+    projectId: requireProjectId(c),
+    apiKeyId,
+  });
+  await logReductionBestEffort(c, {
+    action: "update",
+    resourceType: "api_key",
+    resourceId: apiKeyId,
+    metadata: { action: "cancel_recurring_payments", ...recurringPayments },
+  });
+  return recurringPayments;
+}

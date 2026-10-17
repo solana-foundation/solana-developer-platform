@@ -10,9 +10,7 @@ const AUTH_BASE = {
   organizationId: "org_test_event_access",
   projectId: PROJECT_ID,
   environment: "dashboard",
-  signingWalletId: null,
-  signingWalletIds: [],
-  walletBindings: [],
+  walletAccess: { scope: "all" } as const,
 } satisfies Partial<ApiKeyContext>;
 
 function auth(role: OrganizationRole = "member"): ApiKeyContext {

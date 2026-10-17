@@ -40,7 +40,6 @@ import {
   badRequestQuery,
   conflict,
   type ErrorCode,
-  forbidden,
   internalError,
   isErrorCode,
   notFound,
@@ -62,7 +61,6 @@ import { assertTransferRampProviderInChannel } from "@/middleware/require-module
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
@@ -89,8 +87,6 @@ import { transferIdParamsSchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import {
   admitPaymentWalletRuntimeExecution,
-  assertPaymentWalletReadAccess,
-  authorizeCustodyPaymentWallet,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
@@ -305,9 +301,6 @@ export async function authorizeTransfer(
 ): Promise<TransferResolved> {
   // SAFETY: mounted after validateBody(createTransferSchema).
   const body = input.body as CreateTransferBody;
-  // Read fresh, never from the cached snapshot, which drops a binding once its
-  // wallet is inactive and would refuse the replay of a transfer that ran.
-  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   assertPaymentProjectScope(body.projectId, requireProjectId(c));
   const operation = resolveOutboundPaymentOperation({
@@ -947,22 +940,10 @@ function observedTransferTarget(wallet: CustodyWallet): ObservedTransferTarget {
   };
 }
 
-function assertTransferReadAccess(c: AppContext, row: TransferRow): void {
-  assertPaymentWalletReadAccess(c, {
-    custodyWalletId: row.custody_wallet_id,
-    providerWalletId: row.wallet_id,
-  });
-}
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Wallet-scoped transfer listing merges DB rows with observed on-chain history.
 export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
   if (!query.success) throw badRequestQuery();
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:read",
-  ]);
-
   const {
     page,
     pageSize,
@@ -1008,9 +989,6 @@ export async function listTransfers(c: AppContext) {
 
   let exactWallet: CustodyWallet | null = null;
   if (custodyWalletId) {
-    if (walletAuthorization && !walletAuthorization.custodyWalletIds.includes(custodyWalletId)) {
-      throw forbidden("API key is not authorized for the requested wallet");
-    }
     if (includeObserved) {
       const scope = await resolveScope(c);
       exactWallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
@@ -1023,17 +1001,6 @@ export async function listTransfers(c: AppContext) {
 
   if (hasProviderReference && !hasProvider) {
     throw badRequest("provider is required for provider reference lookup");
-  }
-
-  if (hasExactProviderReference) {
-    const row = await repo.getTransferByProviderReference({
-      provider,
-      providerReference,
-      organizationId: auth.organizationId,
-      projectId: requireProjectId(c),
-    });
-
-    if (row) assertTransferReadAccess(c, row);
   }
 
   let transferRows: TransferRow[];
@@ -1197,22 +1164,11 @@ export async function listTransfers(c: AppContext) {
     transferRows = merged.slice(offset, offset + pageSize);
   } else {
     // DB-only path: exact rows are filtered by the canonical SDP Wallet ID.
-    if (
-      !custodyWalletId &&
-      walletAuthorization !== null &&
-      walletAuthorization.custodyWalletIds.length === 0 &&
-      walletAuthorization.providerWalletIds.length === 0
-    ) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-
     const queryStartedAt = performance.now();
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: requireProjectId(c),
       custodyWalletId,
-      walletAuthorization:
-        custodyWalletId || walletAuthorization === null ? undefined : walletAuthorization,
       counterpartyId,
       search,
       token: tokenFilter,
@@ -1233,7 +1189,6 @@ export async function listTransfers(c: AppContext) {
     });
     total = result.total;
     transferRows = result.rows;
-    for (const row of transferRows) assertTransferReadAccess(c, row);
   }
 
   const transfers = transferRows.map(mapTransferRow);
@@ -1254,7 +1209,6 @@ export async function getTransfer(c: AppContext) {
   });
 
   if (!row) throw notFound("Transfer");
-  assertTransferReadAccess(c, row);
 
   return success(c, { transfer: mapTransferRow(row) });
 }

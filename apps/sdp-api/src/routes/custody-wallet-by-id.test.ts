@@ -55,7 +55,6 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -447,15 +446,8 @@ describe("Custody wallet by ID route", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 for API keys bound to a different wallet to avoid wallet enumeration", async () => {
-    await seedCachedKey({
-      walletBindings: [
-        {
-          walletId: "privy_wallet_a",
-          permissions: ["wallets:read"],
-        },
-      ],
-    });
+  it("returns 404 for a selected key that does not list the wallet, to avoid wallet enumeration", async () => {
+    await seedCachedKey({ walletScope: "selected", walletIds: [] });
 
     const res = await app.request(
       "/v1/wallets/para_wallet_a",

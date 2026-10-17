@@ -1,8 +1,6 @@
 import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
-import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { selectPartyWalletId } from "@/services/dvp/custody-party";
 import type { DvpCallerWallet, DvpInboundRequest } from "@/services/dvp/inbound";
 import type { Env } from "@/types/env";
 
@@ -30,18 +28,12 @@ export async function readDvpActionWallets(
   const addresses = [...new Set(partyAddresses)].filter((key) => callerAddresses.has(key));
   if (addresses.length === 0) return result;
 
-  const readable = getAllowedApiKeyCustodyWalletIdsForPermissions(request.auth, ["wallets:read"]);
-  const writable = getAllowedApiKeyCustodyWalletIdsForPermissions(request.auth, ["payments:write"]);
   const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
   const wallets = await targets.listWallets({
     organizationId: request.organizationId,
     projectId: request.projectId,
   });
-  const visible = new Map(
-    wallets
-      .filter((wallet) => readable === null || readable.includes(wallet.id))
-      .map((wallet) => [wallet.id, wallet])
-  );
+  const visible = new Map(wallets.map((wallet) => [wallet.id, wallet]));
 
   const candidates = await targets.findOperationalWalletIdsByAddresses({
     organizationId: request.organizationId,
@@ -49,9 +41,9 @@ export async function readDvpActionWallets(
     publicKeys: addresses.map((key) => address(key)),
   });
   for (const key of addresses) {
-    // Choose by write scope before applying read visibility: a hidden or
-    // restricted first choice must never fall back to another signer.
-    const id = selectPartyWalletId(candidates.get(key) ?? [], writable);
+    // The first candidate is the signer funding uses (`custodyWalletForParty`);
+    // a hidden first choice must never fall back to another signer.
+    const id = candidates.get(key)?.[0] ?? null;
     const wallet = id === null ? undefined : visible.get(id);
     if (wallet?.publicKey === key) {
       result.set(key, {

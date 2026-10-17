@@ -180,7 +180,8 @@ export interface SeededApiKeyOverrides {
   environment?: "sandbox" | "production";
   rateLimitTier?: "standard" | "elevated" | "unlimited";
   allowedIps?: string[] | null;
-  signingWalletId?: string | null;
+  walletScope?: SeededApiKey["walletScope"];
+  walletIds?: SeededApiKey["walletIds"];
   status?: "active" | "revoked" | "expired" | "deactivated";
   expiresAt?: string | null;
   rotationDeadline?: string | null;
@@ -196,7 +197,6 @@ export function createSeededApiKey(overrides: SeededApiKeyOverrides = {}): Seede
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
     rotationDeadline: null,

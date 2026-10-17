@@ -111,7 +111,6 @@ export async function findKeyedRecurringPayment(
     recurringPaymentId: keyed.id,
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
-    walletAuthorization: null,
   });
   return recurringPayment && { recurringPayment, fingerprint: keyed.idempotencyFingerprint };
 }

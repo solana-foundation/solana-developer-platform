@@ -13,6 +13,7 @@ import {
   clearModuleGrants,
   clearOfferedGrants,
   createApiKeyAuthoringDraft,
+  defaultWalletScopeForGrants,
   everythingGrants,
   grantableActionsInChannel,
   grantModuleRows,
@@ -27,31 +28,25 @@ function draftWith(overrides: Partial<ApiKeyAuthoringDraft>): ApiKeyAuthoringDra
 }
 
 describe("API-key authoring: wallet access", () => {
-  it("builds selected-wallet and all-wallet endpoint scope", () => {
+  it("sends a selected key's custody wallet ids, and none for all wallets", () => {
     const selected = draftWith({
       walletScope: "selected",
-      selectedWalletIds: ["wallet_a", "wallet_b"],
-      defaultWalletId: "wallet_b",
+      selectedWalletIds: ["cwlt_a", "cwlt_b", "cwlt_a"],
     });
 
     expect(buildEndpointWalletPayload(selected)).toEqual({
       walletScope: "selected",
-      signingWalletId: "wallet_b",
-      signingWalletIds: ["wallet_a", "wallet_b"],
+      walletIds: ["cwlt_a", "cwlt_b"],
     });
     expect(buildEndpointWalletPayload({ ...selected, walletScope: "all" })).toEqual({
       walletScope: "all",
     });
   });
 
-  it("falls back to the first selected wallet when the default is not selected", () => {
-    const draft = draftWith({
-      walletScope: "selected",
-      selectedWalletIds: ["wallet_a", "wallet_b"],
-      defaultWalletId: "wallet_z",
-    });
-
-    expect(buildEndpointWalletPayload(draft).signingWalletId).toBe("wallet_a");
+  it("starts a key that can execute on selected wallets, and a read-only key on all", () => {
+    expect(defaultWalletScopeForGrants(["transfers.read", "transfers.execute"])).toBe("selected");
+    expect(defaultWalletScopeForGrants(["transfers.read", "recurring.manage"])).toBe("all");
+    expect(defaultWalletScopeForGrants([])).toBe("all");
   });
 });
 

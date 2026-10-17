@@ -56,7 +56,6 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -448,6 +447,42 @@ describe("Helius Rings routes", () => {
       );
       const listBody = (await list.json()) as { data: { operations: Array<{ id: string }> } };
       expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
+    });
+
+    // Rings exits pay out to a destination the caller picks, and the custody
+    // signer admits exits without reading the principal, so every Rings write
+    // checks the key's wallet scope first (HOO-2099).
+    it.each([
+      { scope: "another wallet", walletIds: ["cw_hr_other"], status: 403 },
+      { scope: "this wallet", walletIds: ["cw_hr_route"], status: 201 },
+    ])("prepares with a key scoped to $scope: $status", async ({ walletIds, status }) => {
+      gatewayOverride.current = new InMemoryRingsGateway();
+      await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+           SELECT ?, id FROM custody_wallets WHERE id = ANY(?::text[])`
+        )
+        .bind(TEST_API_KEY.id, walletIds)
+        .run();
+
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: `route-nonce-scope-${status}`,
+      });
+
+      expect(res.status).toBe(status);
+      if (status === 403) {
+        expect(JSON.stringify(await res.json())).toContain(
+          "The credential may not sign with this wallet"
+        );
+      }
     });
 
     it("requires helius_rings.execute to prepare, retry and execute", async () => {

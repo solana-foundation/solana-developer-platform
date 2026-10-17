@@ -31,9 +31,7 @@ function apiKeyContext(keyId: string) {
     projectId: "prj_metered_quota_test",
     grants: ALL_API_KEY_GRANTS,
     environment: "sandbox" as const,
-    signingWalletId: null,
-    signingWalletIds: [],
-    walletBindings: [],
+    walletAccess: { scope: "all" } as const,
   };
 }
 

@@ -1,5 +1,9 @@
 export { activateRecurringPayment } from "./activation";
 export {
+  type CancelActivatedByKeyResult,
+  cancelRecurringPaymentsActivatedByKey,
+} from "./cancel-activated-by-key";
+export {
   collectRecurringPayment,
   journalAutomatedCollectionFailure,
   skipRefusedRecurringCollectionPeriod,

@@ -121,7 +121,9 @@ describe("Payments routes — subscriptions", () => {
     });
   });
 
-  it("requires owner wallet access when updating subscription plans", async () => {
+  // A plan is a record and an unsigned transaction the owner signs; SDP signs
+  // nothing, so a key's wallet scope does not limit it (HOO-2099).
+  it("lets a key that signs with no wallet archive a project plan", async () => {
     const planRes = await app.request(
       "/v1/payments/subscription-plans",
       {
@@ -141,9 +143,7 @@ describe("Payments routes — subscriptions", () => {
       await planRes.json()
     );
 
-    await seedCachedKey({
-      walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
-    });
+    await seedCachedKey({ walletScope: "selected", walletIds: [] });
 
     const updateRes = await app.request(
       `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}`,
@@ -155,10 +155,11 @@ describe("Payments routes — subscriptions", () => {
       env
     );
 
-    expect(updateRes.status).toBe(403);
-    const updateBody = errorResponseSchema.parse(await updateRes.json());
-    expect(updateBody.error.code).toBe("FORBIDDEN");
-    expect(updateBody.error.message).toContain("requested wallet");
+    expect(updateRes.status).toBe(200);
+    const updated = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await updateRes.json()
+    );
+    expect(updated.data.subscriptionPlan.status).toBe("archived");
   });
 
   it("rejects archived counterparties when creating subscriptions", async () => {

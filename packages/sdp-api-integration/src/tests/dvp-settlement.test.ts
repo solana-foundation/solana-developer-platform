@@ -8,6 +8,7 @@ import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  asOrganizationAdmin,
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
   createMosaicService,
@@ -164,35 +165,40 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
       const externalPartyAddress = (await generateKeyPairSigner()).address;
       await fundAddressToLamports(externalPartyAddress, 1_000_000);
 
-      // Distinct mints prove each direction funds the correct escrow.
-      const [asset, cash] = await Promise.all([
-        mosaic.createToken({
-          template: "custom",
-          feePayer: signer,
-          metadata: { name: "Settlement Asset", symbol: "SETA", uri: "" },
-          decimals: DECIMALS,
-          mintAuthority: signer,
-          freezeAuthority: null,
-        }),
-        mosaic.createToken({
-          template: "custom",
-          feePayer: signer,
-          metadata: { name: "Settlement Cash", symbol: "SETC", uri: "" },
-          decimals: DECIMALS,
-          mintAuthority: signer,
-          freezeAuthority: null,
-        }),
-      ]);
+      // Fixture minting calls the service directly, so it runs as the admin a
+      // request would carry; the trade below goes through the API.
+      const { asset, cash } = await asOrganizationAdmin(async () => {
+        // Distinct mints prove each direction funds the correct escrow.
+        const [asset, cash] = await Promise.all([
+          mosaic.createToken({
+            template: "custom",
+            feePayer: signer,
+            metadata: { name: "Settlement Asset", symbol: "SETA", uri: "" },
+            decimals: DECIMALS,
+            mintAuthority: signer,
+            freezeAuthority: null,
+          }),
+          mosaic.createToken({
+            template: "custom",
+            feePayer: signer,
+            metadata: { name: "Settlement Cash", symbol: "SETC", uri: "" },
+            decimals: DECIMALS,
+            mintAuthority: signer,
+            freezeAuthority: null,
+          }),
+        ]);
 
-      if (!asset.mint || !cash.mint) throw new Error("Settlement fixture mints were not created");
+        if (!asset.mint || !cash.mint) throw new Error("Settlement fixture mints were not created");
 
-      // Give the custody wallet exactly the tokens required for its leg.
-      await mosaic.mintTo({
-        mint: side === "a" ? asset.mint : cash.mint,
-        destination: address(wallet.publicKey),
-        amount: side === "a" ? ASSET_UNITS : CASH_UNITS,
-        mintAuthority: signer.address, // Matches the signer bound to MosaicService above.
-        feePayer: signer.address,
+        // Give the custody wallet exactly the tokens required for its leg.
+        await mosaic.mintTo({
+          mint: side === "a" ? asset.mint : cash.mint,
+          destination: address(wallet.publicKey),
+          amount: side === "a" ? ASSET_UNITS : CASH_UNITS,
+          mintAuthority: signer.address, // Matches the signer bound to MosaicService above.
+          feePayer: signer.address,
+        });
+        return { asset, cash };
       });
 
       // The external address is distinct from all custody wallets, including

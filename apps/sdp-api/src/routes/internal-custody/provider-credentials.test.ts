@@ -533,7 +533,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       environment: "sandbox",
       rateLimitTier: "standard",
       allowedIps: null,
-      signingWalletId: null,
       status: "active",
       expiresAt: null,
     });

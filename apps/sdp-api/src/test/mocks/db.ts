@@ -35,6 +35,7 @@ const POSTGRES_TEST_TABLES = [
   "earn_provider_wallets",
   "earn_strategies",
   "api_key_wallet_permissions",
+  "api_key_signing_wallets",
   "custody_connections",
   "provider_credentials",
   "secret_retirements",

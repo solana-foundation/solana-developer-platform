@@ -233,7 +233,6 @@ async function seedRouteState(): Promise<void> {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -242,7 +241,6 @@ async function seedRouteState(): Promise<void> {
     ...cachedApiKey,
     id: SCOPED_API_KEY.id,
     walletScope: "selected",
-    walletBindings: [{ walletId: OTHER_USER_WALLET_ID, permissions: ["payments:write"] }],
   });
 
   await db.batch([
@@ -306,8 +304,9 @@ async function seedRouteState(): Promise<void> {
       ),
     db
       .prepare(`INSERT INTO api_keys
-      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
-      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active')`)
+      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status,
+       wallet_scope)
+      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active', 'selected')`)
       .bind(
         SCOPED_API_KEY.id,
         ORGANIZATION_ID,
@@ -318,9 +317,9 @@ async function seedRouteState(): Promise<void> {
         [...cachedApiKey.grants]
       ),
     db
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-      VALUES ('akwp-pct', ?, ?, ?)`)
-      .bind(SCOPED_API_KEY.id, OTHER_USER_WALLET_ID, ["private_channels.execute"]),
+      .prepare(`INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+      SELECT ?, id FROM custody_wallets WHERE wallet_id = ?`)
+      .bind(SCOPED_API_KEY.id, OTHER_USER_WALLET_ID),
     db
       .prepare(
         `INSERT INTO private_channels
@@ -850,7 +849,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     expect(response.status).toBe(403);
     expect(JSON.stringify(await response.json())).toContain(
-      "not authorized for the requested wallet"
+      "The credential may not sign with this wallet"
     );
     expect(createChannelTransferMock).not.toHaveBeenCalled();
   });

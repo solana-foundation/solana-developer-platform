@@ -33,7 +33,6 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -436,7 +435,6 @@ export const prepareSubscriptionCollection = async (
 
   const scope = await resolveScope(c);
   const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, callerWallet.walletId, ["payments:write"]);
 
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const { planPda } = await derivePlanAddresses(plan);

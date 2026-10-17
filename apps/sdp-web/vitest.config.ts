@@ -6,6 +6,10 @@ export default defineConfig({
   test: {
     include: ["src/**/*.unit.test.{ts,tsx}"],
     environment: "node",
+    // A running dashboard requires SDP_RELEASE_CHANNEL. Pin it here so a test
+    // never depends on the shell or Doppler; widest channel, as the committed
+    // docs artifacts are. A test that needs another channel stubs it.
+    env: { SDP_RELEASE_CHANNEL: "experimental" },
     coverage: {
       provider: "istanbul",
       reporter: ["text-summary"],

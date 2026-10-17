@@ -101,7 +101,6 @@ async function resolveMetadataUpdate(params: {
     auth: params.auth,
     currentAuthority,
     requestedCustodyWalletId: params.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   await admitIssuanceRuntimeExecution({
     env: params.c.env,
@@ -115,7 +114,6 @@ async function resolveMetadataUpdate(params: {
     auth: params.auth,
     custodyWalletId: authorityWallet.custodyWalletId,
     currentAuthority,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const authority = { ...authorityWallet, ...issuanceAuthority };
   return { authority, patch: params.patch };
@@ -145,7 +143,6 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
         env: c.env,
         auth,
         custodyWalletId: body.signingCustodyWalletId,
-        requiredWalletPermissions: ["tokens:write"],
       })
     : null;
 
@@ -379,7 +376,6 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
       env: c.env,
       auth,
       custodyWalletId: signingCustodyWalletId,
-      requiredWalletPermissions: ["tokens:write"],
     });
   }
 

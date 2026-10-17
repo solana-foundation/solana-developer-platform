@@ -7,27 +7,36 @@
 
 import {
   type Action,
-  type ApiKeyWalletAuthorizationBinding,
-  type ApiKeyWalletScope,
   apiKeyMayPerform,
   type OrganizationRole,
   organizationRoleMayPerform,
 } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
 export type AuthType = "api_key" | "clerk";
+
+/**
+ * Which custody wallets the caller may sign with and list (HOO-2099): every
+ * wallet in the project, or the exact custody wallet ids a selected API key
+ * lists. Signing enforces it at the custody signer; only the wallet list and
+ * wallet detail reads filter by it. Every other read is project-scoped.
+ */
+export const walletAccessSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("all") }),
+  z.object({ scope: z.literal("selected"), custodyWalletIds: z.array(z.string()).readonly() }),
+]);
+
+export type WalletAccess = Readonly<z.infer<typeof walletAccessSchema>>;
 
 interface AuthContextBase {
   id: string;
   organizationId: string;
   projectId: string | null;
   environment: string;
-  walletScope?: ApiKeyWalletScope | null;
-  signingWalletId: string | null;
-  signingWalletIds: string[];
-  walletBindings: ApiKeyWalletAuthorizationBinding[];
+  walletAccess: WalletAccess;
 }
 
 /**
@@ -70,6 +79,13 @@ export function authMayPerform(auth: ApiKeyContext, action: Action): boolean {
   }
 }
 
+const ALL_WALLETS: WalletAccess = Object.freeze({ scope: "all" });
+
+/** Whether the caller may list or open this custody wallet (`GET /v1/wallets`, `/:walletId`). */
+export function walletAccessAllows(access: WalletAccess, custodyWalletId: string): boolean {
+  return access.scope === "all" || access.custodyWalletIds.includes(custodyWalletId);
+}
+
 export interface ClerkAuthContext {
   userId: string;
   organizationId: string;
@@ -100,12 +116,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       organizationId: apiKey.organizationId,
       projectId: apiKey.projectId,
       environment: apiKey.environment,
-      walletScope:
-        apiKey.walletScope ??
-        ((apiKey.walletBindings?.length ?? 0) > 0 || apiKey.signingWalletId ? "selected" : "all"),
-      signingWalletId: apiKey.signingWalletId ?? null,
-      signingWalletIds: apiKey.signingWalletIds ?? [],
-      walletBindings: apiKey.walletBindings ?? [],
+      walletAccess: apiKey.walletAccess,
       authType: "api_key",
       userId: null,
       apiKeyId: apiKey.id,
@@ -123,10 +134,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       organizationId: clerk.organizationId,
       projectId,
       environment: c.get("projectEnvironment") ?? "dashboard",
-      walletScope: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
+      walletAccess: ALL_WALLETS,
       authType: "clerk",
       userId: clerk.userId,
       apiKeyId: null,

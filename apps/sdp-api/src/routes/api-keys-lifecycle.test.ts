@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -192,16 +193,42 @@ describe("API key lifecycle", () => {
   });
 
   describe("rotation", () => {
-    it("copies the target's fields and bindings from the locked row", async () => {
+    it("copies the target's fields and wallet scope from the locked row", async () => {
       await insertKey({
         id: TARGET_KEY_ID,
         grants: ["transfers.read"],
         allowed_ips: JSON.stringify(["203.0.113.0/24"]),
         expires_at: "2999-01-01T00:00:00.000Z",
       });
+      await seedTestCustodyRows(env, {
+        configs: [
+          {
+            id: "cust_lifecycle",
+            organizationId: ORGANIZATION_ID,
+            projectId: PROJECT_ID,
+            provider: "local",
+            configEncrypted: "test-config",
+            status: "active",
+          },
+        ],
+        wallets: [
+          {
+            id: "cwlt_lifecycle",
+            owner: { kind: "config", custodyConfigId: "cust_lifecycle" },
+            walletId: "wallet_lifecycle",
+            publicKey: "wallet_lifecycle_public_key",
+            label: null,
+            purpose: null,
+            status: "active",
+          },
+        ],
+      });
+      await getDb(env).execute("UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?", [
+        TARGET_KEY_ID,
+      ]);
       await getDb(env).execute(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES ('akw_lifecycle_target', ?, 'wallet_lifecycle', '["wallets:read"]')`,
+        `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+         VALUES (?, 'cwlt_lifecycle')`,
         [TARGET_KEY_ID]
       );
 
@@ -217,10 +244,12 @@ describe("API key lifecycle", () => {
       });
       expect(
         await getDb(env).queryMany(
-          "SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = ?",
+          `SELECT ak.wallet_scope, s.custody_wallet_id
+             FROM api_keys ak JOIN api_key_signing_wallets s ON s.api_key_id = ak.id
+            WHERE ak.id = ?`,
           [replacement?.id]
         )
-      ).toEqual([{ wallet_id: "wallet_lifecycle", permissions: '["wallets:read"]' }]);
+      ).toEqual([{ wallet_scope: "selected", custody_wallet_id: "cwlt_lifecycle" }]);
     });
 
     it("refuses to revive a predecessor past its deadline whose replacement was revoked", async () => {

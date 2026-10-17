@@ -17,7 +17,7 @@ Transfers are available through the Payments dashboard and the API.
 
 - A token balance in the source wallet
 - A custody wallet to use as `sourceCustodyWalletId`, with a custody signer configured so SDP can sign and submit.
-- An API key holding the `transfers.execute` grant, whose wallet bindings include the source wallet — `POST /v1/payments/transfers` requires that action at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet binding.
+- An API key holding the `transfers.execute` grant whose [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access) includes the source wallet. `POST /v1/payments/transfers` requires the action at the route, and SDP checks the key, its grant and the source wallet again when it signs.
 
 ## How it works
 

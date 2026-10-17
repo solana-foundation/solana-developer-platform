@@ -9,7 +9,6 @@ import type {
   Action,
   ApiKeyEnvironment,
   ApiKeyStatus,
-  ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
   RateLimitTier,
 } from "@sdp/types";
@@ -22,7 +21,7 @@ import type { Env } from "@/types/env";
 
 /**
  * The state of an API key a suite seeds: the `api_keys` columns authentication
- * reads, plus the wallet bindings to store. Authentication reads all of it from
+ * reads, plus the signing wallets to list. Authentication reads all of it from
  * Postgres on every request, so this is exactly what a request sees.
  */
 export interface SeededApiKey {
@@ -34,11 +33,14 @@ export interface SeededApiKey {
   environment: ApiKeyEnvironment;
   rateLimitTier: RateLimitTier;
   allowedIps: string[] | null;
-  signingWalletId: string | null;
-  /** Ignored: a key's scope follows from its stored bindings. */
+  /** `api_keys.wallet_scope`; `all` unless the seed names a scope or wallets. */
   walletScope?: ApiKeyWalletScope;
-  signingWalletIds?: string[];
-  walletBindings?: ApiKeyWalletAuthorizationBinding[];
+  /**
+   * Custody wallet ids (`custody_wallets.id`) a `selected` key lists. Naming
+   * them makes the key `selected` and replaces its list; the wallets must
+   * already exist (the list has a foreign key).
+   */
+  walletIds?: string[];
   status: ApiKeyStatus;
   expiresAt: string | null;
   rotationDeadline?: string | null;
@@ -98,7 +100,7 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
     .prepare(
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-          grants, status, expires_at, rotation_deadline, signing_wallet_id,
+          grants, status, expires_at, rotation_deadline, wallet_scope,
           allowed_ips, rate_limit_tier)
        SELECT ?, p.organization_id, p.id, (SELECT id FROM users ORDER BY id LIMIT 1),
               'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?, ?
@@ -113,7 +115,7 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
          status = EXCLUDED.status,
          expires_at = EXCLUDED.expires_at,
          rotation_deadline = EXCLUDED.rotation_deadline,
-         signing_wallet_id = EXCLUDED.signing_wallet_id,
+         wallet_scope = EXCLUDED.wallet_scope,
          allowed_ips = EXCLUDED.allowed_ips,
          rate_limit_tier = EXCLUDED.rate_limit_tier`
     )
@@ -124,7 +126,7 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
       data.status,
       data.expiresAt,
       data.rotationDeadline ?? null,
-      data.signingWalletId,
+      data.walletScope ?? (data.walletIds === undefined ? "all" : "selected"),
       data.allowedIps === null ? null : JSON.stringify(data.allowedIps),
       data.rateLimitTier,
       data.organizationId,
@@ -134,37 +136,29 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
     )
     .run();
 
-  // Wallet bindings live in their own table: a key that names bindings
+  // The signing list lives in its own table: a seed that names wallets
   // replaces the key's rows with them. One that names none leaves rows a test
   // inserted itself.
-  if (data.walletBindings === undefined && data.signingWalletIds === undefined) {
+  if (data.walletIds === undefined) {
     return;
   }
-  const bindings = [
-    ...(data.walletBindings ?? []).map((binding) => ({
-      walletId: binding.walletId,
-      permissions: binding.permissions,
-    })),
-    ...(data.signingWalletIds ?? [])
-      .filter((walletId) => !data.walletBindings?.some((binding) => binding.walletId === walletId))
-      .map((walletId) => ({ walletId, permissions: ["*"] })),
-  ];
-  // One replacement: a failed insert must not leave the key partly unbound.
+  const walletIds = data.walletIds;
+  // One replacement: a failed insert must not leave the key partly listed.
   await db.transaction(async (tx) => {
-    await tx.execute("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?", [data.id]);
-    for (const binding of bindings) {
-      await tx.execute(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         SELECT ?, ak.id, ?, ? FROM api_keys ak WHERE ak.id = ?
-         ON CONFLICT DO NOTHING`,
-        [
-          `akw_${crypto.randomUUID()}`,
-          binding.walletId,
-          JSON.stringify(binding.permissions),
-          data.id,
-        ]
-      );
-    }
+    await tx.execute(
+      `UPDATE api_key_signing_wallets
+          SET status = 'archived', archived_at = sdp_iso_now()
+        WHERE api_key_id = ? AND status = 'active' AND NOT (custody_wallet_id = ANY(?::text[]))`,
+      [data.id, walletIds]
+    );
+    await tx.execute(
+      `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+       SELECT ak.id, w FROM api_keys ak CROSS JOIN unnest(?::text[]) AS w WHERE ak.id = ?
+       ON CONFLICT (api_key_id, custody_wallet_id) DO UPDATE
+         SET status = 'active', archived_at = NULL
+       WHERE api_key_signing_wallets.status = 'archived'`,
+      [walletIds, data.id]
+    );
   });
 }
 

@@ -188,8 +188,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     ).toBeNull();
   });
 
-  it("filters batches by exact wallet and exact-wallet allowlist", async () => {
-    const db = getDb(env);
+  it("filters batches by exact source wallet", async () => {
     await repo.createTransferBatchWithRecipients({
       batch: {
         ...baseInput,
@@ -198,11 +197,12 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       },
       recipients: [],
     });
+    // A legacy batch with no source wallet must not match the filter.
     const { batch: legacy } = await repo.createTransferBatchWithRecipients({
       batch: { ...baseInput, projectId: TEST_PROJECT_ID },
       recipients: [],
     });
-    await db
+    await getDb(env)
       .prepare("UPDATE payment_transfer_batches SET source_custody_wallet_id = NULL WHERE id = ?")
       .bind(legacy.id)
       .run();
@@ -214,37 +214,9 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       limit: 20,
       offset: 0,
     });
-    const authorized = await repo.listTransferBatches({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: {
-        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-        providerWalletIds: [TEST_WALLET_ID],
-      },
-      limit: 20,
-      offset: 0,
-    });
-    const authorizationDenied = await repo.listTransferBatches({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
-      limit: 20,
-      offset: 0,
-    });
 
     expect(selected.rows).toHaveLength(1);
     expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(authorized.rows).toHaveLength(2);
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID })
-    );
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({
-        source_custody_wallet_id: null,
-        source_wallet_id: TEST_WALLET_ID,
-      })
-    );
-    expect(authorizationDenied).toEqual({ rows: [], total: 0 });
   });
 });
 

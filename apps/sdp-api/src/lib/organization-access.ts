@@ -10,13 +10,10 @@ import { getDb } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { refuseTerminally } from "@/lib/api-key-refusal-cache";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
+import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
-import {
-  resolveApiKeyWalletAuthorization,
-  warnUnresolvedApiKeyWalletBindings,
-} from "@/services/api-key-wallets.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -30,8 +27,9 @@ import type { Env } from "@/types/env";
  *   its project is active, and every authorization field (grants, IP
  *   restriction, rate-limit tier, project, environment)
  *   comes from it;
- * - for an API key, its wallet scope and bindings (HOO-2048), so routes check
- *   wallets against this request's read and never re-read them;
+ * - for an API key, its wallet scope and the custody wallets a selected key
+ *   lists (HOO-2099), which wallet list and detail reads filter by; signing
+ *   re-checks the list itself, at the waist;
  * - the request's origin passes `settings.allowedIpAddresses`.
  *
  * Deliberately uncached: a cache would keep the previous answer for its TTL
@@ -108,20 +106,13 @@ export async function enforceOrganizationAccess(
   return settings;
 }
 
-/**
- * The `wallet_bindings` aggregate. `permissions` is the raw column, which
- * {@link resolveApiKeyWalletAuthorization} parses and fails closed on.
- */
-const walletBindingCandidatesSchema = z.array(
-  z.object({
-    wallet_id: z.string(),
-    permissions: z.unknown(),
-    candidates: z.array(z.object({ id: z.string(), status: z.string() })),
-  })
-);
-
 /** `api_keys.grants`, a `text[]` the driver returns as an array. */
 const storedGrantsSchema = z.array(z.string());
+
+/** The key's active `api_key_signing_wallets`, aggregated to a `text[]`. */
+const signingWalletIdsSchema = z.array(z.string());
+
+const walletScopeSchema = z.enum(["all", "selected"]);
 
 /** The `api_keys` row and its joins, as the authoritative read returns them. */
 type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
@@ -131,12 +122,12 @@ type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
   grants: unknown;
   allowed_ips: string | null;
   rate_limit_tier: RateLimitTier;
-  signing_wallet_id: string | null;
+  wallet_scope: string;
+  signing_wallet_ids: unknown;
   environment: ApiKeyEnvironment;
   project_status: string;
   organization_status: string;
   settings: string | null;
-  wallet_bindings: unknown;
 };
 
 /** Everything an API key may do on this request, all from one read. */
@@ -150,17 +141,17 @@ export interface ApiKeyAuthorization {
   rateLimitTier: RateLimitTier;
   /** The organization's raw settings, for its entitlements. */
   settings: string | null;
-  walletAuthorization: ReturnType<typeof resolveApiKeyWalletAuthorization>;
+  walletAccess: WalletAccess;
 }
 
 /**
  * Authorize an API key from its live rows: one uncached statement driven by
  * `api_keys.key_hash` (UNIQUE) that returns the key's every authorization
  * field, its project's status and environment, its organization's status and
- * settings, and its wallet bindings (HOO-2048), each with the custody wallets
- * it could name and their status. Nothing is cached, so a revocation, a
- * grant change, an IP restriction, an archived
- * project or a narrowed wallet scope applies on the key's next request.
+ * settings, and its wallet scope with the custody wallet ids a selected key
+ * lists. Nothing is cached, so a revocation, a grant change, an IP
+ * restriction, an archived project or a narrowed wallet scope applies on the
+ * key's next request.
  *
  * Refuses, in order: an unknown key (INVALID_API_KEY); an inactive
  * organization or project (REVOKED_API_KEY); a revoked, expired or
@@ -176,61 +167,18 @@ export async function authorizeApiKey(
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants,
               ak.allowed_ips, ak.rate_limit_tier,
-              ak.status, ak.expires_at, ak.rotation_deadline, ak.signing_wallet_id,
+              ak.status, ak.expires_at, ak.rotation_deadline, ak.wallet_scope,
+              ARRAY(
+                SELECT s.custody_wallet_id
+                  FROM api_key_signing_wallets s
+                 WHERE s.api_key_id = ak.id AND s.status = 'active'
+                 ORDER BY s.custody_wallet_id
+              ) AS signing_wallet_ids,
               p.environment, p.status AS project_status,
-              o.status AS organization_status, o.settings,
-              wb.wallet_bindings
+              o.status AS organization_status, o.settings
          FROM api_keys ak
          JOIN organizations o ON o.id = ak.organization_id
          JOIN projects p ON p.id = ak.project_id AND p.organization_id = ak.organization_id
-         LEFT JOIN LATERAL (
-           SELECT COALESCE(
-                    json_agg(
-                      json_build_object(
-                        'wallet_id', b.wallet_id,
-                        'permissions', b.permissions,
-                        'candidates', (
-                          SELECT COALESCE(
-                                   json_agg(json_build_object('id', m.id, 'status', m.status) ORDER BY m.id),
-                                   '[]'::json
-                                 )
-                            FROM (
-                              SELECT w.id, w.status
-                                FROM custody_wallets w
-                                JOIN custody_configs cc ON cc.id = w.custody_config_id
-                               WHERE cc.organization_id = o.id
-                                 AND cc.project_id = ak.project_id
-                                 AND cc.status = 'active'
-                                 AND w.wallet_id = b.wallet_id
-                              UNION ALL
-                              SELECT w.id, w.status
-                                FROM custody_wallets w
-                                JOIN custody_connections cn ON cn.id = w.custody_connection_id
-                               WHERE cn.organization_id = o.id
-                                 AND cn.project_id = ak.project_id
-                                 AND cn.status = 'active'
-                                 AND w.wallet_id = b.wallet_id
-                            ) m
-                        )
-                      )
-                      ORDER BY b.created_at
-                    ),
-                    '[]'::json
-                  ) AS wallet_bindings
-             FROM (
-               SELECT p.wallet_id, p.permissions, p.created_at
-                 FROM api_key_wallet_permissions p
-                WHERE p.api_key_id = ak.id
-               UNION ALL
-               -- A legacy signing-wallet key carries no binding rows and holds
-               -- full access to its signing wallet.
-               SELECT ak.signing_wallet_id, '["*"]', ''
-                WHERE ak.signing_wallet_id IS NOT NULL
-                  AND NOT EXISTS (
-                    SELECT 1 FROM api_key_wallet_permissions p WHERE p.api_key_id = ak.id
-                  )
-             ) b
-         ) wb ON true
         WHERE ak.key_hash = ?`
     )
     .bind(keyHash)
@@ -262,14 +210,7 @@ export async function authorizeApiKey(
   }
   enforceIpAllowlist(c, row.settings);
 
-  const walletBindings = walletBindingCandidatesSchema.parse(
-    parsePostgresJson<unknown>(row.wallet_bindings)
-  );
-  warnUnresolvedApiKeyWalletBindings(walletBindings, {
-    apiKeyId: row.id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-  });
+  const custodyWalletIds = signingWalletIdsSchema.parse(row.signing_wallet_ids);
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -278,6 +219,9 @@ export async function authorizeApiKey(
     environment: row.environment,
     rateLimitTier: row.rate_limit_tier,
     settings: row.settings,
-    walletAuthorization: resolveApiKeyWalletAuthorization(walletBindings, row.signing_wallet_id),
+    walletAccess:
+      walletScopeSchema.parse(row.wallet_scope) === "all"
+        ? { scope: "all" }
+        : { scope: "selected", custodyWalletIds },
   };
 }

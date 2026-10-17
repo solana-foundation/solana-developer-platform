@@ -14,6 +14,7 @@ import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
@@ -78,7 +79,6 @@ const AUDIT_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -302,12 +302,22 @@ describe("CustodyRuntimeTargets", () => {
       await expect(exit.signTransactions([])).resolves.toEqual([]);
     });
 
-    it("signs a start for an active organization", async () => {
+    it("signs a start for an active organization, as a live member", async () => {
       const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('om_runtime_targets', ?, ?, 'admin', 'active')`
+        )
+        .bind(ORGANIZATION_ID, USER_ID)
+        .run();
 
       const start = await signerFor(`cwlt_${config.id}`, "payments.transfer");
 
-      await expect(start.signTransactions([])).resolves.toEqual([]);
+      // A start signs only for an authenticated principal (HOO-2099).
+      await expect(
+        runAsMoneyPrincipal({ kind: "member", userId: USER_ID }, () => start.signTransactions([]))
+      ).resolves.toEqual([]);
     });
   });
 
@@ -1379,7 +1389,7 @@ function createAuditContext(): Context<{ Bindings: Env }> {
   const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/v1/wallets"), {
     env,
   });
-  auditContext.set("apiKey", AUDIT_API_KEY);
+  auditContext.set("apiKey", { ...AUDIT_API_KEY, walletAccess: { scope: "all" } });
   return auditContext;
 }
 

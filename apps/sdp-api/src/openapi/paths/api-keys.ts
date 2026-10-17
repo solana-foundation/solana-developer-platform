@@ -152,7 +152,8 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "Deactivate API key",
     operationId: "revokeApiKey",
-    description: "Deactivates (soft deletes) an API key and invalidates it immediately.",
+    description:
+      "Deactivates (soft deletes) an API key and invalidates it immediately. Recurring payments the key activated keep collecting: a schedule outlives the key that set it up. If the key may be compromised, set `cancelRecurringPayments` to cancel them as well.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -166,6 +167,11 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
             confirmation: z.string().min(1).openapi({
               description: "Type the exact API key name to confirm deletion.",
               example: "Primary Key",
+            }),
+            cancelRecurringPayments: z.boolean().optional().openapi({
+              description:
+                "Also cancel every active recurring payment this key activated or last resumed. Use it for a compromised key.",
+              example: true,
             }),
           })
         ),

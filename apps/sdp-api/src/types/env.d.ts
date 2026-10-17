@@ -1,5 +1,6 @@
 /** Environment variables consumed by the Node API runtime. */
 
+import type { WalletAccess } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type {
   Action,
@@ -8,7 +9,6 @@ import type {
   OrganizationEntitlements,
   OrganizationRole,
   OrganizationRpcProvider,
-  Permission,
   SdpRampProviderStages,
 } from "@sdp/types";
 import type { ManagedRpcEnv } from "@sdp/rpc";
@@ -359,14 +359,8 @@ declare module "hono" {
       /** The key's explicit grants, read fresh on this request. */
       grants: readonly Action[];
       environment: ApiKeyEnvironment;
-      walletScope?: "all" | "selected";
-      signingWalletId: string | null;
-      signingWalletIds?: string[];
-      walletBindings?: Array<{
-        walletId: string;
-        custodyWalletId?: string;
-        permissions: Permission[];
-      }>;
+      /** The key's wallet scope, read fresh on this request (HOO-2099). */
+      walletAccess: WalletAccess;
     };
     // Clerk auth context set by middleware
     clerk?: {

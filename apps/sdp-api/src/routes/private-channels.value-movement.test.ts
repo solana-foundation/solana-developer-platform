@@ -14,7 +14,6 @@ import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
-import * as organizationAccess from "@/lib/organization-access";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -237,7 +236,6 @@ async function seedRouteState(): Promise<void> {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -246,7 +244,6 @@ async function seedRouteState(): Promise<void> {
     ...cachedApiKey,
     id: SCOPED_API_KEY.id,
     walletScope: "selected",
-    walletBindings: [{ walletId: COLLEAGUE_WALLET_ID, permissions: ["payments:write"] }],
   });
 
   await db.batch([
@@ -312,8 +309,9 @@ async function seedRouteState(): Promise<void> {
       ),
     db
       .prepare(`INSERT INTO api_keys
-      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
-      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active')`)
+      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status,
+       wallet_scope)
+      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active', 'selected')`)
       .bind(
         SCOPED_API_KEY.id,
         ORGANIZATION_ID,
@@ -324,9 +322,9 @@ async function seedRouteState(): Promise<void> {
         [...cachedApiKey.grants]
       ),
     db
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-      VALUES ('akwp-pcv', ?, ?, ?)`)
-      .bind(SCOPED_API_KEY.id, COLLEAGUE_WALLET_ID, ["private_channels.execute"]),
+      .prepare(`INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+      SELECT ?, id FROM custody_wallets WHERE wallet_id = ?`)
+      .bind(SCOPED_API_KEY.id, COLLEAGUE_WALLET_ID),
     db
       .prepare(
         `INSERT INTO private_channel_users
@@ -655,7 +653,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     );
     expect(response.status).toBe(403);
     expect(JSON.stringify(await response.json())).toContain(
-      "not authorized for the requested wallet"
+      "The credential may not sign with this wallet"
     );
   });
 
@@ -866,8 +864,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("denies stale all-wallet access after the key is restricted in the database", async () => {
     await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-      VALUES ('akwp-pcv-restricted', ?, ?, '["payments:write"]')`)
+      .prepare(`UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?`)
+      .bind(API_KEY.id)
+      .run();
+    await getDb(env)
+      .prepare(`INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+      SELECT ?, id FROM custody_wallets WHERE wallet_id = ?`)
       .bind(API_KEY.id, COLLEAGUE_WALLET_ID)
       .run();
     expect(
@@ -906,35 +908,6 @@ describe("Private Channels — deposit and withdrawal access", () => {
       apiKeyHeaders()
     );
     expect(response.status).toBe(401);
-    expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
-    expect(
-      await createPrivateChannelWithdrawalRepository(env).getWithdrawalById({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        id: original.id,
-      })
-    ).toMatchObject({ status: "pending" });
-  });
-
-  // The race the route's own liveness check covers: a revocation landing just
-  // after authentication's read, while the request is in flight.
-  it("rejects recovery when the key is revoked right after authentication", async () => {
-    const original = await abandonedWithdrawal();
-    const authenticate = organizationAccess.authorizeApiKey;
-    vi.spyOn(organizationAccess, "authorizeApiKey").mockImplementationOnce(async (...args) => {
-      const access = await authenticate(...args);
-      await getDb(env)
-        .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
-        .bind(API_KEY.id)
-        .run();
-      return access;
-    });
-
-    const response = await postWithdrawal(
-      { walletId: ACTOR_WALLET_ID, amount: "1.5" },
-      apiKeyHeaders()
-    );
-    expect(response.status).toBe(403);
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
     expect(
       await createPrivateChannelWithdrawalRepository(env).getWithdrawalById({
@@ -1157,7 +1130,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(deposit.status).toBe(403);
     expect(withdrawal.status).toBe(403);
     expect(JSON.stringify(await deposit.json())).toContain(
-      "not authorized for the requested wallet"
+      "The credential may not sign with this wallet"
     );
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();

@@ -139,7 +139,7 @@ describe("OpenAPI spec", () => {
     }
   });
 
-  it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
+  it("documents exact signer-check runtime failures and requires its Provider-ID request", () => {
     const operation = createPublicOpenApiDocument({ releaseChannel: "stable" }).paths?.[
       "/v1/wallets/signer-check"
     ]?.post;
@@ -148,7 +148,8 @@ describe("OpenAPI spec", () => {
     expect(operation?.responses).toHaveProperty("409");
     const request = getJsonSchema(operation?.requestBody);
     expect(request.properties).toEqual({ walletId: expect.any(Object) });
-    expect(request.required).toBeUndefined();
+    // A wallet scope has no default signing wallet, so the request names one.
+    expect(request.required).toEqual(["walletId"]);
   });
 
   it("documents path-based versioning policy", () => {
@@ -643,32 +644,20 @@ describe("OpenAPI spec", () => {
     });
   });
 
-  it("documents optional exact-owner provisioning for both API-key create routes", () => {
+  it("documents no wallet provisioning on either API-key create route", () => {
     const doc = createOpenApiDocument();
 
     for (const path of ["/v1/api-keys", "/v1/projects/{projectId}/api-keys"]) {
       const operation = doc.paths?.[path]?.post;
       const requestSchema = getJsonSchema(operation?.requestBody);
 
-      expect(requestSchema.properties?.connectionId).toBeUndefined();
-      expect(
-        requestSchema.properties?.provisionWallet?.anyOf?.map((variant) => ({
-          required: variant.required,
-          not: variant.not,
-        }))
-      ).toEqual([
-        { required: ["provider"], not: { required: ["connectionId"] } },
-        { required: ["connectionId"], not: { required: ["provider"] } },
-      ]);
-      expect(requestSchema.example).toMatchObject({
-        provisionWallet: { connectionId: "cconn_123" },
-      });
+      // Creating a key never creates a wallet (HOO-2099).
+      for (const field of ["connectionId", "provisionWallet", "walletLabel", "walletPurpose"]) {
+        expect(requestSchema.properties?.[field], `${path} ${field}`).toBeUndefined();
+      }
+      expect(requestSchema.example).toMatchObject({ walletIds: ["cwlt_0f2c8c1e"] });
       expect(operation?.responses?.["201"]).toBeDefined();
       expect(operation?.responses?.["400"]).toBeDefined();
-      expect(operation?.responses?.["403"]).toBeDefined();
-      expect(operation?.responses?.["404"]).toBeDefined();
-      expect(operation?.responses?.["409"]).toBeDefined();
-      expect(operation?.responses?.["503"]).toBeDefined();
     }
   });
 
@@ -910,7 +899,7 @@ describe("OpenAPI spec", () => {
     for (const value of ["mint_authority", "moonpay"]) {
       expect(experimental).toContain(`"${value}"`);
     }
-    expect(classifiedValues()).toContain("earn:write");
+    expect(classifiedValues()).toContain("earn.execute");
   });
 
   it("documents only the stable modules for production", () => {

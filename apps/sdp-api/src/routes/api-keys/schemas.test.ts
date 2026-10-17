@@ -39,46 +39,27 @@ describe("API key IP allowlist schemas", () => {
   });
 });
 
-describe("API key wallet provisioning schema", () => {
-  const provisioningRequest = {
-    name: "Provisioning key",
-    grants: ["transfers.read"],
-    walletScope: "selected",
-  } as const;
-
-  it.each([{ connectionId: "cconn_selected" }, { provider: "privy" }] as const)(
-    "accepts a provisioning owner that names one provider account: %j",
-    (provisionWallet) => {
-      expect(
-        apiKeyCreateSchema.safeParse({ ...provisioningRequest, provisionWallet }).success
-      ).toBe(true);
-    }
-  );
+// Creating a key never creates a wallet (HOO-2099).
+describe("API key create refuses wallet provisioning", () => {
+  const request = { name: "Key", grants: ["transfers.read"], walletScope: "selected" } as const;
 
   it.each([
-    true,
-    false,
-    {},
-    { connectionId: "cconn_selected", provider: "privy" },
-    { connectionId: "" },
-    { provider: "not_a_provider" },
-  ])(
-    "rejects a provisioning owner that names no single provider account: %j",
-    (provisionWallet) => {
-      expect(
-        apiKeyCreateSchema.safeParse({ ...provisioningRequest, provisionWallet }).success
-      ).toBe(false);
-    }
-  );
+    { provisionWallet: { connectionId: "cconn_selected" } },
+    { provisionWallet: { provider: "privy" } },
+    { walletLabel: "Treasury" },
+    { walletPurpose: "transfer" },
+    { connectionId: "cconn_selected" },
+  ])("refuses %j", (field) => {
+    const parsed = apiKeyCreateSchema.safeParse({ ...request, ...field });
+    expect(parsed.success).toBe(false);
+  });
 
-  it("rejects the obsolete top-level connectionId beside a valid owner", () => {
-    expect(
-      apiKeyCreateSchema.safeParse({
-        ...provisioningRequest,
-        provisionWallet: { connectionId: "cconn_selected" },
-        connectionId: "cconn_selected",
-      }).success
-    ).toBe(false);
+  it("points a retired provisioning field at creating the wallet first", () => {
+    const parsed = apiKeyCreateSchema.safeParse({
+      ...request,
+      provisionWallet: { provider: "privy" },
+    });
+    expect(JSON.stringify(parsed.error?.issues)).toContain("POST /v1/wallets");
   });
 });
 

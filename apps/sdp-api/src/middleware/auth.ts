@@ -11,18 +11,15 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type {
-  Action,
-  ApiKeyEnvironment,
-  ApiKeyWalletAuthorizationBinding,
-  ApiKeyWalletScope,
-} from "@sdp/types";
+import type { Action, ApiKeyEnvironment } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { assertNoCachedTerminalRefusal } from "@/lib/api-key-refusal-cache";
+import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import { getLogger } from "@/runtime/logger";
@@ -64,10 +61,21 @@ interface ApiKeyContext {
   projectId: string;
   grants: readonly Action[];
   environment: ApiKeyEnvironment;
-  walletScope: ApiKeyWalletScope;
-  signingWalletId: string | null;
-  signingWalletIds: string[];
-  walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
+  walletAccess: WalletAccess;
+}
+
+/**
+ * The rest of an authenticated API-key request: narrowed to the key's
+ * organization, and moving money as the key (HOO-2099). The signing waists
+ * re-read the key's row whenever it signs for it.
+ */
+function runAsAuthenticatedKey(
+  key: Pick<ApiKeyContext, "id" | "organizationId">,
+  next: Next
+): Promise<void> {
+  return runWithTenantDatabaseIdentity({ organizationId: key.organizationId }, () =>
+    runAsMoneyPrincipal({ kind: "api_key", apiKeyId: key.id }, next)
+  );
 }
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
@@ -194,7 +202,7 @@ export function authMiddleware() {
     const authContext = await runWithSystemDatabaseIdentity("http:auth", () =>
       authenticateApiKeyRequest(c)
     );
-    await runWithTenantDatabaseIdentity({ organizationId: authContext.organizationId }, next);
+    await runAsAuthenticatedKey(authContext, next);
   };
 }
 
@@ -250,10 +258,7 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
     projectId: key.projectId,
     grants: key.grants,
     environment: key.environment,
-    walletScope: key.walletAuthorization.walletScope,
-    signingWalletId: key.walletAuthorization.signingWalletId,
-    signingWalletIds: key.walletAuthorization.signingWalletIds,
-    walletBindings: key.walletAuthorization.walletBindings,
+    walletAccess: key.walletAccess,
   };
 
   c.set("apiKey", authContext);
@@ -294,7 +299,7 @@ export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
     // its own (no-op) next, so the real downstream runs here instead.
     const authenticated = c.get("apiKey");
     if (authenticated) {
-      await runWithTenantDatabaseIdentity({ organizationId: authenticated.organizationId }, next);
+      await runAsAuthenticatedKey(authenticated, next);
       return;
     }
     await next();

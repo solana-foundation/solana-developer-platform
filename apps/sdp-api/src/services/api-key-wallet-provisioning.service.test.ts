@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,10 +7,9 @@ import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
-import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { insertTestCustodyConfigRow } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
@@ -52,14 +50,13 @@ const CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
 const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/wallets"), {
   env,
 });
-auditContext.set("apiKey", CACHED_API_KEY);
+auditContext.set("apiKey", { ...CACHED_API_KEY, walletAccess: { scope: "all" } });
 
 const createConfigWalletMock = vi.spyOn(SigningService.prototype, "createWallet");
 const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
@@ -182,232 +179,87 @@ describe("provisionApiKeyWallet", () => {
     expect(metadata).not.toHaveProperty("assignedSettlementAuthority");
   });
 
-  it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
-    "retains the wallet audit when later API-key creation fails through %s",
-    async (path) => {
-      provisionPrivyWalletMock.mockResolvedValueOnce({
-        walletId: "partial_success",
-        address: "Vote111111111111111111111111111111111111111",
-      });
-      const db = getDb(env);
-      await db.execute(
-        "ALTER TABLE api_keys ADD CONSTRAINT reject_created_key CHECK (name <> 'Rejected key') NOT VALID"
-      );
-      try {
-        const response = await app.request(
-          path,
-          {
-            method: "POST",
-            headers: adminHeaders(),
-            body: JSON.stringify({
-              name: "Rejected key",
-              grants: ["transfers.read"],
-              walletScope: "selected",
-              provisionWallet: { connectionId: CONNECTION_ID },
-            }),
-          },
-          env
-        );
-        expect(response.status).toBe(500);
-        const audit = await db.queryOne<{ resource_id: string; metadata: string }>(
-          "SELECT resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
-        );
-        assert(audit, "Expected wallet creation audit");
-        const metadata = z
-          .object({ result: z.string(), walletId: z.string() })
-          .parse(JSON.parse(audit.metadata));
-        expect(metadata).toMatchObject({
-          result: "created",
-          walletId: "privy_partial_success",
-        });
-        expect(
-          await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit.resource_id])
-        ).toEqual({ id: audit.resource_id });
-        expect(await db.queryOne("SELECT id FROM api_keys WHERE name = 'Rejected key'")).toBeNull();
-      } finally {
-        await db.execute("ALTER TABLE api_keys DROP CONSTRAINT reject_created_key");
-      }
-    }
-  );
-
-  it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
-    "provisions and binds a Connection wallet through %s",
-    async (path) => {
-      provisionPrivyWalletMock.mockResolvedValueOnce({
-        walletId: "endpoint_api_key_wallet",
-        address: "Vote111111111111111111111111111111111111111",
-      });
-
-      const response = await app.request(
-        path,
-        {
-          method: "POST",
-          headers: adminHeaders(),
-          body: JSON.stringify({
-            name: `Connection key ${path}`,
-            grants: ["transfers.read"],
-            walletScope: "selected",
-            provisionWallet: { connectionId: CONNECTION_ID },
-          }),
-        },
-        env
-      );
-
-      expect(response.status).toBe(201);
-      const walletAudit = await getDb(env).queryOne<{ user_id: string; metadata: string }>(
-        "SELECT user_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
-      );
-      assert(walletAudit, "Expected wallet creation audit");
-      expect(walletAudit.user_id).toBe(USER_ID);
-      const metadata = z
-        .object({
-          event: z.string(),
-          creationReason: z.string(),
-          connectionId: z.string(),
-          walletId: z.string(),
-          result: z.string(),
-        })
-        .parse(JSON.parse(walletAudit.metadata));
-      expect(metadata).toMatchObject({
-        event: "custody_wallet_created",
-        creationReason: "api_key",
-        connectionId: CONNECTION_ID,
-        walletId: "privy_endpoint_api_key_wallet",
-        result: "created",
-      });
-      const body = (await response.json()) as { data: { apiKey: { id: string } } };
-      const binding = await getDb(env)
-        .prepare(
-          `SELECT p.wallet_id, w.id AS resolved_custody_wallet_id, w.custody_connection_id
-           FROM api_key_wallet_permissions p
-           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
-           WHERE p.api_key_id = ?`
-        )
-        .bind(body.data.apiKey.id)
-        .first();
-      expect(binding).toEqual({
-        wallet_id: "privy_endpoint_api_key_wallet",
-        resolved_custody_wallet_id: expect.any(String),
-        custody_connection_id: CONNECTION_ID,
-      });
-      expect(createConfigWalletMock).not.toHaveBeenCalled();
-    }
-  );
-
+  // Creating a key never creates a wallet (HOO-2099): the fields that asked
+  // for one are refused, before any row or Provider call.
   it.each([
-    ["/v1/api-keys", { provisionWallet: true }],
-    [`/v1/projects/${PROJECT_ID}/api-keys`, { provisionWallet: true }],
-    [
-      "/v1/api-keys",
-      { provisionWallet: { connectionId: CONNECTION_ID }, connectionId: CONNECTION_ID },
-    ],
-    [
-      `/v1/projects/${PROJECT_ID}/api-keys`,
-      { provisionWallet: { connectionId: CONNECTION_ID }, connectionId: CONNECTION_ID },
-    ],
-    ["/v1/api-keys", { provisionWallet: { connectionId: CONNECTION_ID, provider: "privy" } }],
-    ["/v1/api-keys", { provisionWallet: {} }],
-  ] as const)(
-    "rejects a provisioning request that names no single owner through %s (%j)",
-    async (path, provisioning) => {
-      const db = getDb(env);
-      const keyCountBefore = await db.queryOne("SELECT COUNT(*) AS count FROM api_keys");
-      const walletCountBefore = await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets");
-
-      const response = await app.request(
-        path,
-        {
-          method: "POST",
-          headers: adminHeaders(),
-          body: JSON.stringify({
-            name: "Ownerless provisioning key",
-            grants: ["transfers.read"],
-            walletScope: "selected",
-            ...provisioning,
-          }),
-        },
-        env
-      );
-
-      expect(response.status).toBe(400);
-      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-      expect(createConfigWalletMock).not.toHaveBeenCalled();
-      expect(await db.queryOne("SELECT COUNT(*) AS count FROM api_keys")).toEqual(keyCountBefore);
-      expect(await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets")).toEqual(
-        walletCountBefore
-      );
-    }
-  );
-
-  it.each([
-    ["missing", "/v1/api-keys", "missing_connection", null, 404],
-    ["foreign", `/v1/projects/${PROJECT_ID}/api-keys`, FOREIGN_CONNECTION_ID, null, 404],
-    ["out-of-channel", "/v1/api-keys", CONNECTION_ID, "byok", 403],
-  ] as const)(
-    "rejects %s Connection provisioning before Provider I/O",
-    async (_, path, connectionId, outOfChannelMode, status) => {
-      custodyReleaseChannel.outOfChannelMode = outOfChannelMode;
-      const walletCountBefore = await getDb(env)
-        .prepare("SELECT COUNT(*) AS count FROM custody_wallets")
-        .first<{ count: number }>();
-
-      const response = await app.request(
-        path,
-        {
-          method: "POST",
-          headers: adminHeaders(),
-          body: JSON.stringify({
-            name: `Rejected Connection key ${connectionId}`,
-            grants: ["transfers.read"],
-            walletScope: "selected",
-            provisionWallet: { connectionId },
-          }),
-        },
-        env
-      );
-
-      expect(response.status).toBe(status);
-      if (outOfChannelMode) {
-        expect(await response.json()).toEqual({
-          error: {
-            code: "FORBIDDEN",
-            message: custodyProviderNotInReleaseChannel("privy", outOfChannelMode).message,
-            details: { reason: "custody_provider_not_in_release_channel" },
-          },
-          meta: { requestId: expect.any(String) },
-        });
-      }
-      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-      expect(
-        await getDb(env)
-          .prepare("SELECT COUNT(*) AS count FROM custody_wallets")
-          .first<{ count: number }>()
-      ).toEqual(walletCountBefore);
-    }
-  );
-
-  it("rejects an unusable exact Connection before Provider I/O", async () => {
-    await getDb(env)
-      .prepare("UPDATE provider_credentials SET status = 'failed_validation' WHERE id = ?")
-      .bind(CREDENTIAL_ID)
-      .run();
+    ["/v1/api-keys", { provisionWallet: { connectionId: CONNECTION_ID } }],
+    [`/v1/projects/${PROJECT_ID}/api-keys`, { provisionWallet: { provider: "privy" } }],
+    ["/v1/api-keys", { walletLabel: "Treasury" }],
+    ["/v1/api-keys", { walletPurpose: "transfer" }],
+  ] as const)("refuses wallet provisioning on key create through %s (%j)", async (path, field) => {
+    const db = getDb(env);
+    const keysBefore = await db.queryOne("SELECT COUNT(*) AS count FROM api_keys");
+    const walletsBefore = await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets");
 
     const response = await app.request(
-      `/v1/projects/${PROJECT_ID}/api-keys`,
+      path,
       {
         method: "POST",
         headers: adminHeaders(),
         body: JSON.stringify({
-          name: "Unusable Connection key",
+          name: "Provisioning key",
           grants: ["transfers.read"],
           walletScope: "selected",
-          provisionWallet: { connectionId: CONNECTION_ID },
+          ...field,
         }),
       },
       env
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).toContain("POST /v1/wallets");
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(createConfigWalletMock).not.toHaveBeenCalled();
+    expect(await db.queryOne("SELECT COUNT(*) AS count FROM api_keys")).toEqual(keysBefore);
+    expect(await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets")).toEqual(
+      walletsBefore
+    );
+  });
+
+  it.each([
+    ["missing", "missing_connection", null],
+    ["foreign", FOREIGN_CONNECTION_ID, null],
+    ["out-of-channel", CONNECTION_ID, "byok"],
+  ] as const)(
+    "refuses a %s Connection before Provider I/O",
+    async (_, connectionId, outOfChannelMode) => {
+      custodyReleaseChannel.outOfChannelMode = outOfChannelMode;
+      const walletsBefore = await getDb(env).queryOne(
+        "SELECT COUNT(*) AS count FROM custody_wallets"
+      );
+
+      await expect(
+        provisionApiKeyWallet(getDb(env), env, {
+          auditContext,
+          creationReason: "api_key",
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          owner: { connectionId },
+        })
+      ).rejects.toThrow();
+
+      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+      expect(await getDb(env).queryOne("SELECT COUNT(*) AS count FROM custody_wallets")).toEqual(
+        walletsBefore
+      );
+    }
+  );
+
+  it("refuses an unusable exact Connection before Provider I/O", async () => {
+    await getDb(env)
+      .prepare("UPDATE provider_credentials SET status = 'failed_validation' WHERE id = ?")
+      .bind(CREDENTIAL_ID)
+      .run();
+
+    await expect(
+      provisionApiKeyWallet(getDb(env), env, {
+        auditContext,
+        creationReason: "api_key",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        owner: { connectionId: CONNECTION_ID },
+      })
+    ).rejects.toThrow();
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 
@@ -423,7 +275,7 @@ describe("provisionApiKeyWallet", () => {
           name: "Existing Connection wallet key",
           grants: ["transfers.read"],
           walletScope: "selected",
-          signingWalletId: "privy_api_key_default",
+          walletIds: ["cwlt_api_key_provisioning_default"],
         }),
       },
       env
@@ -434,79 +286,15 @@ describe("provisionApiKeyWallet", () => {
     expect(
       await getDb(env)
         .prepare(
-          `SELECT wallet_id
-           FROM api_key_wallet_permissions
+          `SELECT custody_wallet_id
+           FROM api_key_signing_wallets
            WHERE api_key_id = ?`
         )
         .bind(body.data.apiKey.id)
         .first()
-    ).toEqual({ wallet_id: "privy_api_key_default" });
+    ).toEqual({ custody_wallet_id: "cwlt_api_key_provisioning_default" });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
-
-  it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
-    "provisions and binds a Managed wallet under the named provider through %s",
-    async (path) => {
-      const db = getDb(env);
-      await insertTestCustodyWalletRow(db, {
-        id: "cwlt_api_key_config_provisioned",
-        owner: { kind: "config", custodyConfigId: CONFIG_ID },
-        walletId: "para_api_key_config_provisioned",
-        publicKey: "Vote111111111111111111111111111111111111111",
-        label: null,
-        purpose: null,
-        status: "active",
-      });
-      createConfigWalletMock.mockResolvedValueOnce({
-        id: "cwlt_api_key_config_provisioned",
-        custodyConfigId: CONFIG_ID,
-        walletId: "para_api_key_config_provisioned",
-        publicKey: "Vote111111111111111111111111111111111111111",
-        label: null,
-        purpose: null,
-        status: "active",
-        createdAt: new Date().toISOString(),
-      });
-
-      const response = await app.request(
-        path,
-        {
-          method: "POST",
-          headers: adminHeaders(),
-          body: JSON.stringify({
-            name: `Managed provider key ${path}`,
-            grants: ["transfers.read"],
-            walletScope: "selected",
-            provisionWallet: { provider: "para" },
-          }),
-        },
-        env
-      );
-
-      expect(response.status).toBe(201);
-      expect(createConfigWalletMock).toHaveBeenCalledExactlyOnceWith(ORGANIZATION_ID, PROJECT_ID, {
-        provider: "para",
-        label: undefined,
-        purpose: undefined,
-      });
-      const body = (await response.json()) as { data: { apiKey: { id: string } } };
-      expect(
-        await db
-          .prepare(
-            `SELECT p.wallet_id, w.id AS custody_wallet_id
-           FROM api_key_wallet_permissions p
-           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
-           WHERE p.api_key_id = ?`
-          )
-          .bind(body.data.apiKey.id)
-          .first()
-      ).toEqual({
-        wallet_id: "para_api_key_config_provisioned",
-        custody_wallet_id: "cwlt_api_key_config_provisioned",
-      });
-      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-    }
-  );
 });
 
 /** Keys are created by a signed-in organization admin, never a key (HOO-2099). */

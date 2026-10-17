@@ -175,7 +175,6 @@ async function resolveAllowlistAuthoritySigner(
     auth,
     currentAuthority: authorityAddress,
     requestedCustodyWalletId: signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   await admitIssuanceRuntimeExecution({
     env: c.env,
@@ -188,7 +187,6 @@ async function resolveAllowlistAuthoritySigner(
     auth,
     custodyWalletId: authorityWallet.custodyWalletId,
     currentAuthority: authorityAddress,
-    requiredWalletPermissions: ["tokens:write"],
     movement,
   });
   return { ...authorityWallet, authority };

@@ -24,7 +24,7 @@ export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchem
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "walletId is a Provider wallet ID. When omitted for an API key, its authenticated signing-wallet selection is used: the configured preference, otherwise the first resolved binding. Clerk-authenticated dashboard requests must provide walletId. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record.",
+    "walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record, and an API key may check only a wallet within its wallet scope.",
   example: { walletId: "privy_wallet_123" },
 });
 

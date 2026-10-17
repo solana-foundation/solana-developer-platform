@@ -1,7 +1,7 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
 import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { MovementOf, Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
+import type { MovementOf, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
 import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
@@ -9,7 +9,6 @@ import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
-import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -52,7 +51,6 @@ export async function resolveDirectIssuanceReplay(params: {
   type: TokenTransactionType;
   idempotencyKey?: string;
   requestedCustodyWalletId?: string | null;
-  requiredWalletPermissions: Permission[];
   fingerprintForCustodyWalletId: (custodyWalletId: string) => string | undefined;
 }): Promise<TokenTransaction | null> {
   if (!params.idempotencyKey) return null;
@@ -78,7 +76,6 @@ export async function resolveDirectIssuanceReplay(params: {
     env: params.env,
     auth: params.auth,
     custodyWalletId,
-    requiredWalletPermissions: params.requiredWalletPermissions,
   });
   return transaction;
 }
@@ -346,18 +343,12 @@ export async function resolveIssuanceWallet(params: {
   env: Env;
   auth: ApiKeyContext;
   custodyWalletId: string;
-  requiredWalletPermissions: Permission[];
 }): Promise<ResolvedIssuanceWallet> {
   const matches = await findIssuanceWallets(params);
   const wallet = matches[0];
   if (!wallet) {
     throw walletNotFound();
   }
-  assertApiKeyCustodyWalletAccess(
-    params.auth,
-    wallet.custodyWalletId,
-    params.requiredWalletPermissions
-  );
   return wallet;
 }
 
@@ -367,16 +358,13 @@ export async function resolveAuthorityWallet(params: {
   auth: ApiKeyContext;
   requestedCustodyWalletId?: string | null;
   currentAuthority: string;
-  requiredWalletPermissions: Permission[];
 }): Promise<ResolvedIssuanceWallet> {
-  const { env, auth, requestedCustodyWalletId, currentAuthority, requiredWalletPermissions } =
-    params;
+  const { env, auth, requestedCustodyWalletId, currentAuthority } = params;
   if (requestedCustodyWalletId) {
     const wallet = await resolveIssuanceWallet({
       env,
       auth,
       custodyWalletId: requestedCustodyWalletId,
-      requiredWalletPermissions,
     });
     if (wallet.publicKey !== currentAuthority) {
       throw badRequest("Selected custody wallet does not control the current authority");
@@ -392,9 +380,7 @@ export async function resolveAuthorityWallet(params: {
     throw conflict("Current authority wallet is ambiguous");
   }
 
-  const wallet = matches[0];
-  assertApiKeyCustodyWalletAccess(auth, wallet.custodyWalletId, requiredWalletPermissions);
-  return wallet;
+  return matches[0];
 }
 
 /** The issuance movements: compliance controls are exits, everything else a start. */
@@ -435,7 +421,6 @@ export async function resolveAuthoritySigner(params: {
   auth: ApiKeyContext;
   requestedCustodyWalletId?: string | null;
   currentAuthority: string;
-  requiredWalletPermissions: Permission[];
   movement: IssuanceMovement;
 }): Promise<ResolvedIssuanceWallet & IssuanceAuthority> {
   const resolved = await resolveAuthorityWallet(params);
@@ -456,7 +441,6 @@ export async function createResolvedAuthoritySigner(params: {
   auth: ApiKeyContext;
   custodyWalletId: string;
   currentAuthority: string;
-  requiredWalletPermissions: Permission[];
   movement: IssuanceMovement;
 }): Promise<IssuanceAuthority> {
   const wallet = await resolveIssuanceWallet(params);

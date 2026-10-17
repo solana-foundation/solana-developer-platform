@@ -37,18 +37,19 @@ export interface ApiKeyListItem {
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
   walletScope: ApiKeyWalletScope;
-  signingWalletId: string | null;
+  /** The custody wallet ids a selected key may sign with; empty for `all`. */
+  walletIds: string[];
   lastUsedAt: string | null;
   expiresAt: string | null;
+  /** When a rotated key stops working; null unless it was rotated and is in its grace period. */
+  rotationDeadline: string | null;
   createdAt: string;
 }
 
 export interface ApiKeyDetails extends ApiKeyListItem {
   projectId: string;
   allowedIps: string[] | null;
-  signingWalletId: string | null;
   rotatedFrom: string | null;
-  rotationDeadline: string | null;
 }
 
 export interface CreateApiKeyInput {
@@ -65,9 +66,22 @@ export interface CreateApiKeyInput {
   grants: Action[];
   allowedIps?: string[] | null;
   expiresAt?: string | null;
-  signingWalletId?: string | null;
+  walletScope: ApiKeySigningWalletScope;
   pepper?: string;
 }
+
+/**
+ * A key's wallet scope as it is stored (HOO-2099): `all`, or `selected` with
+ * the exact custody wallet ids it may sign with (possibly none: signs nothing).
+ * The ids are checked to be the project's custody wallets before they reach
+ * here ({@link resolveSigningWalletsInProject}).
+ */
+export const apiKeySigningWalletScopeSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("all") }),
+  z.object({ scope: z.literal("selected"), custodyWalletIds: z.array(z.string()).readonly() }),
+]);
+
+export type ApiKeySigningWalletScope = z.infer<typeof apiKeySigningWalletScopeSchema>;
 
 export interface UpdateApiKeyInput {
   keyId: string;
@@ -81,7 +95,8 @@ export interface UpdateApiKeyInput {
   grants?: Action[];
   allowedIps?: string[] | null;
   expiresAt?: string | null;
-  signingWallet?: { walletId: string | null };
+  /** Replaces the key's wallet scope and list. */
+  walletScope?: ApiKeySigningWalletScope;
 }
 
 export interface CreateApiKeyResult {
@@ -151,34 +166,36 @@ interface ApiKeyListRow {
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
   wallet_scope: ApiKeyWalletScope;
-  signing_wallet_id: string | null;
+  wallet_ids: unknown;
   last_used_at: string | null;
   expires_at: string | null;
+  rotation_deadline: string | null;
   created_at: string;
 }
 
 interface ApiKeyDetailsRow extends ApiKeyListRow {
   project_id: string;
   allowed_ips: string | null;
-  signing_wallet_id: string | null;
   rotated_from: string | null;
-  rotation_deadline: string | null;
 }
 
 /** `api_keys.grants`, a `text[]` the driver returns as an array. */
 const storedGrantsSchema = z.array(z.string());
 
+/** A key's active `api_key_signing_wallets`, aggregated to a `text[]`. */
+const walletIdsSchema = z.array(z.string());
+
+/** The custody wallet ids a key lists, as a SELECT column (`wallet_ids`). */
+const WALLET_IDS_COLUMN = `ARRAY(
+                  SELECT s.custody_wallet_id
+                    FROM api_key_signing_wallets s
+                   WHERE s.api_key_id = ak.id AND s.status = 'active'
+                   ORDER BY s.custody_wallet_id
+                ) AS wallet_ids`;
+
 /** API form of the column: aliases expanded, unknown strings dropped. */
 export function parseGrantsColumn(value: unknown): Action[] {
   return expandStoredGrants(storedGrantsSchema.parse(value));
-}
-
-function stringifyJsonb(value: unknown, fallback: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  return JSON.stringify(value ?? fallback);
 }
 
 type RotationTargetRow = {
@@ -189,7 +206,7 @@ type RotationTargetRow = {
   environment: ApiKeyEnvironment;
   project_id: string;
   allowed_ips: string | null;
-  signing_wallet_id: string | null;
+  wallet_scope: ApiKeyWalletScope;
   created_by: string;
   expires_at: string | null;
   status: ApiKeyStatus;
@@ -257,17 +274,8 @@ export class ApiKeyService {
     const result = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.grants, p.environment, ak.status,
-                CASE
-                  WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
-                    SELECT 1
-                    FROM api_key_wallet_permissions akw
-                    WHERE akw.api_key_id = ak.id
-                  )
-                  THEN 'selected'
-                  ELSE 'all'
-                END AS wallet_scope,
-                ak.signing_wallet_id, ak.last_used_at, ak.expires_at,
-                ak.created_at
+                ak.wallet_scope, ${WALLET_IDS_COLUMN},
+                ak.last_used_at, ak.expires_at, ak.rotation_deadline, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.organization_id = ?
@@ -290,16 +298,7 @@ export class ApiKeyService {
     const row = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.grants, p.environment, ak.status,
-                ak.project_id, ak.allowed_ips, ak.signing_wallet_id,
-                CASE
-                  WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
-                    SELECT 1
-                    FROM api_key_wallet_permissions akw
-                    WHERE akw.api_key_id = ak.id
-                  )
-                  THEN 'selected'
-                  ELSE 'all'
-                END AS wallet_scope,
+                ak.project_id, ak.allowed_ips, ak.wallet_scope, ${WALLET_IDS_COLUMN},
                 ak.last_used_at, ak.expires_at, ak.rotated_from,
                 ak.rotation_deadline, ak.created_at
          FROM api_keys ak
@@ -317,9 +316,7 @@ export class ApiKeyService {
       ...this.mapListRow(row),
       projectId: row.project_id,
       allowedIps: parseOptionalPostgresJson<string[]>(row.allowed_ips),
-      signingWalletId: row.signing_wallet_id,
       rotatedFrom: row.rotated_from,
-      rotationDeadline: row.rotation_deadline,
     };
   }
 
@@ -369,7 +366,7 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            grants, allowed_ips, signing_wallet_id, expires_at, status
+            grants, allowed_ips, wallet_scope, expires_at, status
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
@@ -383,7 +380,7 @@ export class ApiKeyService {
           keyHash,
           normalizeGrants(input.grants),
           input.allowedIps ? JSON.stringify(input.allowedIps) : null,
-          input.signingWalletId ?? null,
+          input.walletScope.scope,
           input.expiresAt ?? null
         )
         .run();
@@ -404,6 +401,7 @@ export class ApiKeyService {
 
       throw error;
     }
+    await this.writeSigningWallets(keyId, input.walletScope);
 
     return {
       id: keyId,
@@ -460,9 +458,9 @@ export class ApiKeyService {
       updates.push("grants = ?");
       values.push(normalizeGrants(input.grants));
     }
-    if (input.signingWallet) {
-      updates.push("signing_wallet_id = ?");
-      values.push(input.signingWallet.walletId);
+    if (input.walletScope !== undefined) {
+      updates.push("wallet_scope = ?");
+      values.push(input.walletScope.scope);
     }
 
     if (updates.length === 0) {
@@ -476,6 +474,37 @@ export class ApiKeyService {
       )
       .bind(...values)
       .run();
+    if (input.walletScope !== undefined) {
+      await this.writeSigningWallets(input.keyId, input.walletScope);
+    }
+  }
+
+  /**
+   * Replace a key's signing list with the scope's: a selected key lists
+   * exactly these custody wallets, an `all` key none. Runs on the caller's
+   * transaction, right after the key row it belongs to.
+   */
+  private async writeSigningWallets(keyId: string, walletScope: ApiKeySigningWalletScope) {
+    const listed =
+      walletScope.scope === "selected" ? [...new Set(walletScope.custodyWalletIds)] : [];
+    // Off the list: archived, never deleted.
+    await this.db.execute(
+      `UPDATE api_key_signing_wallets
+          SET status = 'archived', archived_at = sdp_iso_now()
+        WHERE api_key_id = ? AND status = 'active' AND NOT (custody_wallet_id = ANY(?::text[]))`,
+      [keyId, listed]
+    );
+    if (listed.length > 0) {
+      // On the list: a new row, or an archived one active again.
+      await this.db.execute(
+        `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+         SELECT ?, unnest(?::text[])
+         ON CONFLICT (api_key_id, custody_wallet_id) DO UPDATE
+           SET status = 'active', archived_at = NULL
+         WHERE api_key_signing_wallets.status = 'archived'`,
+        [keyId, listed]
+      );
+    }
   }
 
   /**
@@ -523,7 +552,7 @@ export class ApiKeyService {
     const target = await this.db.queryOne<RotationTargetRow>(
       `SELECT ak.id, ak.name, ak.description, ak.grants,
               p.environment, ak.project_id, ak.allowed_ips,
-              ak.signing_wallet_id, ak.created_by, ak.expires_at,
+              ak.wallet_scope, ak.created_by, ak.expires_at,
               ak.status, ak.rotation_deadline
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
@@ -572,18 +601,14 @@ export class ApiKeyService {
         ? target.rotation_deadline
         : requestedDeadline;
 
-    // Everything the replacement copies comes from the locked row and the
-    // bindings read under it: an update to this key waits for the lock, so it
-    // cannot commit between this read and the copy.
-    const bindingRows = await this.db.queryMany<{ wallet_id: string; permissions: unknown }>(
-      "SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = $1",
-      [keyId]
-    );
+    // Everything the replacement copies comes from the locked row and its
+    // signing list: an update to this key waits for the lock, so it cannot
+    // commit between this read and the copy.
 
     await this.db.execute(
       `INSERT INTO api_keys (
          id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-         grants, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
+         grants, allowed_ips, wallet_scope, rotated_from, status, expires_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
       [
         newKeyId,
@@ -596,7 +621,7 @@ export class ApiKeyService {
         newKeyHash,
         grants,
         target.allowed_ips,
-        target.signing_wallet_id,
+        target.wallet_scope,
         keyId,
         target.expires_at,
       ]
@@ -609,20 +634,12 @@ export class ApiKeyService {
       [rotationDeadline, keyId, this.scope.organizationId, this.scope.projectId]
     );
 
-    for (const row of bindingRows) {
-      await this.db.execute(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES (?, ?, ?, ?)`,
-        [
-          `akw_${crypto.randomUUID()}`,
-          newKeyId,
-          row.wallet_id,
-          // Preserve the column verbatim: NULL stays the historical
-          // unrestricted marker, and a driver-parsed array re-serializes.
-          row.permissions == null ? null : stringifyJsonb(row.permissions, []),
-        ]
-      );
-    }
+    await this.db.execute(
+      `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+       SELECT ?, custody_wallet_id FROM api_key_signing_wallets
+        WHERE api_key_id = ? AND status = 'active'`,
+      [newKeyId, keyId]
+    );
 
     return {
       apiKey: {
@@ -695,9 +712,10 @@ export class ApiKeyService {
       environment: row.environment,
       status: row.status,
       walletScope: row.wallet_scope,
-      signingWalletId: row.signing_wallet_id,
+      walletIds: walletIdsSchema.parse(row.wallet_ids),
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
+      rotationDeadline: row.rotation_deadline,
       createdAt: row.created_at,
     };
   }

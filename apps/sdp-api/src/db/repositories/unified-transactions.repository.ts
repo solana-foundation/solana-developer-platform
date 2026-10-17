@@ -7,15 +7,9 @@ import type {
 } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
 
-export interface UnifiedTransactionModuleWalletScope {
-  module: UnifiedTransactionModule;
-  custodyWalletIds: readonly string[];
-}
-
 export interface ListUnifiedTransactionsInput {
   organizationId: string;
   projectId: string | null;
-  moduleWalletScopes?: readonly UnifiedTransactionModuleWalletScope[];
   modules: readonly UnifiedTransactionModule[];
   /**
    * The kinds of Payments row listed when `modules` includes payments; never

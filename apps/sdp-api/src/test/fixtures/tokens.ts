@@ -46,7 +46,6 @@ export const TEST_PROJECT_CACHED_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
   rotationDeadline: null,

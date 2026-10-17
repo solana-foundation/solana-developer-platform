@@ -30,7 +30,6 @@ function cachedKey(grants: SeededApiKey["grants"]): SeededApiKey {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };

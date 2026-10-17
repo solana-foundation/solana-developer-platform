@@ -141,7 +141,6 @@ async function resolveUpdateAuthorityReplayBeforeLiveChecks(
     env: c.env,
     auth: resolved.auth,
     custodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
   });
   const recovered = await recoverSettledTransactionReplay({
     auditService: new AuditService(getDb(c.env)),
@@ -233,7 +232,6 @@ export const prepareUpdateAuthority = async (
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const { signer, custodyWalletId } = authority;
@@ -362,7 +360,6 @@ export async function extractUpdateAuthorityRequest(
     auth,
     requestedCustodyWalletId: input.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   return {
@@ -403,7 +400,6 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     auth,
     custodyWalletId,
     currentAuthority: currentAuthorityRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const signer = authority.signer;

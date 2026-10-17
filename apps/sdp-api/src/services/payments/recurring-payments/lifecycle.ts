@@ -27,6 +27,7 @@ import {
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -38,6 +39,7 @@ import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
+  lockLiveActivatingKey,
   parseNullableStoredSignature,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
@@ -487,7 +489,27 @@ async function runRecurringPaymentLifecycle(
     input.sourceWallet.id
   );
 
+  // A fresh resume is admitted before its claim commits: the job recovers a
+  // claimed resume as its mandate, so a claim must never exist for a caller
+  // the waist would refuse (HOO-2099). A stale one is admitted below, only
+  // when it still has to sign.
+  const recoveringStaleLifecycle =
+    collectionState.recurringPayment.status ===
+    getRecurringPaymentLifecycleStatuses(input.operation).processingStatus;
+  if (input.operation === "resume" && !recoveringStaleLifecycle) {
+    await input.admitStart();
+  }
+
+  // A resume starts the mandate again; a cancel records nobody.
+  const activatedBy = input.operation === "resume" ? currentMandateActivator() : null;
   const claimResult = await getDb(input.env).transaction(async (tx) => {
+    await lockLiveActivatingKey(tx, {
+      activator: activatedBy,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      movement: "recurring.resume",
+      recurringPaymentId: collectionState.recurringPayment.id,
+    });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentLifecycle({
       recurringPaymentId: collectionState.recurringPayment.id,
@@ -496,6 +518,7 @@ async function runRecurringPaymentLifecycle(
       operation: input.operation,
       updatedAt: new Date().toISOString(),
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
+      activatedBy,
     });
     if (!claimed) return null;
     const attempt = await getOrCreateLifecycleAttempt({
@@ -565,11 +588,11 @@ async function runRecurringPaymentLifecycle(
       );
     }
 
-    // Admission runs only before a new signature. An attempt that already
-    // submitted only confirms below, so a refusal never strands an operation
-    // that is on chain. A refused resume goes back to `canceled` through the
-    // failure reset, which matches the subscription on chain.
-    if (!signature && input.operation === "resume") {
+    // A recovered attempt is admitted only before a new signature. One that
+    // already submitted only confirms below, so a refusal never strands an
+    // operation that is on chain. A refused resume goes back to `canceled`
+    // through the failure reset, which matches the subscription on chain.
+    if (recoveringStaleLifecycle && !signature && input.operation === "resume") {
       await input.admitStart();
     }
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(

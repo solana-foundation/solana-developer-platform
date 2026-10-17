@@ -1,16 +1,14 @@
 "use client";
 
 import type { Action, PaymentsDashboardWallet } from "@sdp/types";
-import { CircleCheck, FileText, KeyRound, Layers, Search, Star, Wallet } from "lucide-react";
+import { CircleCheck, FileText, KeyRound, Layers, Search, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DateTimePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { recordQuickStartStep } from "@/lib/dashboard-quick-start.redesign";
@@ -24,6 +22,7 @@ import {
   type ApiKeyAuthoringMode,
   type ApiKeyAuthoringStep,
   createApiKeyAuthoringDraft,
+  defaultWalletScopeForGrants,
   isAuthoringStepComplete,
 } from "./api-key-authoring";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
@@ -55,8 +54,7 @@ function draftFromInitialKey(initialKey?: ApiKeyAuthoringExistingKey): ApiKeyAut
     name: initialKey.name,
     expiresAt: toLocalDateTime(initialKey.expiresAt),
     walletScope: initialKey.walletScope,
-    selectedWalletIds: initialKey.signingWalletIds,
-    defaultWalletId: initialKey.signingWalletId ?? initialKey.signingWalletIds[0] ?? "",
+    selectedWalletIds: initialKey.walletIds,
     grants: initialKey.grants,
   };
 }
@@ -241,15 +239,11 @@ function PermissionsStep({
 function WalletRow({
   wallet,
   checked,
-  isDefault,
   onToggle,
-  onMakeDefault,
 }: {
   wallet: PaymentsDashboardWallet;
   checked: boolean;
-  isDefault: boolean;
   onToggle: () => void;
-  onMakeDefault: () => void;
 }) {
   const t = useTranslations();
   const label = walletLabel(wallet);
@@ -268,33 +262,6 @@ function WalletRow({
         <p className="truncate text-sm font-medium text-primary">{label}</p>
         <p className="truncate text-xs text-secondary">{shortAddress(wallet.publicKey)}</p>
       </div>
-      {checked ? (
-        isDefault ? (
-          <Badge className="shrink-0 text-[10px]">
-            {t("DashboardCustody.defaultSigningWallet")}
-          </Badge>
-        ) : (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="secondary"
-                  className="size-8 shrink-0"
-                  onClick={onMakeDefault}
-                  aria-label={t("DashboardCustody.apiKeyMakeDefaultWallet", { wallet: label })}
-                >
-                  <Star className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {t("DashboardCustody.apiKeyMakeDefaultSigningWallet")}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )
-      ) : null}
     </div>
   );
 }
@@ -314,9 +281,7 @@ function AccessStep({
 }) {
   const t = useTranslations();
   const [search, setSearch] = useState("");
-  const selectedWallets = wallets.filter((wallet) =>
-    draft.selectedWalletIds.includes(wallet.walletId)
-  );
+  const selectedWallets = wallets.filter((wallet) => draft.selectedWalletIds.includes(wallet.id));
   const filteredWallets = wallets.filter((wallet) => {
     const query = search.trim().toLowerCase();
     if (!query) return true;
@@ -329,12 +294,7 @@ function AccessStep({
     const selectedWalletIds = draft.selectedWalletIds.includes(walletId)
       ? draft.selectedWalletIds.filter((item) => item !== walletId)
       : [...draft.selectedWalletIds, walletId];
-    update({
-      selectedWalletIds,
-      defaultWalletId: selectedWalletIds.includes(draft.defaultWalletId)
-        ? draft.defaultWalletId
-        : (selectedWalletIds[0] ?? ""),
-    });
+    update({ selectedWalletIds });
   };
 
   return (
@@ -409,12 +369,10 @@ function AccessStep({
                 {filteredWallets.length > 0 ? (
                   filteredWallets.map((wallet) => (
                     <WalletRow
-                      key={wallet.walletId}
+                      key={wallet.id}
                       wallet={wallet}
-                      checked={draft.selectedWalletIds.includes(wallet.walletId)}
-                      isDefault={draft.defaultWalletId === wallet.walletId}
-                      onToggle={() => toggleWallet(wallet.walletId)}
-                      onMakeDefault={() => update({ defaultWalletId: wallet.walletId })}
+                      checked={draft.selectedWalletIds.includes(wallet.id)}
+                      onToggle={() => toggleWallet(wallet.id)}
                     />
                   ))
                 ) : (
@@ -453,9 +411,7 @@ function ReviewStep({
   wallets: PaymentsDashboardWallet[];
 }) {
   const t = useTranslations();
-  const selectedWallets = wallets.filter((wallet) =>
-    draft.selectedWalletIds.includes(wallet.walletId)
-  );
+  const selectedWallets = wallets.filter((wallet) => draft.selectedWalletIds.includes(wallet.id));
 
   return (
     <div>
@@ -519,9 +475,7 @@ function KeySummary({
   environment: string;
 }) {
   const t = useTranslations();
-  const selectedWallets = wallets.filter((wallet) =>
-    draft.selectedWalletIds.includes(wallet.walletId)
-  );
+  const selectedWallets = wallets.filter((wallet) => draft.selectedWalletIds.includes(wallet.id));
 
   return (
     <aside className="lg:sticky lg:top-4">
@@ -582,6 +536,9 @@ export function ApiKeyAuthoringWorkspace({
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
   const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
+  // A new key's wallet scope follows its grants until the person picks one:
+  // an execute grant starts it on Selected wallets (HOO-2099).
+  const [walletScopeChosen, setWalletScopeChosen] = useState(mode === "edit");
   const [grantsTouched, setGrantsTouched] = useState(false);
   const [isPending, startTransition] = useTransition();
   const environment =
@@ -595,7 +552,15 @@ export function ApiKeyAuthoringWorkspace({
     if ("grants" in patch) {
       setGrantsTouched(true);
     }
-    setDraft((current) => ({ ...current, ...patch }));
+    if ("walletScope" in patch) {
+      setWalletScopeChosen(true);
+    }
+    setDraft((current) => {
+      const next = { ...current, ...patch };
+      return patch.grants !== undefined && !walletScopeChosen && !("walletScope" in patch)
+        ? { ...next, walletScope: defaultWalletScopeForGrants(patch.grants) }
+        : next;
+    });
   };
 
   const submit = () => {

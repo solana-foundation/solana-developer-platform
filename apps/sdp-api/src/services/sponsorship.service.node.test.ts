@@ -26,6 +26,7 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
 import { env as testEnv } from "@/test/helpers/env";
+import { admittedMoneyFacts } from "@/test/helpers/money-admission";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
@@ -74,11 +75,7 @@ function otherTransaction(): Uint8Array {
 
 describe("sponsorship identity boundary", () => {
   beforeEach(() => {
-    readMoneyAdmissionFacts.mockResolvedValue({
-      organizationStatus: "active",
-      projectEnvironment: "sandbox",
-      rawSettings: null,
-    });
+    readMoneyAdmissionFacts.mockResolvedValue(admittedMoneyFacts({ organizationStatus: "active" }));
     vi.spyOn(feePayment, "createFeePaymentAdapter").mockReturnValue({
       providerId: "kora",
       getFeePayer: vi.fn(),
@@ -210,11 +207,9 @@ describe("sponsorship identity boundary", () => {
     );
   }
   it("refuses a self-hosted sponsor signature for a start the organization may not make", async () => {
-    readMoneyAdmissionFacts.mockResolvedValue({
-      organizationStatus: "deleted",
-      projectEnvironment: "sandbox",
-      rawSettings: null,
-    });
+    readMoneyAdmissionFacts.mockResolvedValue(
+      admittedMoneyFacts({ organizationStatus: "deleted" })
+    );
     const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
     const feePayment = selfHostedFeePayment(signAsFeePayer);
 
@@ -296,7 +291,7 @@ describe("sponsorship identity boundary", () => {
         projectId: "project_stale",
         grants: ALL_API_KEY_GRANTS,
         environment: "sandbox",
-        signingWalletId: null,
+        walletAccess: { scope: "all" } as const,
       });
       await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
     });

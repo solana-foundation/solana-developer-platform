@@ -19,6 +19,7 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { enforceOrganizationAccess, organizationNotActive } from "@/lib/organization-access";
 import {
   loadOrganizationEntitlements,
@@ -561,6 +562,20 @@ function assertClerkTenantClaims(payload: ClerkJwtPayload): void {
   }
 }
 
+/**
+ * The rest of a signed-in request: narrowed to the member's organization, and
+ * moving money as the member (HOO-2099). The signing waists re-read the
+ * membership whenever it signs for them.
+ */
+function runAsSignedInMember(
+  clerk: { userId: string; organizationId: string },
+  next: Next
+): Promise<void> {
+  return runWithTenantDatabaseIdentity({ organizationId: clerk.organizationId }, () =>
+    runAsMoneyPrincipal({ kind: "member", userId: clerk.userId }, next)
+  );
+}
+
 export function clerkAuthMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     // Identity mapping, membership sync, and default-project provisioning all
@@ -593,7 +608,7 @@ export function clerkAuthMiddleware() {
       return context;
     });
 
-    await runWithTenantDatabaseIdentity({ organizationId: clerkContext.organizationId }, next);
+    await runAsSignedInMember(clerkContext, next);
   };
 }
 
@@ -635,7 +650,7 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
 
     const clerk = c.get("clerk");
     if (clerk) {
-      await runWithTenantDatabaseIdentity({ organizationId: clerk.organizationId }, next);
+      await runAsSignedInMember(clerk, next);
       return;
     }
     await next();

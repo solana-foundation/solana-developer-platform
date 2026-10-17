@@ -47,9 +47,7 @@ function createAuth(): ApiKeyContext {
     role: "admin",
     grants: null,
     environment: "dashboard",
-    signingWalletId: null,
-    signingWalletIds: [],
-    walletBindings: [],
+    walletAccess: { scope: "all" } as const,
     authType: "clerk",
     userId: "user_test",
     apiKeyId: null,
@@ -113,48 +111,6 @@ async function seedConfigWallet(input: {
         input.status ?? "active"
       ),
   ]);
-}
-
-async function seedSelectedApiKey(walletId: string): Promise<ApiKeyContext> {
-  await getDb(testEnv).batch([
-    getDb(testEnv)
-      .prepare(
-        `INSERT INTO api_keys (
-           id, organization_id, project_id, created_by, name,
-           key_prefix, key_hash, grants, status, signing_wallet_id
-         ) VALUES (
-           'key_test', 'org_test', 'proj_test', 'user_test', 'Test key',
-           'sdp_test', 'hash_test', ?, 'active', ?
-         )`
-      )
-      .bind(["issuance.execute"], walletId),
-    getDb(testEnv)
-      .prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES ('permission_test', 'key_test', ?, '["tokens:write"]')`
-      )
-      .bind(walletId),
-  ]);
-
-  return {
-    ...createAuth(),
-    id: "key_test",
-    authType: "api_key",
-    apiKeyId: "key_test",
-    userId: null,
-    grants: ["issuance.execute"],
-    role: null,
-    walletScope: "selected",
-    signingWalletId: walletId,
-    signingWalletIds: [walletId],
-    walletBindings: [
-      {
-        walletId,
-        custodyWalletId: "cwlt_authority",
-        permissions: ["tokens:write"],
-      },
-    ],
-  };
 }
 
 async function seedConnectionWallet(input: {
@@ -508,7 +464,6 @@ describe("authority-resolution", () => {
         env: testEnv,
         auth: createAuth(),
         currentAuthority: AUTHORITY,
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).resolves.toEqual({
       custodyWalletId: "cwlt_authority",
@@ -527,7 +482,6 @@ describe("authority-resolution", () => {
         env: testEnv,
         auth: createAuth(),
         currentAuthority: AUTHORITY,
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
   });
@@ -540,7 +494,6 @@ describe("authority-resolution", () => {
         env: testEnv,
         auth: createAuth(),
         currentAuthority: AUTHORITY,
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
   });
@@ -556,7 +509,6 @@ describe("authority-resolution", () => {
         auth: createAuth(),
         currentAuthority: AUTHORITY,
         requestedCustodyWalletId: "cwlt_connection",
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).resolves.toEqual({
       custodyWalletId: "cwlt_connection",
@@ -579,7 +531,6 @@ describe("authority-resolution", () => {
         auth: createAuth(),
         currentAuthority: AUTHORITY,
         requestedCustodyWalletId: "cwlt_other",
-        requiredWalletPermissions: ["tokens:admin"],
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST", statusCode: 400 });
   });
@@ -606,7 +557,6 @@ describe("authority-resolution", () => {
         env: testEnv,
         auth: createAuth(),
         currentAuthority: AUTHORITY,
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
     expect(exactSigner).toHaveBeenCalledWith(
@@ -632,7 +582,6 @@ describe("authority-resolution", () => {
         env: testEnv,
         auth: createAuth(),
         custodyWalletId: "cwlt_draft",
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).resolves.toEqual({
       custodyWalletId: "cwlt_draft",
@@ -672,74 +621,8 @@ describe("authority-resolution", () => {
         env: testEnv,
         auth: createAuth(),
         custodyWalletId: "cwlt_other_tenant",
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
-  });
-
-  it("revalidates selected API-key permissions for the exact wallet", async () => {
-    await resetScope();
-    await seedConfigWallet({ id: "cwlt_authority", walletId: "wal_authority" });
-    const auth = await seedSelectedApiKey("wal_authority");
-
-    await expect(
-      resolveIssuanceWallet({
-        env: testEnv,
-        auth,
-        custodyWalletId: "cwlt_authority",
-        requiredWalletPermissions: ["tokens:write"],
-      })
-    ).resolves.toMatchObject({ custodyWalletId: "cwlt_authority" });
-    await expect(
-      resolveIssuanceWallet({
-        env: testEnv,
-        auth,
-        custodyWalletId: "cwlt_authority",
-        requiredWalletPermissions: ["tokens:admin"],
-      })
-    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
-  });
-
-  // The request's bindings were read fresh by authentication; the replay checks
-  // them, so a key no longer bound to the pinned wallet replays nothing.
-  it("checks the request's bindings for a persisted direct-action replay", async () => {
-    await resetScope();
-    await seedConfigWallet({ id: "cwlt_authority", walletId: "wal_authority" });
-    const auth = await seedSelectedApiKey("wal_authority");
-    const transaction = createTokenTransaction({
-      tokenId: "tok_replay",
-      organizationId: "org_test",
-      custodyWalletId: "cwlt_authority",
-      type: "burn",
-      idempotencyKey: "replay",
-      idempotencyFingerprint: "fingerprint",
-    });
-    const tokenService = {
-      findTransactionByIdempotency: vi.fn().mockResolvedValue(transaction),
-    };
-    const replay = (requestAuth: ApiKeyContext) =>
-      resolveDirectIssuanceReplay({
-        env: testEnv,
-        auth: requestAuth,
-        tokenService: tokenService as never,
-        tokenId: "tok_replay",
-        type: "burn",
-        idempotencyKey: "replay",
-        requestedCustodyWalletId: "cwlt_authority",
-        requiredWalletPermissions: ["tokens:write"],
-        fingerprintForCustodyWalletId: () => "fingerprint",
-      });
-
-    await expect(replay(auth)).resolves.toBe(transaction);
-    const rebound: ApiKeyContext = {
-      ...auth,
-      signingWalletId: "wal_other",
-      signingWalletIds: ["wal_other"],
-      walletBindings: [
-        { walletId: "wal_other", custodyWalletId: "cwlt_other", permissions: ["*"] },
-      ],
-    };
-    await expect(replay(rebound)).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });
 
   it("rejects a requested replay wallet that differs from the persisted pin", async () => {
@@ -765,7 +648,6 @@ describe("authority-resolution", () => {
         type: "burn",
         idempotencyKey: "replay",
         requestedCustodyWalletId: "cwlt_other",
-        requiredWalletPermissions: ["tokens:write"],
         fingerprintForCustodyWalletId: fingerprint,
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
@@ -790,7 +672,6 @@ describe("authority-resolution", () => {
         auth: createAuth(),
         custodyWalletId: "cwlt_other",
         currentAuthority: AUTHORITY,
-        requiredWalletPermissions: ["tokens:admin"],
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST", statusCode: 400 });
     expect(exactSigner).not.toHaveBeenCalled();
@@ -810,7 +691,6 @@ describe("authority-resolution", () => {
         auth: createAuth(),
         custodyWalletId: "cwlt_authority",
         currentAuthority: AUTHORITY,
-        requiredWalletPermissions: ["tokens:admin"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
   });

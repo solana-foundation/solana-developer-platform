@@ -25,7 +25,7 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
-import { saveApiKeyAuthoringAction } from "./actions";
+import { deactivateApiKeyInlineAction, saveApiKeyAuthoringAction } from "./actions";
 import { createApiKeyAuthoringDraft } from "./api-key-authoring";
 
 const client = { fetch: vi.fn() };
@@ -77,20 +77,18 @@ describe("saveApiKeyAuthoringAction: create", () => {
     expect(client.fetch).not.toHaveBeenCalled();
   });
 
-  it("creates selected-wallet keys with their wallet bindings", async () => {
+  it("creates selected-wallet keys with their custody wallet ids", async () => {
     await saveApiKeyAuthoringAction({
       mode: "create",
       draft: draft({
         walletScope: "selected",
-        selectedWalletIds: ["wallet_a", "wallet_b"],
-        defaultWalletId: "wallet_b",
+        selectedWalletIds: ["cwlt_a", "cwlt_b"],
       }),
     });
 
     expect(lastBody()).toMatchObject({
       walletScope: "selected",
-      signingWalletId: "wallet_b",
-      signingWalletIds: ["wallet_a", "wallet_b"],
+      walletIds: ["cwlt_a", "cwlt_b"],
     });
   });
 });
@@ -140,14 +138,10 @@ describe("saveApiKeyAuthoringAction: edit", () => {
     await saveApiKeyAuthoringAction({
       mode: "edit",
       keyId: "key_1",
-      draft: draft({ walletScope: "selected", selectedWalletIds: ["wallet_a"] }),
+      draft: draft({ walletScope: "selected", selectedWalletIds: ["cwlt_a"] }),
     });
 
-    expect(lastBody()).toMatchObject({
-      walletScope: "selected",
-      signingWalletId: "wallet_a",
-      signingWalletIds: ["wallet_a"],
-    });
+    expect(lastBody()).toMatchObject({ walletScope: "selected", walletIds: ["cwlt_a"] });
   });
 
   it("reports an API failure without a flash or a revalidation", async () => {
@@ -168,5 +162,33 @@ describe("saveApiKeyAuthoringAction: edit", () => {
 
     expect(result).toEqual({ ok: false, message: "DashboardCustody.apiKeyEditMissingId" });
     expect(client.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("deactivateApiKeyInlineAction", () => {
+  const revoke = { keyId: "key_1", keyName: "Payouts worker", confirmation: "Payouts worker" };
+
+  it("revokes without touching recurring payments unless asked", async () => {
+    client.fetch.mockResolvedValue({ recurringPayments: null });
+
+    const result = await deactivateApiKeyInlineAction(revoke);
+
+    expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
+    expect(lastBody()).toEqual({ confirmation: "Payouts worker", cancelRecurringPayments: false });
+    expect(result).toEqual({ ok: true, message: "DashboardCustody.apiKeyDeactivated" });
+  });
+
+  it("asks the API to cancel what the key started, and reports both counts", async () => {
+    client.fetch.mockResolvedValue({
+      recurringPayments: { canceled: ["prp_1", "prp_2"], failed: ["prp_3"] },
+    });
+
+    const result = await deactivateApiKeyInlineAction({ ...revoke, cancelRecurringPayments: true });
+
+    expect(lastBody()).toEqual({ confirmation: "Payouts worker", cancelRecurringPayments: true });
+    expect(result).toEqual({
+      ok: true,
+      message: "DashboardCustody.apiKeyDeactivated DashboardCustody.apiKeyRecurringCanceled",
+    });
   });
 });

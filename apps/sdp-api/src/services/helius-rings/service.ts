@@ -1409,12 +1409,14 @@ export class HeliusRingsService {
   ): Promise<HeliusRingsOperationRow> {
     if (error instanceof MoneyMovementRefusedError) {
       // Money admission refused the signature (HOO-1955): a decision, not an
-      // outage. Record it as final and surface the 403 rather than a
-      // retryable gateway failure.
+      // outage, surfaced as the 403. Final, except when no one asked: the
+      // poller resuming a build that died runs as no principal, which may not
+      // start money (HOO-2099). The caller's own retry rebuilds and signs as
+      // them, so that failure stays retryable.
       await this.fail(operation.id, operation.state, {
         code: "signer_failed",
         message: error.message,
-        retryable: false,
+        retryable: error.reason === "principal_missing",
       });
       throw error;
     }
