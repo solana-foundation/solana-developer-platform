@@ -434,6 +434,57 @@ async function bindApiKeyToWallet(custodyWalletId: string): Promise<void> {
   await seedCachedKey({ walletScope: "selected", walletIds: [custodyWalletId] });
 }
 
+/**
+ * POSTs `path` as the recurring test key while another transaction holds the
+ * key row, and revokes the key there once the request's claim is waiting on
+ * it: the request was admitted with a live key, and its claim reads it after
+ * the revocation commits.
+ */
+async function revokeKeyWhileClaiming(path: string): Promise<Response> {
+  let revoke: () => void = () => {};
+  const revoked = new Promise<void>((resolve) => {
+    revoke = resolve;
+  });
+  let locked: () => void = () => {};
+  const holding = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const revocation = getDb(env).transaction(async (tx) => {
+    await tx.execute("SELECT id FROM api_keys WHERE id = ? FOR UPDATE", [TEST_API_KEY.id]);
+    locked();
+    await revoked;
+    await tx.execute("UPDATE api_keys SET status = 'deactivated' WHERE id = ?", [TEST_API_KEY.id]);
+  });
+  await holding;
+  const request = app.request(
+    path,
+    { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+    env
+  );
+  await untilWaitingOnKeyLock();
+  revoke();
+  await revocation;
+  return request;
+}
+
+/** Waits until a claim's share lock on an API key row is blocked behind another transaction. */
+async function untilWaitingOnKeyLock(): Promise<void> {
+  for (let attempt = 0; attempt < 250; attempt++) {
+    const waiting = await getDb(env).queryOne<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock'
+          AND datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND position('FOR SHARE' in query) > 0
+          AND position('api_keys' in query) > 0`
+    );
+    if (!waiting) throw new Error("COUNT(*) returned no row");
+    if (waiting.count > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("No claim started waiting on the API key row lock");
+}
+
 async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPayment> {
   const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
   const response = await app.request(
@@ -4461,6 +4512,55 @@ describe("Payments routes — recurring", () => {
       .first<{ count: number }>();
     expect(attempts).toEqual({ count: 0 });
     expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  });
+
+  // The claim and a revocation are ordered on the key row (HOO-2099): an
+  // activation admitted just before its key is revoked must not leave a claim
+  // the job would later finish as the mandate.
+  it("refuses an activation whose key is revoked between admission and claim", async () => {
+    const payment = await seedPendingRecurringPayment();
+    const before = await recurringExecutionSnapshot(payment.id);
+
+    const response = await revokeKeyWhileClaiming(
+      `/v1/payments/recurring-payments/${payment.id}/activate`
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+  });
+
+  it("refuses a resume whose key is revoked between admission and claim", async () => {
+    recurringExecution
+      .signAndSendMock()
+      .mockResolvedValue(
+        signature(
+          "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+        )
+      );
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancelRes.status).toBe(200);
+    const before = await recurringExecutionSnapshot(activated.id);
+
+    const response = await revokeKeyWhileClaiming(
+      `/v1/payments/recurring-payments/${activated.id}/resume`
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(activated.id)).toEqual(before);
   });
 
   it.each([

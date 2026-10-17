@@ -55,6 +55,7 @@ import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
+  lockLiveActivatingKey,
   parseNullableStoredSignature,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
@@ -672,7 +673,15 @@ export async function activateRecurringPayment(input: {
   if (!recoveringStaleActivation) {
     await input.admitStart();
   }
+  const activatedBy = currentMandateActivator();
   const claimResult = await getDb(input.env).transaction(async (tx) => {
+    await lockLiveActivatingKey(tx, {
+      activator: activatedBy,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      movement: "recurring.activate",
+      recurringPaymentId: input.recurringPayment.id,
+    });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentActivation({
       recurringPaymentId: input.recurringPayment.id,
@@ -680,7 +689,7 @@ export async function activateRecurringPayment(input: {
       projectId: input.projectId,
       updatedAt: nowIso,
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
-      activatedBy: currentMandateActivator(),
+      activatedBy,
     });
     if (!claimed) return null;
     const attempt = await createClaimedActivationAttempt({
