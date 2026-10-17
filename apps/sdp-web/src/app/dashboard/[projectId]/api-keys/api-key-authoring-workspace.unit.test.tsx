@@ -168,8 +168,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
 
   it("starts a key with an execute grant on selected wallets, until the person picks", async () => {
     await openAccessStep();
-    const selected = screen.getByRole("radio", { name: /Selected wallets/ }) as HTMLInputElement;
-    expect(selected.checked).toBe(true);
+    expect(screen.getByRole("radio", { name: /Selected wallets/ })).toHaveProperty("checked", true);
     expect(screen.getByRole("button", { name: "Continue" }).hasAttribute("disabled")).toBe(true);
   });
 
@@ -177,8 +176,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     const user = await openPermissionsStep();
     await user.click(screen.getByRole("checkbox", { name: "Read on Transfers" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    const all = screen.getByRole("radio", { name: /All wallets/ }) as HTMLInputElement;
-    expect(all.checked).toBe(true);
+    expect(screen.getByRole("radio", { name: /All wallets/ })).toHaveProperty("checked", true);
   });
 
   it("selects wallets by their custody wallet id", async () => {

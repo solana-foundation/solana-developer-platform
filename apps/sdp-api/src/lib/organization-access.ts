@@ -109,7 +109,7 @@ export async function enforceOrganizationAccess(
 /** `api_keys.grants`, a `text[]` the driver returns as an array. */
 const storedGrantsSchema = z.array(z.string());
 
-/** `api_key_signing_wallets` for the key, aggregated to a `text[]`. */
+/** The key's active `api_key_signing_wallets`, aggregated to a `text[]`. */
 const signingWalletIdsSchema = z.array(z.string());
 
 const walletScopeSchema = z.enum(["all", "selected"]);
@@ -171,7 +171,7 @@ export async function authorizeApiKey(
               ARRAY(
                 SELECT s.custody_wallet_id
                   FROM api_key_signing_wallets s
-                 WHERE s.api_key_id = ak.id
+                 WHERE s.api_key_id = ak.id AND s.status = 'active'
                  ORDER BY s.custody_wallet_id
               ) AS signing_wallet_ids,
               p.environment, p.status AS project_status,

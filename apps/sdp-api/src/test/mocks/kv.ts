@@ -145,11 +145,18 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
   const walletIds = data.walletIds;
   // One replacement: a failed insert must not leave the key partly listed.
   await db.transaction(async (tx) => {
-    await tx.execute("DELETE FROM api_key_signing_wallets WHERE api_key_id = ?", [data.id]);
+    await tx.execute(
+      `UPDATE api_key_signing_wallets
+          SET status = 'archived', archived_at = sdp_iso_now()
+        WHERE api_key_id = ? AND status = 'active' AND NOT (custody_wallet_id = ANY(?::text[]))`,
+      [data.id, walletIds]
+    );
     await tx.execute(
       `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
        SELECT ak.id, w FROM api_keys ak CROSS JOIN unnest(?::text[]) AS w WHERE ak.id = ?
-       ON CONFLICT DO NOTHING`,
+       ON CONFLICT (api_key_id, custody_wallet_id) DO UPDATE
+         SET status = 'active', archived_at = NULL
+       WHERE api_key_signing_wallets.status = 'archived'`,
       [walletIds, data.id]
     );
   });

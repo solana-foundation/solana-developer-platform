@@ -288,12 +288,9 @@ describe("MOVEMENTS starts", () => {
   // refuses a principal holding none of them; this pins every pairing.
   it("name the actions that sign them", () => {
     const actions = Object.fromEntries(
-      (Object.keys(MOVEMENTS) as MovementId[])
-        .filter((movement) => MOVEMENTS[movement].kind === "start")
-        .map((movement) => {
-          const definition = MOVEMENTS[movement];
-          return [movement, definition.kind === "start" ? [...definition.actions] : []];
-        })
+      Object.entries(MOVEMENTS).flatMap(([movement, definition]) =>
+        definition.kind === "start" ? [[movement, [...definition.actions]]] : []
+      )
     );
     expect(actions).toEqual({
       "custody.signer_check": ["wallets.execute"],

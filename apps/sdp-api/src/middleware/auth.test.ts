@@ -502,7 +502,7 @@ describe("Auth Middleware", () => {
 
       await getDb(env)
         .prepare(
-          "DELETE FROM api_key_signing_wallets WHERE api_key_id = ? AND custody_wallet_id = 'cwlt_fresh_b'"
+          "UPDATE api_key_signing_wallets SET status = 'archived', archived_at = sdp_iso_now() WHERE api_key_id = ? AND custody_wallet_id = 'cwlt_fresh_b'"
         )
         .bind(TEST_API_KEY.id)
         .run();

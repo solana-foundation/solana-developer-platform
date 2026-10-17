@@ -1,7 +1,7 @@
 import {
-  COLLECTABLE_RECURRING_PAYMENT_STATUSES,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
+  LIVE_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES,
   PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_ATTEMPT_STAGES,
@@ -9,7 +9,6 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
-  type PaymentRecurringPaymentStatus,
   RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
@@ -50,18 +49,6 @@ import type {
   UpdatePaymentRecurringPaymentLifecycleInput,
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
-
-/**
- * A recurring payment that collects, or will once its activation, update or
- * resume in flight finishes: revoke-and-cancel must see both, or one mid-way
- * would become active after the revoke that was meant to stop it.
- */
-const LIVE_RECURRING_PAYMENT_STATUSES = [
-  ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
-  "activating",
-  "updating",
-  "resuming",
-] as const satisfies readonly PaymentRecurringPaymentStatus[];
 
 type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
 

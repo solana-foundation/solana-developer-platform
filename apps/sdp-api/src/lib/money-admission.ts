@@ -517,6 +517,7 @@ export async function readMoneyAdmissionFactsWith(
                    ELSE EXISTS (
                      SELECT 1 FROM api_key_signing_wallets s
                       WHERE s.api_key_id = ak.id AND s.custody_wallet_id = ?::text
+                        AND s.status = 'active'
                    )
               END AS key_wallet_listed,
               om.status AS member_status, om.role AS member_role,
