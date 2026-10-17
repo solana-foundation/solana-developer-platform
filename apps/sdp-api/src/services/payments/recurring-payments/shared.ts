@@ -17,6 +17,7 @@ import {
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
   type Instruction,
+  type MaybeAccount,
   partiallySignTransactionMessageWithSigners,
   pipe,
   type Signature,
@@ -24,7 +25,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
 } from "@solana/kit";
-import { findPlanPda } from "@solana/subscriptions";
+import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
 import type {
   PaymentRecurringPaymentRow,
   PaymentSubscriptionPlanRow,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -275,6 +277,125 @@ export async function sendSubscriptionInstructions(input: {
         store: input.submissionStore,
       })
     : feePayment.signAndSend(txBytes);
+}
+
+/**
+ * Whether a subscription delegation is canceled on chain: `cancelSubscription`
+ * sets `expiresAtTs` to the end of the current period and `resumeSubscription`
+ * clears it to 0.
+ */
+export function isSubscriptionDelegationCanceled(
+  delegation: MaybeAccount<SubscriptionDelegation>
+): boolean {
+  return delegation.exists && delegation.data.expiresAtTs !== 0n;
+}
+
+/** What the warning names when a step is found on chain without its saved signature. */
+export interface ResumedStepLogContext {
+  recurring_payment_id: string;
+  attempt_id: string;
+  step:
+    | "create_plan"
+    | "authorize_subscription"
+    | "update_plan"
+    | "cancel_old_subscription"
+    | "cancel"
+    | "resume";
+}
+
+/**
+ * What the chain says about a step an earlier run reached (HOO-2044): `landed`
+ * when its effect is on chain at `finalized`, so it is not sent again; `absent`
+ * when there is no effect and no saved send, so it is sent (`account` is the
+ * `finalized` read, for building it).
+ */
+export type ResumedStep<T> = { kind: "landed" | "absent"; account: T };
+
+/**
+ * Settles a step an earlier run reached before this run sends it. A step's
+ * signature is saved only after its send returns, so the attempt alone cannot
+ * say whether that send landed; the step's account can, because only this
+ * attempt causes its effect.
+ *
+ * - The effect at `finalized`: landed.
+ * - The effect at `confirmed` only (a fresh retry; a stale send is long final):
+ *   it is landing, so this throws for a retry instead of sending.
+ * - No effect, no saved signature: absent. A stale attempt's earlier send can no
+ *   longer land; a fresh retry's still could, and a duplicate then fails on chain.
+ * - No effect, saved signature: looked up with transaction history, since
+ *   recovery runs long after the status cache dropped it. Failed, or unknown on a
+ *   stale attempt (its blockhash expired), fails the step; succeeded but not yet
+ *   visible throws for a retry; unknown on a fresh retry waits for it.
+ */
+export async function settleResumedStep<T extends { exists: boolean }>(input: {
+  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  read: (commitment: "finalized" | "confirmed") => Promise<T>;
+  /** Whether the account shows the step's effect. */
+  landed: (account: T) => boolean;
+  /** The signature an earlier run saved for this step, if it got that far. */
+  savedSignature: Signature | null;
+  /** The attempt is past the operation's stale window, so any earlier send's blockhash expired. */
+  stale: boolean;
+  /** The TRANSACTION_FAILED message when the step's saved send failed. */
+  failureMessage: string;
+  logContext: ResumedStepLogContext;
+}): Promise<ResumedStep<T>> {
+  const finalized = await input.read("finalized");
+  if (input.landed(finalized)) {
+    if (input.savedSignature === null) {
+      getLogger().warn(
+        input.logContext,
+        "Recurring payment step found on chain without its saved signature"
+      );
+    }
+    return { kind: "landed", account: finalized };
+  }
+  if (!input.stale && input.landed(await input.read("confirmed"))) {
+    throw stepStillLanding();
+  }
+  if (input.savedSignature === null) {
+    return { kind: "absent", account: finalized };
+  }
+
+  const [status] = await solanaRpc.getSignatureStatuses(input.rpc, [input.savedSignature], {
+    searchTransactionHistory: true,
+  });
+  if (status === null || status === undefined) {
+    if (input.stale) {
+      throw transactionFailed(input.failureMessage);
+    }
+    const confirmation = await solanaRpc.confirmTransaction(input.rpc, input.savedSignature, {
+      commitment: "confirmed",
+    });
+    if (confirmation.err) {
+      throw transactionFailed(input.failureMessage);
+    }
+    throw stepStillLanding();
+  }
+  if (status.err) {
+    throw transactionFailed(input.failureMessage);
+  }
+  throw stepStillLanding();
+}
+
+/**
+ * {@link settleResumedStep} for a step only some runs resume: null when this run
+ * starts the step, or when the chain says to send it; the account when it landed.
+ */
+export async function settleStepIfResumed<T extends { exists: boolean }>(
+  resumed: boolean,
+  input: Parameters<typeof settleResumedStep<T>>[0]
+): Promise<T | null> {
+  if (!resumed) {
+    return null;
+  }
+  const step = await settleResumedStep(input);
+  return step.kind === "landed" ? step.account : null;
+}
+
+/** A step that landed, or may have, but is not final or not visible yet: retry it. */
+function stepStillLanding(): AppError {
+  return conflict("Recurring payment step has landed but is not final on chain yet; retry");
 }
 
 export async function confirmSubscriptionSignature(

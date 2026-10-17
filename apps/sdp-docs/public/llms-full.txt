@@ -272,6 +272,52 @@ Modules with their own key handling say so on their pages.
 - A new operation needs a new key, even when its request is identical to an earlier one.
 - Keys are scoped to your organization, project, HTTP method and route, and bound to the credential that sent them. The same key value on two different routes is two separate keys.
 
+A money request, saved with its key before the first send and retried under that key:
+
+```typescript title="send-transfer.ts"
+// Save the key with the operation first, so a restarted worker retries under it.
+const payout = await db.payouts.create({ ...input, idempotencyKey: crypto.randomUUID() });
+
+async function sendTransfer(payout: Payout): Promise<Response> {
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch("https://api.solana.com/v1/payments/transfers", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer sk_test_...",
+          "Content-Type": "application/json",
+          "Idempotency-Key": payout.idempotencyKey,
+        },
+        body: JSON.stringify(payout.request),
+      });
+    } catch {
+      // The connection dropped: the transfer may have run, so retry under the same key.
+      await backoff(attempt);
+      continue;
+    }
+    if (!(await isRetryable(response))) return response;
+    await backoff(attempt, response.headers.get("Retry-After"));
+  }
+  throw new Error(`Transfer ${payout.id} is still unanswered: retry later with the same key`);
+}
+
+async function isRetryable(response: Response): Promise<boolean> {
+  // A money route answers a same-key retry after a 5xx from the record the first attempt wrote.
+  if (response.status >= 500 || response.status === 429) return true;
+  if (response.status !== 409) return false;
+  const { error } = await response.clone().json();
+  return error?.code === "IDEMPOTENCY_KEY_IN_FLIGHT";
+}
+
+function backoff(attempt: number, retryAfter?: string | null): Promise<void> {
+  const ms = Math.max(Number(retryAfter ?? 0) * 1000, 250 * 2 ** attempt);
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+```
+
+Every retry above sends the same body and the same key. Don't change the request to "fix" a retry: a different request under the key is `422 IDEMPOTENCY_KEY_REUSED`.
+
 ## What a retry returns
 
 Access is checked before the key on every request, so a retry passes exactly the checks a new request passes, and a request refused for access never claims the key.
@@ -286,7 +332,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
 | A transfer or transfer batch failed after writing its record (for example `400 TRANSACTION_FAILED`, or `409` for a signer mismatch) | Stored: the same error, with `Idempotent-Replayed: true`. After 24 hours the record answers with the same status and code. The key is spent: send the request again with a new key to try again. |
 | A recurring-payment action failed | An action refused before it sent anything leaves the schedule as it was. If a cancel or resume sent its transaction and confirming it then failed, SDP keeps the attempt and the schedule stays `canceling` or `resuming` until the attempt is recovered; poll `GET /v1/payments/recurring-payments/{id}`. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
-| A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel, resume and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted collect finishes on its own from the transaction SDP saved before sending it. An interrupted activate, cancel or resume is resumed in the background from the last step SDP recorded; if it was interrupted after a step was sent but before SDP recorded it, that recovery can fail instead of finishing. An interrupted `PATCH` resumes only when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
+| A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel, resume and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted collect finishes on its own from the transaction SDP saved before sending it. An interrupted activate, cancel or resume is resumed in the background from the last step SDP recorded; SDP first reads each step it may already have sent from the chain, and a step is not sent again when the chain shows it landed. An interrupted `PATCH` resumes only when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
 | A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
 | Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. |
 
@@ -300,7 +346,7 @@ An organization that has been deleted or has lost production access is refused b
 
 A replay returns the response as it was first sent: a transfer stored as `processing` replays as `processing`. To see current state, read the resource with `GET`. Never re-send a request to learn its outcome.
 
-When the answer comes from the original record instead (a same-key retry after a `5xx`, or after the 24-hour window), it reflects that record as it stands now. A recurring-payment lifecycle action answered this way returns the schedule as it is, which may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles. An update left `updating` is not finished in the background: retry the `PATCH` with the same key. Until the interrupted attempt is 15 minutes old, that retry gets `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`; after that, it resumes from the last step SDP recorded. If the interruption came after a step was sent but before SDP recorded it, which is rare, the retry can fail or send that step again; read the schedule with `GET` before editing it again.
+When the answer comes from the original record instead (a same-key retry after a `5xx`, or after the 24-hour window), it reflects that record as it stands now. A recurring-payment lifecycle action answered this way returns the schedule as it is, which may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles. An update left `updating` is not finished in the background: retry the `PATCH` with the same key. Until the interrupted attempt is 15 minutes old, that retry gets `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`; after that, it resumes from the last step SDP recorded, and a step is not sent again when the chain shows it landed.
 
 ## Retention
 
