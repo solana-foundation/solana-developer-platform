@@ -5,6 +5,8 @@ import {
   type Action,
   API_KEY_FORBIDDEN_ACTIONS,
   API_KEY_GRANTABLE_ACTIONS,
+  actionModuleOf,
+  actionVerbOf,
   apiKeyMayPerform,
   expandStoredGrants,
   grantsCoverAction,
@@ -120,8 +122,8 @@ describe("action registry", () => {
 
   it("names every action module.verb with a verb its module has", () => {
     for (const action of ACTIONS) {
-      const [module, verb] = action.split(".") as [keyof typeof ACTION_MODULES, string];
-      expect((ACTION_MODULES[module].verbs as readonly string[]).includes(verb), action).toBe(true);
+      const verbs: readonly string[] = ACTION_MODULES[actionModuleOf(action)].verbs;
+      expect(verbs.includes(actionVerbOf(action)), action).toBe(true);
     }
   });
 });

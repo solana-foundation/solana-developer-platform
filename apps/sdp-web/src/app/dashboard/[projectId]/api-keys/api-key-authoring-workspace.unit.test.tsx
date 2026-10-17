@@ -114,7 +114,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     await user.click(screen.getByRole("checkbox", { name: "Execute on Recurring payments" }));
 
     const read = screen.getByRole("checkbox", { name: "Read on Recurring payments" });
-    expect((read as HTMLInputElement).checked).toBe(true);
+    expect(read).toHaveProperty("checked", true);
     expect(read.hasAttribute("disabled")).toBe(true);
     expect(continueButton.hasAttribute("disabled")).toBe(false);
   });
@@ -158,7 +158,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     const execute = screen.getByRole("checkbox", { name: "Execute on Transfers" });
-    expect((execute as HTMLInputElement).checked).toBe(true);
+    expect(execute).toHaveProperty("checked", true);
   });
 
   it("keeps wallet access on the access step", async () => {
