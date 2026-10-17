@@ -1,0 +1,395 @@
+/*
+ * Markets: the
+ * page's three columns for the words, then the chart across the whole width with its key and
+ * figures in its empty upper left.
+ */
+.section {
+  /* small chart text, darkened from 50% ink so it reaches AA */
+  --chart-ink: #0f0f13a6;
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  padding: var(--pad) 0;
+}
+
+/* the headline across two columns, the paragraph and its link in the third, on its first line */
+.head {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 26px;
+  align-items: first baseline;
+  margin: 0 0 var(--lead);
+}
+
+.title {
+  grid-column: 1 / 3;
+  grid-row: 1;
+  font-size: var(--display);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.body {
+  grid-column: 3;
+  grid-row: 1;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--sub);
+}
+
+/* the link under the paragraph; on a touch screen it keeps its top margin */
+.link {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: start;
+  --more-touch-top: 22px;
+}
+
+/* ── the chart, to the brand file (Chart, 1:3567) ──────────────────────────
+   The slide's chart region is 1826 by 560: the curve y 52–533, the treasuries line y 417–533,
+   the baseline at 551, the dashed Deployed mark at x 1333. Every piece is placed in that box by
+   the slide's own numbers, so it scales as one drawing. */
+.chart {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1826 / 560;
+  margin: 0;
+  cursor: crosshair;
+}
+
+.chart > * {
+  position: absolute;
+}
+
+.fill,
+.curve {
+  left: 0;
+  top: 2.14%;
+  width: 100%;
+  height: 85.9%;
+}
+
+.low {
+  left: 0;
+  top: 67.3%;
+  width: 100%;
+  height: 20.7%;
+}
+
+.base {
+  left: 0;
+  right: 0;
+  top: 91.25%;
+  height: 1px;
+  background: #0f0f1326;
+}
+
+.deployed {
+  left: 70%;
+  top: 79.6%;
+  width: 2px;
+  height: 11.6%;
+}
+
+.dot {
+  width: 11px;
+  height: 11px;
+  right: -5px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+}
+
+.dotDefi {
+  top: 2.2%;
+  background: var(--purple);
+}
+
+/* the end of the DeFi line: a soft halo, and a ripple that leaves it every few seconds */
+.dotDefi::before,
+.dotDefi::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  background: #9945ff1f;
+}
+
+.dotDefi::after {
+  inset: 0;
+  background: #9945ff22;
+  animation: ripple 2.8s cubic-bezier(0.2, 0.6, 0.3, 1) 2s infinite;
+  animation-play-state: paused;
+}
+
+.chart[data-on-screen="true"] .dotDefi::after {
+  animation-play-state: running;
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(4.2);
+    opacity: 0;
+  }
+}
+
+.dotTreasuries {
+  top: 67.4%;
+  background: #2a2830;
+}
+
+.legend {
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: clamp(20px, 2.2vw, 40px);
+  font: 500 clamp(13px, 1.05vw, 16px) / 1.15 var(--font);
+  color: var(--chart-ink);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.key {
+  display: inline-block;
+  width: 18px;
+  height: 5px;
+  border-radius: 1px;
+}
+
+.keyDefi {
+  background: linear-gradient(90deg, #c9c6d1, #9945ff);
+}
+
+.keyTreasuries {
+  background: linear-gradient(90deg, #c9c6d1, #3a3842);
+}
+
+.axis {
+  left: 0;
+  right: 0;
+  top: calc(91.25% + 14px);
+  font: 500 clamp(13px, 1.05vw, 16px) / 1.15 var(--font);
+  color: var(--chart-ink);
+}
+
+.axis span {
+  position: absolute;
+  left: 0;
+  white-space: nowrap;
+}
+
+.axis .axisDeployed {
+  left: 67.1%;
+}
+
+.axis .axisToday {
+  left: 81.9%;
+}
+
+/* the figures sit in the chart's empty upper left, under the key, split by a hairline */
+.stats {
+  left: 0;
+  top: 17%;
+  display: flex;
+}
+
+.stats > div {
+  padding-right: clamp(24px, 3vw, 44px);
+}
+
+.stats > div + div {
+  padding-left: clamp(24px, 3vw, 44px);
+  border-left: 1px solid var(--line);
+}
+
+.stats b {
+  display: block;
+  font: 400 clamp(40px, 4.4vw, 76px) / 1 var(--font);
+  letter-spacing: -0.02em;
+  color: var(--purple);
+}
+
+.stats span {
+  display: block;
+  max-width: 18ch;
+  margin-top: 16px;
+  font: 500 clamp(15px, 1.2vw, 18px) / 1.2 var(--font);
+  color: var(--sub);
+}
+
+/* drawn in from the left, once */
+.fill,
+.curve,
+.low {
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 1800ms cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+.dot {
+  opacity: 0;
+  transition: opacity 500ms ease 1500ms;
+}
+
+.chart[data-drawn="true"] .fill,
+.chart[data-drawn="true"] .curve,
+.chart[data-drawn="true"] .low {
+  clip-path: inset(0 0 0 0);
+}
+
+.chart[data-drawn="true"] .dot {
+  opacity: 1;
+}
+
+/* reading by hand: a hairline up from the axis, a dot on each line, a bubble with both rates */
+.scrub {
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms var(--e);
+}
+
+.scrub[data-on="true"] {
+  opacity: 1;
+}
+
+.scrub::before {
+  content: "";
+  position: absolute;
+  left: var(--x);
+  top: 0;
+  width: 1px;
+  height: 91.25%;
+  background: linear-gradient(#0f0f1300, #0f0f1330 30%, #0f0f1330);
+}
+
+.scrubDefi,
+.scrubTreasuries {
+  position: absolute;
+  left: var(--x);
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+}
+
+.scrubDefi {
+  background: var(--purple);
+  box-shadow:
+    0 0 0 6px #9945ff24,
+    0 0 16px #9945ff66;
+}
+
+.scrubTreasuries {
+  background: #2a2830;
+  box-shadow: 0 0 0 5px #0f0f1314;
+}
+
+.tip {
+  position: absolute;
+  left: var(--x);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: radial-gradient(90% 150% at 32% 78%, #e6d8ff 0%, #f1eaff 60%, #f8f4ff 100%);
+  box-shadow:
+    inset 0 0 12px #9945ff33,
+    0 8px 24px -14px #7a2fe066;
+  font: 500 14px / 1 var(--font);
+  letter-spacing: -0.005em;
+  color: #1e0b3d;
+}
+
+.tip > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tip .key {
+  width: 14px;
+  height: 4px;
+}
+
+@media (hover: none) {
+  .scrub {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .title,
+  .body,
+  .link {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .body {
+    margin-top: 20px;
+  }
+
+  /* the key above the chart and the figures under it, outside its box */
+  .chart {
+    margin-top: 64px;
+    margin-bottom: 190px;
+  }
+
+  .legend {
+    top: -52px;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+  }
+
+  .stats {
+    top: calc(100% + 64px);
+    right: 0;
+  }
+
+  /* the block's reveal would clip the key and the figures that now hang outside it */
+  .layout > .chartBlock,
+  .layout > .chartBlock[data-arrived] {
+    clip-path: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .axis .axisToday {
+    left: auto;
+    right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill,
+  .curve,
+  .low {
+    clip-path: none;
+    transition: none;
+  }
+
+  .dot {
+    opacity: 1;
+    transition: none;
+  }
+
+  .dotDefi::after {
+    animation: none;
+  }
+}

@@ -1,0 +1,306 @@
+/*
+ * Meet the builders. The room is 220vh of
+ * scroll; the stage stays pinned under the bar (--nav-height) and the scene draws in it. Without
+ * the ring (no WebGL, reduced motion) the room is as tall as its content and the captions sit in
+ * the flow around a grid of the films.
+ */
+.section {
+  position: relative;
+  margin-bottom: 0;
+}
+
+.room {
+  position: relative;
+  box-sizing: border-box;
+  height: 220vh;
+  /* the section padding bounds the pinned stage, so the ring arrives 104px down
+     and leaves 104px early; the shot's progress still runs over the whole 220vh */
+  padding: 104px 0;
+  color: #fff;
+}
+
+.stage {
+  position: sticky;
+  top: var(--nav-height);
+  height: calc(100svh - var(--nav-height));
+  overflow: hidden;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.caption {
+  position: absolute;
+  left: 50%;
+  z-index: 4;
+  width: min(900px, 90vw);
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.caption[data-in="true"] {
+  opacity: 1;
+}
+
+.top {
+  top: max(12vh, 76px);
+}
+
+.bottom {
+  bottom: 7vh;
+}
+
+.title {
+  margin: 0;
+  font: 400 var(--display) / 0.98 var(--font);
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.room .title {
+  color: #fff;
+}
+
+/* scoped to the caption to outrank the page's `p { margin: 0 }` */
+.caption .body {
+  max-width: 44ch;
+  margin: 16px auto 0;
+  font-size: clamp(16px, 1.5vw, 22px);
+  line-height: 1.4;
+  color: #ffffff99;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 0.5s 0.25s,
+    transform 0.5s 0.25s;
+}
+
+.top .body {
+  text-shadow: 0 1px 14px #08080acc;
+}
+
+.cta {
+  display: flex;
+  justify-content: center;
+  margin-top: 26px;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 0.5s 0.4s;
+}
+
+.caption[data-in="true"] .body,
+.caption[data-in="true"] .cta {
+  opacity: 1;
+  transform: none;
+}
+
+/* a caption that is not there is not there for a tap or a key */
+.caption:not([data-in="true"]) .cta {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.room .series {
+  border-color: #ffffff33;
+  color: #fff;
+}
+
+.room .series:hover {
+  background: #ffffff14;
+}
+
+.ytm {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 22px;
+  height: auto;
+  margin-right: 10px;
+  vertical-align: -3px;
+}
+
+/* beside the ring: the films as links, out of sight until a key reaches one, then over the stage */
+.keyList {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  list-style: none;
+}
+
+.keyList:focus-within {
+  left: 50%;
+  bottom: 24px;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 18px;
+  width: min(900px, calc(100vw - 32px));
+  height: auto;
+  margin: 0;
+  padding: 14px 18px;
+  overflow: visible;
+  clip-path: none;
+  transform: translateX(-50%);
+  border: 1px solid var(--night-line);
+  border-radius: 12px;
+  background: var(--night2);
+  white-space: normal;
+}
+
+.keyList .film {
+  font-size: 14px;
+  color: var(--night-ink);
+}
+
+/* without the ring: the stills in a grid between the two captions. Under reduced motion the ring
+   never runs, so the room takes this shape while it waits too, rather than shrink from 220vh once
+   the script decides */
+.room[data-mode="still"] {
+  height: auto;
+}
+
+.room[data-mode="still"] .stage {
+  position: relative;
+  top: auto;
+  height: auto;
+  padding: 120px 0;
+}
+
+.room[data-mode="still"] .caption {
+  position: relative;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  margin: 0 auto 64px;
+  transform: none;
+  opacity: 1;
+}
+
+.room[data-mode="still"] .bottom {
+  margin: 64px auto 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room[data-mode="waiting"] {
+    height: auto;
+  }
+
+  .room[data-mode="waiting"] .stage {
+    position: relative;
+    top: auto;
+    height: auto;
+    padding: 120px 0;
+  }
+
+  .room[data-mode="waiting"] .caption {
+    position: relative;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    margin: 0 auto 64px;
+    transform: none;
+    opacity: 1;
+  }
+
+  .room[data-mode="waiting"] .bottom {
+    margin: 64px auto 0;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 28px 20px;
+  width: var(--band);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.grid .film {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 15px;
+  color: var(--night-ink2);
+  text-decoration: none;
+}
+
+.grid .film:hover {
+  color: var(--night-ink);
+}
+
+.still {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 10px;
+  filter: brightness(0.85);
+  transition: filter 160ms var(--micro);
+}
+
+.grid .film:hover .still {
+  filter: none;
+}
+
+@media (max-width: 1000px) {
+  .room {
+    padding: 72px 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 12px;
+  }
+
+  .room[data-mode="still"] .stage {
+    padding: 72px 0;
+  }
+}
+
+@media (max-width: 700px) and (prefers-reduced-motion: reduce) {
+  .room[data-mode="waiting"] .stage {
+    padding: 72px 0;
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .title {
+    font-size: 28px;
+  }
+
+  .caption .body {
+    margin-top: 8px;
+    font-size: 14px;
+  }
+
+  .bottom {
+    bottom: 16px;
+  }
+
+  .cta {
+    margin-top: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caption .body,
+  .cta {
+    transition: none;
+  }
+}

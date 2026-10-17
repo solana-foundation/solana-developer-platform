@@ -1,0 +1,253 @@
+/*
+ * "Settled everywhere, under a second.".
+ * On the page's three columns: the paragraph takes the third and sits on the headline's first
+ * line; the rails end with the second column and the list of settlements takes the third.
+ */
+.section {
+  padding: clamp(88px, 8.9vw, 128px) 0;
+  color: var(--ink3);
+}
+
+.head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 48px;
+  margin-bottom: clamp(56px, 6vw, 88px);
+}
+
+.headline {
+  color: var(--ink);
+}
+
+.intro {
+  margin: 0 0 6px;
+  max-width: 46ch;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: #0f0f1399;
+}
+
+/* the chosen phrase: a white bubble with a soft violet glow inside */
+.selN {
+  position: relative;
+  display: inline-block;
+  padding: 0 0.12em;
+  border-radius: 0.2em;
+  color: #9a47ff;
+  isolation: isolate;
+  transition: color 520ms var(--e);
+}
+
+.selN::before {
+  content: "";
+  position: absolute;
+  inset: -0.06em -0.02em -0.1em;
+  z-index: -1;
+  border-radius: 0.2em;
+  background: #fff;
+  box-shadow:
+    inset 0 0 13px #8d54d266,
+    inset 0 0 34px #8d54d266,
+    inset 0 0 46px #8d54d233;
+}
+
+/* it beats with each settlement on the rails */
+.beat::before {
+  animation: selBeat 1400ms cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+
+@keyframes selBeat {
+  0% {
+    scale: 1;
+  }
+  22% {
+    scale: 1.025;
+  }
+  55% {
+    scale: 0.998;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+/* the race */
+.speed {
+  position: relative;
+  width: 100%;
+  height: max(240px, min(46vh, 420px));
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lanes {
+  position: absolute;
+  inset: 0 auto 0 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.lane {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  transform: translateY(calc(-100% - 10px));
+  white-space: nowrap;
+  font: 500 clamp(14px, 1.05vw, 16px) / 1.2 var(--font);
+}
+
+.lane span {
+  letter-spacing: -0.005em;
+  color: #0f0f1399;
+}
+
+.lane b {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.laneFast span {
+  color: var(--ink);
+}
+
+/* a contrast fix for the green on paper */
+.laneFast b {
+  color: #047857;
+}
+
+/* the list of settlements: its rule is the Solana rail, continued; each row is one rail tall */
+.feed {
+  position: absolute;
+  top: 18%;
+  right: 0;
+  width: calc((100% - 52px) / 3);
+  height: 64%;
+  pointer-events: none;
+}
+
+.feedHead {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #0f0f131f;
+  font: 500 10.5px / 1 var(--font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0f0f1380;
+}
+
+.feedRows {
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  height: 100%;
+}
+
+.feedRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-content: center;
+  gap: 4px 12px;
+  border-bottom: 1px solid #0f0f1314;
+  font-size: 13.5px;
+  color: var(--ink3);
+}
+
+.feedRow span:first-child {
+  color: var(--ink);
+}
+
+.feedRow span:nth-child(2) {
+  text-align: right;
+}
+
+.feedRow span:last-child {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #0f0f1366;
+}
+
+/* the figures */
+.statsBlock {
+  /* the 24px wrapper margin collapses into this one */
+  margin-top: clamp(56px, 6vw, 88px);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stat b {
+  display: block;
+  font: 400 clamp(44px, 5.2vw, 92px) / 1 var(--font);
+  letter-spacing: -0.02em;
+  color: #9945ff;
+}
+
+.stat > span {
+  display: block;
+  margin-top: 22px;
+  max-width: 18ch;
+  font: 500 clamp(15px, 1.2vw, 18px) / 1.2 var(--font);
+  color: #0f0f1399;
+}
+
+@media (min-width: 901px) {
+  .head {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 26px;
+    align-items: first baseline;
+  }
+
+  .headline {
+    grid-column: 1 / 3;
+  }
+
+  .intro {
+    grid-column: 3;
+    max-width: none;
+    margin: 0;
+  }
+
+  .stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .feed {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .section {
+    padding: 64px 0;
+  }
+
+  .head {
+    margin-bottom: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beat::before {
+    animation: none;
+  }
+}

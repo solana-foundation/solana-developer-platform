@@ -1,0 +1,460 @@
+/*
+ * The stack. The drawing keeps the slide's 1840:628 proportions
+ * and sizes everything in it in cqw, so it scales as one picture; inside each bubble cqw is the
+ * bubble's own width, so its rings and words grow with it.
+ */
+.section {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: calc(100svh - var(--nav-height));
+  padding: var(--pad) 0 0;
+}
+
+/* auto on every side: the statement sits in the middle of the screen, the partners keep its floor */
+.inner {
+  flex: 0 0 auto;
+  margin: auto;
+  padding-bottom: clamp(32px, 6vw, 80px);
+}
+
+.head {
+  text-align: center;
+}
+
+.title {
+  font-size: var(--display);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin: 0 auto;
+}
+
+.sub {
+  max-width: 56ch;
+  margin: 24px auto 0;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: #0f0f1399;
+}
+
+/* ── the drawing ─────────────────────────────────────────────────────────── */
+.grid {
+  position: relative;
+  margin-top: calc(var(--lead) - 12%);
+  aspect-ratio: 1840 / 628;
+  container-type: inline-size;
+}
+
+.label {
+  position: absolute;
+  top: 84%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font: 500 max(12px, 1.2cqw) / 1 var(--font);
+  letter-spacing: -0.005em;
+  color: #0f0f1399;
+}
+
+.track {
+  position: absolute;
+  left: 17%;
+  width: 66%;
+  top: calc(64.13% - 0.22cqw);
+  height: 0.44cqw;
+  min-height: 3px;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0f0f1318 0%, #9945ff45 50%, #14f1955c 100%);
+}
+
+/* a soft light running along the line */
+.track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #fff0 0%, #ffffffd9 50%, #fff0 100%) no-repeat;
+  background-size: 22% 100%;
+  background-position: -30% 0;
+  animation: trackGlint 5.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes trackGlint {
+  0% {
+    background-position: -30% 0;
+  }
+
+  60%,
+  100% {
+    background-position: 130% 0;
+  }
+}
+
+/* the knob carries the sending service's mark along the track (its left is set by the script) */
+.knob {
+  position: absolute;
+  left: 17%;
+  top: 64.13%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 2.3cqw;
+  height: 2.3cqw;
+  margin: -1.15cqw 0 0 -1.15cqw;
+  border-radius: 50%;
+  color: #4a4852;
+  background: radial-gradient(circle at 35% 30%, #fff 0%, #f6f5f8 70%, #ecebf0 100%);
+  box-shadow:
+    0 0.25cqw 0.8cqw #0f0f1330,
+    0 0 0 0.3cqw #0f0f130a;
+  opacity: 0;
+  transition:
+    opacity 240ms var(--e),
+    color 500ms var(--e),
+    box-shadow 500ms var(--e);
+}
+
+.knob svg {
+  width: 1.2cqw;
+  height: 1.2cqw;
+  stroke-width: 1.9;
+}
+
+.knob[data-show] {
+  opacity: 1;
+}
+
+.knob[data-tone="violet"] {
+  color: #7a2fe0;
+  box-shadow:
+    0 0.3cqw 0.9cqw #5b16c233,
+    0 0 0 0.35cqw #9945ff1f;
+}
+
+.knob[data-tone="mint"] {
+  color: #0fa66e;
+  box-shadow:
+    0 0.3cqw 0.9cqw #05bf8633,
+    0 0 0 0.35cqw #14f19526;
+}
+
+/* the received note rises from the product as each payment lands */
+.toast {
+  position: absolute;
+  left: 83%;
+  top: 41%;
+  z-index: 3;
+  transform: translate(-50%, 0);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7cqw;
+  white-space: nowrap;
+  padding: 0.6cqw 1.2cqw 0.6cqw 0.8cqw;
+  border-radius: 999px;
+  font: 500 max(11px, 1.05cqw) / 1 var(--font);
+  font-variant-numeric: tabular-nums;
+  color: #0b2a1f;
+  background: radial-gradient(90% 150% at 32% 78%, #bdf7dd 0%, #d8fbea 60%, #eefdf5 100%);
+  box-shadow:
+    inset 0 0 8px #14f19540,
+    0 0.8cqw 2cqw -1cqw #05bf8655;
+  opacity: 0;
+}
+
+.toastDot {
+  width: 0.8cqw;
+  height: 0.8cqw;
+  min-width: 7px;
+  min-height: 7px;
+  border-radius: 50%;
+  background: #14d98a;
+  box-shadow: 0 0 0 0.3cqw #14f19533;
+}
+
+.toast[data-up] {
+  animation: toastUp 2200ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+@keyframes toastUp {
+  0% {
+    opacity: 0;
+    translate: 0 1.4cqw;
+    scale: 0.92;
+  }
+
+  14% {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+
+  70% {
+    opacity: 1;
+    translate: 0 -0.4cqw;
+  }
+
+  100% {
+    opacity: 0;
+    translate: 0 -1.4cqw;
+  }
+}
+
+/* ── the bubbles: a pill in two rings (bubble.module.css) ───────────────── */
+.bubble {
+  position: absolute;
+  top: 44.52%;
+  width: 23.228%;
+  height: 39.22%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  container-type: inline-size;
+  pointer-events: none;
+}
+
+.src {
+  left: 5.386%;
+}
+
+.sdp {
+  left: 38.386%;
+}
+
+.product {
+  left: 71.386%;
+}
+
+/* the words share one cell, so the pill is as wide as its widest word and never changes size */
+.pill {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  height: 17.5cqw;
+  padding: 0 5.5cqw;
+}
+
+.word {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  font: 400 10cqw / 1 var(--font);
+  letter-spacing: -0.02em;
+  color: #0b2a1f;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 300ms var(--e),
+    transform 520ms var(--e);
+}
+
+/* the word leaving is gone before the next arrives */
+.word[data-on] {
+  opacity: 1;
+  transform: none;
+  transition-delay: 280ms;
+}
+
+/* partner services: grey, each word led by its mark */
+.src .pill {
+  padding: 0 7cqw;
+}
+
+.src .word {
+  color: #1c1b1f;
+}
+
+.wordIcon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 0.86em;
+  width: 0.86em;
+  height: 0.86em;
+  margin-right: 0.26em;
+  color: #0f0f12;
+  transform: translateY(-0.02em);
+}
+
+.wordIcon svg {
+  width: 0.86em;
+  height: 0.86em;
+  stroke-width: 1.4;
+}
+
+/* SDP: violet, with the brand lockup for its word */
+.sdp .word {
+  letter-spacing: -0.01em;
+  color: #1e0b3d;
+}
+
+.lockup {
+  display: block;
+  width: 3.38em;
+  height: 1.3em;
+  max-width: none;
+}
+
+/* off screen, every loop in the drawing holds still (the doubled attribute outranks the beat rules) */
+.grid[data-paused][data-paused] *,
+.grid[data-paused][data-paused] *::after {
+  animation-play-state: paused;
+}
+
+/* ── the partners passing under it ──────────────────────────────────────── */
+.marquee {
+  position: relative;
+  flex: 0 0 auto;
+  margin-top: auto;
+  overflow: hidden;
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.marquee::before,
+.marquee::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 120px;
+  pointer-events: none;
+}
+
+.marquee::before {
+  left: 0;
+  background: linear-gradient(90deg, var(--paper), #fbfaf900);
+}
+
+.marquee::after {
+  right: 0;
+  background: linear-gradient(270deg, var(--paper), #fbfaf900);
+}
+
+.marqueeTrack {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  animation: marquee 90s linear infinite;
+}
+
+.marqueeTrack[data-paused] {
+  animation-play-state: paused;
+}
+
+.partnerList {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.partner {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 30px;
+  white-space: nowrap;
+  font: 400 21px / 1 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  opacity: 0.9;
+}
+
+/* a magenta dot between names */
+.partner::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--magenta);
+  transform: translate(50%, -50%);
+}
+
+.partnerLogo {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* ── narrower screens ───────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .toast {
+    display: none;
+  }
+}
+
+/* a phone: the drawing across the whole screen and a little taller, the bubbles a third of it */
+@media (max-width: 600px) {
+  .grid {
+    aspect-ratio: 1840 / 760;
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+  }
+
+  .bubble {
+    top: 34.1%;
+    width: 30%;
+    height: 41.8%;
+  }
+
+  .src {
+    left: 2%;
+  }
+
+  .sdp {
+    left: 35%;
+  }
+
+  .product {
+    left: 68%;
+  }
+
+  .track {
+    top: calc(55% - 1.1cqw);
+  }
+
+  .knob {
+    top: 55%;
+    width: 4.6cqw;
+    height: 4.6cqw;
+    margin: -2.3cqw 0 0 -2.3cqw;
+  }
+
+  .marquee::before,
+  .marquee::after {
+    width: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track::after,
+  .marqueeTrack {
+    animation: none;
+  }
+
+  .word {
+    transition: none;
+  }
+
+  /* a still picture: nothing travels the track and no payment lands */
+  .knob,
+  .toast {
+    display: none;
+  }
+}

@@ -1,0 +1,367 @@
+{
+  "Homepage": {
+    "cta": {
+      "createAccount": "Create account",
+      "signIn": "Sign in",
+      "dashboard": "Dashboard",
+      "readDocs": "Read the docs",
+      "joinWaitlist": "Join the waitlist"
+    },
+    "nav": {
+      "skip": "Skip to content",
+      "home": "Solana Developer Platform home",
+      "primary": "Primary",
+      "menu": "Menu",
+      "openMenu": "Open menu",
+      "closeMenu": "Close menu",
+      "platform": {
+        "label": "Platform",
+        "issuance": { "title": "Issuance", "body": "Launch the asset. Control it after." },
+        "payments": { "title": "Payments", "body": "Stablecoins and fiat, one API." },
+        "markets": { "title": "Markets", "body": "Earn on it. Settle against it." },
+        "privacy": "Privacy",
+        "partners": "Partners",
+        "interfaces": "Interfaces",
+        "network": "The network",
+        "sandbox": "Open the sandbox"
+      },
+      "builders": {
+        "label": "Builders",
+        "meet": {
+          "title": "Meet the builders",
+          "body": "Sixteen conversations, from the Solana channel."
+        },
+        "walkthroughs": {
+          "title": "The sandbox walkthroughs",
+          "body": "Recorded from the console, under thirty seconds each."
+        },
+        "partners": { "title": "Partners", "body": "Custody, compliance, ramps, nodes and more." },
+        "series": "The whole series",
+        "seriesLabel": "The whole series on YouTube (opens in a new tab)"
+      },
+      "docs": {
+        "label": "Docs",
+        "docs": { "title": "Docs", "body": "Guides and reference for the whole surface." },
+        "openapi": { "title": "OpenAPI", "body": "The full API contract, machine-readable." },
+        "llms": { "title": "llms.txt", "body": "Context for coding assistants." },
+        "execute": "Execute mode",
+        "prepare": "Prepare mode",
+        "dashboard": "Dashboard"
+      },
+      "mobile": {
+        "builders": "Builders",
+        "walkthroughs": "Walkthroughs"
+      }
+    },
+    "hero": {
+      "title": {
+        "lead": "The",
+        "selected": "interface",
+        "secondLead": "to",
+        "chosen": "onchain finance"
+      },
+      "lede": "One platform, thirty partners, one integration. Issue the asset, move the money, earn on the balance. Switch a partner without rebuilding.",
+      "globe": {
+        "label": "Payments crossing the network",
+        "from": "from {city}",
+        "confirmed": "Confirmed",
+        "landed": "{city} · under a second"
+      },
+      "logos": {
+        "withSdp": "Building with SDP",
+        "onSolana": "Building on Solana"
+      }
+    },
+    "stack": {
+      "title": "One integration across the stack",
+      "sub": "SDP is the Foundation’s aggregation layer: one integration across custody, compliance, ramps, nodes, privacy and more. Pick the partner on your criteria. Switch without rebuilding.",
+      "labels": {
+        "partners": "Partner APIs",
+        "sdp": "SDP",
+        "product": "Your product"
+      },
+      "aria": {
+        "partners": "Partner APIs: custody, compliance, ramps, nodes, wallets",
+        "sdp": "SDP",
+        "product": "Your product: a wallet, checkout, payroll, treasury"
+      },
+      "services": {
+        "custody": "Custody",
+        "compliance": "Compliance",
+        "ramps": "Ramps",
+        "nodes": "Nodes",
+        "wallets": "Wallets"
+      },
+      "products": {
+        "wallet": "Wallet",
+        "checkout": "Checkout",
+        "payroll": "Payroll",
+        "treasury": "Treasury"
+      },
+      "received": "Received {amount} USDC",
+      "partnersLabel": "Partners on the platform"
+    },
+    "pillars": {
+      "headlineLine1": "Issue it. Move it.",
+      "headlineLine2": "Earn on it.",
+      "intro": "Three surfaces behind one API and one dashboard. Each is a product on its own; together they are the stack a finance team needs onchain.",
+      "issuance": {
+        "title": "Issuance",
+        "body": "Launch a stablecoin, a tokenized deposit or a real-world asset on Token-2022, with permissioning and privacy set before mint.",
+        "link": "Issue the asset",
+        "imageLabel": "An asset being minted"
+      },
+      "payments": {
+        "title": "Payments",
+        "body": "Stablecoins and two hundred fiat currencies through one API: pay, request, recurring, batch and micro, on and off ramp.",
+        "link": "Move the money",
+        "imageLabel": "A payment moving"
+      },
+      "markets": {
+        "title": "Markets",
+        "body": "Yield on idle balances from tokenized treasuries to curated DeFi, and atomic delivery-versus-payment against cash.",
+        "link": "Earn on it",
+        "imageLabel": "Two legs of a trade settling together"
+      }
+    },
+    "network": {
+      "headlineLine1": "Settled everywhere,",
+      "headlineHighlight": "under a second",
+      "headlineEnd": ".",
+      "intro": "Solana settles in about four hundred milliseconds, for a fraction of a cent. SDP puts custody, compliance, ramps and nodes on top of it through one contract, so what took quarters to assemble is a call.",
+      "raceLabel": "The same payment on four rails: Solana settles in under a second while the others take days",
+      "lanes": {
+        "solana": { "name": "Solana, via SDP", "time": "~0.4 s" },
+        "cards": { "name": "Card networks", "time": "1 to 2 days" },
+        "ach": { "name": "ACH", "time": "1 to 3 days" },
+        "swift": { "name": "SWIFT", "time": "1 to 5 days" }
+      },
+      "feedHeading": "Settled on Solana",
+      "feedAmount": "{amount} {token}",
+      "feedSlot": "slot {slot}",
+      "stats": {
+        "finality": { "value": "<1 s", "label": "to finality on Solana" },
+        "partners": { "value": "{count}+", "label": "partners behind one integration" },
+        "currencies": { "value": "{count}+", "label": "fiat currencies, on and off ramp" },
+        "contract": { "value": "{count}", "label": "API contract: REST, OpenAPI, llms.txt" }
+      }
+    },
+    "issuance": {
+      "titleLine1": "Issue the asset.",
+      "titleLine2": "Control after launch.",
+      "body": "Mint, burn, freeze, pause, seize and screen. The lifecycle is part of the asset, under the authority you configured, every operation auditable.",
+      "sandboxLink": "Open issuance in the sandbox",
+      "sheet": {
+        "asset": "USDx",
+        "assetNote": "an example asset",
+        "standardLabel": "Standard",
+        "standardValue": "Token-2022",
+        "supplyLabel": "Supply",
+        "transferControlsLabel": "Transfer controls",
+        "blocklist": "Blocklist",
+        "paused": "Paused",
+        "authorityLabel": "Authority",
+        "authorityValue": "Issuer multisig",
+        "privacyLabel": "Privacy",
+        "privacyValue": "Confidential balances",
+        "status": {
+          "live": "Live",
+          "minted": "Minted",
+          "paused": "Paused",
+          "resumed": "Resumed",
+          "burned": "Burned"
+        }
+      }
+    },
+    "payments": {
+      "titleLine1": "Stablecoins and fiat,",
+      "titleLine2": "one payments API.",
+      "body": "Move money in stablecoins or two hundred fiat currencies through the partners you chose. The policy looks at every payment before it moves, and the ledger says when it has.",
+      "sandboxLink": "Send a payment in the sandbox",
+      "bubbleLabel": "Payments of every kind, each one sent and settled",
+      "kindsLabel": "Payment kinds",
+      "pause": "Pause",
+      "play": "Play",
+      "kinds": {
+        "pay": {
+          "name": "Pay",
+          "body": "Send USDC to a wallet or pay out to a bank in local currency. Your policy checks every payment first.",
+          "figure": "Pay: a payment of 250 USDC to Jane Smith passes the policy and arrives in her wallet, or is paid out to her bank in USD."
+        },
+        "request": {
+          "name": "Request",
+          "body": "Share a link or a QR code, get paid in stablecoins and follow each request until it is final onchain.",
+          "figure": "Request: a payment request for 120 USDC, shared as a QR code and a link, paid by the payer and tracked from processed to finalized."
+        },
+        "recurring": {
+          "name": "Recurring",
+          "body": "Set the amount and the schedule once. Payroll, subscriptions and vendor bills then go out on time.",
+          "figure": "Recurring: a monthly schedule of 1,200 USDC runs by itself, each run ticked off as the next one comes up."
+        },
+        "batch": {
+          "name": "Batch",
+          "body": "Pay thousands of people from one file or one API call, with a status you can track for every row.",
+          "figure": "Batch: the rows of a payout file are paid one after another, each one ticked as it settles."
+        },
+        "micro": {
+          "name": "Micro",
+          "body": "Charge a thousandth of a dollar per API call. Solana fees keep even the smallest payment worth sending.",
+          "figure": "Micro: an agent wallet pays an API a thousandth of a dollar per call, call after call, every one settled."
+        },
+        "deposit": {
+          "name": "Deposit",
+          "body": "Customers top up a wallet by card or bank transfer and receive stablecoins through the ramp you chose.",
+          "figure": "Deposit: a card payment goes up the ramp and arrives in the wallet as 500 USDC, the deposit received."
+        }
+      },
+      "figure": {
+        "opsWallet": "Ops wallet",
+        "pay": "Pay",
+        "send": "SEND",
+        "received": "Received",
+        "bankUsd": "Bank USD",
+        "paidOut": "Paid out",
+        "paymentRequest": "Payment request",
+        "paidTo": "to {address}",
+        "processed": "Processed",
+        "confirmed": "Confirmed",
+        "finalized": "Finalized",
+        "schedule": "Schedule",
+        "howOften": "How often",
+        "monthly": "Monthly",
+        "startsOn": "Starts on",
+        "nextRun": "Next run",
+        "paidCount": "{paid} of {total} paid",
+        "agentWallet": "Agent wallet",
+        "api": "API",
+        "perCall": "per call",
+        "callsPaid": "calls paid",
+        "wallet": "Wallet",
+        "depositReceived": "Deposit received"
+      }
+    },
+    "markets": {
+      "titleLine1": "Earn on it.",
+      "titleLine2": "Settle against it.",
+      "body": "Two strategies on one balance: tokenized treasuries for the floor, curated DeFi for the ceiling. And delivery-versus-payment, where the asset and the cash leave escrow together, or neither does.",
+      "sandboxLink": "Open markets in the sandbox",
+      "chart": {
+        "description": "Chart of the yield on one balance over time. While the balance is idle it earns close to nothing. Once it is deployed, tokenized treasuries rise to about 4.5% a year and curated DeFi climbs to up to 8% a year by today.",
+        "legendDefi": "Curated DeFi · up to 8%",
+        "legendTreasuries": "Tokenized treasuries · ~4.5%",
+        "axisIdle": "Idle",
+        "axisDeployed": "Deployed",
+        "axisToday": "Today",
+        "rateValue": "3.5–8%",
+        "rateLabel": "a year on idle balances, indicative",
+        "withdrawValue": "Any time",
+        "withdrawLabel": "to withdraw, either strategy"
+      }
+    },
+    "privacy": {
+      "titleLine1": "Confidential",
+      "titleLine2": "per operation.",
+      "body": "Turn privacy on per operation. Settlement stays onchain; balances, positions and payroll stay off the public ledger, through confidential balances, private channels and shielded rings.",
+      "policiesLink": "See the policies",
+      "bubbleLabel": "What stays private: payments, issuance, markets, payroll, balances",
+      "words": {
+        "payments": "Payments",
+        "issuance": "Issuance",
+        "markets": "Markets",
+        "payroll": "Payroll",
+        "balances": "Balances"
+      }
+    },
+    "interfaces": {
+      "headlineLine1": "Call the API.",
+      "headlineLine2": "Or use the dashboard.",
+      "intro": "REST for integrations, dashboard for ops, OpenAPI for agents. One public contract.",
+      "modes": "Ways to work with the platform",
+      "response": "Response",
+      "execute": {
+        "title": "Execute mode",
+        "body": "SDP constructs, signs and submits for server‑to‑server workflows.",
+        "status": "200 · confirmed"
+      },
+      "prepare": {
+        "title": "Prepare mode",
+        "body": "SDP returns an unsigned transaction for your HSM, multisig or wallet.",
+        "status": "200 · ready to sign"
+      },
+      "dashboard": {
+        "title": "Dashboard",
+        "body": "Approvals, policies, activity and audit records, in one place.",
+        "status": "200 · 1 pending"
+      },
+      "links": {
+        "openapi": "OpenAPI",
+        "llms": "llms.txt",
+        "docs": "Docs"
+      }
+    },
+    "builders": {
+      "label": "Meet the builders",
+      "intro": {
+        "title": "Meet the builders",
+        "body": "Sixteen conversations with the teams on the platform, from the Solana channel. Choose a film to watch it."
+      },
+      "outro": {
+        "title": "In their own words"
+      },
+      "films": "The films",
+      "film": "{name}: watch the conversation on YouTube (opens in a new tab)",
+      "series": "Watch the series",
+      "seriesLabel": "Watch the series on YouTube (opens in a new tab)"
+    },
+    "walkthroughs": {
+      "headline": "The sandbox walkthroughs.",
+      "chapters": "Chapters",
+      "watch": "Watch",
+      "watchLabel": "Watch “{title}”, {seconds} seconds",
+      "captions": "English",
+      "films": {
+        "dvp": {
+          "title": "Delivery versus payment",
+          "note": "Markets · both legs move, or neither does",
+          "videoLabel": "Markets: delivery versus payment"
+        },
+        "v1": {
+          "title": "What changed in v1.0",
+          "note": "One source for every figure, Command K, provider logos",
+          "videoLabel": "What changed in v1.0"
+        }
+      }
+    },
+    "start": {
+      "titleBefore": "Build the next ",
+      "titleHighlight": "wave of finance",
+      "titleAfter": " on Solana",
+      "sub": "One platform for issuance, payments, and the infrastructure behind them.",
+      "openSandbox": "Open the sandbox",
+      "doorNote": "Devnet keys and the full console. No wallet, no contract, no wait."
+    },
+    "footer": {
+      "home": "SDP home",
+      "tagline": "The interface to onchain finance.",
+      "columns": {
+        "platform": "Platform",
+        "developers": "Developers",
+        "ecosystem": "Ecosystem"
+      },
+      "links": {
+        "issuance": "Issuance",
+        "payments": "Payments",
+        "markets": "Markets",
+        "privacy": "Privacy",
+        "interfaces": "Interfaces",
+        "docs": "Docs",
+        "openApi": "OpenAPI",
+        "github": "GitHub",
+        "partners": "Partners",
+        "builders": "Builders",
+        "tutorials": "Tutorials"
+      },
+      "providedBy": "Provided by the {organization}"
+    }
+  }
+}
