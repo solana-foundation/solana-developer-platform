@@ -821,6 +821,36 @@ describe("DvP routes", () => {
     });
   });
 
+  // HOO-2099: the custody signer refuses a wallet outside a selected key's
+  // scope; the leg action refuses it first, so nothing is claimed.
+  describe("fund refusal outside the key's wallet scope", () => {
+    beforeEach(async () => {
+      await seedCustodyWallets();
+    });
+
+    it("refuses a side whose wallet the key does not list, writing no claim", async () => {
+      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+      await seedApiKeyRow(env, keyHash, {
+        ...TEST_CACHED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+      await seedTradeFor({ tradeId: "dvp_out_of_scope" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_out_of_scope/fund",
+        { method: "POST", headers: authHeaders(), body: JSON.stringify({ side: "a" }) },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { details: { reason: "wallet_out_of_scope" } },
+      });
+      expect(await fundingClaimCount("dvp_out_of_scope")).toBe(0);
+    });
+  });
+
   // Reclaim is the same right as funding: the program only lets the leg's own
   // party sign, so a caller with no wallet at that address has nothing to sign with.
   describe("reclaim refusal without custody", () => {

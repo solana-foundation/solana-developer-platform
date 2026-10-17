@@ -3,7 +3,8 @@
  * (fund, reclaim) share the same answer.
  *
  * Whether the caller may sign with the wallet is decided by the custody signer
- * when it signs (HOO-2099).
+ * when it signs (HOO-2099); the scope is refused here as well, from
+ * authentication, so an out-of-scope action records nothing first.
  */
 
 import type { Context } from "hono";
@@ -11,6 +12,7 @@ import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden, notFound } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { custodyWalletForParty, walletIdIfHoldsAddress } from "@/services/dvp/custody-party";
 import type { DvpCloseAction } from "@/services/dvp/settle";
 import {
@@ -86,13 +88,17 @@ export async function resolveLegAction(
       : await custodyWalletForParty(
           c.env,
           { organizationId: auth.organizationId, projectId },
-          partyAddress
+          partyAddress,
+          auth.walletAccess
         );
   if (custodyWalletId === null) {
     throw forbidden(
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
     );
   }
+  // The custody signer refuses a wallet outside the key's scope (HOO-2099);
+  // refusing here as well stops the action before it records anything.
+  assertCallerWalletInScope(auth.walletAccess, custodyWalletId);
   return {
     trade,
     actor: dvpTradeAuditActor(auth),
@@ -103,10 +109,10 @@ export async function resolveLegAction(
 /**
  * Resolves the trade and the settlement wallet a close signs with.
  *
- * Re-reads the binding before anything irreversible: the auth context can be an
- * hour stale, and settling with a revoked key is an irreversible two-leg spend,
- * not a read slip. The wallet asserted is the SETTLEMENT wallet, the one that
- * signs; the liveness assert covers keys the wallet-scoped check skips.
+ * The SETTLEMENT wallet is the one that signs. The custody signer decides the
+ * caller's live credential and scope when it signs (HOO-2099); the scope is
+ * also refused here, from authentication, so an out-of-scope close does no
+ * work first.
  *
  * @param c - Request context naming the trade.
  * @param _action - Which close is being resolved; the resolution is the same
@@ -140,6 +146,7 @@ export async function resolveCloseAction(
   if (settlement === null) {
     throw notFound("DvP settlement wallet not found for this trade's project");
   }
+  assertCallerWalletInScope(auth.walletAccess, settlement.custodyWalletId);
 
   return { trade, actor: dvpTradeAuditActor(auth), settlement, projectId };
 }

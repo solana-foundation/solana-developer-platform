@@ -1,6 +1,7 @@
 import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { pickPartyWalletId } from "@/services/dvp/custody-party";
 import type { DvpCallerWallet, DvpInboundRequest } from "@/services/dvp/inbound";
 import type { Env } from "@/types/env";
 
@@ -41,9 +42,9 @@ export async function readDvpActionWallets(
     publicKeys: addresses.map((key) => address(key)),
   });
   for (const key of addresses) {
-    // The first candidate is the signer funding uses (`custodyWalletForParty`);
-    // a hidden first choice must never fall back to another signer.
-    const id = candidates.get(key)?.[0] ?? null;
+    // The candidate funding uses (`custodyWalletForParty`, the same pick); a
+    // hidden choice must never fall back to another signer.
+    const id = pickPartyWalletId(candidates.get(key) ?? [], request.auth.walletAccess);
     const wallet = id === null ? undefined : visible.get(id);
     if (wallet?.publicKey === key) {
       result.set(key, {

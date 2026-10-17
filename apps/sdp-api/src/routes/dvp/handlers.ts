@@ -873,11 +873,12 @@ async function resolveYourSide(
   projectId: string
 ): Promise<{ side: "a" | "b"; custodyWalletId: string } | null> {
   const org = { organizationId: getAuth(c).organizationId, projectId };
-  const walletForA = await custodyWalletForParty(c.env, org, trade.userA);
+  const { walletAccess } = getAuth(c);
+  const walletForA = await custodyWalletForParty(c.env, org, trade.userA, walletAccess);
   if (walletForA !== null) {
     return { side: "a", custodyWalletId: walletForA };
   }
-  const walletForB = await custodyWalletForParty(c.env, org, trade.userB);
+  const walletForB = await custodyWalletForParty(c.env, org, trade.userB, walletAccess);
   if (walletForB !== null) {
     return { side: "b", custodyWalletId: walletForB };
   }
