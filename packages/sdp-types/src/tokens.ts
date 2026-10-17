@@ -42,6 +42,30 @@ export const TOKEN_TRANSACTION_STATUSES = [
 ] as const;
 export type TokenTransactionStatus = (typeof TOKEN_TRANSACTION_STATUSES)[number];
 
+/** Submitted, not yet on chain: a deploy in this state is still on its way. */
+export const TOKEN_TRANSACTION_STATUS_IN_FLIGHT = [
+  "pending",
+  "processing",
+] as const satisfies readonly TokenTransactionStatus[];
+
+/** On chain: the transaction landed. */
+export const TOKEN_TRANSACTION_STATUS_LANDED = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly TokenTransactionStatus[];
+
+export function isInFlightTokenTransactionStatus(
+  status: TokenTransactionStatus
+): status is (typeof TOKEN_TRANSACTION_STATUS_IN_FLIGHT)[number] {
+  return TOKEN_TRANSACTION_STATUS_IN_FLIGHT.some((inFlight) => inFlight === status);
+}
+
+export function isLandedTokenTransactionStatus(
+  status: TokenTransactionStatus
+): status is (typeof TOKEN_TRANSACTION_STATUS_LANDED)[number] {
+  return TOKEN_TRANSACTION_STATUS_LANDED.some((landed) => landed === status);
+}
+
 export type AllowlistEntryStatus = "pending" | "active" | "revoked";
 
 // ═══════════════════════════════════════════════════════════════════════════

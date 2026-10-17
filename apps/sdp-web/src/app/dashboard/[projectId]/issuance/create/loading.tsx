@@ -1,4 +1,4 @@
-import { IssuanceCreateSkeleton } from "../issuance-create-skeleton";
+import { IssuanceCreateSkeleton } from "../issuance-route-skeletons.redesign";
 
 export default function IssuanceCreateLoading() {
   return <IssuanceCreateSkeleton />;

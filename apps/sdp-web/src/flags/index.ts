@@ -58,6 +58,7 @@ export const {
   newDesignContacts,
   newDesignPayDeposit,
   newDesignActivity,
+  newDesignIssuance,
   rampProviderMoonpay,
   rampProviderStripe,
 } = flags;

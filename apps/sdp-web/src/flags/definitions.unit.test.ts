@@ -28,6 +28,7 @@ const FLAG_CAPS = {
   newDesignContacts: "uncapped",
   newDesignPayDeposit: "uncapped",
   newDesignActivity: "uncapped",
+  newDesignIssuance: "uncapped",
   issuance: { module: "issuance" },
   assetProfiles: { module: "issuance" },
   privateChannels: { module: "private_channels" },
@@ -114,6 +115,7 @@ describe("defineDashboardFlags", () => {
         "newDesignContacts",
         "newDesignPayDeposit",
         "newDesignActivity",
+        "newDesignIssuance",
       ].sort()
     );
     for (const name of delegated) {

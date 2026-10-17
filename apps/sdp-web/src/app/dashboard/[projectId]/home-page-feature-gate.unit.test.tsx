@@ -31,6 +31,7 @@ vi.mock("@/flags", () => ({
   newDesignOverview: async () => true,
   newDesignPayDeposit: async () => true,
   newDesignWallets: async () => true,
+  newDesignIssuance: async () => true,
 }));
 // Custody has no flag of its own: the release channel alone decides (HOO-1956).
 vi.mock("@/flags/release-channel", () => ({

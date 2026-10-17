@@ -13,9 +13,14 @@ import {
   IntegrationsFlagsSkeleton,
 } from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
 import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
-import { IssuanceCreateSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-create-skeleton";
-import { IssuanceDetailSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-detail-skeleton";
-import { IssuancePageSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-page-skeleton";
+import { IssuanceCreateSkeleton as LegacyIssuanceCreateSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-create-skeleton";
+import { IssuanceDetailSkeleton as LegacyIssuanceDetailSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-detail-skeleton";
+import { IssuancePageSkeleton as LegacyIssuancePageSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-page-skeleton";
+import {
+  CurrentIssuanceCreateSkeleton,
+  CurrentIssuanceDetailSkeleton,
+  CurrentIssuancePageSkeleton,
+} from "@/app/dashboard/[projectId]/issuance/issuance-route-skeletons.redesign";
 import {
   DvpCreateSkeleton,
   DvpTradeDetailSkeleton,
@@ -100,6 +105,9 @@ const LEGACY_DESIGN_PAGE_LOADING: Partial<
   "wallets-overview": LegacyWalletsOverviewSkeleton,
   "wallet-setup": LegacyWalletSetupSkeleton,
   "wallet-detail": LegacyWalletDetailSkeleton,
+  "issuance-overview": LegacyIssuancePageSkeleton,
+  "issuance-create": LegacyIssuanceCreateSkeleton,
+  "issuance-detail": LegacyIssuanceDetailSkeleton,
 };
 
 export function resolvePageLoadingComponent(
@@ -133,11 +141,11 @@ function resolveCurrentPageLoadingComponent(
     case "wallet-detail":
       return CurrentWalletDetailSkeleton;
     case "issuance-overview":
-      return IssuancePageSkeleton;
+      return CurrentIssuancePageSkeleton;
     case "issuance-create":
-      return IssuanceCreateSkeleton;
+      return CurrentIssuanceCreateSkeleton;
     case "issuance-detail":
-      return IssuanceDetailSkeleton;
+      return CurrentIssuanceDetailSkeleton;
     case "payments-overview":
       return PaymentsPageSkeleton;
     case "markets-landing":

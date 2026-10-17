@@ -101,14 +101,22 @@ export function RecordStack({ children }: { children: ReactNode }) {
   return <div className="flex min-w-0 flex-col gap-8 md:gap-16">{children}</div>;
 }
 
-/** Record rows in two columns 48px apart, one column on a phone. */
+/**
+ * Record rows in two columns 48px apart, one column on a phone, where a column's last row keeps
+ * its rule so the stacked columns read as one list.
+ */
 export function RecordColumns({ children }: { children: ReactNode }) {
-  return <div className="grid min-w-0 gap-x-12 md:grid-cols-2">{children}</div>;
+  return (
+    <div className="grid min-w-0 gap-x-12 max-md:[&>dl:not(:last-child)>div:last-child]:border-b md:grid-cols-2">
+      {children}
+    </div>
+  );
 }
 
 /**
  * A label and its value on one 40px rule, as the design's record rows read: 13px, then 14px.
- * A hint puts an (i) after the label.
+ * A hint puts an (i) after the label. On a phone the value sits under the label, 8px below it,
+ * on a 68px rule.
  */
 export function RecordRow({
   label,
@@ -120,12 +128,12 @@ export function RecordRow({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-10 items-center justify-between gap-4 border-b border-border-subtle py-2.5 last:border-b-0">
-      <dt className="flex shrink-0 items-center gap-1.5 text-meta leading-5 text-secondary">
+    <div className="flex min-h-10 flex-col items-start gap-2 border-b border-border-subtle py-3 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-4 md:py-2.5">
+      <dt className="flex shrink-0 items-center gap-1.5 text-meta leading-4 text-secondary md:leading-5">
         {label}
         {hint ? <InfoHint text={hint} /> : null}
       </dt>
-      <dd className="flex min-w-0 items-center justify-end gap-1.5 text-right text-body text-primary">
+      <dd className="flex min-w-0 max-w-full items-center gap-1.5 text-body text-primary md:justify-end md:text-right">
         {children}
       </dd>
     </div>
