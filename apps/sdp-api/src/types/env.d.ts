@@ -2,10 +2,11 @@
 
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type {
-  AllowedOperation,
+  Action,
   ApiKeyEnvironment,
   EgressReadiness,
   OrganizationEntitlements,
+  OrganizationRole,
   OrganizationRpcProvider,
   Permission,
   SdpRampProviderStages,
@@ -355,10 +356,9 @@ declare module "hono" {
       id: string;
       organizationId: string;
       projectId: string;
-      role: string;
-      permissions: Permission[];
+      /** The key's explicit grants, read fresh on this request. */
+      grants: readonly Action[];
       environment: ApiKeyEnvironment;
-      allowedOperations?: AllowedOperation[] | null;
       walletScope?: "all" | "selected";
       signingWalletId: string | null;
       signingWalletIds?: string[];
@@ -372,8 +372,8 @@ declare module "hono" {
     clerk?: {
       userId: string;
       organizationId: string;
-      permissions: Permission[];
-      role: string;
+      /** The member's organization role; its actions are ORGANIZATION_ROLE_ACTIONS[role]. */
+      role: OrganizationRole;
       clerkUserId: string;
       clerkOrgId: string;
       email: string | null;

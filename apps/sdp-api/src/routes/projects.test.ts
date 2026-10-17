@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { TEST_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS_SQL, TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
@@ -91,8 +91,8 @@ describe("Projects Routes", () => {
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, ${ALL_API_KEY_GRANTS_SQL}, 'active')`
       )
       .bind(
         TEST_API_KEY.id,
@@ -267,7 +267,7 @@ describe("Projects Routes", () => {
   });
 
   describe("PATCH /v1/projects/:projectId", () => {
-    it("updates the API key's project details", async () => {
+    it("refuses an API key, since project administration is `projects.manage`", async () => {
       const res = await app.request(
         `/v1/projects/${TEST_PROJECT.id}`,
         {
@@ -284,10 +284,10 @@ describe("Projects Routes", () => {
         env
       );
 
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.data.project.name).toBe("Updated Name");
-      expect(body.data.project.description).toBe("New description");
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "projects.manage" } },
+      });
     });
 
     it("returns 404 without modifying another project in the same organization", async () => {

@@ -169,7 +169,7 @@ describe("Payments routes — ramps", () => {
   });
 
   it("refuses ramp quotes from a key without counterparties:read", async () => {
-    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    await seedCachedKey({ grants: ["transfers.execute", "wallets.read"] });
 
     for (const direction of ["onramp", "offramp"]) {
       const response = await app.request(

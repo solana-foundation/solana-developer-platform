@@ -17,11 +17,11 @@ import { balanceQuerySchema } from "../schemas";
  * `owner` accepts a `walletId`, a wallet public key, or a raw Solana address
  * (resolved via the shared wallet helpers); `mint` defaults to the instance
  * cluster's USDC mint. The connection is the project's ACTIVE persisted instance.
- * Feature-gated (router middleware) + `payments:read`.
+ * Feature-gated (router middleware) + `private_channels.read`.
  *
  * TODO(visibility): balance is per (wallet, mint) at the SPC layer and shared across
  * channels, so the read primitive is correct but this endpoint is UNDER-GATED: any
- * project member with `payments:read` can read ANY `owner`'s balance. The intended
+ * project member with `private_channels.read` can read ANY `owner`'s balance. The intended
  * rule is no visibility beyond your own channels — a caller may read a balance only
  * when they are a project ADMIN, the wallet's own user, or share an active channel
  * with it, which `private_channel_memberships` and

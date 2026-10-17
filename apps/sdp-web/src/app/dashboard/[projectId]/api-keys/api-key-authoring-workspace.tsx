@@ -1,22 +1,7 @@
 "use client";
 
-import {
-  type ApiKeyRole,
-  getPermissionsForApiKeyRole,
-  operationTypesInFamily,
-  type PaymentsDashboardWallet,
-} from "@sdp/types";
-import {
-  CircleCheck,
-  FileText,
-  KeyRound,
-  Layers,
-  ListChecks,
-  Search,
-  ShieldCheck,
-  Star,
-  Wallet,
-} from "lucide-react";
+import type { Action, PaymentsDashboardWallet } from "@sdp/types";
+import { CircleCheck, FileText, KeyRound, Layers, Search, Star, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -38,27 +23,19 @@ import {
   type ApiKeyAuthoringExistingKey,
   type ApiKeyAuthoringMode,
   type ApiKeyAuthoringStep,
-  buildAllowedOperations,
   createApiKeyAuthoringDraft,
-  familyState,
-  isOperationTypeTicked,
-  toggleFamily,
-  toggleOperationType,
+  isAuthoringStepComplete,
 } from "./api-key-authoring";
-import {
-  API_KEY_OPERATION_FAMILIES,
-  familyDescription,
-  familyLabel,
-  operationsSummaryLabel,
-} from "./api-key-operations-labels";
+import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
+import { ApiKeyGrantPicker } from "./api-key-grant-picker";
 
 const API_KEYS_PATH = "/dashboard/api-keys";
-
-const ROLE_OPTIONS: ApiKeyRole[] = ["api_admin", "api_developer", "api_readonly"];
 
 interface ApiKeyAuthoringWorkspaceProps {
   mode: ApiKeyAuthoringMode;
   wallets: PaymentsDashboardWallet[];
+  /** The actions this deployment's release channel lets a key hold. */
+  offeredActions: Action[];
   initialKey?: ApiKeyAuthoringExistingKey;
 }
 
@@ -73,17 +50,14 @@ function toLocalDateTime(value: string | null): string {
 function draftFromInitialKey(initialKey?: ApiKeyAuthoringExistingKey): ApiKeyAuthoringDraft {
   const empty = createApiKeyAuthoringDraft();
   if (!initialKey) return empty;
-  const { allowedOperations } = initialKey;
   return {
     ...empty,
     name: initialKey.name,
-    role: initialKey.role,
     expiresAt: toLocalDateTime(initialKey.expiresAt),
     walletScope: initialKey.walletScope,
     selectedWalletIds: initialKey.signingWalletIds,
     defaultWalletId: initialKey.signingWalletId ?? initialKey.signingWalletIds[0] ?? "",
-    operationsScope: allowedOperations.length > 0 ? "selected" : "all",
-    selectedOperations: allowedOperations,
+    grants: initialKey.grants,
   };
 }
 
@@ -95,12 +69,6 @@ function walletLabel(wallet: PaymentsDashboardWallet): string {
 function shortAddress(value: string): string {
   if (value.length <= 16) return value;
   return `${value.slice(0, 7)}...${value.slice(-7)}`;
-}
-
-function roleLabel(role: ApiKeyRole, t: ReturnType<typeof useTranslations>): string {
-  if (role === "api_admin") return t("DashboardCustody.admin");
-  if (role === "api_readonly") return t("DashboardCustody.readOnly");
-  return t("DashboardCustody.developer");
 }
 
 function WorkSection({
@@ -123,40 +91,18 @@ function WorkSection({
   );
 }
 
-function permissionCountLabel(
-  permissions: readonly string[],
-  t: ReturnType<typeof useTranslations>
-): string {
-  return permissions.includes("*")
-    ? t("DashboardCustody.apiKeyFullEndpointAccess")
-    : t("DashboardCustody.apiKeyPermissionCount", { count: permissions.length });
-}
-
-/**
- * The endpoint permissions a role grants, spelled out. A bare count left a
- * partner guessing whether "Developer" covered Earn, which is the exact thing
- * the Embedded Yield guide sends them here to check. Callers skip it for the
- * `*` admin sentinel, where "Full endpoint access" is the whole list.
- */
-function PermissionChipList({
-  className,
-  permissions,
-}: {
-  className?: string;
-  permissions: readonly string[];
-}) {
+/** The key's grants, one module per line. */
+function GrantSummaryList({ grants }: { grants: readonly Action[] }) {
   const t = useTranslations();
+  const lines = grantSummaryLines(grants, t);
+  if (lines.length === 0) {
+    return <p className="text-sm text-secondary">{t("DashboardCustody.apiKeyGrantsNone")}</p>;
+  }
   return (
-    <ul
-      aria-label={t("DashboardCustody.endpointPermissions")}
-      className={cn("flex flex-wrap gap-1.5", className)}
-    >
-      {permissions.map((permission) => (
-        <li
-          key={permission}
-          className="rounded-md border border-border-default bg-surface-raised px-2 py-0.5 text-xs font-medium text-secondary"
-        >
-          {permission}
+    <ul className="space-y-1">
+      {lines.map((line) => (
+        <li key={line} className="text-sm text-primary">
+          {line}
         </li>
       ))}
     </ul>
@@ -260,15 +206,16 @@ function DetailsStep({
 
 function PermissionsStep({
   draft,
-  mode,
+  offeredActions,
+  touched,
   update,
 }: {
   draft: ApiKeyAuthoringDraft;
-  mode: ApiKeyAuthoringMode;
+  offeredActions: Action[];
+  touched: boolean;
   update: (patch: Partial<ApiKeyAuthoringDraft>) => void;
 }) {
   const t = useTranslations();
-  const permissions = getPermissionsForApiKeyRole(draft.role);
   return (
     <div>
       <h2 className="text-2xl font-medium text-primary">
@@ -278,57 +225,13 @@ function PermissionsStep({
         {t("DashboardCustody.apiKeyPermissionsDescription")}
       </p>
       <div className="mt-5 space-y-4">
-        <WorkSection
-          title={t("DashboardCustody.endpointPermissions")}
-          description={mode === "edit" ? t("DashboardCustody.apiKeyRoleFixedOnEdit") : undefined}
-        >
-          <div className="grid gap-3 sm:grid-cols-3">
-            {ROLE_OPTIONS.map((role) => {
-              const checked = draft.role === role;
-              return (
-                <label
-                  key={role}
-                  className={cn(
-                    "flex min-h-24 items-start gap-3 rounded-lg border p-4",
-                    checked ? "border-primary bg-fill-subtle" : "border-border-default",
-                    mode === "edit" ? "cursor-default" : "cursor-pointer"
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="api-key-role"
-                    value={role}
-                    checked={checked}
-                    disabled={mode === "edit"}
-                    onChange={() => update({ role })}
-                    className="mt-1"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-primary">
-                      {roleLabel(role, t)}
-                    </span>
-                    <span className="mt-1 block text-xs text-secondary">
-                      {t(`DashboardCustody.apiKeyRoleDescription.${role}`)}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          <div className="mt-4 flex items-start gap-3 rounded-lg bg-fill-subtle p-3">
-            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-tertiary" />
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-primary">
-                {permissionCountLabel(permissions, t)}
-              </p>
-              {permissions.includes("*") ? null : (
-                <PermissionChipList className="mt-2" permissions={permissions} />
-              )}
-              <p className="mt-2 text-xs text-secondary">
-                {t("DashboardCustody.apiKeyPermissionsSeparateFromOperations")}
-              </p>
-            </div>
-          </div>
+        <WorkSection title={t("DashboardCustody.apiKeyGrantsReviewTitle")}>
+          <ApiKeyGrantPicker
+            offered={offeredActions}
+            grants={draft.grants}
+            touched={touched}
+            onChange={(grants) => update({ grants })}
+          />
         </WorkSection>
       </div>
     </div>
@@ -396,137 +299,17 @@ function WalletRow({
   );
 }
 
-function OperationsPicker({
-  draft,
-  touched,
-  update,
-}: {
-  draft: ApiKeyAuthoringDraft;
-  touched: boolean;
-  update: (patch: Partial<ApiKeyAuthoringDraft>) => void;
-}) {
-  const t = useTranslations();
-  return (
-    <div>
-      <div className="space-y-3">
-        <label className="flex items-start gap-3 rounded-lg border border-border-default p-3">
-          <input
-            type="radio"
-            name="operations-scope"
-            checked={draft.operationsScope === "all"}
-            onChange={() => update({ operationsScope: "all" })}
-            className="mt-1"
-          />
-          <span>
-            <span className="block text-sm font-medium text-primary">
-              {t("DashboardCustody.apiKeyOperationsAll")}
-            </span>
-            <span className="mt-1 block text-xs text-secondary">
-              {t("DashboardCustody.apiKeyOperationsAllHelper")}
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-3 rounded-lg border border-border-default p-3">
-          <input
-            type="radio"
-            name="operations-scope"
-            checked={draft.operationsScope === "selected"}
-            onChange={() => update({ operationsScope: "selected" })}
-            className="mt-1"
-          />
-          <span>
-            <span className="block text-sm font-medium text-primary">
-              {t("DashboardCustody.apiKeyOperationsSelected")}
-            </span>
-            <span className="mt-1 block text-xs text-secondary">
-              {t("DashboardCustody.apiKeyOperationsSelectedHelper")}
-            </span>
-          </span>
-        </label>
-      </div>
-      {draft.operationsScope === "selected" ? (
-        <div className="mt-4 space-y-3">
-          {API_KEY_OPERATION_FAMILIES.map((family) => {
-            const state = familyState(draft.selectedOperations, family);
-            return (
-              <div key={family} className="rounded-lg border border-border-default">
-                <label className="flex items-start gap-3 p-3">
-                  <input
-                    type="checkbox"
-                    checked={state === "all"}
-                    ref={(element) => {
-                      if (element) element.indeterminate = state === "some";
-                    }}
-                    onChange={() =>
-                      update({ selectedOperations: toggleFamily(draft.selectedOperations, family) })
-                    }
-                    aria-label={familyLabel(family, t)}
-                    aria-describedby={`api-key-family-${family}-description`}
-                    className="mt-1"
-                  />
-                  <span>
-                    <span className="block text-sm font-medium text-primary">
-                      {familyLabel(family, t)}
-                    </span>
-                    <span
-                      id={`api-key-family-${family}-description`}
-                      className="mt-1 block text-xs text-secondary"
-                    >
-                      {familyDescription(family, t)}
-                    </span>
-                  </span>
-                </label>
-                {state !== "none" ? (
-                  <div className="grid gap-2 border-t border-border-subtle px-3 py-3 sm:grid-cols-2">
-                    {operationTypesInFamily(family).map((type) => (
-                      <label
-                        key={type}
-                        className="flex items-center gap-2 font-mono text-xs text-primary"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isOperationTypeTicked(draft.selectedOperations, type)}
-                          onChange={() =>
-                            update({
-                              selectedOperations: toggleOperationType(
-                                draft.selectedOperations,
-                                type
-                              ),
-                            })
-                          }
-                        />
-                        {type}
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-          {touched && draft.selectedOperations.length === 0 ? (
-            <p className="text-xs text-destructive">
-              {t("DashboardCustody.apiKeyOperationsRequired")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function AccessStep({
   draft,
   wallets,
   walletSelectionTouched,
   onWalletSelectionTouched,
-  operationsTouched,
   update,
 }: {
   draft: ApiKeyAuthoringDraft;
   wallets: PaymentsDashboardWallet[];
   walletSelectionTouched: boolean;
   onWalletSelectionTouched: () => void;
-  operationsTouched: boolean;
   update: (patch: Partial<ApiKeyAuthoringDraft>) => void;
 }) {
   const t = useTranslations();
@@ -648,13 +431,6 @@ function AccessStep({
             </div>
           ) : null}
         </WorkSection>
-
-        <WorkSection
-          title={t("DashboardCustody.apiKeyOperationsTitle")}
-          description={t("DashboardCustody.apiKeyOperationsDescription")}
-        >
-          <OperationsPicker draft={draft} touched={operationsTouched} update={update} />
-        </WorkSection>
       </div>
     </div>
   );
@@ -698,17 +474,7 @@ function ReviewStep({
           />
         </WorkSection>
         <WorkSection title={t("DashboardCustody.apiKeyReviewPermissions")}>
-          <ReviewLine label={t("DashboardCustody.role")} value={roleLabel(draft.role, t)} />
-          <ReviewLine
-            label={t("DashboardCustody.endpointPermissions")}
-            value={permissionCountLabel(getPermissionsForApiKeyRole(draft.role), t)}
-          />
-          {getPermissionsForApiKeyRole(draft.role).includes("*") ? null : (
-            <PermissionChipList
-              className="pt-2.5"
-              permissions={getPermissionsForApiKeyRole(draft.role)}
-            />
-          )}
+          <GrantSummaryList grants={draft.grants} />
         </WorkSection>
         <WorkSection title={t("DashboardCustody.apiKeyReviewWalletAccess")}>
           <ReviewLine
@@ -725,12 +491,6 @@ function ReviewStep({
               value={selectedWallets.map(walletLabel).join(", ")}
             />
           ) : null}
-        </WorkSection>
-        <WorkSection title={t("DashboardCustody.apiKeyReviewOperations")}>
-          <ReviewLine
-            label={t("DashboardCustody.apiKeyOperationsTitle")}
-            value={operationsSummaryLabel(buildAllowedOperations(draft), t)}
-          />
         </WorkSection>
       </div>
     </div>
@@ -783,7 +543,7 @@ function KeySummary({
           <SummaryRow
             icon={<KeyRound className="size-4" />}
             label={t("DashboardCustody.apiKeySummaryPermissions")}
-            value={roleLabel(draft.role, t)}
+            value={grantsSummaryLabel(draft.grants, t)}
           />
           <SummaryRow
             icon={<Wallet className="size-4" />}
@@ -803,11 +563,6 @@ function KeySummary({
                 : t("DashboardCustody.selected", { count: selectedWallets.length })
             }
           />
-          <SummaryRow
-            icon={<ListChecks className="size-4" />}
-            label={t("DashboardCustody.apiKeyOperationsTitle")}
-            value={operationsSummaryLabel(buildAllowedOperations(draft), t)}
-          />
         </div>
       </div>
     </aside>
@@ -817,6 +572,7 @@ function KeySummary({
 export function ApiKeyAuthoringWorkspace({
   mode,
   wallets,
+  offeredActions,
   initialKey,
 }: ApiKeyAuthoringWorkspaceProps) {
   const t = useTranslations();
@@ -826,25 +582,18 @@ export function ApiKeyAuthoringWorkspace({
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
   const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
-  const [operationsTouched, setOperationsTouched] = useState(false);
+  const [grantsTouched, setGrantsTouched] = useState(false);
   const [isPending, startTransition] = useTransition();
   const environment =
     (initialKey?.environment ?? sdpEnvironment) === "production"
       ? t("DashboardCustody.production")
       : t("DashboardCustody.sandbox");
   const currentStepIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
-  const selectedWalletCount = draft.selectedWalletIds.length;
-  const operationsValid = draft.operationsScope === "all" || draft.selectedOperations.length > 0;
-  const canContinue =
-    currentStep === "details"
-      ? draft.name.trim().length > 0
-      : currentStep === "wallets"
-        ? (draft.walletScope === "all" || selectedWalletCount > 0) && operationsValid
-        : true;
+  const canContinue = isAuthoringStepComplete(currentStep, draft);
 
   const update = (patch: Partial<ApiKeyAuthoringDraft>) => {
-    if ("operationsScope" in patch || "selectedOperations" in patch) {
-      setOperationsTouched(true);
+    if ("grants" in patch) {
+      setGrantsTouched(true);
     }
     setDraft((current) => ({ ...current, ...patch }));
   };
@@ -855,7 +604,7 @@ export function ApiKeyAuthoringWorkspace({
         mode,
         keyId: initialKey?.id,
         draft,
-        operationsTouched,
+        grantsTouched,
       });
       if (!result.ok) {
         toast.error(result.message, { position: "bottom-right" });
@@ -901,7 +650,12 @@ export function ApiKeyAuthoringWorkspace({
               <DetailsStep draft={draft} environment={environment} update={update} />
             ) : null}
             {currentStep === "permissions" ? (
-              <PermissionsStep draft={draft} mode={mode} update={update} />
+              <PermissionsStep
+                draft={draft}
+                offeredActions={offeredActions}
+                touched={grantsTouched}
+                update={update}
+              />
             ) : null}
             {currentStep === "wallets" ? (
               <AccessStep
@@ -909,7 +663,6 @@ export function ApiKeyAuthoringWorkspace({
                 wallets={wallets}
                 walletSelectionTouched={walletSelectionTouched}
                 onWalletSelectionTouched={() => setWalletSelectionTouched(true)}
-                operationsTouched={operationsTouched}
                 update={update}
               />
             ) : null}

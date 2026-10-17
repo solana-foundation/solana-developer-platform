@@ -11,6 +11,7 @@ import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getLogger } from "@/runtime/logger";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -88,8 +89,7 @@ function cachedApiKey(environment: SdpEnvironment): SeededApiKey {
     id: API_KEYS[environment].id,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_IDS[environment],
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
     environment,
     rateLimitTier: "standard",
     allowedIps: null,
@@ -132,8 +132,7 @@ async function seedEnvironmentApiKey(environment: SdpEnvironment): Promise<void>
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_IDS[environment],
     createdBy: USER_ID,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
   await seedApiKeyRow(env, keyHash, cachedApiKey(environment));
 }
@@ -144,9 +143,11 @@ function initialize(environment: SdpEnvironment, provider: CustodyProvider): Pro
       "/v1/wallets/initialize",
       {
         method: "POST",
+        // Custody setup is `wallets.configure`, which no API key may hold.
         headers: {
-          Authorization: `Bearer ${API_KEYS[environment].raw}`,
+          Authorization: `Bearer ${clerkToken}`,
           "Content-Type": "application/json",
+          "X-Project-ID": PROJECT_IDS[environment],
         },
         body: JSON.stringify({ provider }),
       },
@@ -549,7 +550,18 @@ describe("Custody setup by project environment", () => {
           .bind(PROJECT_IDS[environment])
           .run();
 
-        const response = await initialize(environment, "privy");
+        const response = await app.request(
+          "/v1/wallets/initialize",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${API_KEYS[environment].raw}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ provider: "privy" }),
+          },
+          env
+        );
 
         // Authentication refuses a key whose project is not active (HOO-2099).
         expect(response.status).toBe(401);

@@ -5,6 +5,7 @@ import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -222,16 +223,15 @@ describe("Clerk webhooks", () => {
     await db.batch([
       db
         .prepare(`INSERT INTO api_keys
-             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, 'api_admin', ?, 'active')`)
-        .bind(keyId, orgId, projectId, userId, keyHash, JSON.stringify(["*"])),
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, ?, 'active')`)
+        .bind(keyId, orgId, projectId, userId, keyHash, ALL_API_KEY_GRANTS),
     ]);
     await seedApiKeyRow(env, keyHash, {
       id: keyId,
       organizationId: orgId,
       projectId,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
       rateLimitTier: "standard",
       allowedIps: null,
@@ -744,7 +744,7 @@ describe("Clerk webhooks", () => {
     assert(lifecycleProject, "Expected the Clerk organization sandbox project to exist");
     await getDb(env)
       .prepare(`INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
          SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?, ?, ?
          FROM auth_organization_identities aoi
          WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
@@ -755,7 +755,7 @@ describe("Clerk webhooks", () => {
         "Lifecycle Key",
         "sk_test_web",
         apiKeyHash,
-        "api_admin",
+        ALL_API_KEY_GRANTS,
         "active",
         "org_clerk_lifecycle"
       )

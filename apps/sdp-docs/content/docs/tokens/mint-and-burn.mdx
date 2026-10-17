@@ -14,7 +14,7 @@ After [deploying a token](/docs/tokens/deploy-a-token), you can mint new tokens 
 ## Prerequisites
 
 - A deployed token with status `active`
-- `tokens:write` permission — or `tokens:admin` for force-burn
+- The `issuance.execute` grant — or `issuance.enforce` for force-burn
 - For standard burn, the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works

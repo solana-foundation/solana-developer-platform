@@ -30,7 +30,7 @@ import { resolveWithdrawalCreateContext } from "../value-movement-access";
  * POST /withdrawals — burn the custody wallet's channel-chain balance (via the
  * withdraw program) and broadcast it to the gateway; the operator later releases
  * the matching real USDC to `destination` (defaults to the owner). Feature-gated
- * + `payments:write`. Returns the withdrawal DTO with its current status
+ * + `private_channels.execute`. Returns the withdrawal DTO with its current status
  * (submitted/confirmed, or failed with a reason). `settled` (operator's release
  * observed) is detected asynchronously by the oracle.
  *

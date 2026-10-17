@@ -74,8 +74,7 @@ function cachedKey(): SeededApiKey {
     id: KEY.id,
     organizationId: ORG,
     projectId: PROJECT,
-    role: "api_developer",
-    permissions: ["earn:read"],
+    grants: ["earn.read"],
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
@@ -107,8 +106,7 @@ async function seedScope() {
     organizationId: ORG,
     projectId: `${PROJECT}_production`,
     createdBy: USER,
-    role: "api_developer",
-    permissions: ["earn:read"],
+    grants: ["earn.read"],
   });
   await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
@@ -120,10 +118,10 @@ async function seedScope() {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'External activity', 'sk_test_act', ?, 'api_developer', '["earn:read"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'External activity', 'sk_test_act', ?, ?, 'active')`
       )
-      .bind(KEY.id, ORG, PROJECT, USER, keyHash),
+      .bind(KEY.id, ORG, PROJECT, USER, keyHash, ["earn.read"]),
   ]);
 }
 

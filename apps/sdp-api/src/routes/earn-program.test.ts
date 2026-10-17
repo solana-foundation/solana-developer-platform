@@ -59,7 +59,7 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import app from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
-import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -88,8 +88,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -184,8 +183,7 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
     organizationId: TEST_ORG.id,
     projectId: TEST_PRODUCTION_PROJECT.id,
     createdBy: TEST_USER.id,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
   await seedApiKeyRow(env, productionKeyHash, {
     ...TEST_CACHED_API_KEY,
@@ -197,9 +195,9 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, grants = excluded.grants, status = excluded.status`
       )
       .bind(
         TEST_API_KEY.id,
@@ -209,8 +207,7 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
         "Earn Program Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -2182,9 +2179,9 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, grants = excluded.grants, status = excluded.status`
       )
       .bind(
         WALLET_SCOPED_KEY.id,
@@ -2194,8 +2191,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
         "Wallet-scoped key",
         WALLET_SCOPED_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       )
       .run();

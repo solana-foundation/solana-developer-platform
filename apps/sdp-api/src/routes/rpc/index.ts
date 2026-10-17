@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { payloadTooLarge } from "@/lib/errors";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { relayRpcRequest } from "./handlers";
@@ -37,7 +38,7 @@ rpc.use(
 // must not be able to charge the org-wide pool and starve authorized users.
 rpc.post(
   "/proxy",
-  requirePermissions("tokens:write"),
+  requireAction("rpc.execute"),
   validateBody(rpcRelayPayloadSchema),
   // A batch of N is N node calls charged as N, so the ceiling means what it
   // says regardless of how requests are packed.

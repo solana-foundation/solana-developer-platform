@@ -1,11 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
-import { normalizeOrganizationRole, type OrganizationRole, type Permission } from "@sdp/types";
+import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { requireHumanActor } from "@/middleware/human-session";
+import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -23,28 +24,13 @@ function resolveActor(c: AppContext): {
   organizationId: string;
   userId: string;
   clerkUserId: string;
-  permissions: Permission[];
 } {
   const clerk = requireHumanActor(c);
   return {
     organizationId: clerk.organizationId,
     userId: clerk.userId,
     clerkUserId: clerk.clerkUserId,
-    permissions: clerk.permissions,
   };
-}
-
-/**
- * Whether the caller holds a permission, resolved exactly as
- * `requirePermissions` resolves it (same credential precedence, same wildcard).
- *
- * A route gate is all-or-nothing, so a response that mixes two sensitivities
- * has to check the finer one itself. Reading it the same way keeps the
- * in-handler gate from drifting away from the route-level one.
- */
-function callerHasPermission(c: AppContext, permission: Permission): boolean {
-  const { permissions } = resolveActor(c);
-  return permissions.includes("*") || permissions.includes(permission);
 }
 
 function mapRoleToClerkRole(role: OrganizationRole): string {
@@ -178,12 +164,13 @@ export const listMembers = async (c: AppContext) => {
 
   // Pending invitations are shown only to callers who can act on them. Raising
   // one (`POST /invite`) and withdrawing one (`DELETE /invitations/:id`) both
-  // require `org:write`, but this list is `org:read`, which the `member` role
-  // holds too. That gap put every invitee's address — and Clerk's accept link,
-  // a forwardable credential we cannot expire, since Clerk mints it — within
-  // reach of the lowest privilege tier. The roster stays at `org:read`; the
-  // invitations follow the permission that already governs them.
-  const canReadInvitations = callerHasPermission(c, "org:write");
+  // require `members.manage`, but this list is `members.read`, which the
+  // `member` role holds too. That gap put every invitee's address — and
+  // Clerk's accept link, a forwardable credential we cannot expire, since
+  // Clerk mints it — within reach of the lowest privilege tier. The roster
+  // stays at `members.read`; the invitations follow the action that already
+  // governs them. A route gate is all-or-nothing, so the finer check is here.
+  const canReadInvitations = callerMayPerform(c, "members.manage");
 
   const memberTotalRow = await getDb(c.env)
     .prepare(

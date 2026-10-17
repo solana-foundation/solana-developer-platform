@@ -7855,6 +7855,132 @@
     }
   ],
   "valueGates": {
+    "transfers.read": {
+      "module": "payments"
+    },
+    "transfers.execute": {
+      "module": "payments"
+    },
+    "transfer_batches.read": {
+      "module": "payments"
+    },
+    "transfer_batches.execute": {
+      "module": "payments"
+    },
+    "payment_requests.read": {
+      "module": "payments"
+    },
+    "payment_requests.manage": {
+      "module": "payments"
+    },
+    "counterparties.read": {
+      "module": "payments"
+    },
+    "counterparties.manage": {
+      "module": "payments"
+    },
+    "counterparties.execute": {
+      "module": "payments"
+    },
+    "transactions.read": {
+      "module": "payments"
+    },
+    "recurring.read": {
+      "module": "recurring_payments"
+    },
+    "recurring.manage": {
+      "module": "recurring_payments"
+    },
+    "recurring.execute": {
+      "module": "recurring_payments"
+    },
+    "wallets.read": {
+      "module": "custody"
+    },
+    "wallets.manage": {
+      "module": "custody"
+    },
+    "wallets.execute": {
+      "module": "custody"
+    },
+    "wallets.configure": {
+      "module": "custody"
+    },
+    "compliance.execute": {
+      "module": "compliance"
+    },
+    "onramp.read": {
+      "module": "ramps"
+    },
+    "onramp.execute": {
+      "module": "ramps"
+    },
+    "offramp.read": {
+      "module": "ramps"
+    },
+    "offramp.execute": {
+      "module": "ramps"
+    },
+    "ramp_transfers.manage": {
+      "module": "ramps"
+    },
+    "issuance.read": {
+      "module": "issuance"
+    },
+    "issuance.manage": {
+      "module": "issuance"
+    },
+    "issuance.execute": {
+      "module": "issuance"
+    },
+    "issuance.enforce": {
+      "module": "issuance"
+    },
+    "issuance.authority": {
+      "module": "issuance"
+    },
+    "dvp.read": {
+      "module": "dvp"
+    },
+    "dvp.manage": {
+      "module": "dvp"
+    },
+    "dvp.execute": {
+      "module": "dvp"
+    },
+    "earn.read": {
+      "module": "earn"
+    },
+    "earn.manage": {
+      "module": "earn"
+    },
+    "earn.execute": {
+      "module": "earn"
+    },
+    "private_channels.read": {
+      "module": "private_channels"
+    },
+    "private_channels.manage": {
+      "module": "private_channels"
+    },
+    "private_channels.execute": {
+      "module": "private_channels"
+    },
+    "private_channels.configure": {
+      "module": "private_channels"
+    },
+    "helius_rings.read": {
+      "module": "helius_rings"
+    },
+    "helius_rings.manage": {
+      "module": "helius_rings"
+    },
+    "helius_rings.execute": {
+      "module": "helius_rings"
+    },
+    "helius_rings.configure": {
+      "module": "helius_rings"
+    },
     "tokens:read": {
       "module": "issuance"
     },
@@ -7903,126 +8029,6 @@
     "custody:admin": {
       "module": "custody"
     },
-    "privacy": {
-      "module": "helius_rings"
-    },
-    "payment": {
-      "module": "payments"
-    },
-    "ramp": {
-      "module": "ramps"
-    },
-    "issuance": {
-      "module": "issuance"
-    },
-    "program": {
-      "module": "markets"
-    },
-    "payment_transfer_execute": {
-      "module": "payments"
-    },
-    "payment_transfer_batch_execute": {
-      "module": "payments"
-    },
-    "recurring_payment_create": {
-      "module": "recurring_payments"
-    },
-    "recurring_payment_update": {
-      "module": "recurring_payments"
-    },
-    "recurring_payment_collection": {
-      "module": "recurring_payments"
-    },
-    "ramp_onramp_quote": {
-      "module": "ramps"
-    },
-    "ramp_offramp_quote": {
-      "module": "ramps"
-    },
-    "issuance_allowlist_add_execute": {
-      "module": "issuance"
-    },
-    "issuance_allowlist_remove_execute": {
-      "module": "issuance"
-    },
-    "issuance_burn_execute": {
-      "module": "issuance"
-    },
-    "issuance_deploy_execute": {
-      "module": "issuance"
-    },
-    "issuance_force_burn_execute": {
-      "module": "issuance"
-    },
-    "issuance_freeze_execute": {
-      "module": "issuance"
-    },
-    "issuance_metadata_update_execute": {
-      "module": "issuance"
-    },
-    "issuance_mint_execute": {
-      "module": "issuance"
-    },
-    "issuance_pause_execute": {
-      "module": "issuance"
-    },
-    "issuance_seize_execute": {
-      "module": "issuance"
-    },
-    "issuance_unfreeze_execute": {
-      "module": "issuance"
-    },
-    "issuance_unpause_execute": {
-      "module": "issuance"
-    },
-    "issuance_update_authority_execute": {
-      "module": "issuance"
-    },
-    "dvp_fund": {
-      "module": "dvp"
-    },
-    "dvp_settle": {
-      "module": "dvp"
-    },
-    "earn_vault_deposit": {
-      "module": "earn"
-    },
-    "earn_vault_withdrawal": {
-      "module": "earn"
-    },
-    "earn_program_withdrawal": {
-      "module": "earn"
-    },
-    "rings_shield": {
-      "module": "helius_rings"
-    },
-    "rings_transfer_registered": {
-      "module": "helius_rings"
-    },
-    "rings_transfer_anonymous": {
-      "module": "helius_rings"
-    },
-    "rings_withdraw": {
-      "module": "helius_rings"
-    },
-    "rings_merge": {
-      "module": "helius_rings"
-    },
-    "rings_timelock_create": {
-      "module": "helius_rings"
-    },
-    "rings_timelock_settle": {
-      "module": "helius_rings"
-    },
-    "rings_zone_create": {
-      "module": "helius_rings"
-    },
-    "rings_ring_exit": {
-      "module": "helius_rings"
-    },
-    "rings_ring_entry": {
-      "module": "helius_rings"
-    },
     "mint_authority": {
       "module": "issuance"
     },
@@ -8043,6 +8049,9 @@
     },
     "private_channels": {
       "module": "private_channels"
+    },
+    "issuance": {
+      "module": "issuance"
     },
     "rings": {
       "module": "helius_rings"

@@ -149,8 +149,7 @@ describe("GET /internal/dashboard/network", () => {
       organizationId: ORG.id,
       projectId: PROJECT_ID,
       createdBy: USER.id,
-      role: "api_developer",
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
     const fetchSpy = mockSources();
 

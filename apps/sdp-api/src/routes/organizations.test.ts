@@ -3,7 +3,7 @@ import type { Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
@@ -288,7 +288,7 @@ describe("Organizations routes", () => {
       await getDb(env).batch([
         getDb(env)
           .prepare(
-            "INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
           )
           .bind(
             TEST_API_KEY.id,
@@ -298,7 +298,7 @@ describe("Organizations routes", () => {
             "Test Key",
             TEST_API_KEY.prefix,
             validKeyHash,
-            "api_admin",
+            ALL_API_KEY_GRANTS,
             "active"
           ),
       ]);

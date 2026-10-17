@@ -15,6 +15,7 @@ import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import {
   activateTestCustodyConnection,
@@ -105,8 +106,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -152,8 +152,7 @@ async function seedAuth(): Promise<void> {
     organizationId: TEST_ORG.id,
     projectId: TEST_PRODUCTION_PROJECT.id,
     createdBy: TEST_USER.id,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
   await seedApiKeyRow(env, productionKeyHash, {
     ...TEST_CACHED_API_KEY,
@@ -165,8 +164,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn VW Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Earn VW Test Key', ?, ?, ?, 'active')`
       )
       .bind(
         TEST_API_KEY.id,
@@ -174,7 +173,8 @@ async function seedAuth(): Promise<void> {
         TEST_PROJECT.id,
         TEST_USER.id,
         TEST_API_KEY.prefix,
-        keyHash
+        keyHash,
+        ALL_API_KEY_GRANTS
       ),
     getDb(env)
       .prepare(
@@ -1151,14 +1151,14 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     expect(res.status).toBe(404);
   });
 
-  it("refuses an earn:read-only key — wallets:read backs the binding check it reads through", async () => {
+  it("refuses a key without earn.read before it reads a position's live payout", async () => {
     await seedAuth();
     const positionId = await seedPosition({ provider: "veda" });
     const readOnlyKey = { id: "key_earn_vw_ro", raw: "sk_test_earn_vw_ro" };
     await seedApiKeyRow(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
       ...TEST_CACHED_API_KEY,
       id: readOnlyKey.id,
-      permissions: ["earn:read"],
+      grants: ["transfers.read", "wallets.read"],
     });
 
     const res = await app.request(
@@ -1174,11 +1174,10 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
       env
     );
 
-    // For a key with NO wallet bindings the handler's binding check is a
-    // documented no-op, so this gate is the only thing keeping an
-    // earn:read-only key from reading any org position's live payout while
-    // GET /vault-positions answers the same key 403.
+    // The route's action is the gate: the handler's binding check is a
+    // documented no-op for a key with NO wallet bindings.
     expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { details: { action: "earn.read" } } });
   });
 });
 

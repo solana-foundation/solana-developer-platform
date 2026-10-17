@@ -1,6 +1,6 @@
 import type {
-  OperationFamily,
-  OperationType,
+  ActionModule,
+  ActionVerb,
   RampProviderId,
   SdpModule,
   SdpReleaseChannel,
@@ -23,7 +23,7 @@ export type PublicSurface = {
   releaseChannel: SdpReleaseChannel;
   modules: readonly SdpModule[];
   rampProviders: readonly RampProviderId[];
-  allowedOperations: readonly { family: OperationFamily; types: readonly OperationType[] }[];
+  grantableActions: readonly { module: ActionModule; verbs: readonly ActionVerb[] }[];
   allModules: readonly SdpModule[];
   allRampProviders: readonly RampProviderId[];
 };

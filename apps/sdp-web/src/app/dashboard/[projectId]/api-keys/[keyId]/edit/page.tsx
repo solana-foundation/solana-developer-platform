@@ -1,8 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { grantableActionsInChannel } from "../../api-key-authoring";
 import { fetchApiKeyAuthoringWallets, fetchApiKeyForAuthoring } from "../../api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "../../api-key-authoring-workspace";
 
@@ -29,5 +31,12 @@ export default async function EditApiKeyPage({ params }: { params: Promise<{ key
     notFound();
   }
 
-  return <ApiKeyAuthoringWorkspace mode="edit" wallets={wallets} initialKey={apiKey} />;
+  return (
+    <ApiKeyAuthoringWorkspace
+      mode="edit"
+      wallets={wallets}
+      offeredActions={grantableActionsInChannel(isModuleInDeploymentReleaseChannel)}
+      initialKey={apiKey}
+    />
+  );
 }

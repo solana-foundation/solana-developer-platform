@@ -3,7 +3,8 @@ import { isRampProviderSurfaced, RAMP_PROVIDERS } from "@sdp/types/provider-acce
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import { requirePermissions } from "@/middleware/auth";
+import { requireAction } from "@/middleware/require-action";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { listOfframpCurrencies } from "./ramps/offramp/handlers";
@@ -30,8 +31,7 @@ function buildApp(environment: "sandbox" | "production" = "sandbox") {
       id: "key_ramp_currency_test",
       organizationId: "org_ramp_currency_test",
       projectId: "prj_ramp_currency_test",
-      role: "api_admin",
-      permissions: ["payments:read"],
+      grants: ALL_API_KEY_GRANTS,
       environment,
       signingWalletId: null,
     });
@@ -40,14 +40,10 @@ function buildApp(environment: "sandbox" | "production" = "sandbox") {
     await next();
   });
 
-  app.get(
-    "/v1/payments/ramps/onramp/currency",
-    requirePermissions("payments:read"),
-    listOnrampCurrencies
-  );
+  app.get("/v1/payments/ramps/onramp/currency", requireAction("onramp.read"), listOnrampCurrencies);
   app.get(
     "/v1/payments/ramps/offramp/currency",
-    requirePermissions("payments:read"),
+    requireAction("offramp.read"),
     listOfframpCurrencies
   );
 

@@ -12,12 +12,10 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type {
-  AllowedOperation,
+  Action,
   ApiKeyEnvironment,
-  ApiKeyRole,
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
-  Permission,
 } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
@@ -64,14 +62,12 @@ interface ApiKeyContext {
   id: string;
   organizationId: string;
   projectId: string;
-  role: ApiKeyRole;
-  permissions: Permission[];
+  grants: readonly Action[];
   environment: ApiKeyEnvironment;
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
   walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
-  allowedOperations?: AllowedOperation[] | null;
 }
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
@@ -252,10 +248,8 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
     id: key.id,
     organizationId: key.organizationId,
     projectId: key.projectId,
-    role: key.role,
-    permissions: key.permissions,
+    grants: key.grants,
     environment: key.environment,
-    allowedOperations: key.allowedOperations,
     walletScope: key.walletAuthorization.walletScope,
     signingWalletId: key.walletAuthorization.signingWalletId,
     signingWalletIds: key.walletAuthorization.signingWalletIds,
@@ -270,59 +264,6 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   void scheduleApiKeyLastUsedUpdate(getDb(c.env), key.id);
 
   return authContext;
-}
-
-/**
- * Require specific permissions
- */
-export function grantedPermissions(c: Context<{ Bindings: Env }>): readonly Permission[] | "*" {
-  const permissions = c.get("apiKey")?.permissions ?? c.get("clerk")?.permissions ?? null;
-
-  if (!permissions) {
-    throw new AppError("UNAUTHORIZED");
-  }
-
-  return permissions.includes("*") ? "*" : permissions;
-}
-
-export function requirePermissions(...required: Permission[]) {
-  return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const permissions = grantedPermissions(c);
-
-    // Check for wildcard
-    if (permissions === "*") {
-      await next();
-      return;
-    }
-
-    // Check each required permission
-    const hasAll = required.every((p) => permissions.includes(p));
-    if (!hasAll) {
-      throw new AppError(
-        "INSUFFICIENT_PERMISSIONS",
-        `Required permissions: ${required.join(", ")}`
-      );
-    }
-
-    await next();
-  };
-}
-
-/**
- * Enforce the existing permission contract when optional auth resolved a
- * caller, while leaving a truly anonymous request untouched. This lets one
- * route serve both tiers without weakening scoped API keys or duplicating the
- * endpoint.
- */
-export function requirePermissionsWhenAuthenticated(...required: Permission[]) {
-  const enforce = requirePermissions(...required);
-  return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (!c.get("apiKey") && !c.get("clerk")) {
-      await next();
-      return;
-    }
-    await enforce(c, next);
-  };
 }
 
 /**

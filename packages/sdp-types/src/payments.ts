@@ -955,16 +955,26 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
-export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+export const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
   at: string;
 }
 
+/**
+ * A payment request as reads return it. It carries no link token: that is a
+ * bearer secret, returned only by {@link CreatedPaymentRequest} and
+ * {@link PaymentRequestLink} (APE-849).
+ */
 export interface PaymentRequest {
   id: string;
-  publicToken: string;
   organizationId: string;
   projectId: string | null;
   counterpartyId: string | null;
@@ -981,6 +991,20 @@ export interface PaymentRequest {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** The create response: the record plus the token behind its hosted `/pay/{publicToken}` link. */
+export interface CreatedPaymentRequest extends PaymentRequest {
+  publicToken: string;
+}
+
+/**
+ * `GET /v1/payments/requests/{id}/link` (`payment_requests.manage`): the
+ * request's link token.
+ */
+export interface PaymentRequestLink {
+  id: string;
+  publicToken: string;
 }
 
 export interface ListPaymentRequestsResponse {

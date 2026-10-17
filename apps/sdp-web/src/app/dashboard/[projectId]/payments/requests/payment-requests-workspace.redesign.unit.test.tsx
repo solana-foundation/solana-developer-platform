@@ -38,7 +38,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const paymentRequest = {
   id: "preq_1",
-  publicToken: "tok_1",
   counterpartyId: null,
   destinationAddress: "11111111111111111111111111111111",
   token: "So11111111111111111111111111111111111111112",
@@ -80,7 +79,6 @@ afterEach(() => {
 const otherRequest = {
   ...paymentRequest,
   id: "preq_2",
-  publicToken: "tok_2",
   counterpartyId: "cp_jane",
   amount: "80",
   reference: "ref_2",

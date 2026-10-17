@@ -1,11 +1,11 @@
 ---
 title: Manage API Keys
-description: Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
+description: Create, rotate, and revoke API keys with explicit grants by module, wallet bindings, and zero-downtime rotation.
 ---
 
-Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and carries a role plus optional fine-grained controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and holds an explicit list of grants plus optional controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
 
-Keys are credentials, not administrators: they are created, changed, rotated, and revoked by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever role or permissions it carries.
+Keys are credentials, not administrators: they are created, changed, rotated, and revoked by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever it is granted.
 
 The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
@@ -16,15 +16,27 @@ The full secret is returned exactly once — at creation and at rotation. SDP st
 | Sandbox | `sk_test_` | devnet |
 | Production | `sk_live_` | mainnet-beta |
 
-## Roles
+## Grants by module
 
-| Role | Description |
+Every API route performs exactly one **action**, named `module.verb`, and a key may call a route only when it holds that action. A key holds an explicit list of grants: there is no role and no wildcard.
+
+| Verb | What it allows |
 | --- | --- |
-| `api_admin` | Full access including custody and platform operations |
-| `api_developer` | Read/write access, excludes custody actions |
-| `api_readonly` | Read-only access to all resources |
+| `read` | View the module's records |
+| `manage` | Create and edit records reversibly: drafts, pausing, cancelling |
+| `execute` | Anything irreversible or that leaves SDP: on-chain transactions, provider calls, moving money, and changing where money goes, such as a payout destination or a recurring amount |
+| `enforce` | Token enforcement: freeze, pause, seize, force-burn, allowlist |
+| `authority` | Transferring or revoking a token's authorities |
 
-A key can also carry explicit `permissions` that override the role's defaults. A key can only be granted permissions its creator holds.
+`manage` and `execute` each include the same module's `read`. Nothing else implies another action: `execute` does not include `manage`, and a grant on one module gives nothing on another. These are the actions a key can be granted on this deployment:
+
+<ApiKeyGrantsTable />
+
+Some actions are never granted to a key, because keys are credentials, not administrators: key, member, organization and project administration, and every provider, credential or connection setup (`configure`). A create or update naming one is refused with `400`. So is a grant on a module this deployment does not run; a key that already holds one keeps it when an update sends it back.
+
+A request without the route's action is refused with `403 INSUFFICIENT_PERMISSIONS`, and `error.details.action` names the missing action. Nothing runs or is recorded on refusal. Grants are read on every request, so a change applies to the key's next request.
+
+When you create a key you can grant only actions you hold yourself. **Everything** in the dashboard writes out every action available when the key is created; an action added to SDP later is not granted to existing keys.
 
 ## Create a key
 
@@ -34,7 +46,7 @@ A key can also carry explicit `permissions` that override the role's defaults. A
 
 2. Click **New API key** in the top right, then fill in the key details:
    - **Name** — a descriptive label (e.g., "CI deploy key")
-   - **Role** — Admin, Developer, or Read only
+   - **Permissions** — a checkbox per verb for each module (Read, Manage, Execute); ticking Manage or Execute includes Read. **Everything** ticks every offered action
    - **Wallet access** — All wallets or Selected wallets
    - **Expiration (optional)** — date/time picker
 
@@ -48,25 +60,15 @@ A key can also carry explicit `permissions` that override the role's defaults. A
 
    ![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
 
-5. Dismiss the modal. The key now appears in the table with its prefix, role, environment, and status.
+5. Dismiss the modal. The key now appears in the table with its prefix, grants, environment, and status.
 
    ![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
 The key belongs to the project you create it in and inherits that project's environment.
 
-## Allowed operations
-
-A key can carry a list of the operation families and types it may perform on the wallets it can access. The list is an allow-list. An empty or missing list places no restriction. An operation that is not in a non-empty list is refused with `OPERATION_NOT_ALLOWED` before anything executes. Nothing is recorded on refusal, like a missing permission.
-
-<AllowedOperationsTable />
-
-Set the list when you create a key in the dashboard, or change it later on the key. A family entry covers every type in it, and a single type can be listed on its own.
-
-Clear the list to remove the restriction. Actions that get funds back out are never restricted by this list.
-
 ## Rotate a key
 
-Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and allowed operations, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's grants, IP allowlist, and wallet bindings, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
 
 1. In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**.
 

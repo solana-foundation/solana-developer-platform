@@ -1,9 +1,8 @@
 "use client";
 
 import type {
-  AllowedOperation,
+  Action,
   ApiKeyEnvironment,
-  ApiKeyRole,
   ApiKeyStatus,
   ApiKeyWalletBinding,
   ApiKeyWalletScope,
@@ -26,7 +25,7 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
-import { operationsSummaryLabel } from "./api-key-operations-labels";
+import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
 
 const PREFIX_COLUMN_CLASS = "hidden @4xl/api-keys-table:table-cell";
 const STATUS_COLUMN_CLASS = "hidden @5xl/api-keys-table:table-cell";
@@ -38,15 +37,13 @@ export interface ApiKeyRecord {
   id: string;
   name: string;
   keyPrefix: string;
-  role: ApiKeyRole;
+  grants: Action[];
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
   walletBindings: ApiKeyWalletBinding[];
-  /** Empty means the key may perform every operation. */
-  allowedOperations: AllowedOperation[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -65,12 +62,6 @@ function formatDate(
     day: "2-digit",
     year: "numeric",
   });
-}
-
-function formatRole(role: ApiKeyRole, t: ReturnType<typeof useTranslations>): string {
-  if (role === "api_admin") return t("DashboardCustody.admin");
-  if (role === "api_readonly") return t("DashboardCustody.readOnly");
-  return t("DashboardCustody.developer");
 }
 
 function formatWalletLabel(wallet: PaymentsDashboardWallet): string {
@@ -114,18 +105,18 @@ function AccessSummary({
 }) {
   const t = useTranslations();
   const walletSummary = getWalletNames(apiKey, walletLabelById, t);
-  const operationsSummary = operationsSummaryLabel(apiKey.allowedOperations, t);
+  const grantLines = grantSummaryLines(apiKey.grants, t);
 
   return (
     <div className="min-w-0">
-      <p className="truncate text-sm font-medium text-primary">
-        {t("DashboardCustody.roleAccess", { role: formatRole(apiKey.role, t) })}
-      </p>
       <p
-        className="mt-1 truncate text-xs text-secondary"
-        title={`${walletSummary.title} · ${operationsSummary}`}
+        className="truncate text-sm font-medium text-primary"
+        title={grantLines.join("\n") || undefined}
       >
-        {walletSummary.label} · {operationsSummary}
+        {grantLines.length === 1 ? grantLines[0] : grantsSummaryLabel(apiKey.grants, t)}
+      </p>
+      <p className="mt-1 truncate text-xs text-secondary" title={walletSummary.title}>
+        {walletSummary.label}
       </p>
     </div>
   );

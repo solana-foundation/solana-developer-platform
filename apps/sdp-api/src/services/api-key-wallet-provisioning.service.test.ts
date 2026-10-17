@@ -9,6 +9,7 @@ import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
@@ -47,8 +48,7 @@ const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -201,6 +201,7 @@ describe("provisionApiKeyWallet", () => {
             headers: adminHeaders(),
             body: JSON.stringify({
               name: "Rejected key",
+              grants: ["transfers.read"],
               walletScope: "selected",
               provisionWallet: { connectionId: CONNECTION_ID },
             }),
@@ -244,6 +245,7 @@ describe("provisionApiKeyWallet", () => {
           headers: adminHeaders(),
           body: JSON.stringify({
             name: `Connection key ${path}`,
+            grants: ["transfers.read"],
             walletScope: "selected",
             provisionWallet: { connectionId: CONNECTION_ID },
           }),
@@ -319,6 +321,7 @@ describe("provisionApiKeyWallet", () => {
           headers: adminHeaders(),
           body: JSON.stringify({
             name: "Ownerless provisioning key",
+            grants: ["transfers.read"],
             walletScope: "selected",
             ...provisioning,
           }),
@@ -355,6 +358,7 @@ describe("provisionApiKeyWallet", () => {
           headers: adminHeaders(),
           body: JSON.stringify({
             name: `Rejected Connection key ${connectionId}`,
+            grants: ["transfers.read"],
             walletScope: "selected",
             provisionWallet: { connectionId },
           }),
@@ -395,6 +399,7 @@ describe("provisionApiKeyWallet", () => {
         headers: adminHeaders(),
         body: JSON.stringify({
           name: "Unusable Connection key",
+          grants: ["transfers.read"],
           walletScope: "selected",
           provisionWallet: { connectionId: CONNECTION_ID },
         }),
@@ -416,6 +421,7 @@ describe("provisionApiKeyWallet", () => {
         headers: adminHeaders(),
         body: JSON.stringify({
           name: "Existing Connection wallet key",
+          grants: ["transfers.read"],
           walletScope: "selected",
           signingWalletId: "privy_api_key_default",
         }),
@@ -469,6 +475,7 @@ describe("provisionApiKeyWallet", () => {
           headers: adminHeaders(),
           body: JSON.stringify({
             name: `Managed provider key ${path}`,
+            grants: ["transfers.read"],
             walletScope: "selected",
             provisionWallet: { provider: "para" },
           }),
@@ -552,9 +559,9 @@ async function seedFixture(): Promise<void> {
     await tx.execute(
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-          role, permissions, status)
-       VALUES (?, ?, ?, ?, 'Admin', 'sk_test_api', ?, 'api_admin', '["*"]', 'active')`,
-      [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, keyHash]
+          grants, status)
+       VALUES (?, ?, ?, ?, 'Admin', 'sk_test_api', ?, ?, 'active')`,
+      [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, keyHash, ALL_API_KEY_GRANTS]
     );
     await insertTestCustodyConfigRow(tx, {
       id: CONFIG_ID,

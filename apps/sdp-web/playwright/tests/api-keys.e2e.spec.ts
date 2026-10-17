@@ -30,11 +30,11 @@ test.describe
 
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
-      await expect(
-        page.getByRole("heading", { level: 2, name: "Endpoint permissions" })
-      ).toBeVisible();
+      // Grants are explicit (HOO-2099): nothing is granted until a verb is ticked.
+      await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+      await page.getByRole("checkbox", { name: "Execute on Transfers" }).check();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByLabel("Selected wallets").check();
+      await page.getByRole("radio", { name: /^Selected wallets/ }).check();
       await page
         .getByRole("checkbox", { name: /^Select / })
         .first()
@@ -42,8 +42,7 @@ test.describe
       await page.getByRole("button", { name: "Continue" }).click();
 
       await expect(page.getByText("Key identity")).toBeVisible();
-      await expect(page.getByText("Allowed operations").first()).toBeVisible();
-      await expect(page.getByText("All operations").first()).toBeVisible();
+      await expect(page.getByText("Transfers: Read, Execute").first()).toBeVisible();
 
       await page.getByRole("button", { name: "Create key" }).click();
 
@@ -57,9 +56,8 @@ test.describe
       await expect(page.getByText("Your full key (shown once)")).toHaveCount(0);
       const keyRow = page.getByRole("row", { name: new RegExp(keyName) });
       await expect(keyRow).toBeVisible({ timeout: 120_000 });
-      await expect(keyRow).toContainText("Developer access");
+      await expect(keyRow).toContainText("Transfers: Read, Execute");
       await expect(keyRow).toContainText("1 selected");
-      await expect(keyRow).toContainText("All operations");
 
       const tableBeforeMenu = await page.getByRole("table").boundingBox();
       const bodyOverflowBeforeMenu = await page.evaluate(
@@ -79,7 +77,7 @@ test.describe
       );
     });
 
-    test("user can limit a key to Issuance, keep the limit through rotation, and clear it", async ({
+    test("user can limit a key to reading transfers, keep the grant through rotation, and widen it", async ({
       page,
     }) => {
       const keyName = `Playwright Limited Key ${Date.now()}`;
@@ -88,9 +86,8 @@ test.describe
       await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("checkbox", { name: "Read on Transfers" }).check();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("radio", { name: /^Only selected operations/ }).check();
-      await page.getByRole("checkbox", { name: "Issuance", exact: true }).check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Create key" }).click();
 
@@ -98,7 +95,7 @@ test.describe
       await page.getByRole("button", { name: "Dismiss", exact: true }).click();
 
       let keyRow = page.getByRole("row", { name: new RegExp(keyName) });
-      await expect(keyRow).toContainText("Issuance", { timeout: 120_000 });
+      await expect(keyRow).toContainText("Transfers: Read", { timeout: 120_000 });
 
       await keyRow.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Rotate key (24h grace)" }).click();
@@ -106,16 +103,16 @@ test.describe
       await page.getByRole("button", { name: "Dismiss", exact: true }).click();
       const rotatedKeyRows = page.getByRole("row", { name: new RegExp(keyName) });
       await expect(rotatedKeyRows).toHaveCount(2);
-      await expect(rotatedKeyRows.nth(0)).toContainText("Issuance");
-      await expect(rotatedKeyRows.nth(1)).toContainText("Issuance");
+      await expect(rotatedKeyRows.nth(0)).toContainText("Transfers: Read");
+      await expect(rotatedKeyRows.nth(1)).toContainText("Transfers: Read");
       keyRow = rotatedKeyRows.first();
 
-      // Changing wallet access keeps the limit and needs no confirmation.
+      // Changing wallet access keeps the grants and needs no confirmation.
       await keyRow.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Edit API key" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByLabel("Selected wallets").check();
+      await page.getByRole("radio", { name: /^Selected wallets/ }).check();
       await page
         .getByRole("checkbox", { name: /^Select / })
         .first()
@@ -124,18 +121,19 @@ test.describe
       await page.getByRole("button", { name: "Save changes" }).click();
 
       keyRow = page.getByRole("row", { name: new RegExp(keyName) }).first();
-      await expect(keyRow).toContainText("Issuance", { timeout: 120_000 });
+      await expect(keyRow).toContainText("Transfers: Read", { timeout: 120_000 });
       await expect(keyRow).toContainText("1 selected");
 
+      // Widening the grant applies to the same key.
       await keyRow.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Edit API key" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("checkbox", { name: "Execute on Transfers" }).check();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("radio", { name: /^All operations/ }).check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Save changes" }).click();
 
       keyRow = page.getByRole("row", { name: new RegExp(keyName) }).first();
-      await expect(keyRow).toContainText("All operations", { timeout: 120_000 });
+      await expect(keyRow).toContainText("Transfers: Read, Execute", { timeout: 120_000 });
     });
   });

@@ -1,4 +1,3 @@
-import { normalizeAllowedOperations, upgradeStoredAllowedOperations } from "@sdp/types";
 /**
  * API Key Service
  *
@@ -7,33 +6,38 @@ import { normalizeAllowedOperations, upgradeStoredAllowedOperations } from "@sdp
 
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  ApiKeyStatus,
-  ApiKeyWalletScope,
-  Permission,
+import {
+  type Action,
+  type ApiKeyEnvironment,
+  type ApiKeyStatus,
+  type ApiKeyWalletScope,
+  expandStoredGrants,
+  normalizeGrants,
+  type OrganizationRole,
 } from "@sdp/types";
-import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
+import { z } from "zod";
+import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
-import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
+import {
+  type ApiKeyGrantChannel,
+  assertApiKeyGrantsInReleaseChannel,
+  assertGrantableApiKeyGrants,
+} from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
   id: string;
   name: string;
   description: string | null;
   keyPrefix: string;
-  role: ApiKeyRole;
+  /** The key's explicit grants. */
+  grants: Action[];
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
-  /** Operation families/types the key may perform. Empty means unrestricted. */
-  allowedOperations: AllowedOperation[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -42,7 +46,6 @@ export interface ApiKeyListItem {
 export interface ApiKeyDetails extends ApiKeyListItem {
   projectId: string;
   allowedIps: string[] | null;
-  permissions: Permission[] | null;
   signingWalletId: string | null;
   rotatedFrom: string | null;
   rotationDeadline: string | null;
@@ -53,13 +56,14 @@ export interface CreateApiKeyInput {
   projectId: string;
   /** The signed-in person creating the key; API keys never manage keys. */
   createdByUserId: string;
-  actorPermissions: Permission[];
+  /** The signed-in person's organization role: a key holds only actions they hold. */
+  actorRole: OrganizationRole;
+  /** The deployment's release channel: a key holds only actions it runs. */
+  grantChannel: ApiKeyGrantChannel;
   name: string;
   description?: string | null;
-  role: ApiKeyRole;
-  permissions?: Permission[] | null;
+  grants: Action[];
   allowedIps?: string[] | null;
-  allowedOperations?: AllowedOperation[] | null;
   expiresAt?: string | null;
   signingWalletId?: string | null;
   pepper?: string;
@@ -69,14 +73,14 @@ export interface UpdateApiKeyInput {
   keyId: string;
   organizationId: string;
   projectId: string;
-  actorPermissions: Permission[];
-  currentRole: ApiKeyRole;
+  actorRole: OrganizationRole;
+  /** The deployment's release channel: new grants must be actions it runs. */
+  grantChannel: ApiKeyGrantChannel;
   name?: string;
   description?: string | null;
+  grants?: Action[];
   allowedIps?: string[] | null;
-  allowedOperations?: AllowedOperation[] | null;
   expiresAt?: string | null;
-  permissions?: Permission[] | null;
   signingWallet?: { walletId: string | null };
 }
 
@@ -85,7 +89,7 @@ export interface CreateApiKeyResult {
   name: string;
   key: string;
   keyPrefix: string;
-  role: ApiKeyRole;
+  grants: Action[];
   environment: ApiKeyEnvironment;
   expiresAt: string | null;
   createdAt: string;
@@ -98,7 +102,7 @@ export interface RotateApiKeyResult {
     name: string;
     key: string;
     keyPrefix: string;
-    role: ApiKeyRole;
+    grants: Action[];
     environment: ApiKeyEnvironment;
     expiresAt: string | null;
     createdAt: string;
@@ -143,12 +147,11 @@ interface ApiKeyListRow {
   name: string;
   description: string | null;
   key_prefix: string;
-  role: ApiKeyRole;
+  grants: unknown;
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
   wallet_scope: ApiKeyWalletScope;
   signing_wallet_id: string | null;
-  allowed_operations: string | null;
   last_used_at: string | null;
   expires_at: string | null;
   created_at: string;
@@ -157,25 +160,17 @@ interface ApiKeyListRow {
 interface ApiKeyDetailsRow extends ApiKeyListRow {
   project_id: string;
   allowed_ips: string | null;
-  permissions: string | null;
   signing_wallet_id: string | null;
   rotated_from: string | null;
   rotation_deadline: string | null;
 }
 
-/** Column form of an Allowed Operations list: NULL when unrestricted. */
-function serializeAllowedOperationsColumn(
-  allowedOperations: AllowedOperation[] | null | undefined
-): string | null {
-  if (!allowedOperations || allowedOperations.length === 0) {
-    return null;
-  }
-  return JSON.stringify(normalizeAllowedOperations(allowedOperations));
-}
+/** `api_keys.grants`, a `text[]` the driver returns as an array. */
+const storedGrantsSchema = z.array(z.string());
 
-/** API form of the column: an empty list when unrestricted. */
-export function parseAllowedOperationsColumn(value: string | null): AllowedOperation[] {
-  return upgradeStoredAllowedOperations(parseOptionalPostgresJson<string[]>(value) ?? []);
+/** API form of the column: aliases expanded, unknown strings dropped. */
+export function parseGrantsColumn(value: unknown): Action[] {
+  return expandStoredGrants(storedGrantsSchema.parse(value));
 }
 
 function stringifyJsonb(value: unknown, fallback: unknown): string {
@@ -190,12 +185,10 @@ type RotationTargetRow = {
   id: string;
   name: string;
   description: string | null;
-  role: ApiKeyRole;
-  permissions: string | null;
+  grants: unknown;
   environment: ApiKeyEnvironment;
   project_id: string;
   allowed_ips: string | null;
-  allowed_operations: string | null;
   signing_wallet_id: string | null;
   created_by: string;
   expires_at: string | null;
@@ -263,7 +256,7 @@ export class ApiKeyService {
     );
     const result = await this.db
       .prepare(
-        `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
+        `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.grants, p.environment, ak.status,
                 CASE
                   WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
                     SELECT 1
@@ -273,7 +266,7 @@ export class ApiKeyService {
                   THEN 'selected'
                   ELSE 'all'
                 END AS wallet_scope,
-                ak.signing_wallet_id, ak.allowed_operations, ak.last_used_at, ak.expires_at,
+                ak.signing_wallet_id, ak.last_used_at, ak.expires_at,
                 ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
@@ -296,8 +289,8 @@ export class ApiKeyService {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.getDetails");
     const row = await this.db
       .prepare(
-        `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.role, p.environment, ak.status,
-                ak.project_id, ak.allowed_ips, ak.permissions, ak.signing_wallet_id,
+        `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.grants, p.environment, ak.status,
+                ak.project_id, ak.allowed_ips, ak.signing_wallet_id,
                 CASE
                   WHEN ak.signing_wallet_id IS NOT NULL OR EXISTS (
                     SELECT 1
@@ -307,7 +300,7 @@ export class ApiKeyService {
                   THEN 'selected'
                   ELSE 'all'
                 END AS wallet_scope,
-                ak.allowed_operations, ak.last_used_at, ak.expires_at, ak.rotated_from,
+                ak.last_used_at, ak.expires_at, ak.rotated_from,
                 ak.rotation_deadline, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
@@ -324,7 +317,6 @@ export class ApiKeyService {
       ...this.mapListRow(row),
       projectId: row.project_id,
       allowedIps: parseOptionalPostgresJson<string[]>(row.allowed_ips),
-      permissions: row.permissions ? parsePostgresJson<Permission[]>(row.permissions) : null,
       signingWalletId: row.signing_wallet_id,
       rotatedFrom: row.rotated_from,
       rotationDeadline: row.rotation_deadline,
@@ -333,7 +325,8 @@ export class ApiKeyService {
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     assertTenantClaim(this.scope, input, "ApiKeyService.createApiKey");
-    assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
+    assertGrantableApiKeyGrants(input.actorRole, input.grants);
+    assertApiKeyGrantsInReleaseChannel(input.grantChannel, input.grants);
 
     // The organization must still be active, and the share lock holds that
     // until this transaction commits: a concurrent deletion's
@@ -376,8 +369,8 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, allowed_operations, signing_wallet_id, expires_at, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            grants, allowed_ips, signing_wallet_id, expires_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
           keyId,
@@ -388,10 +381,8 @@ export class ApiKeyService {
           input.description ?? null,
           prefix,
           keyHash,
-          input.role,
-          input.permissions ? JSON.stringify(input.permissions) : null,
+          normalizeGrants(input.grants),
           input.allowedIps ? JSON.stringify(input.allowedIps) : null,
-          serializeAllowedOperationsColumn(input.allowedOperations),
           input.signingWalletId ?? null,
           input.expiresAt ?? null
         )
@@ -419,7 +410,7 @@ export class ApiKeyService {
       name: input.name,
       key,
       keyPrefix: prefix,
-      role: input.role,
+      grants: normalizeGrants(input.grants),
       environment: project.environment,
       expiresAt: input.expiresAt ?? null,
       createdAt: new Date().toISOString(),
@@ -429,16 +420,25 @@ export class ApiKeyService {
 
   async updateApiKey(input: UpdateApiKeyInput): Promise<void> {
     assertTenantClaim(this.scope, input, "ApiKeyService.updateApiKey");
-    if (input.permissions !== undefined) {
-      assertGrantableApiKeyPermissions(
-        input.actorPermissions,
-        input.currentRole,
-        input.permissions
+    if (input.grants !== undefined) {
+      assertGrantableApiKeyGrants(input.actorRole, input.grants);
+      // Only a grant the key does not hold yet is being given now: one it kept
+      // from before a channel change survives an edit that sends it back.
+      const current = await this.db.queryOne<{ grants: unknown }>(
+        `SELECT grants FROM api_keys
+          WHERE id = $1 AND organization_id = $2 AND project_id = $3
+          FOR UPDATE`,
+        [input.keyId, input.organizationId, input.projectId]
+      );
+      const held = current ? parseGrantsColumn(current.grants) : [];
+      assertApiKeyGrantsInReleaseChannel(
+        input.grantChannel,
+        input.grants.filter((grant) => !held.includes(grant))
       );
     }
 
     const updates: string[] = [];
-    const values: (string | null)[] = [];
+    const values: (string | string[] | null)[] = [];
 
     if (input.name !== undefined) {
       updates.push("name = ?");
@@ -456,13 +456,9 @@ export class ApiKeyService {
       updates.push("expires_at = ?");
       values.push(input.expiresAt);
     }
-    if (input.allowedOperations !== undefined) {
-      updates.push("allowed_operations = ?");
-      values.push(serializeAllowedOperationsColumn(input.allowedOperations));
-    }
-    if (input.permissions !== undefined) {
-      updates.push("permissions = ?");
-      values.push(input.permissions ? JSON.stringify(input.permissions) : null);
+    if (input.grants !== undefined) {
+      updates.push("grants = ?");
+      values.push(normalizeGrants(input.grants));
     }
     if (input.signingWallet) {
       updates.push("signing_wallet_id = ?");
@@ -500,7 +496,7 @@ export class ApiKeyService {
     organizationId: string,
     projectId: string,
     gracePeriodHours: number,
-    actorPermissions: Permission[],
+    actorRole: OrganizationRole,
     pepper?: string
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
@@ -525,8 +521,8 @@ export class ApiKeyService {
     // The target's own row lock serializes every lifecycle change of this key
     // behind this rotation.
     const target = await this.db.queryOne<RotationTargetRow>(
-      `SELECT ak.id, ak.name, ak.description, ak.role, ak.permissions,
-              p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
+      `SELECT ak.id, ak.name, ak.description, ak.grants,
+              p.environment, ak.project_id, ak.allowed_ips,
               ak.signing_wallet_id, ak.created_by, ak.expires_at,
               ak.status, ak.rotation_deadline
          FROM api_keys ak
@@ -560,11 +556,8 @@ export class ApiKeyService {
       return { alreadyRotatedTo: replacement.id };
     }
 
-    assertGrantableApiKeyPermissions(
-      actorPermissions,
-      target.role,
-      target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions)
-    );
+    const grants = parseGrantsColumn(target.grants);
+    assertGrantableApiKeyGrants(actorRole, grants);
 
     const newKeyId = `key_${crypto.randomUUID()}`;
     const { key: newKey, prefix: newPrefix } = createApiKeyMaterial(target.environment);
@@ -590,9 +583,8 @@ export class ApiKeyService {
     await this.db.execute(
       `INSERT INTO api_keys (
          id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-         role, permissions, allowed_ips, allowed_operations, signing_wallet_id, rotated_from,
-         status, expires_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+         grants, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
       [
         newKeyId,
         organizationId,
@@ -602,10 +594,8 @@ export class ApiKeyService {
         target.description,
         newPrefix,
         newKeyHash,
-        target.role,
-        target.permissions,
+        grants,
         target.allowed_ips,
-        target.allowed_operations,
         target.signing_wallet_id,
         keyId,
         target.expires_at,
@@ -640,7 +630,7 @@ export class ApiKeyService {
         name: target.name,
         key: newKey,
         keyPrefix: newPrefix,
-        role: target.role,
+        grants,
         environment: target.environment,
         expiresAt: target.expires_at,
         createdAt: new Date(now).toISOString(),
@@ -701,12 +691,11 @@ export class ApiKeyService {
       name: row.name,
       description: row.description,
       keyPrefix: row.key_prefix,
-      role: row.role,
+      grants: parseGrantsColumn(row.grants),
       environment: row.environment,
       status: row.status,
       walletScope: row.wallet_scope,
       signingWalletId: row.signing_wallet_id,
-      allowedOperations: parseAllowedOperationsColumn(row.allowed_operations),
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
       createdAt: row.created_at,

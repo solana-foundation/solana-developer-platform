@@ -104,7 +104,6 @@
     "selectedWallets": "Selected wallets",
     "selected": "{count} selected",
     "selectedLabel": "Selected",
-    "roleAccess": "{role} access",
     "createApiKey": "Create API key",
     "reviewApiKey": "Review API key",
     "walletAccess": "Wallet access",
@@ -122,7 +121,6 @@
     "sandbox": "Sandbox",
     "none": "None",
     "invalidDate": "Invalid date",
-    "endpointPermissions": "Endpoint permissions",
     "securityNote": "Security note",
     "creating": "Creating...",
     "createKey": "Create key",
@@ -376,29 +374,17 @@
     "apiKeyDetailsTitle": "Key details",
     "apiKeyDetailsDescription": "Name the key and choose when it should expire.",
     "apiKeyIdentity": "Key identity",
-    "apiKeyPermissionsTitle": "Endpoint permissions",
-    "apiKeyPermissionsDescription": "Choose which SDP endpoints this key can reach.",
-    "apiKeyRoleFixedOnEdit": "The role remains fixed after creation. Wallet access and allowed operations can still be updated.",
-    "apiKeyRoleDescription": {
-      "api_admin": "Full endpoint access, including administrative operations.",
-      "api_developer": "Token, payment, Earn, counterparty, wallet, compliance, and webhook access.",
-      "api_readonly": "Read-only token, payment, Earn, counterparty, wallet, compliance, webhook, and audit access."
-    },
-    "apiKeyFullEndpointAccess": "Full endpoint access",
-    "apiKeyPermissionCount": "{count} endpoint permissions",
-    "apiKeyAllWalletsHelper": "This key can reach wallets permitted by its endpoint permissions.",
+    "apiKeyPermissionsTitle": "Permissions",
+    "apiKeyPermissionsDescription": "Choose what this key may do in each module. Every API route needs one action, and the key is refused anything it does not hold.",
+    "apiKeyAllWalletsHelper": "This key can use every wallet its permissions reach.",
     "apiKeySelectedWalletCount": "Selected wallets ({count})",
     "apiKeySearchWallets": "Search wallets",
     "apiKeyNoWalletSearchResults": "No wallets match this search.",
     "apiKeySelectWallet": "Select {wallet}",
     "apiKeyMakeDefaultWallet": "Make {wallet} the default signing wallet",
     "apiKeyMakeDefaultSigningWallet": "Make default signing wallet",
-    "apiKeyFamilyPayment": "Payments",
-    "apiKeyFamilyRamp": "Ramps",
-    "apiKeyFamilyIssuance": "Issuance",
-    "apiKeyFamilyProgram": "Program interactions",
     "apiKeyReviewTitle": "Review API key",
-    "apiKeyReviewDescription": "Confirm identity, endpoint reach, wallet access, and allowed operations.",
+    "apiKeyReviewDescription": "Confirm identity, permissions, and wallet access.",
     "apiKeyReviewIdentity": "Key identity",
     "apiKeyReviewPermissions": "Endpoint permissions",
     "apiKeyReviewWalletAccess": "Wallet access",
@@ -630,21 +616,130 @@
     "walletSetupModeHint": "Managed wallets use SDP's provider account. Bring your own credentials connects your own provider app.",
     "apiKeyAccessTitle": "Access",
     "apiKeyAccessDescription": "Choose which wallets this key can use and which operations it can perform.",
-    "apiKeyOperationsTitle": "Allowed operations",
-    "apiKeyOperationsDescription": "Limit the kinds of operations this key can perform. This applies to every wallet the key can use.",
-    "apiKeyOperationsAll": "All operations",
-    "apiKeyOperationsAllHelper": "No limit. The key can perform any operation its endpoint permissions allow.",
-    "apiKeyOperationsSelected": "Only selected operations",
-    "apiKeyOperationsSelectedHelper": "Anything you do not select is refused.",
-    "apiKeyOperationsRequired": "Select at least one operation, or allow all operations.",
-    "apiKeyOperationsSpecificCount": "Specific actions: {count}",
-    "apiKeyFamilyPrivacy": "Privacy",
-    "apiKeyFamilyPaymentDescription": "Transfers, transfer batches and recurring payments.",
-    "apiKeyFamilyRampDescription": "On-ramp and off-ramp quotes.",
-    "apiKeyFamilyIssuanceDescription": "Deploy, mint, burn, freeze, pause and other token actions.",
-    "apiKeyFamilyProgramDescription": "Earn deposits and withdrawals, and DvP funding and settlement.",
-    "apiKeyFamilyPrivacyDescription": "Private operations through Helius Rings.",
-    "apiKeyReviewOperations": "Allowed operations",
-    "apiKeyPermissionsSeparateFromOperations": "Endpoint permissions determine reach. Allowed operations, set on the next step, can limit the key further."
+    "apiKeyGrantsEverything": "Everything",
+    "apiKeyGrantsClear": "Clear all",
+    "apiKeyGrantsEverythingHelper": "Everything grants every action listed here now. Actions SDP adds later are not granted automatically.",
+    "apiKeyGrantsRequired": "Grant at least one permission.",
+    "apiKeyGrantsNone": "No permissions",
+    "apiKeyGrantsModuleCount": "Modules: {count}",
+    "apiKeyGrantsImplied": "Included",
+    "apiKeyGrantsImpliedHelper": "Manage and Execute include Read.",
+    "apiKeyGrantsNotOffered": "This key also holds grants for modules this deployment doesn't run. They're kept as they are; remove one to take it away.",
+    "apiKeyGrantsRemove": "Remove {action}",
+    "apiKeyGrantsNotGrantable": "Keys can never manage API keys, members, the organization or projects, or set up providers. Those stay with signed-in admins.",
+    "apiKeyGrantsToggle": "{verb} on {module}",
+    "apiKeyGrantsReviewTitle": "Permissions",
+    "apiKeyGrantVerb": {
+      "read": {
+        "label": "Read",
+        "description": "View records."
+      },
+      "manage": {
+        "label": "Manage",
+        "description": "Create and edit records, reversibly: drafts, pausing, cancelling."
+      },
+      "execute": {
+        "label": "Execute",
+        "description": "Irreversible or external actions: on-chain transactions, provider calls, moving money, and changing where money goes."
+      },
+      "configure": {
+        "label": "Configure",
+        "description": "Provider, credential and connection setup."
+      },
+      "enforce": {
+        "label": "Enforce",
+        "description": "Freeze, pause, seize, force-burn and allowlist changes."
+      },
+      "authority": {
+        "label": "Authority",
+        "description": "Transfer or revoke token authorities."
+      }
+    },
+    "apiKeyGrantModule": {
+      "transfers": {
+        "label": "Transfers",
+        "description": "Single transfers from a custody wallet."
+      },
+      "transfer_batches": {
+        "label": "Transfer batches",
+        "description": "Batches of transfers and their estimates."
+      },
+      "payment_requests": {
+        "label": "Payment requests",
+        "description": "Payment requests and their payment links."
+      },
+      "counterparties": {
+        "label": "Counterparties",
+        "description": "Counterparties and their accounts. Execute changes payout destinations and submits provider requirements."
+      },
+      "transactions": {
+        "label": "Transactions",
+        "description": "The unified transaction list."
+      },
+      "recurring": {
+        "label": "Recurring payments",
+        "description": "Recurring payments, plans and subscriptions. Execute activates, collects, resumes and changes amounts or destinations."
+      },
+      "wallets": {
+        "label": "Wallets",
+        "description": "Custody wallets and balances. Manage creates, edits and deletes wallets."
+      },
+      "compliance": {
+        "label": "Compliance",
+        "description": "Address screening."
+      },
+      "api_keys": {
+        "label": "API keys",
+        "description": "API keys."
+      },
+      "projects": {
+        "label": "Projects",
+        "description": "Projects and provider availability."
+      },
+      "members": {
+        "label": "Members",
+        "description": "Organization and project members."
+      },
+      "organizations": {
+        "label": "Organization",
+        "description": "Organization settings and provider access."
+      },
+      "rpc": {
+        "label": "RPC",
+        "description": "The managed Solana RPC relay."
+      },
+      "onramp": {
+        "label": "On-ramp",
+        "description": "On-ramp currencies, estimates and quotes."
+      },
+      "offramp": {
+        "label": "Off-ramp",
+        "description": "Off-ramp currencies, estimates and quotes."
+      },
+      "ramp_transfers": {
+        "label": "Ramp transfers",
+        "description": "Cancelling ramp transfers and sandbox simulation."
+      },
+      "issuance": {
+        "label": "Issuance",
+        "description": "Tokens, templates and asset profiles."
+      },
+      "dvp": {
+        "label": "DvP",
+        "description": "Delivery-versus-payment trades."
+      },
+      "earn": {
+        "label": "Earn",
+        "description": "Earn strategies, deposits, withdrawals and programs."
+      },
+      "private_channels": {
+        "label": "Private Channels",
+        "description": "Private channels and their movements."
+      },
+      "helius_rings": {
+        "label": "Helius Rings",
+        "description": "Rings wallets and operations."
+      }
+    }
   }
 }

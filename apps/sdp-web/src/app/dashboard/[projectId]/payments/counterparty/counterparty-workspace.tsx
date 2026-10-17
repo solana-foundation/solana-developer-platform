@@ -65,7 +65,6 @@ interface CounterpartyApiKeyOption {
   id: string;
   name: string;
   keyPrefix: string;
-  role: string;
   environment: string;
 }
 

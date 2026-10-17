@@ -1,11 +1,12 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
 import {
+  ACTION_MODULE_NAMES,
+  type ActionModule,
+  type ActionVerb,
+  API_KEY_GRANTABLE_ACTIONS,
+  actionsInModule,
+  actionVerbOf,
   DEFAULT_SDP_API_URL,
-  OPERATION_FAMILIES,
-  OPERATION_FAMILY_BY_TYPE,
-  OPERATION_TYPES,
-  type OperationFamily,
-  type OperationType,
   RAMP_PROVIDERS,
   type RampProviderId,
   SDP_MODULES,
@@ -15,6 +16,7 @@ import {
 } from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 
+import { declaredActionForOperation } from "@/routes/route-actions";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
@@ -257,6 +259,38 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerOnboardingPaths(registry);
 }
 
+const HTTP_METHODS = ["get", "put", "post", "delete", "patch"] as const;
+
+/**
+ * Names each operation's action in its 403, read from the route's own
+ * `requireAction` declaration, so the reference can never say a different
+ * action than the route enforces. An operation that documents no 403 gets one
+ * with the shape of its 401.
+ */
+function describeActionRefusals(document: OpenAPIObject): void {
+  for (const [path, item] of Object.entries(document.paths ?? {})) {
+    for (const method of HTTP_METHODS) {
+      const operation = item[method];
+      if (!operation) continue;
+      const action = declaredActionForOperation(method, path);
+      if (!action) continue;
+      const documented = operation.responses["403"];
+      const existing = documented ?? operation.responses["401"];
+      const requirement = `Forbidden. Requires the \`${action}\` action: an API key must hold it (a module's \`manage\` or \`execute\` also covers its \`read\`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and \`error.details.action\` names the action. Any other 403 names its own reason.`;
+      // A route that documents its own 403 reasons (anything but the generic
+      // "Error" from errorResponses) keeps them after the action requirement.
+      const ownReasons =
+        documented && "description" in documented && documented.description !== "Error"
+          ? documented.description
+          : null;
+      operation.responses["403"] = {
+        ...existing,
+        description: ownReasons ? `${requirement}\n\n${ownReasons}` : requirement,
+      };
+    }
+  }
+}
+
 function createDocument({
   publicOnly,
   publishEarn,
@@ -304,6 +338,7 @@ function createDocument({
       },
     ],
   });
+  describeActionRefusals(document);
   if (!publicOnly || releaseChannel === undefined) {
     return document;
   }
@@ -330,15 +365,15 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
 /**
  * What a release channel's public surfaces may name, for consumers that cannot
  * load this package (the docs site's MDX pipeline): the modules and ramp
- * providers the public document publishes, Earn's hold included, the API-key
- * operation families and types it documents, and the full vocabularies to
- * validate tags against.
+ * providers the public document publishes, Earn's hold included, the actions
+ * an API key may be granted in it (per module, in registry order), and the
+ * full vocabularies to validate tags against.
  */
 export type PublicSurfaceManifest = {
   releaseChannel: SdpReleaseChannel;
   modules: SdpModule[];
   rampProviders: RampProviderId[];
-  allowedOperations: { family: OperationFamily; types: OperationType[] }[];
+  grantableActions: { module: ActionModule; verbs: ActionVerb[] }[];
   allModules: SdpModule[];
   allRampProviders: RampProviderId[];
 };
@@ -352,12 +387,12 @@ export function createPublicSurfaceManifest(
     releaseChannel,
     modules: SDP_MODULES.filter((module) => modules.has(module)),
     rampProviders: RAMP_PROVIDERS.filter(published),
-    allowedOperations: OPERATION_FAMILIES.filter(published).map((family) => ({
-      family,
-      types: OPERATION_TYPES.filter(
-        (type) => OPERATION_FAMILY_BY_TYPE[type] === family && published(type)
-      ),
-    })),
+    grantableActions: ACTION_MODULE_NAMES.map((module) => ({
+      module,
+      verbs: actionsInModule(module)
+        .filter((action) => API_KEY_GRANTABLE_ACTIONS.includes(action) && published(action))
+        .map(actionVerbOf),
+    })).filter(({ verbs }) => verbs.length > 0),
     allModules: [...SDP_MODULES],
     allRampProviders: [...RAMP_PROVIDERS],
   };

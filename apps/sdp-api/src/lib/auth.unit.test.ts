@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TEST_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { type ApiKeyContext, canManageOrganizationCredentials, requireAuthProjectId } from "./auth";
@@ -16,35 +16,35 @@ const base = {
 };
 
 describe("canManageOrganizationCredentials", () => {
-  it("recognizes a normalized Clerk admin role even when its permission claim is incomplete", () => {
+  it("recognizes an organization administrator", () => {
     const auth: ApiKeyContext = {
       ...base,
       authType: "clerk",
       apiKeyId: null,
       userId: TEST_USER.id,
       role: "admin",
-      permissions: ["payments:read"],
+      grants: null,
     };
 
     expect(canManageOrganizationCredentials(auth)).toBe(true);
   });
 
-  it("rejects members and API keys, including wildcard API keys", () => {
+  it("rejects members and API keys, including a key holding every grant", () => {
     const member: ApiKeyContext = {
       ...base,
       authType: "clerk",
       apiKeyId: null,
       userId: TEST_USER.id,
       role: "member",
-      permissions: ["payments:read"],
+      grants: null,
     };
     const apiKey: ApiKeyContext = {
       ...base,
       authType: "api_key",
       apiKeyId: TEST_API_KEY.id,
       userId: null,
-      role: "api_admin",
-      permissions: ["*"],
+      role: null,
+      grants: ALL_API_KEY_GRANTS,
     };
 
     expect(canManageOrganizationCredentials(member)).toBe(false);
@@ -59,7 +59,7 @@ describe("requireAuthProjectId", () => {
     apiKeyId: null,
     userId: TEST_USER.id,
     role: "member",
-    permissions: ["payments:read"],
+    grants: null,
   };
 
   it("returns the project the auth context is scoped to", () => {

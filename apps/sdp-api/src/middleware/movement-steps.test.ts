@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { AppError, forbidden } from "@/lib/errors";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { authorize } from "./authorize";
@@ -29,8 +30,7 @@ function claimFromHeader(app: Hono<{ Bindings: Env }>): void {
       id: KEY_ID,
       organizationId: ORG_ID,
       projectId: "prj_movement_steps",
-      role: "api_admin",
-      permissions: [],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
       signingWalletId: null,
     });

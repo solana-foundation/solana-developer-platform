@@ -10,6 +10,7 @@ import { generateEarnPositionId } from "@/db/repositories/earn-movements.reposit
 import app from "@/index";
 import { badRequest, conflict } from "@/lib/errors";
 import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -108,8 +109,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -168,8 +168,8 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn Ext Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Earn Ext Test Key', ?, ?, ?, 'active')`
       )
       .bind(
         TEST_API_KEY.id,
@@ -177,13 +177,14 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
         TEST_PROJECT.id,
         TEST_USER.id,
         TEST_API_KEY.prefix,
-        keyHash
+        keyHash,
+        ALL_API_KEY_GRANTS
       ),
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn Ext Prod Key', ?, ?, 'api_admin', '["*"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Earn Ext Prod Key', ?, ?, ?, 'active')`
       )
       .bind(
         PROD_API_KEY.id,
@@ -191,7 +192,8 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
         TEST_PRODUCTION_PROJECT.id,
         TEST_USER.id,
         PROD_API_KEY.prefix,
-        prodKeyHash
+        prodKeyHash,
+        ALL_API_KEY_GRANTS
       ),
   ]);
 }

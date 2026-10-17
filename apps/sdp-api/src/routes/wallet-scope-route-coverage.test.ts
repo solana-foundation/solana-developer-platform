@@ -45,6 +45,7 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /ramps/offramp/currency",
       "GET /ramps/onramp/currency",
       "GET /requests",
+      "GET /requests/:paymentRequestId",
       "GET /subscription-plans",
       "GET /subscription-plans/:planId",
       "GET /subscriptions",
@@ -65,6 +66,7 @@ describe("wallet-scoped route coverage inventory", () => {
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
       "GET /recurring-payments",
       "GET /recurring-payments/:id",
+      "GET /requests/:paymentRequestId/link",
       "GET /transfers",
       "GET /transfers/:transferId",
       "GET /wallets/:walletId/balances",

@@ -1,10 +1,19 @@
-import { RAMP_PROVIDERS, UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types";
+import {
+  type Action,
+  actionOwnerOf,
+  PAYMENT_TRANSACTION_KINDS,
+  type PaymentTransactionKind,
+  RAMP_PROVIDERS,
+  UNIFIED_TRANSACTION_SDP_MODULES,
+} from "@sdp/types";
+import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
-import { forbidden, insufficientPermissions } from "@/lib/errors";
+import { AppError, forbidden } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { grantedPermissions } from "@/middleware/auth";
+import { callerMayPerform } from "@/middleware/require-action";
 import {
   assertModuleInChannel,
   isModuleInChannel,
@@ -12,8 +21,12 @@ import {
 } from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
+import type { Env } from "@/types/env";
 import {
+  PAYMENT_TRANSACTION_KIND_ACTIONS,
+  permittedPaymentTransactionKinds,
   permittedUnifiedTransactionModules,
+  UNIFIED_TRANSACTION_MODULE_ACTIONS,
   UNIFIED_TRANSACTION_MODULE_PERMISSIONS,
 } from "./module-permissions";
 import type { UnifiedTransactionsQuery, unifiedTransactionsQuerySchema } from "./schemas";
@@ -26,17 +39,26 @@ export async function listUnifiedTransactions(
   if (query.module !== undefined) {
     assertModuleInChannel(c, UNIFIED_TRANSACTION_SDP_MODULES[query.module]);
   }
-  const granted = grantedPermissions(c);
-  const grantedModules = permittedUnifiedTransactionModules(granted);
-  if (
-    grantedModules.length === 0 ||
-    (query.module !== undefined && !grantedModules.includes(query.module))
-  ) {
-    throw insufficientPermissions();
+  const grantedModules = permittedUnifiedTransactionModules((action) =>
+    callerMayPerform(c, action)
+  );
+  if (query.module !== undefined && !grantedModules.includes(query.module)) {
+    const action = UNIFIED_TRANSACTION_MODULE_ACTIONS[query.module];
+    throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+  }
+  // Each kind of Payments row also needs the read of the module it comes
+  // from, and that module in the release channel.
+  const paymentKinds = permittedPaymentTransactionKinds(
+    (action) => callerMayPerform(c, action) && isActionInChannel(c, action)
+  );
+  if (query.module === "payments" && query.kind !== undefined) {
+    assertPaymentKindPermitted(query.kind, paymentKinds);
   }
   // Rows of a module the release channel leaves out are not listed (ADR 0005).
-  const permittedModules = grantedModules.filter((module) =>
-    isModuleInChannel(c, UNIFIED_TRANSACTION_SDP_MODULES[module])
+  const permittedModules = grantedModules.filter(
+    (module) =>
+      isModuleInChannel(c, UNIFIED_TRANSACTION_SDP_MODULES[module]) &&
+      (module !== "payments" || paymentKinds.length > 0)
   );
   if (permittedModules.length === 0) {
     return success(c, { transactions: [], nextCursor: null });
@@ -62,6 +84,7 @@ export async function listUnifiedTransactions(
   const result = await repository.list({
     ...query,
     modules: permittedModules,
+    paymentKinds,
     // Ramp transfers are Payments rows, so an excluded provider is filtered by its stored provider.
     excludedRampProviders: RAMP_PROVIDERS.filter(
       (provider) => !isRampProviderInChannel(c, provider)
@@ -71,4 +94,23 @@ export async function listUnifiedTransactions(
     moduleWalletScopes: walletScoped ? moduleWalletScopes : undefined,
   });
   return success(c, { transactions: result.rows, nextCursor: result.nextCursor });
+}
+
+function isActionInChannel(c: Context<{ Bindings: Env }>, action: Action): boolean {
+  const owner = actionOwnerOf(action);
+  return owner === "core" || isModuleInChannel(c, owner);
+}
+
+const paymentTransactionKindSchema = z.enum(PAYMENT_TRANSACTION_KINDS);
+
+/** A Payments kind filter the caller cannot read is refused, naming the read it lacks. */
+function assertPaymentKindPermitted(
+  kind: string,
+  paymentKinds: readonly PaymentTransactionKind[]
+): void {
+  // The query schema already checked the kind against the Payments kinds.
+  const requested = paymentTransactionKindSchema.parse(kind);
+  if (paymentKinds.includes(requested)) return;
+  const action = PAYMENT_TRANSACTION_KIND_ACTIONS[requested];
+  throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
 }

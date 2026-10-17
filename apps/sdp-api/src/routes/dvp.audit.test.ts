@@ -1,3 +1,4 @@
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 /**
  * Audit-ledger parity for DvP money movement (PRO-1992).
  *
@@ -55,8 +56,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -108,8 +108,8 @@ async function seedAuth(): Promise<void> {
   await db
     .prepare(
       `INSERT INTO api_keys
-        (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       TEST_API_KEY.id,
@@ -119,8 +119,7 @@ async function seedAuth(): Promise<void> {
       "DvP Audit Key",
       TEST_API_KEY.prefix,
       keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
+      ALL_API_KEY_GRANTS,
       "active"
     )
     .run();

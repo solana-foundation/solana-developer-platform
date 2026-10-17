@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as repositories from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -34,8 +35,8 @@ const auth: ApiKeyContext = {
   apiKeyId: null,
   authType: "clerk",
   role: "admin",
+  grants: null,
   environment: "sandbox",
-  permissions: ["*"],
   signingWalletId: null,
   signingWalletIds: [],
   walletBindings: [],
@@ -47,7 +48,8 @@ const keyAuth: ApiKeyContext = {
   authType: "api_key",
   apiKeyId: "key_pc_verify",
   userId: null,
-  role: "api_admin",
+  grants: ALL_API_KEY_GRANTS,
+  role: null,
   walletScope: "all",
 };
 
@@ -116,9 +118,11 @@ beforeEach(async () => {
         "INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status) VALUES ('cw_verify', 'cfg_verify', ?, ?, 'active')"
       )
       .bind(WALLET_ID, PUBKEY),
-    db.prepare(`INSERT INTO api_keys
-      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-      VALUES ('key_pc_verify', 'org_test_pc_wallet', 'prj_1', 'usr_test_pc_wallet', 'PC verification', 'pcverify', 'pcverify', 'api_admin', NULL, 'active')`),
+    db
+      .prepare(`INSERT INTO api_keys
+      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+      VALUES ('key_pc_verify', 'org_test_pc_wallet', 'prj_1', 'usr_test_pc_wallet', 'PC verification', 'pcverify', 'pcverify', ?, 'active')`)
+      .bind(ALL_API_KEY_GRANTS),
   ]);
   verifiedRepo = {
     upsert: vi.fn().mockResolvedValue({
@@ -186,17 +190,17 @@ afterEach(() => {
 });
 
 describe("verifyPrivateChannelWallet", () => {
-  it("verifies with role permissions when explicit permissions are absent", async () => {
+  it("verifies with a key that holds private_channels.execute", async () => {
     const { row } = await verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID);
     expect(row.pubkey).toBe(PUBKEY);
     expect(signMessages).toHaveBeenCalledTimes(1);
   });
-  it.each(["[]", '["payments:read"]'])(
-    "does not inherit role permissions over explicit permissions %s",
-    async (permissions) => {
+  it.each([[[]], [["private_channels.read"]]])(
+    "refuses a key whose grants lack private_channels.execute: %j",
+    async (grants) => {
       await getDb(env)
-        .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
-        .bind(permissions, keyAuth.apiKeyId)
+        .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+        .bind(grants, keyAuth.apiKeyId)
         .run();
       await expect(
         verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID)
@@ -205,17 +209,14 @@ describe("verifyPrivateChannelWallet", () => {
       expect(client.challengeWallet).not.toHaveBeenCalled();
     }
   );
-  it("rejects malformed permissions before verification can sign", async () => {
+  it("treats unknown stored grants as none before verification can sign", async () => {
     await getDb(env)
-      .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
-      .bind('"payments:write"', keyAuth.apiKeyId)
+      .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+      .bind(["payments:write", "private_channels.everything"], keyAuth.apiKeyId)
       .run();
     await expect(
       verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID)
-    ).rejects.toMatchObject({
-      code: "INTERNAL_ERROR",
-      message: "Stored API key permissions are invalid",
-    });
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
     expect(PrivySigner.create).not.toHaveBeenCalled();
     expect(client.challengeWallet).not.toHaveBeenCalled();
   });

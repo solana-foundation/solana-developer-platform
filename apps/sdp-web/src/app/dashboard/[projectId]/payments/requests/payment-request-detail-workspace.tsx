@@ -48,14 +48,22 @@ function requestWhy(
 }
 
 /** The request's pay link on this origin, and the copy that puts it on the clipboard. */
-function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symbol: string }) {
+function RequestPaymentLink({
+  request,
+  publicToken,
+  symbol,
+}: {
+  request: PaymentRequest;
+  publicToken: string;
+  symbol: string;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const demo = usePaymentsDemo();
   // The link is on this origin; read after mount so the server render does not guess it.
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
-  const payLink = `${origin}/pay/${request.publicToken}`;
+  const payLink = `${origin}/pay/${publicToken}`;
 
   // A demo request lives in this browser only, so the public pay page can't open its link.
   if (demo) {
@@ -110,6 +118,11 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
 
 interface PaymentRequestDetailWorkspaceProps {
   request: PaymentRequest | null;
+  /**
+   * The pay link's token, null when the member's role may not manage payment
+   * requests: the token is a bearer credential (APE-849).
+   */
+  publicToken: string | null;
   /** The contact the request names, when it names one and the contact could be read. */
   contactName: string | null;
   /** The destination wallet's label, when it has one. */
@@ -124,6 +137,7 @@ interface PaymentRequestDetailWorkspaceProps {
  */
 export function PaymentRequestDetailWorkspace({
   request,
+  publicToken,
   contactName,
   walletName,
   error,
@@ -143,17 +157,24 @@ export function PaymentRequestDetailWorkspace({
     );
   }
   return (
-    <PaymentRequestRecord request={request} contactName={contactName} walletName={walletName} />
+    <PaymentRequestRecord
+      request={request}
+      publicToken={publicToken}
+      contactName={contactName}
+      walletName={walletName}
+    />
   );
 }
 
 /** The record once the request could be read: the band, the amount and link, then the rows. */
 function PaymentRequestRecord({
   request,
+  publicToken,
   contactName,
   walletName,
 }: {
   request: PaymentRequest;
+  publicToken: string | null;
   contactName: string | null;
   walletName: string | null;
 }) {
@@ -199,7 +220,11 @@ function PaymentRequestRecord({
           <RecordAmount label={t("DashboardPayments.requests.amountRequested")}>
             {formatDecimalAmount(request.amount, locale)} {symbol}
           </RecordAmount>
-          <RequestPaymentLink request={request} symbol={symbol} />
+          {/* The pay link is a bearer credential: only a member who may manage payment
+              requests receives its token (APE-849). */}
+          {publicToken ? (
+            <RequestPaymentLink request={request} publicToken={publicToken} symbol={symbol} />
+          ) : null}
         </section>
 
         <div className="pt-2">

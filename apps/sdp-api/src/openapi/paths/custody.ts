@@ -66,7 +66,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500]),
       403: {
         description:
-          "Forbidden: the API key lacks permission or is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, or provider_not_entitled.",
+          "Forbidden: the caller lacks the route's action or the API key is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, or provider_not_entitled.",
         content: jsonContent(errorResponseSchema),
       },
       503: {
@@ -101,7 +101,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500, 503]),
       403: {
         description:
-          "Forbidden: the API key lacks permission or is wallet-scoped, or the provider account was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when provider names a Managed config in a Production project (Production is BYOK only: create the wallet in a Custody Connection with connectionId), custody_provider_not_in_release_channel, or provider_not_entitled.",
+          "Forbidden: the caller lacks the route's action or the API key is wallet-scoped, or the provider account was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when provider names a Managed config in a Production project (Production is BYOK only: create the wallet in a Custody Connection with connectionId), custody_provider_not_in_release_channel, or provider_not_entitled.",
         content: jsonContent(errorResponseSchema),
       },
     },

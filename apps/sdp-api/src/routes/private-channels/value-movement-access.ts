@@ -3,7 +3,7 @@
  *
  * Deposits, withdrawals and member transfers all answer the same question before
  * anything is signed: may value move out of THIS wallet, to THIS destination, on
- * THIS instance? Holding `payments:write` on the project is not enough — it only
+ * THIS instance? Holding `private_channels.execute` on the project is not enough — it only
  * proves the caller may move project funds at all. The control that actually
  * binds a wallet to the channel is `private_channel_verified_wallets`: the record
  * that the wallet completed the challenge → sign → verify handshake under the

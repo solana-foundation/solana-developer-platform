@@ -1,3 +1,4 @@
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 /**
  * Test Factories
  *
@@ -175,8 +176,7 @@ export interface SeededApiKeyOverrides {
   id?: string;
   organizationId?: string;
   projectId?: string;
-  role?: "api_admin" | "api_developer" | "api_readonly";
-  permissions?: SeededApiKey["permissions"];
+  grants?: SeededApiKey["grants"];
   environment?: "sandbox" | "production";
   rateLimitTier?: "standard" | "elevated" | "unlimited";
   allowedIps?: string[] | null;
@@ -192,8 +192,7 @@ export function createSeededApiKey(overrides: SeededApiKeyOverrides = {}): Seede
     id: `key_factory_${n.toString().padStart(8, "0")}`,
     organizationId: `org_factory_${n.toString().padStart(8, "0")}`,
     projectId: `prj_factory_${n.toString().padStart(8, "0")}`,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,

@@ -1,3 +1,4 @@
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -72,7 +73,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
       },
       body: JSON.stringify({
         name: `Wallet scope key ${Date.now()}`,
-        role: "api_admin",
+        grants: [...API_KEY_GRANTABLE_ACTIONS],
         projectId: TEST_PROJECT.id,
         walletScope: "selected",
         signingWalletId: walletA.walletId,

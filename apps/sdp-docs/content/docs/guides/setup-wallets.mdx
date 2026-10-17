@@ -56,54 +56,11 @@ Each provider supports a different set of operations shown as capability chips:
 </Tab>
 <Tab value="API">
 
-#### 1. Initialize the signing provider
+#### 1. Initialize the provider from the dashboard
 
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/wallets/initialize \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "privy",
-    "walletLabel": "Master wallet"
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript title="initialize-wallet-provider.ts"
-const response = await fetch("https://api.solana.com/v1/wallets/initialize", {
-  method: "POST",
-  headers: {
-    "Authorization": "Bearer sk_test_...",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    provider: "privy",
-    walletLabel: "Master wallet",
-  }),
-});
-const { data } = await response.json();
-// data: { configId, publicKey, walletId }
-```
-</Tab>
-<Tab value="Java">
-```java title="InitializeWalletProvider.java"
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/wallets/initialize"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "provider": "privy",
-          "walletLabel": "Master wallet"
-        }"""))
-    .build();
-```
-</Tab>
-</Tabs>
+Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/initialize` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
 
-Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId`:
+Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets \

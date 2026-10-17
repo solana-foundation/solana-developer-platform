@@ -51,8 +51,7 @@ describe("Issuance routes — metered quota", () => {
     await seedApiKeyRow(env, keyHash, {
       ...TEST_PROJECT_CACHED_KEY,
       id: "key_quota_readonly",
-      role: "api_readonly",
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
 
     const res = await app.request(

@@ -7,7 +7,12 @@ import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repos
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { noopObservability } from "@/runtime/observability";
-import { TEST_API_KEY, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import {
+  ALL_API_KEY_GRANTS,
+  ALL_API_KEY_GRANTS_SQL,
+  TEST_API_KEY,
+  TEST_PRODUCTION_API_KEY,
+} from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
@@ -89,15 +94,14 @@ describe("Counterparties Routes", () => {
       organizationId: TEST_ORG.id,
       projectId: `${TEST_PROJECT_ID}_production`,
       createdBy: TEST_USER.id,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
     });
 
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, ${ALL_API_KEY_GRANTS_SQL}, 'active')`
       )
       .bind(
         TEST_API_KEY.id,

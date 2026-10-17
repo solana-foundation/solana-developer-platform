@@ -1,18 +1,18 @@
-import { hasPermission } from "@sdp/types";
 import type { PrivateChannelReferenceWalletScope } from "@/db/repositories";
-import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
+import { callerMayPerform } from "@/middleware/require-action";
 import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import type { AppContext } from "../context";
 import { getPrivateChannelReferenceRepository } from "../context";
 import { resolveEventViewer } from "../event-access";
 
-function resolveWalletScope(auth: ApiKeyContext): PrivateChannelReferenceWalletScope {
-  if (!hasPermission(auth.permissions, "wallets:read")) {
+function resolveWalletScope(c: AppContext): PrivateChannelReferenceWalletScope {
+  if (!callerMayPerform(c, "wallets.read")) {
     return { scope: "none" };
   }
 
-  const walletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
+  const walletIds = getAllowedApiKeyWalletIdsForPermissions(getAuth(c), ["wallets:read"]);
   if (walletIds === null) {
     return { scope: "all" };
   }
@@ -23,7 +23,7 @@ function resolveWalletScope(auth: ApiKeyContext): PrivateChannelReferenceWalletS
  * GET /events/references — flat id→name dictionary for event enrichment.
  * Channels and members follow the same viewer rules as the events feed.
  * Issued-token symbols are project-wide (public on-chain data), and wallet
- * labels follow the same wallets:read and selected-wallet scope as custody.
+ * labels follow the same wallets.read action and selected-wallet scope as custody.
  */
 export async function listPrivateChannelEventReferences(c: AppContext) {
   const auth = getAuth(c);
@@ -36,7 +36,7 @@ export async function listPrivateChannelEventReferences(c: AppContext) {
   const rows = await getPrivateChannelReferenceRepository(c).listReferences({
     organizationId: auth.organizationId,
     projectId,
-    walletScope: resolveWalletScope(auth),
+    walletScope: resolveWalletScope(c),
     viewer,
   });
 

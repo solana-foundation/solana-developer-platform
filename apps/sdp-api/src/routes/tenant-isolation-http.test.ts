@@ -1,3 +1,4 @@
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 /**
  * Cross-tenant access through the full HTTP stack under the plain
  * NOSUPERUSER/NOBYPASSRLS runtime role: API-key resolution runs under the
@@ -75,10 +76,17 @@ describe("tenant isolation through the HTTP stack", () => {
           .prepare(
             `INSERT INTO api_keys
                (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-                role, permissions, status)
-             VALUES (?, ?, ?, ?, 'HTTP isolation', 'sk_test_htt', ?, 'api_admin', '["*"]', 'active')`
+                grants, status)
+             VALUES (?, ?, ?, ?, 'HTTP isolation', 'sk_test_htt', ?, ?, 'active')`
           )
-          .bind(tenant.keyId, tenant.org, tenant.project, USER_ID, keyHashes.get(tenant.keyId)),
+          .bind(
+            tenant.keyId,
+            tenant.org,
+            tenant.project,
+            USER_ID,
+            keyHashes.get(tenant.keyId),
+            ALL_API_KEY_GRANTS
+          ),
         db
           .prepare(
             // provider_data is explicit: 0036 dropped its NOT NULL/DEFAULT, and

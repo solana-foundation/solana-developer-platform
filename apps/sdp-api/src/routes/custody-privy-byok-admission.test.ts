@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
@@ -28,8 +30,7 @@ const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -66,20 +67,34 @@ async function seedActor(): Promise<void> {
       .prepare(
         `INSERT INTO api_keys (
            id, organization_id, project_id, created_by, name, key_prefix,
-           key_hash, role, permissions, status
-         ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`
+           key_hash, grants, status
+         ) VALUES (?, ?, ?, ?, 'Test', ?, ?, ?, 'active')`
       )
-      .bind(API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash),
+      .bind(
+        API_KEY.id,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        USER_ID,
+        API_KEY.prefix,
+        keyHash,
+        ALL_API_KEY_GRANTS
+      ),
   ]);
 }
 
 async function requestInitialize(): Promise<Response> {
+  // Custody setup is `wallets.configure`: a signed-in admin, never an API key.
+  const admin = await clerkAdminHeaders(env, getDb(env), {
+    userId: USER_ID,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+  });
   return app.request(
     "/v1/wallets/initialize",
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${API_KEY.raw}`,
+        ...admin,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ provider: "privy" }),

@@ -7,10 +7,11 @@ import app from "@/index";
 import { TERMINAL_REFUSAL_TTL_MS } from "@/lib/api-key-refusal-cache";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { AppError } from "@/lib/errors";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { authMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { requireAction } from "@/middleware/require-action";
 import {
+  ALL_API_KEY_GRANTS,
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
   TEST_EXPIRED_KEY,
@@ -288,7 +289,7 @@ describe("Auth Middleware", () => {
         .prepare(
           `INSERT INTO api_keys (
              id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-             role, allowed_ips, status
+             grants, allowed_ips, status
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
@@ -299,7 +300,7 @@ describe("Auth Middleware", () => {
           "Restricted key",
           TEST_API_KEY.prefix,
           validKeyHash,
-          "api_admin",
+          ALL_API_KEY_GRANTS,
           JSON.stringify(["203.0.113.0/24"]),
           "active"
         )
@@ -532,9 +533,7 @@ describe("Auth Middleware", () => {
       mini.use("*", kvStoreMiddleware());
       mini.use("*", authMiddleware());
       mini.get("/context", (c) => c.json(c.get("apiKey")));
-      mini.get("/transfer", requireAllowedOperation("payment_transfer_execute"), (c) =>
-        c.json({ ok: true })
-      );
+      mini.get("/transfer", requireAction("transfers.execute"), (c) => c.json({ ok: true }));
       return mini;
     };
     const keyed = (path: string, headers: Record<string, string> = {}) =>
@@ -549,7 +548,7 @@ describe("Auth Middleware", () => {
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
-    const updateKey = (assignment: string, value: string | null) =>
+    const updateKey = (assignment: string, value: string | string[] | null) =>
       getDb(env)
         .prepare(`UPDATE api_keys SET ${assignment} = ? WHERE id = ?`)
         .bind(value, TEST_API_KEY.id)
@@ -560,8 +559,7 @@ describe("Auth Middleware", () => {
     });
 
     it("builds the request context from the key's row", async () => {
-      await updateKey("role", "api_developer");
-      await updateKey("permissions", JSON.stringify(["org:read"]));
+      await updateKey("grants", ["organizations.read"]);
 
       const res = await keyed("/context");
 
@@ -570,18 +568,16 @@ describe("Auth Middleware", () => {
         id: TEST_API_KEY.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
-        role: "api_developer",
-        permissions: ["org:read"],
+        grants: ["organizations.read"],
         environment: "sandbox",
-        allowedOperations: null,
         walletScope: "all",
       });
     });
 
-    it("applies a permission reduction on the next request", async () => {
+    it("applies a grant reduction on the next request", async () => {
       expect((await orgRequest()).status).toBe(200);
 
-      await updateKey("permissions", JSON.stringify(["tokens:read"]));
+      await updateKey("grants", ["issuance.read"]);
 
       const res = await orgRequest();
       expect(res.status).toBe(403);
@@ -589,15 +585,24 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
     });
 
-    it("applies an Allowed Operations change on the next request", async () => {
+    it("applies a grant change on the next request", async () => {
       expect((await keyed("/transfer")).status).toBe(200);
 
-      await updateKey("allowed_operations", JSON.stringify(["ramp"]));
+      await updateKey("grants", ["transfers.read"]);
 
       expect((await keyed("/transfer")).status).toBe(403);
       expect(await (await keyed("/context")).json()).toMatchObject({
-        allowedOperations: ["ramp"],
+        grants: ["transfers.read"],
       });
+    });
+
+    it("drops an unknown stored grant, so it authorizes nothing", async () => {
+      await updateKey("grants", ["transfers.everything", "transfers.read"]);
+
+      expect(await (await keyed("/context")).json()).toMatchObject({
+        grants: ["transfers.read"],
+      });
+      expect((await keyed("/transfer")).status).toBe(403);
     });
 
     it("applies an IP restriction on the next request", async () => {
@@ -717,11 +722,11 @@ describe("Auth Middleware", () => {
     });
   });
 
-  describe("permissions", () => {
+  describe("actions", () => {
     it("allows access with wildcard permission", async () => {
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
-        permissions: ["*"],
+        grants: ALL_API_KEY_GRANTS,
       });
 
       const res = await app.request(
@@ -737,10 +742,10 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(200);
     });
 
-    it("allows access with specific permission", async () => {
+    it("allows access with the route's action", async () => {
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
-        permissions: ["org:read", "org:write"],
+        grants: ["organizations.read"],
       });
 
       const res = await app.request(
@@ -756,10 +761,10 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(200);
     });
 
-    it("rejects requests without required permissions", async () => {
+    it("rejects a request without the route's action, naming it", async () => {
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
-        permissions: ["tokens:read"],
+        grants: ["issuance.read"],
       });
 
       const res = await app.request(
@@ -773,8 +778,13 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(403);
-      const body = errorBodySchema.parse(await res.json());
-      expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
+      expect(await res.json()).toMatchObject({
+        error: {
+          code: "INSUFFICIENT_PERMISSIONS",
+          message: "Missing action: organizations.read",
+          details: { action: "organizations.read" },
+        },
+      });
     });
   });
 });

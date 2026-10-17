@@ -26,7 +26,11 @@ import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
 import * as SolanaServices from "@/services/solana";
 import { TokenService } from "@/services/token.service";
-import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import {
+  ALL_API_KEY_GRANTS,
+  ALL_API_KEY_GRANTS_SQL,
+  TEST_PRODUCTION_API_KEY,
+} from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
@@ -314,16 +318,15 @@ describe("Issuance Routes", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PRODUCTION_PROJECT.id,
       createdBy: TEST_USER.id,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
     });
 
     // Seed project-scoped API key
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, ${ALL_API_KEY_GRANTS_SQL}, 'active')`
       )
       .bind(
         TEST_PROJECT_API_KEY.id,
@@ -1686,7 +1689,7 @@ describe("Issuance Routes", () => {
         createdAt: "2024-01-06T00:00:00.000Z",
       });
       await cacheProjectApiKey({
-        permissions: ["tokens:read"],
+        grants: ["issuance.read"],
         walletBindings: [
           { walletId: walletA.walletId, permissions: ["tokens:read"] },
           { walletId: walletB.walletId, permissions: ["tokens:read"] },
@@ -1736,7 +1739,7 @@ describe("Issuance Routes", () => {
         createdAt: "2024-01-06T00:00:00.000Z",
       });
       await cacheProjectApiKey({
-        permissions: ["tokens:read"],
+        grants: ["issuance.read"],
         walletBindings: [
           { walletId: walletA.walletId, permissions: ["tokens:read"] },
           { walletId: walletB.walletId, permissions: ["payments:read"] },
@@ -1772,7 +1775,7 @@ describe("Issuance Routes", () => {
         params: { source: wallet.publicKey, amount: "1" },
       });
       await cacheProjectApiKey({
-        permissions: ["tokens:read"],
+        grants: ["issuance.read"],
         walletBindings: [{ walletId: wallet.walletId, permissions: ["payments:read"] }],
       });
 
@@ -2184,7 +2187,7 @@ describe("Issuance Routes", () => {
         params: { source: wallet.publicKey, amount: "1" },
       });
       await cacheProjectApiKey({
-        permissions: ["tokens:read"],
+        grants: ["issuance.read"],
         walletBindings: [{ walletId: wallet.walletId, permissions: ["tokens:read"] }],
       });
 
@@ -2229,7 +2232,7 @@ describe("Issuance Routes", () => {
         TEST_SOLANA_ADDRESSES.wallet1
       );
       await cacheProjectApiKey({
-        permissions: ["tokens:read"],
+        grants: ["issuance.read"],
         walletBindings: [{ walletId: wallet.walletId, permissions: ["payments:read"] }],
       });
 
@@ -2257,7 +2260,7 @@ describe("Issuance Routes", () => {
         TEST_SOLANA_ADDRESSES.wallet2
       );
       await cacheProjectApiKey({
-        permissions: ["tokens:read"],
+        grants: ["issuance.read"],
         walletBindings: [{ walletId: boundWallet.walletId, permissions: ["tokens:read"] }],
       });
 

@@ -10,6 +10,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -67,8 +68,7 @@ function cachedKey(): SeededApiKey {
     id: API_KEY.id,
     organizationId: ORG,
     projectId: PROJECT_A,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
@@ -100,8 +100,7 @@ async function seedScope(): Promise<void> {
     organizationId: ORG,
     projectId: `${PROJECT_A}_production`,
     createdBy: USER,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
   await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
@@ -113,10 +112,19 @@ async function seedScope(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', '["*"]'::jsonb, 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`
       )
-      .bind(API_KEY.id, ORG, PROJECT_A, USER, "Vault key", "sk_test_vau", keyHash),
+      .bind(
+        API_KEY.id,
+        ORG,
+        PROJECT_A,
+        USER,
+        "Vault key",
+        "sk_test_vau",
+        keyHash,
+        ALL_API_KEY_GRANTS
+      ),
     ...[[CONFIG_A, PROJECT_A, WALLET_A, PROVIDER_WALLET_A, PUBLIC_KEY_A]].flatMap(
       ([configId, projectId, walletId, providerWalletId, publicKey]) => [
         getDb(env)

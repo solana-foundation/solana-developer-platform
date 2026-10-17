@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { insertTestCustodyConfigRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -45,8 +47,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -63,14 +64,17 @@ let originalPrivyAppId: string | undefined;
 let originalPrivyAppSecret: string | undefined;
 let originalCustodyEncryptionKey: string | undefined;
 
+/** A signed-in admin, set before each test: custody setup is `wallets.configure`. */
+let adminHeaders: Record<string, string>;
+
 async function initializeProvider(body: { provider: "para" }): Promise<Response> {
   return app.request(
     "/v1/wallets/initialize",
     {
       method: "POST",
       headers: {
+        ...adminHeaders,
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
       },
       body: JSON.stringify(body),
     },
@@ -135,8 +139,8 @@ async function seedAuthAndConfigs(): Promise<void> {
   });
   await getDb(env).execute(
     `INSERT INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       TEST_API_KEY.id,
       TEST_ORG.id,
@@ -145,8 +149,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "Custody Multi Provider Test Key",
       TEST_API_KEY.prefix,
       keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
+      ALL_API_KEY_GRANTS,
       "active",
     ]
   );
@@ -248,6 +251,11 @@ describe("Custody multi-provider routes", () => {
     env.PARA_API_KEY = "para_test_api_key";
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
+    adminHeaders = await clerkAdminHeaders(env, getDb(env), {
+      userId: TEST_USER.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+    });
   });
 
   afterEach(async () => {
@@ -261,6 +269,8 @@ describe("Custody multi-provider routes", () => {
   });
 
   it("rejects Managed initialization out of channel before any Provider call or row", async () => {
+    // Load Clerk's signing keys before fetch is stubbed for the provider.
+    expect((await app.request("/v1/wallets", { headers: adminHeaders }, env)).status).toBe(200);
     const providerFetch = await removeParaConfig();
     custodyReleaseChannel.outOfChannelMode = "managed";
 

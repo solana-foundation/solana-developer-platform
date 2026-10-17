@@ -1,6 +1,9 @@
 import {
-  type AllowedOperation,
+  ACTIONS,
+  actionOwnerOf,
+  actionsInModule,
   type CustodyWalletPurpose,
+  HIDDEN_ACTION_MODULES,
   isRampProviderInReleaseChannel,
   type Permission,
   RAMP_PROVIDERS,
@@ -20,11 +23,12 @@ import { z } from "zod";
 /**
  * Value-level visibility for the public OpenAPI document. Removing a module's
  * routes is not enough: shared schemas name its values too (an API key's
- * `earn:write` scope, a `mint_authority` wallet purpose, a `moonpay` transfer
+ * `earn.execute` grant, a `mint_authority` wallet purpose, a `moonpay` transfer
  * provider). Every enum value a module owns is classified here, from the
  * catalogs in `@sdp/types`, and `pruneUnpublishedValues` drops the ones the
- * document's channel does not publish. The `Record` types make a new permission,
- * operation or wallet purpose fail to compile until it is classified.
+ * document's channel does not publish. Actions carry their owner in the
+ * registry; the `Record` types make a new wallet-binding permission or wallet
+ * purpose fail to compile until it is classified.
  */
 
 /** `core` values run in every release channel. */
@@ -67,50 +71,6 @@ const PERMISSION_OWNERS = {
   "*": "core",
 } as const satisfies Record<Permission, ValueOwner>;
 
-/** `program` covers DvP and Earn, so Markets owns it (in a channel with either). */
-const ALLOWED_OPERATION_OWNERS = {
-  privacy: "helius_rings",
-  payment: "payments",
-  ramp: "ramps",
-  issuance: "issuance",
-  program: "markets",
-  payment_transfer_execute: "payments",
-  payment_transfer_batch_execute: "payments",
-  recurring_payment_create: "recurring_payments",
-  recurring_payment_update: "recurring_payments",
-  recurring_payment_collection: "recurring_payments",
-  ramp_onramp_quote: "ramps",
-  ramp_offramp_quote: "ramps",
-  issuance_allowlist_add_execute: "issuance",
-  issuance_allowlist_remove_execute: "issuance",
-  issuance_burn_execute: "issuance",
-  issuance_deploy_execute: "issuance",
-  issuance_force_burn_execute: "issuance",
-  issuance_freeze_execute: "issuance",
-  issuance_metadata_update_execute: "issuance",
-  issuance_mint_execute: "issuance",
-  issuance_pause_execute: "issuance",
-  issuance_seize_execute: "issuance",
-  issuance_unfreeze_execute: "issuance",
-  issuance_unpause_execute: "issuance",
-  issuance_update_authority_execute: "issuance",
-  dvp_fund: "dvp",
-  dvp_settle: "dvp",
-  earn_vault_deposit: "earn",
-  earn_vault_withdrawal: "earn",
-  earn_program_withdrawal: "earn",
-  rings_shield: "helius_rings",
-  rings_transfer_registered: "helius_rings",
-  rings_transfer_anonymous: "helius_rings",
-  rings_withdraw: "helius_rings",
-  rings_merge: "helius_rings",
-  rings_timelock_create: "helius_rings",
-  rings_timelock_settle: "helius_rings",
-  rings_zone_create: "helius_rings",
-  rings_ring_exit: "helius_rings",
-  rings_ring_entry: "helius_rings",
-} as const satisfies Record<AllowedOperation, ValueOwner>;
-
 const WALLET_PURPOSE_OWNERS = {
   root: "core",
   mint_authority: "issuance",
@@ -131,7 +91,11 @@ function buildOwners(): ReadonlyMap<string, Owner> {
     }
     owners.set(value, owner);
   };
-  for (const table of [PERMISSION_OWNERS, ALLOWED_OPERATION_OWNERS, WALLET_PURPOSE_OWNERS]) {
+  for (const action of ACTIONS) {
+    const owner = actionOwnerOf(action);
+    if (owner !== "core") own(action, { module: owner });
+  }
+  for (const table of [PERMISSION_OWNERS, WALLET_PURPOSE_OWNERS]) {
     for (const [value, owner] of Object.entries(table)) {
       if (owner !== "core") own(value, { module: owner });
     }
@@ -151,6 +115,9 @@ function buildOwners(): ReadonlyMap<string, Owner> {
 
 const VALUE_OWNERS = buildOwners();
 
+/** Values no public document names in any channel: the hidden families' actions. */
+const HIDDEN_VALUES: ReadonlySet<string> = new Set(HIDDEN_ACTION_MODULES.flatMap(actionsInModule));
+
 /**
  * The modules a public document publishes: those in the release channel, less
  * Earn while its publication hold is on. Markets follows its sub-modules.
@@ -166,12 +133,16 @@ export function publishedModules(
   return modules;
 }
 
-/** Whether a public document for `modules` may name `value`. Unclassified values are core. */
+/**
+ * Whether a public document for `modules` may name `value`. A hidden family's
+ * action never is; other unclassified values are core.
+ */
 export function isValuePublished(
   value: string,
   modules: ReadonlySet<SdpModule>,
   releaseChannel: SdpReleaseChannel
 ): boolean {
+  if (HIDDEN_VALUES.has(value)) return false;
   const owner = VALUE_OWNERS.get(value);
   if (!owner) return true;
   if ("module" in owner) return modules.has(owner.module);
@@ -184,6 +155,11 @@ export function isValuePublished(
 /** Every classified value, for tests that scan a document for leaks. */
 export function classifiedValues(): readonly string[] {
   return [...VALUE_OWNERS.keys()];
+}
+
+/** The values no public document names, for tests that scan a document for leaks. */
+export function hiddenValues(): readonly string[] {
+  return [...HIDDEN_VALUES];
 }
 
 /** The module or ramp provider that owns a value, for consumers that filter by channel. */

@@ -12,6 +12,7 @@ import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -95,8 +96,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -134,8 +134,8 @@ async function seedAuthAndConfigs(): Promise<void> {
   });
   await getDb(env).execute(
     `INSERT INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       TEST_API_KEY.id,
       TEST_ORG.id,
@@ -144,8 +144,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "Custody scope key",
       TEST_API_KEY.prefix,
       keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
+      ALL_API_KEY_GRANTS,
       "active",
     ]
   );

@@ -6,6 +6,7 @@ import {
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
 } from "@sdp/rpc/solana";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -209,8 +210,8 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
   await db
     .prepare(
       `INSERT OR REPLACE INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, ?, 'active')`
     )
     .bind(
       TEST_PROJECT_API_KEY.id,
@@ -218,7 +219,8 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
       TEST_PROJECT.id,
       TEST_USER.id,
       TEST_PROJECT_API_KEY.prefix,
-      apiKeyHash
+      apiKeyHash,
+      [...API_KEY_GRANTABLE_ACTIONS]
     )
     .run();
 }

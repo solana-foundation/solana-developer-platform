@@ -233,8 +233,7 @@ async function seedRouteState(): Promise<void> {
     id: API_KEY.id,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
-    role: "api_admin",
-    permissions: ["payments:read", "payments:write"],
+    grants: ["private_channels.execute"],
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
@@ -290,18 +289,12 @@ async function seedRouteState(): Promise<void> {
       .prepare(
         `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-            role, permissions, status)
-         VALUES (?, ?, ?, ?, 'PC value key', ?, ?, 'api_admin', ?, 'active')`
+            grants, status)
+         VALUES (?, ?, ?, ?, 'PC value key', ?, ?, ?, 'active')`
       )
-      .bind(
-        API_KEY.id,
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        ACTOR_USER_ID,
-        API_KEY.prefix,
-        keyHash,
-        JSON.stringify(cachedApiKey.permissions)
-      ),
+      .bind(API_KEY.id, ORGANIZATION_ID, PROJECT_ID, ACTOR_USER_ID, API_KEY.prefix, keyHash, [
+        ...cachedApiKey.grants,
+      ]),
     db
       .prepare(
         `INSERT INTO private_channel_instances
@@ -319,8 +312,8 @@ async function seedRouteState(): Promise<void> {
       ),
     db
       .prepare(`INSERT INTO api_keys
-      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, 'api_admin', ?, 'active')`)
+      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active')`)
       .bind(
         SCOPED_API_KEY.id,
         ORGANIZATION_ID,
@@ -328,12 +321,12 @@ async function seedRouteState(): Promise<void> {
         ACTOR_USER_ID,
         SCOPED_API_KEY.prefix,
         await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER),
-        JSON.stringify(cachedApiKey.permissions)
+        [...cachedApiKey.grants]
       ),
     db
       .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
       VALUES ('akwp-pcv', ?, ?, ?)`)
-      .bind(SCOPED_API_KEY.id, COLLEAGUE_WALLET_ID, JSON.stringify(["payments:write"])),
+      .bind(SCOPED_API_KEY.id, COLLEAGUE_WALLET_ID, ["private_channels.execute"]),
     db
       .prepare(
         `INSERT INTO private_channel_users
@@ -474,10 +467,10 @@ async function abandonedWithdrawal() {
   return row;
 }
 
-async function setKeyPermissions(permissions: string[]) {
+async function setKeyGrants(grants: string[]) {
   await getDb(env)
-    .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
-    .bind(JSON.stringify(permissions), API_KEY.id)
+    .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+    .bind(grants, API_KEY.id)
     .run();
 }
 
@@ -531,16 +524,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it.each([false, true])(
-    "uses role permissions when explicit permissions are absent (replay=%s)",
+    "executes and replays with private_channels.execute (replay=%s)",
     async (replay) => {
       if (replay) {
         await recordedDeposit(ACTOR_ADDRESS);
         await recordedWithdrawal(ACTOR_ADDRESS);
       }
-      await getDb(env)
-        .prepare("UPDATE api_keys SET permissions = NULL WHERE id = ?")
-        .bind(API_KEY.id)
-        .run();
       await clearKVStores(env);
 
       for (const post of [postDeposit, postWithdrawal]) {
@@ -551,12 +540,9 @@ describe("Private Channels — deposit and withdrawal access", () => {
     }
   );
 
-  it("uses the current role instead of the cached role when permissions are absent", async () => {
+  it("applies a grant reduction to replay while history stays readable", async () => {
     const original = await recordedDeposit(ACTOR_ADDRESS);
-    await getDb(env)
-      .prepare("UPDATE api_keys SET role = 'api_readonly', permissions = NULL WHERE id = ?")
-      .bind(API_KEY.id)
-      .run();
+    await setKeyGrants(["private_channels.read"]);
     const body = { walletId: ACTOR_WALLET_ID, amount: "1.5" };
     expect((await postWithdrawal(body, apiKeyHeaders())).status).toBe(403);
     expect((await postDeposit(body, apiKeyHeaders())).status).toBe(403);
@@ -570,11 +556,11 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
   });
 
-  it.each([{ permissions: [] }, { permissions: ["wallets:read"] }])(
-    "does not inherit role permissions for explicit permissions $permissions",
-    async ({ permissions }) => {
+  it.each([{ grants: [] }, { grants: ["wallets.read"] }])(
+    "refuses movement without private_channels.execute: $grants",
+    async ({ grants }) => {
       await recordedDeposit(ACTOR_ADDRESS);
-      await setKeyPermissions(permissions);
+      await setKeyGrants(grants);
       const body = { walletId: ACTOR_WALLET_ID, amount: "1.5" };
       expect((await postWithdrawal(body, apiKeyHeaders())).status).toBe(403);
       expect((await postDeposit(body, apiKeyHeaders())).status).toBe(403);
@@ -583,33 +569,26 @@ describe("Private Channels — deposit and withdrawal access", () => {
     }
   );
 
-  it.each([
-    "not json",
-    '"payments:write"',
-    "{}",
-    "null",
-    '["payments:write", 42]',
-    '["payments:write", "unknown:permission"]',
-  ])("rejects malformed stored permissions before execution: %s", async (permissions) => {
-    await getDb(env)
-      .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
-      .bind(permissions, API_KEY.id)
-      .run();
+  it.each([["payments:write"], ["private_channels.everything"], ["*"]])(
+    "treats unknown stored grants as none before execution: %s",
+    async (grant) => {
+      await setKeyGrants([grant]);
 
-    for (const replay of [false, true]) {
-      if (replay) await recordedDeposit(ACTOR_ADDRESS);
-      const response = await postDeposit(
-        { walletId: ACTOR_WALLET_ID, amount: "1.5" },
-        apiKeyHeaders()
-      );
-      expect(response.status).toBe(500);
-      expect(await response.json()).toMatchObject({
-        error: { code: "INTERNAL_ERROR", message: "Stored API key permissions are invalid" },
-      });
+      for (const replay of [false, true]) {
+        if (replay) await recordedDeposit(ACTOR_ADDRESS);
+        const response = await postDeposit(
+          { walletId: ACTOR_WALLET_ID, amount: "1.5" },
+          apiKeyHeaders()
+        );
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({
+          error: { code: "INSUFFICIENT_PERMISSIONS" },
+        });
+      }
+      expect(providerSignerMock).not.toHaveBeenCalled();
+      expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
     }
-    expect(providerSignerMock).not.toHaveBeenCalled();
-    expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
-  });
+  );
 
   it("requires write for deposit replay and keeps history readable", async () => {
     const repo = createPrivateChannelDepositRepository(env);
@@ -640,8 +619,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
         .prepare("UPDATE private_channel_instances SET is_active = false WHERE id = ?")
         .bind(INSTANCE_ID),
       getDb(env)
-        .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
-        .bind(JSON.stringify(["payments:read"]), API_KEY.id),
+        .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+        .bind(["private_channels.read"], API_KEY.id),
     ]);
     await clearKVStores(env);
 
@@ -900,10 +879,10 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
 
-  it("denies revoked API keys even when their stored permissions would allow replay", async () => {
+  it("denies revoked API keys even when their stored grants would allow replay", async () => {
     await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
-      .prepare("UPDATE api_keys SET status = 'revoked', permissions = NULL WHERE id = ?")
+      .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
       .bind(API_KEY.id)
       .run();
     // Authentication reads the key's row fresh, so it refuses before the route's own check.
@@ -967,7 +946,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("does not create new work for a read-only key", async () => {
-    await setKeyPermissions(["payments:read"]);
+    await setKeyGrants(["private_channels.read"]);
     expect(
       (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders())).status
     ).toBe(403);
@@ -983,7 +962,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const withdrawal = await recordedWithdrawal(ACTOR_ADDRESS);
     await useConnectionSource();
     custodyReleaseChannel.outOfChannelMode = "byok";
-    await setKeyPermissions(["payments:write"]);
+    await setKeyGrants(["private_channels.execute"]);
     for (const { post, id } of [
       { post: postDeposit, id: required(deposit).id },
       { post: postWithdrawal, id: withdrawal.id },
@@ -1101,7 +1080,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       const original = await abandonedWithdrawal();
       await useConnectionSource();
       custodyReleaseChannel.outOfChannelMode = "byok";
-      await setKeyPermissions(write ? ["payments:read", "payments:write"] : ["payments:read"]);
+      await setKeyGrants(write ? ["private_channels.execute"] : ["private_channels.read"]);
       const response = await postWithdrawal(
         { walletId: ACTOR_WALLET_ID, amount: "1.5" },
         apiKeyHeaders()

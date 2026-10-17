@@ -1,7 +1,10 @@
 /**
- * SDP Permission System
+ * Legacy permission strings.
  *
- * Hierarchical permission model for API access control.
+ * Callers are authorized by actions (./actions): an API key holds explicit
+ * grants and a member holds their organization role's actions. These strings
+ * remain only as the vocabulary of an API key's per-wallet bindings
+ * (`api_key_wallet_permissions`), which the wallet-scope work replaces.
  */
 
 // Resource-level permissions
@@ -69,68 +72,17 @@ export const PERMISSIONS = [
   "custody:write",
   "custody:admin",
 
-  // Admin wildcard (all permissions)
+  // Wildcard: a wallet binding with full access to its wallet
   "*",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-// Organization roles and their default permissions
-export const ORGANIZATION_ROLES = {
-  admin: {
-    description: "Full organization control",
-    permissions: [
-      "org:read",
-      "org:write",
-      "org:admin",
-      "tokens:read",
-      "tokens:write",
-      "tokens:admin",
-      "payments:read",
-      "payments:write",
-      "earn:read",
-      "earn:write",
-      "counterparties:read",
-      "counterparties:write",
-      "wallets:read",
-      "wallets:write",
-      "webhooks:read",
-      "webhooks:write",
-      "api-keys:read",
-      "api-keys:write",
-      "projects:read",
-      "projects:write",
-      "projects:admin",
-      "project-members:read",
-      "project-members:write",
-      "audit:read",
-      "custody:read",
-      "custody:admin",
-    ] as Permission[],
-  },
-  member: {
-    description: "Standard product access",
-    permissions: [
-      "org:read",
-      "api-keys:read",
-      "tokens:read",
-      "tokens:write",
-      "payments:read",
-      "payments:write",
-      "earn:read",
-      "earn:write",
-      "counterparties:read",
-      "counterparties:write",
-      "wallets:read",
-      "wallets:write",
-      "webhooks:read",
-      "webhooks:write",
-      "projects:read",
-    ] as Permission[],
-  },
-} as const;
+// Organization roles. What each role may do is its list of actions
+// (`ORGANIZATION_ROLE_ACTIONS` in ./actions).
+export const ORGANIZATION_ROLES = ["admin", "member"] as const;
 
-export type OrganizationRole = keyof typeof ORGANIZATION_ROLES;
+export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 export type LegacyOrganizationRole = OrganizationRole | "owner" | "developer" | "viewer";
 
 export function normalizeOrganizationRole(
@@ -141,93 +93,6 @@ export function normalizeOrganizationRole(
   }
 
   return "member";
-}
-
-// API key roles and their default permissions
-export const API_KEY_ROLES = {
-  api_admin: {
-    description: "Full API access",
-    permissions: ["*"] as Permission[],
-  },
-  api_developer: {
-    description: "Standard API access for tokens, payments, wallets",
-    permissions: [
-      "tokens:read",
-      "tokens:write",
-      "payments:read",
-      "payments:write",
-      "earn:read",
-      "earn:write",
-      "counterparties:read",
-      "counterparties:write",
-      "wallets:read",
-      "wallets:write",
-      "compliance:read",
-      "webhooks:read",
-      "webhooks:write",
-    ] as Permission[],
-  },
-  api_readonly: {
-    description: "Read-only API access",
-    permissions: [
-      "tokens:read",
-      "payments:read",
-      "earn:read",
-      "counterparties:read",
-      "wallets:read",
-      "compliance:read",
-      "webhooks:read",
-      "audit:read",
-    ] as Permission[],
-  },
-} as const;
-
-export type ApiKeyRole = keyof typeof API_KEY_ROLES;
-
-/**
- * Check if a permission set includes a required permission
- */
-export function hasPermission(userPermissions: Permission[], required: Permission): boolean {
-  if (userPermissions.includes("*")) {
-    return true;
-  }
-  return userPermissions.includes(required);
-}
-
-/**
- * Check if a permission set includes any of the required permissions
- */
-export function hasAnyPermission(userPermissions: Permission[], required: Permission[]): boolean {
-  if (userPermissions.includes("*")) {
-    return true;
-  }
-  return required.some((p) => userPermissions.includes(p));
-}
-
-/**
- * Check if a permission set includes all required permissions
- */
-export function hasAllPermissions(userPermissions: Permission[], required: Permission[]): boolean {
-  if (userPermissions.includes("*")) {
-    return true;
-  }
-  return required.every((p) => userPermissions.includes(p));
-}
-
-/**
- * Get default permissions for an organization role
- */
-export function getPermissionsForOrgRole(
-  role: LegacyOrganizationRole | string | null | undefined
-): Permission[] {
-  return [...ORGANIZATION_ROLES[normalizeOrganizationRole(role)].permissions];
-}
-
-/**
- * Get default permissions for an API key role
- */
-export function getPermissionsForApiKeyRole(role: ApiKeyRole): Permission[] {
-  return [...API_KEY_ROLES[role].permissions];
 }
 
 // Project roles and their default permissions
