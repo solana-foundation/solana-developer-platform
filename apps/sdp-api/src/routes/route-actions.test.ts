@@ -351,10 +351,10 @@ describe("caller authorization goes through actions only", () => {
     /\b(auth|actor|clerk|apiKey|caller|member)\.role\s*(===|!==|==|!=)/,
   ];
   // Checks that are not a tenant's authorization at all.
-  const ROUTE_EXEMPTIONS: Record<string, string> = {
+  const ROUTE_EXEMPTIONS = {
     "routes/allowlist/middleware.ts":
       "operator: an admin of the platform's own admin organization, not a tenant grant",
-  };
+  } as const satisfies Record<string, string>;
   const root = path.resolve(__dirname, "..");
 
   function offendersOf(files: string[], patterns: RegExp[]): string[] {
