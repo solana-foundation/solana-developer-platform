@@ -41,6 +41,7 @@ import {
   confirmSubscriptionSignature,
   isSubscriptionDelegationCanceled,
   parseNullableStoredSignature,
+  ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
   settleResumedStep,
@@ -517,8 +518,6 @@ async function runRecurringPaymentLifecycle(
   // An attempt an earlier run left at `submit` reached the send, saved or not
   // (HOO-2044). Claiming it took the stale window, so the chain settles it.
   const resumedAtSubmit = attempt.stage === "submit";
-  // While the chain is being read, a failure leaves the attempt to recover, not fail it.
-  let chainUnread = false;
 
   try {
     if (!claimed.plan_pda || !claimed.subscription_id || !claimed.subscription_pda) {
@@ -572,7 +571,6 @@ async function runRecurringPaymentLifecycle(
       subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment });
     let onChainSubscription: MaybeAccount<SubscriptionDelegation> | null = null;
     if (resumedAtSubmit) {
-      chainUnread = true;
       const step = await settleResumedStep({
         rpc,
         read: readDelegation,
@@ -589,7 +587,6 @@ async function runRecurringPaymentLifecycle(
           step: input.operation,
         },
       });
-      chainUnread = false;
       if (step.kind === "landed") {
         confirmedOnChain = true;
         return await finalizeRecurringPaymentLifecycle({
@@ -704,7 +701,10 @@ async function runRecurringPaymentLifecycle(
     const failedOnChain = error instanceof AppError && error.code === "TRANSACTION_FAILED";
 
     // Once the operation is on chain, or may be, a failure only leaves the attempt to finish.
-    if ((signature || confirmedOnChain || chainUnread) && !failedOnChain) {
+    if (
+      (signature || confirmedOnChain || error instanceof ResumedStepUnsettledError) &&
+      !failedOnChain
+    ) {
       await preserveRecoverableLifecycleAttempt({
         recurringRepo,
         attempt,

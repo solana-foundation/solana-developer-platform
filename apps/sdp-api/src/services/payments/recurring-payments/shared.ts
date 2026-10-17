@@ -327,6 +327,19 @@ export type ResumedStep<T> = { kind: "landed" | "absent"; account: T };
  *   stale attempt (its blockhash expired), fails the step; succeeded but not yet
  *   visible throws for a retry; unknown on a fresh retry waits for it.
  */
+/**
+ * The chain cannot settle a resumed step yet: it is landing but not final, its
+ * saved send succeeded but is not visible, or the read itself failed. The step
+ * may be on chain, so the attempt stays in flight for the next run instead of
+ * failing or resetting; the request answers 409.
+ */
+export class ResumedStepUnsettledError extends AppError {
+  constructor(message: string) {
+    super("CONFLICT", message);
+    this.name = "ResumedStepUnsettledError";
+  }
+}
+
 export async function settleResumedStep<T extends { exists: boolean }>(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   read: (commitment: "finalized" | "confirmed") => Promise<T>;
@@ -340,6 +353,26 @@ export async function settleResumedStep<T extends { exists: boolean }>(input: {
   failureMessage: string;
   logContext: ResumedStepLogContext;
 }): Promise<ResumedStep<T>> {
+  try {
+    return await readResumedStep(input);
+  } catch (error) {
+    if (
+      error instanceof ResumedStepUnsettledError ||
+      (error instanceof AppError && error.code === "TRANSACTION_FAILED")
+    ) {
+      throw error;
+    }
+    getLogger().warn(
+      { ...input.logContext, err: error },
+      "Recurring payment step could not be read on chain"
+    );
+    throw new ResumedStepUnsettledError("Recurring payment step could not be read on chain; retry");
+  }
+}
+
+async function readResumedStep<T extends { exists: boolean }>(
+  input: Parameters<typeof settleResumedStep<T>>[0]
+): Promise<ResumedStep<T>> {
   const finalized = await input.read("finalized");
   if (input.landed(finalized)) {
     if (input.savedSignature === null) {
@@ -394,8 +427,10 @@ export async function settleStepIfResumed<T extends { exists: boolean }>(
 }
 
 /** A step that landed, or may have, but is not final or not visible yet: retry it. */
-function stepStillLanding(): AppError {
-  return conflict("Recurring payment step has landed but is not final on chain yet; retry");
+function stepStillLanding(): ResumedStepUnsettledError {
+  return new ResumedStepUnsettledError(
+    "Recurring payment step has landed but is not final on chain yet; retry"
+  );
 }
 
 export async function confirmSubscriptionSignature(

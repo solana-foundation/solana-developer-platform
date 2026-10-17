@@ -131,8 +131,10 @@ its attempt recorded; it does not fail the row. Collection saves its signed tran
 broadcast. Activation, lifecycle and update save a step's signature only after its send returns,
 so a run that resumes a step an earlier run reached settles it from the step's account first
 (`settleResumedStep`, HOO-2044): the effect at `finalized` means it landed and is not sent again;
-only at `confirmed` means it is landing, and the request fails retryably; a saved signature is
-looked up with transaction history, since recovery runs long after the status cache dropped it.
+only at `confirmed` means it is landing; a saved signature is looked up with transaction history,
+since recovery runs long after the status cache dropped it. A step the chain cannot settle yet
+(landing, not yet visible, or the read failed) answers 409 and leaves the attempt in flight, never
+failed or reset, so recovery finishes it.
 An activation reset after a failed save can be retried at once, before its earlier send lands;
 that duplicate fails on chain because the account exists, and the next retry finds it.
 

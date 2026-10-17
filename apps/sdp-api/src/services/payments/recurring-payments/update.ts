@@ -77,6 +77,7 @@ import {
   confirmSubscriptionSignature,
   isSubscriptionDelegationCanceled,
   parseNullableStoredSignature,
+  ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedPlan,
@@ -2062,8 +2063,11 @@ export async function updateRecurringPayment(input: {
         currentAttempt.mode === "metadata_schedule" &&
         Boolean(currentAttempt.plan_update_signature);
       const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
+      // A resumed step the chain cannot settle yet may have landed: keep the attempt.
       resetToActive =
-        !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
+        !(error instanceof ResumedStepUnsettledError) &&
+        !hasReplacementAuthorization &&
+        (!hasSubmittedMetadataUpdate || transactionFailed);
 
       await recordRecurringPaymentUpdateFailure({
         env: input.env,

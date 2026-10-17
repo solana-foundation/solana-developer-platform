@@ -6104,7 +6104,7 @@ describe("Payments routes — recurring", () => {
 
         const failed = await cancel(crypto.randomUUID());
 
-        expect(failed.status).toBeGreaterThanOrEqual(500);
+        expect(failed.status).toBe(409);
         expect(sent).not.toHaveBeenCalled();
         // Neither failed nor reset: the attempt waits at `submit` for the chain to answer.
         expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
@@ -6138,6 +6138,50 @@ describe("Payments routes — recurring", () => {
         expect(retry.status).toBe(409);
         expect(sent).not.toHaveBeenCalled();
         expect((await recurringPaymentDueAt(activated.id)).status).not.toBe("active");
+      });
+
+      it("keeps a resumed metadata update in flight when the chain read fails", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        const metadataUri = "https://example.com/recurring/unsettled.json";
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ metadataUri }) },
+            env
+          );
+        // The plan update is sent and the process dies before its signature is saved.
+        recurringExecution
+          .signAndSendMock()
+          .mockRejectedValueOnce(new Error("process died after broadcast"));
+        expect((await request()).status).toBe(500);
+        await leaveUpdateCrashedAt(activated.id, key);
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_update_attempts SET stage = 'update_plan'
+              WHERE recurring_payment_id = ?`
+          )
+          .bind(activated.id)
+          .run();
+        vi.mocked(subscriptionsProgram.fetchMaybePlan).mockRejectedValueOnce(
+          new Error("RPC unavailable")
+        );
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        // The new URI may have landed: neither failed nor reset to the old metadata.
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+        const attempt = await getDb(env)
+          .prepare(
+            "SELECT status FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+          )
+          .bind(activated.id)
+          .first<{ status: PaymentRecurringPaymentAttemptStatus }>();
+        expect(attempt?.status).toBe("processing");
       });
 
       it("sends a cancel the chain does not show", async () => {
@@ -6637,15 +6681,20 @@ describe("Payments routes — recurring", () => {
 
         expect(landing.status).toBe(409);
         expect(sent).not.toHaveBeenCalled();
+        // The plan may be on chain: the schedule stays `activating` for recovery,
+        // not reset to `pending_activation`, where the cron would never pick it up.
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
 
-        // Once final, the retry takes the plan as landed and sends only the subscription.
-        const retry = await activate();
-
-        expect(retry.status).toBe(200);
-        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
-          status: "active",
-          planCreationSignature: null,
+        // Once stale and final, the cron takes the plan as landed and sends only the subscription.
+        await getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+          .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), created.id)
+          .run();
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
+          recovered: 1,
         });
+
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("active");
         expect(sent).toHaveBeenCalledTimes(1);
       });
     });

@@ -55,6 +55,7 @@ import {
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
+  ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
@@ -201,6 +202,24 @@ async function recordActivationFailure(input: {
   error: Error;
   failedAt: string;
 }): Promise<void> {
+  // A step the chain cannot settle yet may be on chain: the attempt stays in
+  // flight and the schedule `activating`, so the cron recovers it once stale.
+  if (input.error instanceof ResumedStepUnsettledError) {
+    const recurringRepo = createPaymentRecurringPaymentsRepository(
+      input.env,
+      createTenantScope(input)
+    );
+    requireUpdatedAttempt(
+      await recurringRepo.updateActivationAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        error: recurringPaymentErrorMessage(input.error),
+        updatedAt: input.failedAt,
+      })
+    );
+    return;
+  }
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     requireUpdatedAttempt(
