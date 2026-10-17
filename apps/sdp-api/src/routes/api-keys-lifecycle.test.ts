@@ -223,6 +223,32 @@ describe("API key lifecycle", () => {
       ).toEqual([{ wallet_id: "wallet_lifecycle", permissions: '["wallets:read"]' }]);
     });
 
+    it("keeps a key that predates grants unmarked through rotation, until grants are set", async () => {
+      await insertKey({ id: TARGET_KEY_ID });
+      await getDb(env).execute("UPDATE api_keys SET grants_assigned = false WHERE id = ?", [
+        TARGET_KEY_ID,
+      ]);
+      const grantsAssigned = async (id: string | undefined) =>
+        (
+          await getDb(env).queryOne<{ grants_assigned: boolean }>(
+            "SELECT grants_assigned FROM api_keys WHERE id = ?",
+            [id]
+          )
+        )?.grants_assigned;
+
+      expect((await rotate(TARGET_KEY_ID)).status).toBe(201);
+      const [replacement] = await replacementsOf(TARGET_KEY_ID);
+      expect(await grantsAssigned(replacement?.id)).toBe(false);
+
+      const response = await app.request(
+        `/v1/api-keys/${replacement?.id}`,
+        { method: "PATCH", headers, body: JSON.stringify({ grants: ["transfers.read"] }) },
+        env
+      );
+      expect(response.status).toBe(200);
+      expect(await grantsAssigned(replacement?.id)).toBe(true);
+    });
+
     it("refuses to revive a predecessor past its deadline whose replacement was revoked", async () => {
       const deadline = new Date(Date.now() - 60_000).toISOString();
       await insertKey({ id: TARGET_KEY_ID, rotation_deadline: deadline });

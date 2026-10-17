@@ -186,6 +186,7 @@ type RotationTargetRow = {
   name: string;
   description: string | null;
   grants: unknown;
+  grants_assigned: boolean;
   environment: ApiKeyEnvironment;
   project_id: string;
   allowed_ips: string | null;
@@ -457,7 +458,8 @@ export class ApiKeyService {
       values.push(input.expiresAt);
     }
     if (input.grants !== undefined) {
-      updates.push("grants = ?");
+      // A person set the grants: a key that predates them is usable again.
+      updates.push("grants = ?", "grants_assigned = true");
       values.push(normalizeGrants(input.grants));
     }
     if (input.signingWallet) {
@@ -521,7 +523,7 @@ export class ApiKeyService {
     // The target's own row lock serializes every lifecycle change of this key
     // behind this rotation.
     const target = await this.db.queryOne<RotationTargetRow>(
-      `SELECT ak.id, ak.name, ak.description, ak.grants,
+      `SELECT ak.id, ak.name, ak.description, ak.grants, ak.grants_assigned,
               p.environment, ak.project_id, ak.allowed_ips,
               ak.signing_wallet_id, ak.created_by, ak.expires_at,
               ak.status, ak.rotation_deadline
@@ -583,8 +585,8 @@ export class ApiKeyService {
     await this.db.execute(
       `INSERT INTO api_keys (
          id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-         grants, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+         grants, grants_assigned, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
       [
         newKeyId,
         organizationId,
@@ -595,6 +597,8 @@ export class ApiKeyService {
         newPrefix,
         newKeyHash,
         grants,
+        // A replacement for a key that predates grants predates them too.
+        target.grants_assigned,
         target.allowed_ips,
         target.signing_wallet_id,
         keyId,
