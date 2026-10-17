@@ -34,6 +34,7 @@ export * from "./projects";
 export * from "./provider-access";
 export * from "./release-channels";
 export * from "./site";
+export * from "./sponsorship";
 export * from "./tokens";
 export * from "./unified-transactions";
 export * from "./veda-programs";

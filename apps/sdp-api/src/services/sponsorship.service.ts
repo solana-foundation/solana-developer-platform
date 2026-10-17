@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   createFeePaymentAdapter,
   FeePaymentError,
@@ -13,9 +14,10 @@ import {
   type ProjectEnvironment,
   type SolanaCluster,
 } from "@sdp/types";
-import type { Address, Signature } from "@solana/kit";
+import { type Address, getTransactionDecoder, type Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
@@ -27,6 +29,37 @@ import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budg
 import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
 type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
+
+/** Trusted identity for one managed sponsored transaction message, never a public selector. */
+export interface SponsorshipAccountingIdentity {
+  reservationId: string;
+  attempt: number;
+  network: "devnet" | "mainnet";
+  environment: ProjectEnvironment;
+  organizationId: string;
+  projectId: string | null;
+  actor: SponsorshipScope["actor"];
+  transactionDigest: string;
+  feePayer: string;
+  providerConfigFingerprint: string;
+}
+
+export interface SponsorshipContinuity {
+  /** Retained server-owned execution mode; changing deployment config is not absence proof. */
+  deploymentMode: "managed" | "self_hosted";
+  legacyActor: SponsorshipScope["actor"];
+  exactActor: SponsorshipScope["actor"];
+  /**
+   * `legacy_new` is a genuinely new domain-owned window/message, never an
+   * unlinked old claim. `after_writer_retirement` is a trusted release decision;
+   * successful lookup must still prove absence. Existing work defaults to refusal.
+   */
+  admission: "continue_only" | "legacy_new" | "after_writer_retirement";
+  /** Comes only from retained domain storage and is checked against accounting evidence. */
+  reservationId?: string;
+  /** Domain CAS must fence this specific message/payer/attempt before provider effects. */
+  persistAccountingIdentity(identity: SponsorshipAccountingIdentity): Promise<void>;
+}
 
 export interface SponsorshipScope {
   /**
@@ -41,6 +74,7 @@ export interface SponsorshipScope {
     type: SponsorshipActorType;
     id: string;
   };
+  continuity?: SponsorshipContinuity;
 }
 
 /**
@@ -78,7 +112,8 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
  */
 function withOwnedSubmissionLifecycle(
   provider: FeePaymentPort,
-  admission: { env: Env; scope: SponsorshipMovementScope }
+  admission: { env: Env; scope: SponsorshipMovementScope },
+  assertAccounting?: (transaction: Uint8Array) => Promise<void>
 ): SponsorshipFeePayment {
   const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
   let feePayer: Promise<Address> | undefined;
@@ -98,6 +133,7 @@ function withOwnedSubmissionLifecycle(
     );
   };
   const signVerified = async (transaction: Uint8Array) => {
+    await assertAccounting?.(transaction);
     await admit();
     const signedTransaction = await provider.signAsFeePayer(transaction);
     const decoded = await assertSponsorSignedSameMessage({
@@ -112,6 +148,7 @@ function withOwnedSubmissionLifecycle(
     getFeePayer: () => sponsor(),
     signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
     signAndSend: async (transaction) => {
+      await assertAccounting?.(transaction);
       await admit();
       return provider.signAndSend(transaction);
     },
@@ -191,14 +228,89 @@ export function createSponsorshipFeePayment(
   movement: MovementId
 ): SponsorshipFeePayment {
   const admitted: SponsorshipMovementScope = { ...scope, movement };
-  const provider = instrumentedAdapter(
-    env,
-    buildKoraUserId(admitted),
-    CLUSTER_BY_SDP_ENVIRONMENT[admitted.environment]
-  );
-  return isSelfHostedDeployment(env)
-    ? withOwnedSubmissionLifecycle(provider, { env, scope: admitted })
-    : new BudgetedFeePayment(env, admitted, provider);
+  const selfHosted = isSelfHostedDeployment(env);
+  const continuity = scope.continuity;
+  if (continuity && continuity.deploymentMode !== (selfHosted ? "self_hosted" : "managed")) {
+    throw new FeePaymentError(
+      "Deployment mode conflicts with retained sponsorship evidence",
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  if (
+    continuity &&
+    ![continuity.legacyActor, continuity.exactActor].some(
+      (actor) => actor.type === scope.actor.type && actor.id === scope.actor.id
+    )
+  ) {
+    throw new FeePaymentError(
+      "Sponsorship actor does not belong to this operation",
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  const initialActor =
+    selfHosted && continuity && continuity.admission !== "after_writer_retirement"
+      ? continuity.legacyActor
+      : scope.actor;
+  const providerId = resolveFeePaymentProvider(env);
+  const providers = new Map<string, FeePaymentPort>();
+  const providerForActor = (actor: SponsorshipScope["actor"]) => {
+    const userId = buildKoraUserId({ ...scope, actor });
+    const cached = providers.get(userId);
+    if (cached) return cached;
+    const created = instrumentedAdapter(env, userId, CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
+    providers.set(userId, created);
+    return created;
+  };
+  // Continuations prove the retained actor before constructing its provider.
+  // Unrelated callers keep their eager construction behavior.
+  let lazyProvider: FeePaymentPort | undefined;
+  const getProvider = () => (lazyProvider ??= providerForActor(initialActor));
+  const provider: FeePaymentPort = scope.continuity
+    ? {
+        providerId,
+        getFeePayer: () => getProvider().getFeePayer(),
+        signAsFeePayer: (transaction) => getProvider().signAsFeePayer(transaction),
+        signAndSend: (transaction) => getProvider().signAndSend(transaction),
+        getSponsorshipConfiguration: async () => {
+          const selected = getProvider();
+          if (!selected.getSponsorshipConfiguration) {
+            throw new FeePaymentError(
+              "Sponsorship provider configuration unavailable",
+              "PROVIDER_NOT_AVAILABLE"
+            );
+          }
+          return selected.getSponsorshipConfiguration();
+        },
+      }
+    : providerForActor(scope.actor);
+  return selfHosted
+    ? withOwnedSubmissionLifecycle(
+        provider,
+        { env, scope: admitted },
+        continuity
+          ? async (transaction) => {
+              const decoded = getTransactionDecoder().decode(transaction);
+              const transactionDigest = createHash("sha256")
+                .update(new Uint8Array(decoded.messageBytes))
+                .digest("hex");
+              const candidates = await new SponsorshipBudgetRepository(
+                getDb(env)
+              ).findReservationEvidence({
+                organizationId: scope.organizationId,
+                projectId: scope.projectId,
+                transactionDigest,
+                reservationId: continuity.reservationId,
+              });
+              if (candidates.length > 0 || continuity.reservationId !== undefined) {
+                throw new FeePaymentError(
+                  "Managed accounting evidence requires a compatible managed reader",
+                  "PROVIDER_NOT_AVAILABLE"
+                );
+              }
+            }
+          : undefined
+      )
+    : new BudgetedFeePayment(env, admitted, provider, { providerForActor });
 }
 
 /**

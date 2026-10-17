@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { transferListResponse } from "@/openapi/paths/responses";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -809,12 +810,18 @@ describe("Payments routes — list transfers", () => {
       expect(forbiddenRes.status).toBe(403);
     });
 
-    it("keeps authorized legacy null-pin transfers visible to selected keys", async () => {
+    it("retains authorized legacy transfer history until cutover", async () => {
+      await seedTransfer({
+        id: "xfr_exact_authorized",
+        status: "confirmed",
+        createdAt: "2026-10-12T00:00:00.000Z",
+      });
       await seedTransfer({
         id: "xfr_legacy_authorized",
         status: "confirmed",
         custodyWalletId: null,
         walletId: TEST_WALLET_ID,
+        createdAt: "2026-10-12T00:00:01.000Z",
       });
       await seedTransfer({
         id: "xfr_legacy_unauthorized",
@@ -842,8 +849,49 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(response.status).toBe(200);
-      const body = (await response.json()) as { data: Array<{ id: string }> };
-      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_legacy_authorized"]);
+      const body = transferListResponse.parse(await response.json());
+      expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
+        "xfr_exact_authorized",
+        "xfr_legacy_authorized",
+      ]);
+      expect(body.meta.total).toBe(2);
+      const nextPage = await app.request(
+        "/v1/payments/transfers?includeObserved=false&pageSize=1&page=2",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(nextPage.status).toBe(200);
+      expect(await nextPage.json()).toMatchObject({
+        data: [{ id: "xfr_exact_authorized" }],
+        meta: { total: 2 },
+      });
+      const scopedDetail = await app.request(
+        "/v1/payments/transfers/xfr_legacy_authorized",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(scopedDetail.status).toBe(200);
+      const unauthorizedDetail = await app.request(
+        "/v1/payments/transfers/xfr_legacy_unauthorized",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(unauthorizedDetail.status).toBe(403);
+
+      await seedCachedKey({ walletScope: "all", walletBindings: [] });
+      const tenantDetail = await app.request(
+        "/v1/payments/transfers/xfr_legacy_authorized",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(tenantDetail.status).toBe(200);
+      const tenantList = await app.request(
+        "/v1/payments/transfers?includeObserved=false",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(tenantList.status).toBe(200);
+      expect(await tenantList.json()).toMatchObject({ meta: { total: 3 } });
     });
 
     it("returns no rows when selected wallets grant no payments:read access", async () => {

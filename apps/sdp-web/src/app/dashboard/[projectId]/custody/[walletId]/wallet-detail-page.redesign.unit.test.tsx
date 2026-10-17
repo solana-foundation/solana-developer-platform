@@ -96,7 +96,7 @@ beforeEach(() => {
   mockLoadWalletActivity.mockReset();
   mockFetchProjectProviderAvailability.mockReset();
   mockRequest.mockReset();
-  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
+  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record`);
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
   mockIssuanceFlag.mockResolvedValue(true);
@@ -109,12 +109,23 @@ beforeEach(() => {
     },
   });
   mockRequest.mockImplementation(async (path: string) => {
-    if (path.startsWith("/v1/wallets/wallet%2Fone")) {
+    if (
+      path.startsWith("/v1/wallets/wallet%2Fone") ||
+      path.startsWith("/v1/wallets/wallet_record")
+    ) {
       return walletMetadataResponse();
     }
 
     if (path.includes("/balances")) {
-      return Response.json({ data: { walletBalances: { balances: [solBalance] } } });
+      return Response.json({
+        data: {
+          walletBalances: {
+            custodyWalletId: "wallet_record",
+            address: "11111111111111111111111111111111",
+            balances: [solBalance],
+          },
+        },
+      });
     }
 
     if (path.startsWith("/v1/issuance/tokens")) {
@@ -155,7 +166,8 @@ type ViewProps = ComponentProps<typeof WalletDetailView>;
 
 async function renderPage(): Promise<ViewProps> {
   const page = (await WalletDetailPage({
-    params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    params: Promise.resolve({ walletId: "wallet_record" }),
+    searchParams: Promise.resolve({}),
   })) as ReactNode;
   expect(isValidElement(page)).toBe(true);
   if (!isValidElement(page)) throw new Error("no element");
@@ -167,6 +179,89 @@ const requested = (fragment: string) =>
   mockRequest.mock.calls.some(([path]) => String(path).includes(fragment));
 
 describe("WalletDetailPage", () => {
+  it("preserves a bookmarked tab and repeated query values when canonicalizing", async () => {
+    mockRequest.mockImplementation(async () => walletMetadataResponse());
+    await expect(
+      WalletDetailPage({
+        params: Promise.resolve({ walletId: "wallet%2Fone" }),
+        searchParams: Promise.resolve({
+          tab: "settings",
+          filter: ["a", "b"],
+          label: "Wallet & Treasury",
+          empty: "",
+          absent: undefined,
+        }),
+      })
+    ).rejects.toThrow(
+      `/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record?tab=settings&filter=a&filter=b&label=Wallet+%26+Treasury&empty=`
+    );
+    expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/payments/"))).toBe(
+      false
+    );
+  });
+
+  it("canonicalizes a legacy bookmark before reading Payments balances", async () => {
+    await expect(
+      WalletDetailPage({
+        params: Promise.resolve({ walletId: "wallet%2Fone" }),
+        searchParams: Promise.resolve({}),
+      })
+    ).rejects.toThrow(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record`);
+    expect(requested("/payments/")).toBe(false);
+  });
+
+  it("preserves the empty balance display for a missing tracked balance", async () => {
+    const base = mockRequest.getMockImplementation();
+    if (!base) throw new Error("Wallet detail request fixture is missing");
+    mockRequest.mockImplementation(async (path: string) =>
+      path.includes("/balances") ? new Response(null, { status: 404 }) : base(path)
+    );
+
+    const props = await renderPage();
+
+    await expect(props.balancesPromise).resolves.toEqual({ balances: [], error: null });
+    expect(mockRequest).toHaveBeenCalledWith("/v1/payments/wallets/wallet_record/balances");
+  });
+
+  it.each(["wrong-wallet", "missing-identity", "invalid-balance"] as const)(
+    "reports an unavailable balance for %s instead of an empty wallet",
+    async (failure) => {
+      const base = mockRequest.getMockImplementation();
+      if (!base) throw new Error("Wallet detail request fixture is missing");
+      mockRequest.mockImplementation(async (path: string) => {
+        if (!path.includes("/balances")) return base(path);
+        const custodyWalletId = (() => {
+          switch (failure) {
+            case "missing-identity":
+              return undefined;
+            case "wrong-wallet":
+              return "wrong_wallet";
+            case "invalid-balance":
+              return "wallet_record";
+            default: {
+              const exhaustive: never = failure;
+              throw new Error(`Unsupported balance failure: ${exhaustive}`);
+            }
+          }
+        })();
+        return Response.json({
+          data: {
+            walletBalances: {
+              custodyWalletId,
+              address: "11111111111111111111111111111111",
+              balances: failure === "invalid-balance" ? [{}] : [],
+            },
+          },
+        });
+      });
+      const props = await renderPage();
+      await expect(props.balancesPromise).resolves.toEqual({
+        balances: [],
+        error: "DashboardCustody.trackedBalancesUnavailable",
+      });
+    }
+  );
+
   it("names the wallet and its provider, and says what it can sign", async () => {
     const { wallet } = await renderPage();
     expect(wallet).toMatchObject({
@@ -255,7 +350,7 @@ describe("WalletDetailPage", () => {
 
   it("loads metadata only and hands the lower parts over as promises", async () => {
     const props = await renderPage();
-    expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
+    expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet_record?includeBalance=false");
     await expect(props.balancesPromise).resolves.toEqual({ balances: [solBalance], error: null });
     await expect(props.issuedTokensPromise).resolves.toEqual({});
   });
@@ -268,7 +363,17 @@ describe("WalletDetailPage", () => {
     );
     const props = await renderPage();
     expect(props.wallet.name).toBe("Fast wallet");
-    balances.resolve(Response.json({ data: { walletBalances: { balances: [] } } }));
+    balances.resolve(
+      Response.json({
+        data: {
+          walletBalances: {
+            custodyWalletId: "wallet_record",
+            address: "11111111111111111111111111111111",
+            balances: [],
+          },
+        },
+      })
+    );
     await expect(props.balancesPromise).resolves.toEqual({ balances: [], error: null });
   });
 });

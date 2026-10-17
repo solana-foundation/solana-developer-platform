@@ -1,3 +1,4 @@
+import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {
@@ -71,35 +72,114 @@ describe("fetchFundingWallets", () => {
 });
 
 describe("live funding wallet balances", () => {
+  it.each(["   ", "0x10"])(
+    "rejects a fresh balance response with invalid token amount %j",
+    async (uiAmount) => {
+      stubResponse({
+        data: {
+          balanceReadContext: { minimumSlot: 101 },
+          walletBalances: {
+            custodyWalletId: "cwlt_requested",
+            address: "address",
+            balances: [
+              {
+                token: WELL_KNOWN_TOKENS.SOL.symbol,
+                mint: SOL_MINT,
+                amount: "1000000000",
+                uiAmount,
+                decimals: SOL_DECIMALS,
+              },
+            ],
+          },
+        },
+      });
+      await expect(fetchLiveFundingWalletBalance("cwlt_requested", 101)).rejects.toThrow(
+        "Invalid custody wallet balance response"
+      );
+    }
+  );
+  it.each([
+    ["missing identity", { balances: [] }],
+    ["wrong exact identity", { custodyWalletId: "cwlt_other", address: "address", balances: [] }],
+    ["missing address", { custodyWalletId: "cwlt_requested", balances: [] }],
+    [
+      "malformed balance",
+      {
+        custodyWalletId: "cwlt_requested",
+        address: "address",
+        balances: [{ token: WELL_KNOWN_TOKENS.SOL.symbol }],
+      },
+    ],
+  ])("rejects a live balance response with %s", async (_condition, walletBalances) => {
+    stubResponse({ data: { walletBalances } });
+    await expect(fetchLiveFundingWalletBalance("cwlt_requested")).rejects.toThrow(
+      "Invalid custody wallet balance response"
+    );
+  });
+
   it("constrains only affected wallets and other bindings of the same chain address", async () => {
     const affected = wallet({ id: "affected" });
     const alias = wallet({ id: "alias" });
     const unrelated = wallet({ id: "unrelated", publicKey: "11111111111111111111111111111111" });
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-      Response.json({
-        data: { balanceReadContext: { minimumSlot: 101 }, walletBalances: { balances: [] } },
-      })
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const id = String(input).split("/wallets/")[1]?.split("/")[0];
+      return Response.json({
+        data: {
+          balanceReadContext: { minimumSlot: 101 },
+          walletBalances: { custodyWalletId: id, address: "address", balances: [] },
+        },
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
     await refreshFundingWalletBalances([affected, alias, unrelated], new Map([[affected.id, 101]]));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/dashboard/payments/wallets/provider-affected/balances?minimumSlot=101",
-      "/api/dashboard/payments/wallets/provider-alias/balances?minimumSlot=101",
-      "/api/dashboard/payments/wallets/provider-unrelated/balances",
+      "/api/dashboard/payments/wallets/affected/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/alias/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/unrelated/balances",
     ]);
   });
+  it("refreshes distinct exact owners even when their Provider ID is identical", async () => {
+    const first = wallet({ id: "cwlt_first", walletId: "provider-shared" });
+    const second = wallet({ id: "cwlt_second", walletId: "provider-shared" });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const id = String(input).split("/wallets/")[1]?.split("/")[0];
+      return Response.json({
+        data: { walletBalances: { custodyWalletId: id, address: first.publicKey, balances: [] } },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(refreshFundingWalletBalances([first, second])).resolves.toEqual([
+      { ...first, balances: [] },
+      { ...second, balances: [] },
+    ]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/dashboard/payments/wallets/cwlt_first/balances",
+      "/api/dashboard/payments/wallets/cwlt_second/balances",
+    ]);
+  });
+
   it("requires the wallet API to acknowledge the position confirmation slot", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(Response.json({ data: { walletBalances: { balances: [] } } }))
       .mockResolvedValueOnce(
         Response.json({
-          data: { balanceReadContext: { minimumSlot: 100 }, walletBalances: { balances: [] } },
+          data: { walletBalances: { custodyWalletId: "wallet", address: "address", balances: [] } },
         })
       )
       .mockResolvedValueOnce(
         Response.json({
-          data: { balanceReadContext: { minimumSlot: 101 }, walletBalances: { balances: [] } },
+          data: {
+            balanceReadContext: { minimumSlot: 100 },
+            walletBalances: { custodyWalletId: "wallet", address: "address", balances: [] },
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            balanceReadContext: { minimumSlot: 101 },
+            walletBalances: { custodyWalletId: "wallet", address: "address", balances: [] },
+          },
         })
       );
     vi.stubGlobal("fetch", fetchMock);
@@ -126,7 +206,11 @@ describe("live funding wallet balances", () => {
         decimals: 6,
       },
     ];
-    const fetchMock = vi.fn(async () => Response.json({ data: { walletBalances: { balances } } }));
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        data: { walletBalances: { custodyWalletId: "wallet/live", address: "address", balances } },
+      })
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchLiveFundingWalletBalance("wallet/live")).resolves.toEqual(balances);
@@ -153,12 +237,14 @@ describe("live funding wallet balances", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("provider-unavailable")) {
+        if (String(input).includes("/wallets/unavailable/")) {
           return Response.json({ error: { message: "RPC unavailable" } }, { status: 503 });
         }
         return Response.json({
           data: {
             walletBalances: {
+              custodyWalletId: "first",
+              address: first.publicKey,
               balances: [
                 {
                   token: "USDC",

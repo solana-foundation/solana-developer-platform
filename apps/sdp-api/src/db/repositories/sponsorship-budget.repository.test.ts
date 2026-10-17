@@ -45,6 +45,21 @@ function reservationInput(id: string): CreateSponsorshipReservationInput {
   };
 }
 
+const foreignReservationScopes = [
+  {
+    organizationId: "org_other",
+    projectId: "project_other",
+    network: "devnet",
+    productEnvironment: "sandbox",
+  },
+  {
+    organizationId: "org_1",
+    projectId: "project_1_production",
+    network: "mainnet",
+    productEnvironment: "production",
+  },
+] as const;
+
 describe("SponsorshipBudgetRepository", () => {
   beforeEach(async () => {
     const db = getDb(env);
@@ -52,7 +67,10 @@ describe("SponsorshipBudgetRepository", () => {
       "TRUNCATE sponsorship_budget_policy_revisions, sponsorship_budget_reservations, sponsorship_budget_policies, sponsorship_reconciliation_state"
     );
     await db.execute(
-      "INSERT INTO organizations (id, name, slug) VALUES ('org_1', 'org_1', 'sponsorship-budget-org') ON CONFLICT (id) DO NOTHING"
+      `INSERT INTO organizations (id, name, slug) VALUES
+       ('org_1', 'org_1', 'sponsorship-budget-org'),
+       ('org_other', 'org_other', 'sponsorship-budget-other-org')
+       ON CONFLICT (id) DO NOTHING`
     );
     await db.execute(
       "INSERT INTO users (id, email) VALUES ('usr_sponsorship_budget', 'sponsorship-budget@example.test') ON CONFLICT (id) DO NOTHING"
@@ -63,9 +81,155 @@ describe("SponsorshipBudgetRepository", () => {
       members: [],
       ids: { sandbox: "project_1", production: "project_1_production" },
     });
+    await seedDefaultProjects(db, {
+      organizationId: "org_other",
+      createdBy: "usr_sponsorship_budget",
+      members: [],
+      ids: { sandbox: "project_other", production: "project_other_production" },
+    });
     await insertPolicy({ id: "global", scopeType: "global", scopeId: null });
     await insertPolicy({ id: "org_default", scopeType: "organization", scopeId: null });
     await insertPolicy({ id: "project_default", scopeType: "project", scopeId: null });
+  });
+
+  it("looks up retained message evidence without collapsing conflicting actors or scope", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation(reservationInput("sbr_legacy"));
+    await repository.createReservation({
+      ...reservationInput("sbr_exact"),
+      actorType: "wallet",
+      actorId: "cwlt_1",
+    });
+    for (const scope of foreignReservationScopes) {
+      await repository.createReservation({
+        ...reservationInput(`sbr_foreign_${scope.projectId}`),
+        ...scope,
+      });
+    }
+    const candidates = await repository.findReservationEvidence({
+      organizationId: "org_1",
+      projectId: "project_1",
+      transactionDigest: "digest_1",
+    });
+    expect(candidates.map((row) => row.id).sort()).toEqual(["sbr_exact", "sbr_legacy"]);
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_1",
+        projectId: "project_1",
+        reservationId: "sbr_legacy",
+      })
+    ).resolves.toEqual(candidates);
+    expect(candidates[0]).toMatchObject({
+      organizationId: "org_1",
+      projectId: "project_1",
+      network: "devnet",
+      productEnvironment: "sandbox",
+      transactionDigest: "digest_1",
+      feePayer: "fee_payer_1",
+      providerConfigFingerprint: "config_1",
+      attempt: 1,
+    });
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_other",
+        projectId: "project_1",
+        transactionDigest: "digest_1",
+      })
+    ).resolves.toEqual([]);
+  });
+
+  it("retains a same-tenant stored ID's contrary message evidence for refusal", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation(reservationInput("sbr_other_message"));
+    const candidates = await repository.findReservationEvidence({
+      organizationId: "org_1",
+      projectId: "project_1",
+      transactionDigest: "missing-message",
+      reservationId: "sbr_other_message",
+    });
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        id: "sbr_other_message",
+        organizationId: "org_1",
+        projectId: "project_1",
+        transactionDigest: "digest_1",
+      }),
+    ]);
+  });
+
+  it.each([
+    { transactionDigest: "digest_1" },
+    { reservationId: "sbr_local" },
+    { transactionDigest: "digest_1", reservationId: "sbr_local" },
+  ] as const)("excludes another organization's project evidence: %o", async (evidence) => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation(reservationInput("sbr_local"));
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_other",
+        projectId: "project_1",
+        ...evidence,
+      })
+    ).resolves.toEqual([]);
+  });
+
+  it.each(foreignReservationScopes)(
+    "excludes a foreign retained ID alongside a message digest: %o",
+    async (foreignScope) => {
+      const repository = new SponsorshipBudgetRepository(getDb(env));
+      await repository.createReservation({
+        ...reservationInput("sbr_foreign_id"),
+        ...foreignScope,
+      });
+      await expect(
+        repository.findReservationEvidence({
+          organizationId: "org_1",
+          projectId: "project_1",
+          transactionDigest: "missing-message",
+          reservationId: "sbr_foreign_id",
+        })
+      ).resolves.toEqual([]);
+    }
+  );
+
+  it.each(foreignReservationScopes)(
+    "does not derive a local message match from a foreign ID: %o",
+    async (foreignScope) => {
+      const repository = new SponsorshipBudgetRepository(getDb(env));
+      await repository.createReservation({
+        ...reservationInput("sbr_foreign_id"),
+        ...foreignScope,
+      });
+      await repository.createReservation(reservationInput("sbr_local_same_message"));
+      await expect(
+        repository.findReservationEvidence({
+          organizationId: "org_1",
+          projectId: "project_1",
+          reservationId: "sbr_foreign_id",
+        })
+      ).resolves.toEqual([]);
+    }
+  );
+
+  it.each([
+    { transactionDigest: "digest_1" },
+    { reservationId: "sbr_project_legacy" },
+    { transactionDigest: "digest_1", reservationId: "sbr_project_legacy" },
+  ] as const)("does not treat an absent project as a wildcard: %o", async (evidence) => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation(reservationInput("sbr_project_legacy"));
+    await repository.createReservation({
+      ...reservationInput("sbr_project_exact"),
+      actorType: "wallet",
+      actorId: "cwlt_1",
+    });
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_1",
+        projectId: null,
+        ...evidence,
+      })
+    ).resolves.toEqual([]);
   });
 
   it("prefers exact tenant policies and falls back independently at each scope", async () => {

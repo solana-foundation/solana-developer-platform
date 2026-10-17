@@ -15,7 +15,7 @@ const WALLET_BALANCE_CACHE_TTL_MS = 30_000;
 
 interface WalletCardBalanceValueProps {
   walletId: string;
-  initialBalances: CustodyWalletTokenBalance[];
+  initialBalances?: CustodyWalletTokenBalance[];
 }
 
 /**
@@ -37,7 +37,7 @@ export function useWalletCardBalances(enabled = true) {
     {
       key: "wallet-card-balances",
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
-      version: 2,
+      version: 3,
     }
   );
 }
@@ -61,6 +61,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     },
     {
       key: `wallet-card-balance-fallback.${walletId}`,
+      version: 2,
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
     }
   );
@@ -69,7 +70,8 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     ? (fallbackBalances ?? batchBalances?.[walletId] ?? initialBalances)
     : (batchBalances?.[walletId] ?? initialBalances);
   const hasError = batchFailed && (fallbackBalances === undefined || Boolean(fallbackError));
-  const totalBalance = resolveTotalBalance(balances);
+  // shortcut: preserve the legacy zero/stale display until balance-state UX is changed separately.
+  const totalBalance = resolveTotalBalance(balances ?? []);
 
   return (
     <span className={`font-medium ${hasError ? "text-muted" : "text-primary"}`}>

@@ -23,6 +23,7 @@ import * as paymentsRepositoryPostgres from "@/db/repositories/payments.reposito
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { transferBatchListResponse } from "@/openapi/paths/responses";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
@@ -939,14 +940,27 @@ describe("payment transfer batches", () => {
     expect(detailBody.error.code).toBe("CONFLICT");
   });
 
-  it("keeps authorized legacy null-pin batches visible to selected keys", async () => {
+  it("retains authorized legacy batch history until cutover", async () => {
     await getDb(env).batch([
+      getDb(env)
+        .prepare(`INSERT INTO payment_transfer_batches
+          (id, organization_id, project_id, source_custody_wallet_id,
+           source_wallet_id, source_address, token, created_at)
+          VALUES ('xbatch_exact_authorized', ?, ?, ?, ?, ?, ?, '2026-10-12T00:00:00.000Z')`)
+        .bind(
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_CUSTODY_WALLET_ID,
+          TEST_WALLET_ID,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          WELL_KNOWN_TOKENS.SOL.symbol
+        ),
       getDb(env)
         .prepare(
           `INSERT INTO payment_transfer_batches
              (id, organization_id, project_id, source_custody_wallet_id,
-              source_wallet_id, source_address, token)
-           VALUES ('xbatch_legacy_authorized', ?, ?, NULL, ?, ?, 'SOL')`
+              source_wallet_id, source_address, token, created_at)
+           VALUES ('xbatch_legacy_authorized', ?, ?, NULL, ?, ?, 'SOL', '2026-10-12T00:00:01.000Z')`
         )
         .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
       getDb(env)
@@ -983,8 +997,52 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: Array<{ id: string }> };
-    expect(body.data.map((batch) => batch.id)).toEqual(["xbatch_legacy_authorized"]);
+    const body = transferBatchListResponse.parse(await response.json());
+    expect(body.data.map((batch) => batch.id).sort()).toEqual([
+      "xbatch_exact_authorized",
+      "xbatch_legacy_authorized",
+    ]);
+    expect(body.meta.total).toBe(2);
+    const nextPage = await app.request(
+      "/v1/payments/transfer-batches?pageSize=1&page=2",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(nextPage.status).toBe(200);
+    expect(await nextPage.json()).toMatchObject({
+      data: [{ id: "xbatch_exact_authorized" }],
+      meta: { total: 2 },
+    });
+    const scopedDetail = await app.request(
+      "/v1/payments/transfer-batches/xbatch_legacy_authorized",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(scopedDetail.status).toBe(200);
+    const unauthorizedDetail = await app.request(
+      "/v1/payments/transfer-batches/xbatch_legacy_unauthorized",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(unauthorizedDetail.status).toBe(403);
+    await seedCachedApiKey(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      walletScope: "all",
+      walletBindings: [],
+    });
+    const tenantDetail = await app.request(
+      "/v1/payments/transfer-batches/xbatch_legacy_authorized",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(tenantDetail.status).toBe(200);
+    const tenantList = await app.request(
+      "/v1/payments/transfer-batches",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(tenantList.status).toBe(200);
+    expect(await tenantList.json()).toMatchObject({ meta: { total: 3 } });
   });
 
   it("keeps exact persisted batch history readable after the wallet becomes inactive", async () => {
@@ -1018,7 +1076,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(res.status).toBe(200);
-    const response = (await res.json()) as { data: Array<{ id: string }> };
+    const response = transferBatchListResponse.parse(await res.json());
     expect(response.data.map((batch) => batch.id)).toEqual(["xbatch_inactive_wallet_history"]);
   });
 

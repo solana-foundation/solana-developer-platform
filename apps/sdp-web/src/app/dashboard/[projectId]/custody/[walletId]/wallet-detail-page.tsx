@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletMetadataResponse, CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletMetadataResponse } from "@sdp/types";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
@@ -29,24 +29,18 @@ import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
+import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
 import { resolveWalletConnectionRow } from "./wallet-connection-row";
+import { walletDetailHref } from "./wallet-detail.shared";
 import {
   WalletBalanceRows,
   type WalletBalanceTokenRoutes,
   WalletBalanceTotal,
   type WalletTrackedBalancesResult,
 } from "./wallet-detail-balances";
-
-interface WalletBalancesResponse {
-  walletBalances?: {
-    walletId: string;
-    address: string;
-    balances: CustodyWalletTokenBalance[];
-  };
-}
 
 interface OwnedTokenRoute {
   id: string;
@@ -88,6 +82,7 @@ async function getWalletTrackedBalances(
   const readAt = Date.now();
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
+    // shortcut: preserve the legacy 404 display until balance-state UX is changed separately.
     if (response.status === 404) {
       return { balances: [], error: null, readAt };
     }
@@ -99,8 +94,8 @@ async function getWalletTrackedBalances(
       };
     }
 
-    const json = (await response.json()) as { data?: WalletBalancesResponse };
-    return { balances: json.data?.walletBalances?.balances ?? [], error: null, readAt };
+    const balances = parseWalletBalanceResponse(await response.json(), walletId).balances;
+    return { balances, error: null, readAt };
   } catch {
     return {
       balances: [],
@@ -151,8 +146,10 @@ async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Ow
 
 export default async function WalletDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ walletId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled] = await Promise.all([
     getTranslations(),
@@ -169,14 +166,16 @@ export default async function WalletDetailPage({
 
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const walletPromise = getWalletDetail(apiClient.request, resolvedWalletId);
+  const wallet = await getWalletDetail(apiClient.request, resolvedWalletId);
+  if (wallet.id !== resolvedWalletId) {
+    redirect(await requestProjectHref(walletDetailHref(wallet.id, await searchParams)));
+  }
   const trackedBalancesPromise = getWalletTrackedBalances(
     apiClient.request,
-    resolvedWalletId,
+    wallet.id,
     t("DashboardCustody.trackedBalancesUnavailable")
   );
   const ownedTokensByMintPromise = getOwnedTokenRoutes(apiClient.request);
-  const wallet = await walletPromise;
 
   const { provider } = wallet;
   const category = getCustodyProviderCategory(provider);
@@ -255,11 +254,7 @@ export default async function WalletDetailPage({
                 monospace
                 trailing={<WalletAddressCopyButton address={wallet.publicKey} />}
               />
-              <WalletInfoRow
-                label={t("DashboardCustody.walletId")}
-                value={wallet.walletId}
-                monospace
-              />
+              <WalletInfoRow label={t("DashboardCustody.walletId")} value={wallet.id} monospace />
               <WalletInfoRow
                 label={t("DashboardCustody.status")}
                 value={formatDisplayLabel(wallet.status)}

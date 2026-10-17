@@ -11,7 +11,7 @@ import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navi
 
 const mocks = vi.hoisted(() => ({
   query: "",
-  toast: vi.fn(),
+  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
   refresh: vi.fn(),
   mutate: vi.fn(),
   replaceSearchParams: vi.fn(),
@@ -108,9 +108,32 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("wallet cards", () => {
+  it.each(["grid", "list"])("opens exact alias wallets from the %s view", (view) => {
+    mocks.query = `view=${view}`;
+    renderOverview({
+      wallets: [
+        makeWallet({ id: "cwlt_a", walletId: "provider_shared", label: "Wallet A" }),
+        makeWallet({ id: "cwlt_b", walletId: "provider_shared", label: "Wallet B" }),
+      ],
+    });
+    const links = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+    expect(links).toContain("/dashboard/prj_test_sandbox/wallets/cwlt_a");
+    expect(links).toContain("/dashboard/prj_test_sandbox/wallets/cwlt_b");
+    expect(links).not.toContain("/dashboard/prj_test_sandbox/wallets/provider_shared");
+  });
+
+  it("copies the exact Wallet ID from its card", () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal("navigator", Object.create(navigator, { clipboard: { value: { writeText } } }));
+    renderOverview({ wallets: [makeWallet({ id: "cwlt_selected", walletId: "provider_shared" })] });
+    fireEvent.click(screen.getByRole("button", { name: "Copy wallet id" }));
+    expect(writeText).toHaveBeenCalledWith("cwlt_selected");
+  });
+
   it("names each wallet with its purpose and provider, root wallets included", () => {
     renderOverview();
     const settlement = screen.getByText("Settlement Fireblocks").closest("article");
@@ -121,7 +144,7 @@ describe("wallet cards", () => {
     expect(within(offRamp as HTMLElement).getByText("Wallet ID")).toBeTruthy();
     expect(
       screen.getByRole("link", { name: "Open Off ramp demo wallet" }).getAttribute("href")
-    ).toBe("/dashboard/prj_test_sandbox/wallets/wa-offramp");
+    ).toBe("/dashboard/prj_test_sandbox/wallets/row-2");
   });
 
   it("marks only a wallet whose signing is restricted", () => {
@@ -145,7 +168,7 @@ describe("wallet cards", () => {
     renderOverview();
     expect(document.querySelector("[data-wallets-refreshed-at]")).toBeNull();
     cleanup();
-    mocks.balances = { fb_wallet: [] };
+    mocks.balances = { row: [] };
     renderOverview();
     const time = document.querySelector("[data-wallets-refreshed-at]");
     expect(time?.getAttribute("dateTime")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -209,13 +232,30 @@ describe("empty and failed lists", () => {
 });
 
 describe("favorites", () => {
+  it("pins alias wallets independently and preserves each exact sidebar target", () => {
+    renderOverview({
+      wallets: [
+        makeWallet({ id: "cwlt_a", walletId: "provider_shared", label: "Wallet A" }),
+        makeWallet({ id: "cwlt_b", walletId: "provider_shared", label: "Wallet B" }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Wallet A to favorites" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Wallet B to favorites" }));
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual([
+      "cwlt_a",
+      "cwlt_b",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove Wallet A from favorites" }));
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["cwlt_b"]);
+  });
+
   it("pins a wallet to the sidebar and undoes it from the toast", () => {
     renderOverview();
     const star = screen.getByRole("button", { name: "Add Off ramp demo wallet to favorites" });
     fireEvent.click(star);
 
     expect(readWalletFavorites(KEY)).toEqual([
-      { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
+      { walletId: "row-2", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
     expect(
       screen
@@ -241,17 +281,14 @@ describe("favorites", () => {
       screen.getByRole("button", { name: "Remove Settlement Fireblocks from favorites" })
     );
 
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["wa-offramp"]);
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["row-2"]);
     const [title, options] = mocks.toast.mock.calls[2] as [
       string,
       { action: { onClick: () => void } },
     ];
     expect(title).toBe("Removed from favorites");
     options.action.onClick();
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual([
-      "fb_wallet",
-      "wa-offramp",
-    ]);
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["row", "row-2"]);
   });
 
   it("renames pins and drops wallets that are gone when the list loads", () => {
@@ -264,7 +301,7 @@ describe("favorites", () => {
     );
     renderOverview();
     expect(readWalletFavorites(KEY)).toEqual([
-      { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
+      { walletId: "row-2", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
   });
 

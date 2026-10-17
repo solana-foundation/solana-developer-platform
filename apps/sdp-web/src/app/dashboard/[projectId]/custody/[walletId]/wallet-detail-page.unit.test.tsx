@@ -79,7 +79,10 @@ import WalletDetailPage, {
 } from "./wallet-detail-page";
 
 function renderPage() {
-  return WalletDetailPage({ params: Promise.resolve({ walletId: "wallet%2Fone" }) });
+  return WalletDetailPage({
+    params: Promise.resolve({ walletId: "wallet_record" }),
+    searchParams: Promise.resolve({}),
+  });
 }
 
 let walletOverrides: Record<string, unknown> = {};
@@ -153,7 +156,7 @@ function renderWalletIdentity(page: ReactNode): string {
 
 beforeEach(() => {
   walletOverrides = {};
-  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
+  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record`);
   mockAuth.mockReset();
   mockFetchProjectProviderAvailability.mockReset();
   mockIssuanceFlag.mockReset();
@@ -176,12 +179,20 @@ beforeEach(() => {
 });
 
 async function defaultApiResponse(path: string): Promise<Response> {
-  if (path.startsWith("/v1/wallets/wallet%2Fone")) {
+  if (path.startsWith("/v1/wallets/wallet_record")) {
     return walletMetadataResponse();
   }
 
   if (path.includes("/balances")) {
-    return Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } });
+    return Response.json({
+      data: {
+        walletBalances: {
+          custodyWalletId: "wallet_record",
+          address: "11111111111111111111111111111111",
+          balances: [solBalance("0")],
+        },
+      },
+    });
   }
 
   if (path.includes("/policies")) {
@@ -213,6 +224,52 @@ async function defaultApiResponse(path: string): Promise<Response> {
 }
 
 describe("WalletDetailPage critical path", () => {
+  it("preserves the empty balance display for a missing tracked balance", async () => {
+    mockRequest.mockImplementation(async (path: string) =>
+      path.includes("/balances") ? new Response(null, { status: 404 }) : defaultApiResponse(path)
+    );
+
+    const summary = findElementProps(await renderPage(), WalletBalanceSummary);
+    if (!summary) throw new Error("Wallet balance summary is missing");
+
+    await expect(summary.balancesPromise).resolves.toMatchObject({ balances: [], error: null });
+    expect(mockRequest).toHaveBeenCalledWith("/v1/payments/wallets/wallet_record/balances");
+  });
+
+  it("preserves a bookmarked tab and repeated query values when canonicalizing", async () => {
+    mockRequest.mockImplementation(async () => walletMetadataResponse());
+    await expect(
+      WalletDetailPage({
+        params: Promise.resolve({ walletId: "wallet%2Fone" }),
+        searchParams: Promise.resolve({
+          tab: "settings",
+          filter: ["a", "b"],
+          label: "Wallet & Treasury",
+          empty: "",
+          absent: undefined,
+        }),
+      })
+    ).rejects.toThrow(
+      `/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record?tab=settings&filter=a&filter=b&label=Wallet+%26+Treasury&empty=`
+    );
+    expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/payments/"))).toBe(
+      false
+    );
+  });
+
+  it("redirects a legacy bookmark before requesting Payments balances", async () => {
+    mockRequest.mockImplementation(async () => walletMetadataResponse());
+    await expect(
+      WalletDetailPage({
+        params: Promise.resolve({ walletId: "wallet%2Fone" }),
+        searchParams: Promise.resolve({}),
+      })
+    ).rejects.toThrow(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record`);
+    expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/payments/"))).toBe(
+      false
+    );
+  });
+
   it("keeps a connection-owned wallet readable without connection requests or links for a member", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
     mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
@@ -347,7 +404,13 @@ describe("WalletDetailPage critical path", () => {
       }),
     ]);
     const markup = [summary, populatedBalances, emptyBalances]
-      .map((surface) => renderToStaticMarkup(surface))
+      .map((surface) =>
+        renderToStaticMarkup(
+          <I18nProvider locale="en" messages={getMessages("en")}>
+            {surface}
+          </I18nProvider>
+        )
+      )
       .join("\n");
 
     expect(markup.match(/bg-surface-raised/g)).toHaveLength(3);
@@ -387,7 +450,7 @@ describe("WalletDetailPage critical path", () => {
     await renderPage();
 
     expect(mockLoadWalletActivity).not.toHaveBeenCalled();
-    expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
+    expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet_record?includeBalance=false");
   });
 
   it("does not load or render policy controls when Policies is disabled", async () => {
@@ -404,7 +467,7 @@ describe("WalletDetailPage critical path", () => {
     const policy = deferred<Response>();
     const ownedTokens = deferred<Response>();
     mockRequest.mockImplementation((path: string) => {
-      if (path === "/v1/wallets/wallet%2Fone?includeBalance=false") {
+      if (path === "/v1/wallets/wallet_record?includeBalance=false") {
         return Promise.resolve(walletMetadataResponse());
       }
       if (path.includes("/balances")) return balances.promise;
@@ -424,7 +487,15 @@ describe("WalletDetailPage critical path", () => {
       expect(result).toBe("resolved");
     } finally {
       balances.resolve(
-        Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } })
+        Response.json({
+          data: {
+            walletBalances: {
+              custodyWalletId: "wallet_record",
+              address: "11111111111111111111111111111111",
+              balances: [solBalance("0")],
+            },
+          },
+        })
       );
       policy.resolve(new Response(null, { status: 404 }));
       ownedTokens.resolve(Response.json({ data: [] }));

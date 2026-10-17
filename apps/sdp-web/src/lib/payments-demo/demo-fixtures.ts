@@ -1316,7 +1316,12 @@ function walletBalancesBody(world: DemoWorld, walletId: string) {
   if (!wallet) return undefined;
   return {
     data: {
-      walletBalances: { walletId, address: wallet.publicKey, balances: wallet.balances },
+      walletBalances: {
+        custodyWalletId: wallet.id,
+        walletId: wallet.walletId,
+        address: wallet.publicKey,
+        balances: wallet.balances,
+      },
     },
   };
 }

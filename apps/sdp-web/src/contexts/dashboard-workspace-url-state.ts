@@ -1,3 +1,4 @@
+import { WALLET_TABS } from "@/app/dashboard/[projectId]/custody/[walletId]/wallet-detail.shared";
 import {
   DASHBOARD_INTEGRATIONS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
@@ -56,6 +57,11 @@ export function shouldClearDashboardTabAfterPathnameChange({
   const destination = normalizePathname(pathname);
   const ownsTab =
     ROUTE_TABS.get(destination)?.includes(tab) ||
-    (!newDesign && LEGACY_DESIGN_ROUTE_TABS.get(destination)?.includes(tab));
+    (!newDesign && LEGACY_DESIGN_ROUTE_TABS.get(destination)?.includes(tab)) ||
+    (newDesign &&
+      /^\/dashboard\/(?:wallets|custody)\/(?!setup$|connections$|switch$)[^/]+$/.test(
+        destination
+      ) &&
+      WALLET_TABS.some((walletTab) => walletTab === tab));
   return !ownsTab;
 }

@@ -1199,7 +1199,7 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
   });
 
-  it("authorizes exact rows by custody ID and legacy null rows by Provider ID", async () => {
+  it("authorizes exact transfers and legacy null-pin history before pagination", async () => {
     const repo = await seedTwoWallets();
 
     const authorized = await repo.listTransfers({
@@ -1214,16 +1214,24 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
       walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
     });
 
-    expect(authorized.rows).toHaveLength(2);
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({
-        custody_wallet_id: CUSTODY_WALLET_B,
-        wallet_id: WALLET_B,
-      })
-    );
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({ custody_wallet_id: null, wallet_id: WALLET_A })
-    );
+    expect(authorized.total).toBe(2);
+    expect(authorized.rows.map((row) => row.id).sort()).toEqual(["xfr_a-2", "xfr_b-1"]);
+    const nextPage = await repo.listTransfers({
+      ...listArgs,
+      walletAuthorization: {
+        custodyWalletIds: [CUSTODY_WALLET_B],
+        providerWalletIds: [WALLET_A],
+      },
+      limit: 1,
+      offset: 1,
+    });
+    expect(nextPage).toMatchObject({ rows: [{ id: "xfr_a-2" }], total: 2 });
+    const providerOnly = await repo.listTransfers({
+      ...listArgs,
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [WALLET_A] },
+    });
+    expect(providerOnly.total).toBe(1);
+    expect(providerOnly.rows.map((row) => row.id)).toEqual(["xfr_a-2"]);
     expect(authorized.rows).not.toContainEqual(
       expect.objectContaining({ custody_wallet_id: CUSTODY_WALLET_A })
     );

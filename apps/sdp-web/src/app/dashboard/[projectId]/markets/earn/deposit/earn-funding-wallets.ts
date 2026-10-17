@@ -4,6 +4,10 @@ import { useCallback, useRef } from "react";
 import useSWR from "swr";
 import { z } from "zod";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
+import {
+  walletBalanceResponseSchema,
+  walletTokenBalanceSchema,
+} from "@/lib/wallet-balance-response";
 import { earnQueryKeys } from "../earn-query-key";
 
 /**
@@ -17,16 +21,6 @@ import { earnQueryKeys } from "../earn-query-key";
  * deposit and holds the resulting shares. One live wallet inventory serves
  * both flows; their write contracts remain deliberately separate.
  */
-
-const walletTokenBalanceSchema = z.object({
-  token: z.string(),
-  mint: z.string(),
-  amount: z.string(),
-  uiAmount: z.string(),
-  decimals: z.number(),
-  usdPrice: z.number().optional(),
-  usdValue: z.number().optional(),
-});
 
 /**
  * The wallet fields this seam actually promises its callers, PARSED rather than
@@ -69,14 +63,11 @@ const fundingWalletsResponseSchema = z.object({
   }),
 });
 
-const fundingWalletBalanceResponseSchema = z.object({
-  data: z.object({
+const fundingWalletBalanceResponseSchema = walletBalanceResponseSchema.extend({
+  data: walletBalanceResponseSchema.shape.data.extend({
     balanceReadContext: z
       .object({ minimumSlot: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
       .optional(),
-    walletBalances: z.object({
-      balances: z.array(walletTokenBalanceSchema),
-    }),
   }),
 });
 
@@ -112,19 +103,19 @@ export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
  * on the pre-transaction balance.
  */
 export async function fetchLiveFundingWalletBalance(
-  walletId: string,
+  custodyWalletId: string,
   minimumSlot?: number
 ): Promise<NonNullable<EarnFundingWallet["balances"]>> {
   const query = minimumSlot === undefined ? "" : `?minimumSlot=${minimumSlot}`;
   const response = await dashboardRequest(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances${query}`,
+    `/api/dashboard/payments/wallets/${encodeURIComponent(custodyWalletId)}/balances${query}`,
     { cache: "no-store" }
   );
   if (!response.ok) {
     throw new Error(`Request failed (${response.status})`);
   }
   const parsed = fundingWalletBalanceResponseSchema.safeParse(await response.json());
-  if (!parsed.success) {
+  if (!parsed.success || parsed.data.data.walletBalances.custodyWalletId !== custodyWalletId) {
     throw new Error("Invalid custody wallet balance response");
   }
   if (
@@ -160,7 +151,7 @@ export async function refreshFundingWalletBalances(
     wallets.map(async (wallet) => {
       const slot =
         typeof minimumSlot === "number" ? minimumSlot : slotsByAddress.get(wallet.publicKey);
-      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, slot);
+      const balances = await fetchLiveFundingWalletBalance(wallet.id, slot);
       return { ...wallet, balances };
     })
   );

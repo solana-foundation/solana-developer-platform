@@ -83,6 +83,36 @@ describe("wallet favorites", () => {
     unsubscribe();
   });
 
+  it("moves a unique legacy pin to its exact wallet without changing its position", async () => {
+    const favorites = await import("./wallet-favorites");
+    const exact = { walletId: "cwlt_selected", name: "Treasury", provider: "dfns" };
+    favorites.addWalletFavorite(key, offRamp);
+    favorites.addWalletFavorite(key, kms);
+    favorites.syncWalletFavorites(key, [{ ...exact, providerWalletId: "wa-1" }, kms]);
+    expect(favorites.readWalletFavorites(key)).toEqual([exact, kms]);
+  });
+
+  it("keeps ambiguous legacy pins without assigning a sibling and preserves existing exact pins", async () => {
+    const favorites = await import("./wallet-favorites");
+    const exact = { walletId: "cwlt_a", name: "Exact A", provider: "dfns" };
+    favorites.addWalletFavorite(key, offRamp);
+    favorites.addWalletFavorite(key, exact);
+    favorites.syncWalletFavorites(key, [
+      { ...exact, providerWalletId: "wa-1" },
+      { walletId: "cwlt_b", name: "Exact B", provider: "dfns", providerWalletId: "wa-1" },
+    ]);
+    expect(favorites.readWalletFavorites(key)).toEqual([offRamp, exact]);
+  });
+
+  it("keeps an existing exact pin when its legacy copy is also present", async () => {
+    const favorites = await import("./wallet-favorites");
+    const exact = { walletId: "cwlt_selected", name: "Treasury", provider: "dfns" };
+    favorites.addWalletFavorite(key, offRamp);
+    favorites.addWalletFavorite(key, exact);
+    favorites.syncWalletFavorites(key, [{ ...exact, providerWalletId: "wa-1" }]);
+    expect(favorites.readWalletFavorites(key)).toEqual([exact]);
+  });
+
   it("ignores a corrupt or malformed stored value", async () => {
     window.localStorage.setItem(key, "{not json");
     const favorites = await import("./wallet-favorites");

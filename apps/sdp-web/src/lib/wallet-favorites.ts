@@ -122,19 +122,34 @@ export function reinsertWalletFavorite(key: string, favorite: WalletFavorite, in
  * name, and a wallet that no longer exists in the project drops out. Writes only on a change,
  * so calling it on every render of the list is cheap.
  */
-export function syncWalletFavorites(key: string, wallets: readonly WalletFavorite[]): void {
+export function syncWalletFavorites(
+  key: string,
+  wallets: readonly (WalletFavorite & { providerWalletId?: string })[]
+): void {
   const current = readWalletFavorites(key);
   if (current.length === 0) return;
   const byId = new Map(wallets.map((wallet) => [wallet.walletId, wallet]));
   const next = current.flatMap((entry) => {
-    const wallet = byId.get(entry.walletId);
-    return wallet ? [{ ...entry, name: wallet.name, provider: wallet.provider }] : [];
+    let wallet = byId.get(entry.walletId);
+    if (!wallet) {
+      const matches = wallets.filter((candidate) => candidate.providerWalletId === entry.walletId);
+      // An ambiguous legacy pin stays recoverable; it never selects a sibling automatically.
+      if (matches.length > 1) return [entry];
+      const legacy = matches[0];
+      if (legacy && current.some((favorite) => favorite.walletId === legacy.walletId)) return [];
+      wallet = legacy;
+    }
+    return wallet
+      ? [{ walletId: wallet.walletId, name: wallet.name, provider: wallet.provider }]
+      : [];
   });
   const changed =
     next.length !== current.length ||
     next.some(
       (entry, index) =>
-        entry.name !== current[index]?.name || entry.provider !== current[index]?.provider
+        entry.walletId !== current[index]?.walletId ||
+        entry.name !== current[index]?.name ||
+        entry.provider !== current[index]?.provider
     );
   if (changed) writeFavorites(key, next);
 }

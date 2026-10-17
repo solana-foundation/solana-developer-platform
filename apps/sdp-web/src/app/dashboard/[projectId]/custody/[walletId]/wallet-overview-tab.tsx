@@ -143,11 +143,11 @@ function BalanceBlock({
               label={t("DashboardCustody.walletId")}
               hint={t("DashboardCustody.walletIdInfo")}
             >
-              <span className="truncate tabular-nums" title={wallet.walletId}>
-                {truncateMiddle(wallet.walletId, 9, 6)}
+              <span className="truncate tabular-nums" title={wallet.custodyWalletId}>
+                {truncateMiddle(wallet.custodyWalletId, 9, 6)}
               </span>
               <WalletMetadataCopyButton
-                value={wallet.walletId}
+                value={wallet.custodyWalletId}
                 label={t("DashboardCustody.walletId")}
               />
             </RecordRow>
