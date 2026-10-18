@@ -46,7 +46,7 @@ import { earnRoutes as earn } from "@/routes/earn";
 import { health } from "@/routes/health";
 import { heliusRings } from "@/routes/helius-rings";
 import { internalCustody } from "@/routes/internal-custody";
-import { routes as internalHeliusRings } from "@/routes/internal-helius-rings";
+import { internalHeliusRings } from "@/routes/internal-helius-rings";
 import { internalNetwork } from "@/routes/internal-network";
 import { issuance } from "@/routes/issuance";
 import { llms } from "@/routes/llms";
