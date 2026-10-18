@@ -88,7 +88,7 @@ assertHastraNotPortfolioProvider(hastra);
  * supersets and leaves the rest alone. Routes must resolve through this registry
  * when they need provider capabilities.
  */
-export const EARN_PROVIDER_CLIENTS = {
+export const EARN_PROVIDER_CLIENTS: Record<EarnProviderId, EarnVaultProvider> = {
   ...CATALOGUE_PROVIDER_CLIENTS,
   kamino,
   jupiter_lend: jupiterLend,
@@ -96,7 +96,7 @@ export const EARN_PROVIDER_CLIENTS = {
   ondo,
   hastra,
   wisdomtree,
-} as const satisfies Record<EarnProviderId, EarnVaultProvider>;
+};
 
 export function resolveEarnProviderClient(provider: string): EarnVaultProvider {
   if (!isEarnProviderId(provider)) {
