@@ -37,7 +37,6 @@
   },
   "devDependencies": {
     "@types/node": "26.6.2",
-    "tsx": "4.23.15",
     "vitest": "4.1.11"
   },
   "dependencies": {
