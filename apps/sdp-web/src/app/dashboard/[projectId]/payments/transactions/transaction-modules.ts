@@ -1,5 +1,5 @@
-// biome-ignore lint/style/noRestrictedImports: this is the gated list; it filters the tuple by the channel-capped flags
 import {
+  // biome-ignore lint/style/noRestrictedImports: this is the gated list; it filters the tuple by the channel-capped flags
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
 } from "@sdp/types/unified-transactions";

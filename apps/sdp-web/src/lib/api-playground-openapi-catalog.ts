@@ -1,6 +1,5 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 // biome-ignore lint/style/noRestrictedImports: validates the generated catalog's provider names; visibility comes from isRampProviderInReleaseChannel
-// biome-ignore lint/style/noRestrictedImports: validates the generated catalog's provider names; visibility comes from isRampProviderInReleaseChannel
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
   isRampProviderInReleaseChannel,

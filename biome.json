@@ -187,13 +187,15 @@
               "level": "error",
               "options": {
                 "paths": {
-                  "@sdp/types": {
+                  "@sdp/types/unified-transactions": {
                     "importNames": [
                       "UNIFIED_TRANSACTION_MODULES",
-                      "UNIFIED_TRANSACTION_SDP_MODULES",
-                      "SDP_MODULES",
-                      "RAMP_PROVIDERS"
+                      "UNIFIED_TRANSACTION_SDP_MODULES"
                     ],
+                    "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
+                  },
+                  "@sdp/types/release-channels": {
+                    "importNames": ["SDP_MODULES"],
                     "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
                   },
                   "@sdp/types/provider-access": {
