@@ -15,11 +15,14 @@ vi.mock("@/db/repositories/earn-movements.repository", () => ({
   createPostgresEarnMovementsRepository: () => ({ getMovementById: mocks.movement }),
 }));
 vi.mock("@sdp/rpc/solana", () => ({ createRpc: vi.fn(), getSignatureStatuses: mocks.statuses }));
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+  resolveClusterRpcUrl: () => "https://rpc.invalid",
+}));
 vi.mock("./execution-registry", () => ({
   assertClusterEndpoint: mocks.prove,
   earnClusterFor: (environment: string) =>
     environment === "production" ? "mainnet-beta" : "devnet",
-  resolveClusterRpcUrl: () => "https://rpc.invalid",
 }));
 const input = {
   movementIds: ["one", "two", "three"],

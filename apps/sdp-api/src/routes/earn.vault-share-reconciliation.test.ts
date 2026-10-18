@@ -26,10 +26,13 @@ const { assertClusterEndpoint, resolveClusterRpcUrl } = vi.hoisted(() => ({
   assertClusterEndpoint: vi.fn(async () => {}),
   resolveClusterRpcUrl: vi.fn(() => "http://127.0.0.1:8899"),
 }));
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+  resolveClusterRpcUrl,
+}));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   assertClusterEndpoint,
-  resolveClusterRpcUrl,
 }));
 
 // Lets one test shrink the pass budget to prove the deadline posture; null

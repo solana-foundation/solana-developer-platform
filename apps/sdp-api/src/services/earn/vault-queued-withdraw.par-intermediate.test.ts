@@ -16,10 +16,13 @@ const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 const verifySignedExternalWalletTransaction = vi.hoisted(() => vi.fn());
 const readConfirmedBlockHeight = vi.hoisted(() => vi.fn());
 
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultParRedemptionClient: () => ({ quoteParRedemption, buildParRedemptionRequest }),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("./vault-execution.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./vault-execution.service")>()),

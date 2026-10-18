@@ -58,11 +58,14 @@ vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   fetchJupiterSwapLeg,
 }));
 
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 
 // `appendVaultRequestMemo` and `compileUnsignedVaultTransaction` stay REAL:

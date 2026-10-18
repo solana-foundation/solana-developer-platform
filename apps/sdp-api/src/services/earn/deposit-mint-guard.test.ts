@@ -21,8 +21,11 @@ vi.mock("@sdp/rpc/solana", () => ({
   })),
 }));
 
-vi.mock("@/services/earn/execution-registry", () => ({
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
   resolveClusterRpcUrl: mocks.resolveClusterRpcUrl,
+}));
+vi.mock("@/services/earn/execution-registry", () => ({
   assertClusterEndpoint: mocks.assertClusterEndpoint,
 }));
 

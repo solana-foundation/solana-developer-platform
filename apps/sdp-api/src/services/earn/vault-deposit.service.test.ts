@@ -37,10 +37,13 @@ vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   fetchJupiterSwapLeg,
 }));
 
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultDirectClient,
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 
 vi.mock("./vault-execution.service", async (importOriginal) => ({

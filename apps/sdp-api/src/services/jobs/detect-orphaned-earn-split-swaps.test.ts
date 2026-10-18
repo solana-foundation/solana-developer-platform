@@ -17,10 +17,13 @@ const logEvent = vi.hoisted(() => vi.fn());
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
 }));
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   assertClusterEndpoint: vi.fn(async () => {}),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("@/services/earn/owner-token-balance", () => ({ readOwnerMintBalance }));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({

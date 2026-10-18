@@ -15,10 +15,13 @@ const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
 const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 
+vi.mock("@sdp/rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultWithdrawClient,
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 
 vi.mock("./vault-execution.service", async (importOriginal) => ({
