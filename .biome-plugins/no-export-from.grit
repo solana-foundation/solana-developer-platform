@@ -6,9 +6,5 @@ or {
   `export * from $source`,
   `export * as $ns from $source`
 } where {
-  register_diagnostic(
-    span = $source,
-    message = "Re-exports are banned (ADR 0010). Import the symbol from the file that defines it; a package's public surface is its package.json exports map.",
-    severity = "error"
-  )
+  register_diagnostic(span=$source, message="Re-exports are banned (ADR 0010). Import the symbol from the file that defines it; a package's public surface is its package.json exports map.", severity="error")
 }
