@@ -40,7 +40,6 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
 }));
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mockFetchProjectProviderAvailability,
 }));
