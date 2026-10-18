@@ -237,7 +237,7 @@ jobs:
           changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
           printf '%s\n' "$changed"
           detect() {
-            if printf '%s\n' "$changed" | grep -qE "$2"; then
+            if printf '%s\n' "$changed" | grep -E "$2" >/dev/null; then
               echo "$1=true" >> "$GITHUB_OUTPUT"
             else
               echo "$1=false" >> "$GITHUB_OUTPUT"
