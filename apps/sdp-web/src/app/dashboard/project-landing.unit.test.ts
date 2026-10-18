@@ -13,6 +13,9 @@ import {
 
 const sdpApi = vi.hoisted(() => ({
   listSdpProjects: vi.fn<() => Promise<Project[]>>(),
+}));
+
+const sdpAuth = vi.hoisted(() => ({
   getSdpAuth: vi.fn(async () => ({ orgRole: "org:admin", orgId: "org_test", userId: "user_test" })),
 }));
 
@@ -44,6 +47,7 @@ const DASHBOARD_FLAGS = vi.hoisted(
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/sdp-api", () => sdpApi);
+vi.mock("@/lib/sdp-auth", () => sdpAuth);
 vi.mock("@/flags/dashboard", () => ({ getDashboardFlags: async () => DASHBOARD_FLAGS }));
 vi.mock("@/lib/quick-start-server", () => ({ loadQuickStartStep: async () => null }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({

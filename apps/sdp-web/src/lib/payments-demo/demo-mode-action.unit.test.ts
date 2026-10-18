@@ -24,7 +24,7 @@ vi.mock("next/headers", () => ({
     },
   }),
 }));
-vi.mock("../sdp-api", () => ({ getSdpAuth: async () => state.auth }));
+vi.mock("../sdp-auth", () => ({ getSdpAuth: async () => state.auth }));
 vi.mock("@/flags", () => ({ paymentsDemoMode: async () => state.demoFlag }));
 
 const { setPaymentsDemoAction } = await import("./demo-mode-action");

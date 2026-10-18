@@ -16,6 +16,7 @@ vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("../../payments/payments-page.data", () => ({ fetchPaymentsWallets: mocks.wallets }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
 vi.mock("@/flags", () => ({ assetProfiles: mocks.enabled }));
+vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 const input = {
   assetClass: "stablecoin",

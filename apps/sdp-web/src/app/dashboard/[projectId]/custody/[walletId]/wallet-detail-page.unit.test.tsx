@@ -56,6 +56,7 @@ vi.mock("@/flags", () => ({
   issuance: mockIssuanceFlag,
   policies: mockPoliciesFlag,
 }));
+vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-api")>()),

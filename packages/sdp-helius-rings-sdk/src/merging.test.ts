@@ -15,7 +15,7 @@ vi.mock("@heliuslabs/zolana/wallet", () => ({
 
 // Stubbed because the custody sign-and-broadcast round trip is covered where it
 // lives; here the question is only whether it is reached, and with what.
-vi.mock("./provision.js", () => ({ landTransaction }));
+vi.mock("./land-transaction.js", () => ({ landTransaction }));
 
 const OWNER = "5hQVjMN4AENMgCWQsNfzRhC1YrvmgnaFyKYefmY2oY7z";
 const TRANSACTION = { transaction: true };
