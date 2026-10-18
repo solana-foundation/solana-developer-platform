@@ -1,9 +1,10 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { Signature, SolanaRpc } from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import type { Signature } from "@solana/kit";
 import {
   FindReferenceError,
   findReference,

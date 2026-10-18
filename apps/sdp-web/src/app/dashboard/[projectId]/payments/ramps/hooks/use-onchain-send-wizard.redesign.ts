@@ -13,8 +13,9 @@ import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments
 import type { CreateTransferInput } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";

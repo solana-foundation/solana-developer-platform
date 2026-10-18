@@ -1,7 +1,8 @@
 import type { MoonpayRampSettlement, PaymentTransferSummary } from "@sdp/types/payments";
 import type { PersistedRampProviderId } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { explorerTxUrl } from "@/lib/explorer";
 import { formatDisplayAmount, shortenAddress } from "./payments-overview.utils";
 

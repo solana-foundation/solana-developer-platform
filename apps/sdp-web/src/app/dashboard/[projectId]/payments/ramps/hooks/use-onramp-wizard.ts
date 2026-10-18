@@ -12,8 +12,9 @@ import {
   simulateSandboxTransfer,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { onrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";

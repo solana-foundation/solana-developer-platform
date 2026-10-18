@@ -10,11 +10,7 @@ import type {
 } from "@sdp/types/advanced-settings";
 import type { AssetCategory } from "@sdp/types/asset-profiles";
 import { ASSET_TYPES } from "@sdp/types/asset-profiles";
-import {
-  normalizeTemplateId,
-  TEMPLATE_DEFINITIONS,
-  type TemplateOverrideError,
-} from "../templates/definitions";
+import { normalizeTemplateId, TEMPLATE_DEFINITIONS } from "../templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import {
   ADVANCED_SETTINGS,
@@ -22,9 +18,6 @@ import {
   SETTING_KEYS,
   type SettingKey,
 } from "./settings";
-
-export type { SettingKey, TemplateOverrideError };
-export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
 // Drop conflicting settings; sanitizes persisted selections.
 export function pruneIncompatibleSettings(settingKeys: readonly string[]): SettingKey[] {

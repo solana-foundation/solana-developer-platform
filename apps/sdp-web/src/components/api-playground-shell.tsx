@@ -20,8 +20,9 @@ import {
   PendingApiKeyContext,
 } from "@/components/playground-pending-api-key";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";

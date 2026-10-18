@@ -1,5 +1,6 @@
 import { isWellKnownTokenSymbol } from "@sdp/types/well-known-tokens";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 

@@ -18,7 +18,6 @@ import {
   getBootstrapApiBaseUrl,
   getPlaywrightCustodyProvider,
   type PlaywrightWalletFixture,
-  seedLocalClerkOrganizationMapping,
 } from "./local-dashboard-bootstrap";
 
 interface BootstrapOptions {
@@ -275,5 +274,3 @@ export async function bootstrapLocalPaymentFixtures({
     token: toFixtureToken(openToken),
   };
 }
-
-export { getBootstrapApiBaseUrl, seedLocalClerkOrganizationMapping };

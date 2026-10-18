@@ -5,7 +5,8 @@ import {
   resolveAggregateBalanceDisplayToken,
   resolveTotalBalance,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
 type IssuedTokenSymbolsByMint = Record<string, string>;

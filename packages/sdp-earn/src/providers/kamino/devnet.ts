@@ -1,3 +1,7 @@
+// The devnet kvault program, NOT mainnet's: Kamino deploys one per cluster, and mainnet's id also
+// exists on devnet with zero accounts under it, so the wrong one yields a confident empty shelf
+// rather than an error. It lives in @sdp/types because an @sdp/earn -> @sdp/kamino edge would be a
+// workspace cycle and would make the catalogue cron load a 13MB SDK it never calls.
 import { KAMINO_DEVNET_KVAULT_PROGRAM_ID } from "@sdp/types/kamino-programs";
 import { internalError } from "../../errors";
 import {
@@ -36,24 +40,6 @@ import {
  * It still goes through `providerFetchJson`, so timeouts and error taxonomy are
  * the package's, not bespoke.
  */
-
-/**
- * The devnet kvault program. NOT the mainnet id — Kamino deploys a separate
- * program per cluster, and mainnet's id also exists on devnet with ZERO
- * accounts under it, so pointing at the wrong one yields a confident empty
- * shelf rather than an error.
- *
- * Re-exported from `@sdp/types/kamino-programs`, which is the single home for
- * every Kamino program address. It cannot live in `@sdp/kamino` (the package
- * that builds deposit/withdraw instructions against the same program) because
- * this module would then have to import it, and a `@sdp/earn → @sdp/kamino`
- * edge is both a workspace cycle and a reason for the catalogue cron to load a
- * 13MB SDK it never calls.
- *
- * Imported AND re-exported: `listKaminoDevnetVaults` below uses it as a value,
- * which a bare `export … from` would not bind locally.
- */
-export { KAMINO_DEVNET_KVAULT_PROGRAM_ID };
 
 /**
  * `VaultState` account size, and the byte offsets of the fields SDP reads.

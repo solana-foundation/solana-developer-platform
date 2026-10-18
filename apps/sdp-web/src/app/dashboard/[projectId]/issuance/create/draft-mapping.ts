@@ -11,7 +11,8 @@ import {
   getAssetTypeRegistryEntry,
   type IssuanceMetadata,
 } from "@sdp/types/asset-profiles";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import {
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,

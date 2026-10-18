@@ -27,8 +27,9 @@ import {
   canonicalTransferBatchRequest,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { BulkImportRow } from "../bulk-import";

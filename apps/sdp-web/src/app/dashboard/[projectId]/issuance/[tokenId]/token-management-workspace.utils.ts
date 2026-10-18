@@ -2,7 +2,8 @@ import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token, TokenAllowlistEntry } from "@sdp/types/tokens";
 import { isAddress } from "@solana/kit";
 import type { AppLocale } from "@/i18n/config";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { type AccessControlMode, getTokenAccessControlMode } from "../access-control.utils";
 import type {

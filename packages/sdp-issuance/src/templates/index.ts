@@ -5,7 +5,7 @@
  */
 
 import type { TokenTemplateInfo } from "@sdp/types/tokens";
-import { normalizeTemplateId, resolveTemplateConfig, TEMPLATE_DEFINITIONS } from "./definitions";
+import { normalizeTemplateId, TEMPLATE_DEFINITIONS } from "./definitions";
 
 const TEMPLATE_IDS = Object.keys(TEMPLATE_DEFINITIONS) as Array<keyof typeof TEMPLATE_DEFINITIONS>;
 const PUBLIC_TEMPLATE_IDS = TEMPLATE_IDS.filter((id) => id !== "arcade");
@@ -47,5 +47,3 @@ export function getPublicTemplateInfo(id: string): TokenTemplateInfo | undefined
   }
   return buildTemplateInfo(normalized);
 }
-
-export { normalizeTemplateId, resolveTemplateConfig };

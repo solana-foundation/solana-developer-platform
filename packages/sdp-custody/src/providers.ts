@@ -3,8 +3,6 @@ import {
   type CustodyProvider as SharedCustodyProvider,
 } from "@sdp/types/custody";
 
-export { CUSTODY_PROVIDER_CAPABILITIES };
-
 export function canProviderSign(provider: SharedCustodyProvider): boolean {
   return CUSTODY_PROVIDER_CAPABILITIES[provider].supportsSigning;
 }

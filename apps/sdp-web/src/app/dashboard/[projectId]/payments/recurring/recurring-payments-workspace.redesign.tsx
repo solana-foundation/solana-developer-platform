@@ -32,7 +32,6 @@ import { formatDate } from "../payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
-  RECURRING_PAYMENT_STATUSES,
   type RecurringPaymentsListState,
 } from "./recurring-payments.data.redesign";
 import {
@@ -284,7 +283,7 @@ function RecurringPaymentsToolbar({
                 <FilterMenuOptions
                   value={status ?? undefined}
                   anyLabel={t("DashboardPayments.recurring.allStatuses")}
-                  options={RECURRING_PAYMENT_STATUSES.map((option) => ({
+                  options={PAYMENT_RECURRING_PAYMENT_STATUSES.map((option) => ({
                     value: option,
                     label: statusLabel(option),
                   }))}

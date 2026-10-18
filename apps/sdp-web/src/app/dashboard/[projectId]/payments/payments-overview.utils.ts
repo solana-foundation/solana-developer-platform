@@ -8,7 +8,8 @@ import {
 } from "@sdp/types/payments";
 import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { toTitleCase } from "../activity-format-utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
 

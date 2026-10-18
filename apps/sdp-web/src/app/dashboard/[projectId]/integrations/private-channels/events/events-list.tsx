@@ -17,8 +17,9 @@ import {
   formatTokenAmount,
   resolveTransferTokenLabel,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { type LoadEventsResult, loadProjectEventsAction } from "./actions";
 import { EventDetail } from "./event-detail";
 import {

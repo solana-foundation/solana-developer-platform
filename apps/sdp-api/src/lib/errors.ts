@@ -5,8 +5,9 @@
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import type { CountryCode } from "@sdp/types/countries";
 import type { IdempotencyErrorCode } from "@sdp/types/idempotency";
+import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 
 export type ErrorCode =
   | "BAD_REQUEST"

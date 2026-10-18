@@ -1,6 +1,6 @@
 "use client";
 
-import type { DvpLegOutcome, DvpTradeSide } from "@sdp/types/dvp";
+import type { DvpLegOutcome, DvpLegTransferKind, DvpTradeSide } from "@sdp/types/dvp";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
@@ -41,7 +41,6 @@ import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpLegTransfer,
-  type DvpLegTransferKind,
   type DvpPartyRef,
   type DvpTrade,
   type DvpTradeKind,

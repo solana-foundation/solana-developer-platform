@@ -34,7 +34,6 @@ import {
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
-  RECURRING_PAYMENT_STATUSES,
   type RecurringPaymentsListState,
 } from "./recurring-payments.data";
 import {
@@ -207,7 +206,7 @@ export function RecurringPaymentsWorkspace({
               }}
             >
               <SelectItem value="all">{t("DashboardPayments.recurring.allStatuses")}</SelectItem>
-              {RECURRING_PAYMENT_STATUSES.map((status) => (
+              {PAYMENT_RECURRING_PAYMENT_STATUSES.map((status) => (
                 <SelectItem key={status} value={status}>
                   {t(STATUS_TRANSLATION_KEYS[status])}
                 </SelectItem>

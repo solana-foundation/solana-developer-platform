@@ -1,7 +1,6 @@
 "use client";
 
-import type { PaymentRampQuote, PaymentTransferSummary } from "@sdp/types/payments";
-import type { RampDirection } from "@sdp/types/ramp-requirements";
+import type { PaymentRampQuote, PaymentTransferSummary, RampDirection } from "@sdp/types/payments";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
@@ -14,8 +13,9 @@ import {
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
 import { EntityLink } from "@/components/entity-link";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";

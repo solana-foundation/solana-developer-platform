@@ -2,9 +2,9 @@
 
 import type { Counterparty } from "@sdp/types/counterparties";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
-import type { PaymentRampQuote, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { PaymentRampQuote, PaymentsDashboardWallet, RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { isCollectStageStatus } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";

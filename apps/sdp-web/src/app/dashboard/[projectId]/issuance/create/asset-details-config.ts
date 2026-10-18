@@ -1,6 +1,7 @@
 import type { AssetCategory } from "@sdp/types/asset-profiles";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import {
   type AccessControlMode,
   type CapacityConfig,

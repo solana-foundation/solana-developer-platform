@@ -19,7 +19,8 @@ import {
   Vault,
 } from "lucide-react";
 import type { AppLocale } from "@/i18n/config";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { profileToDraftState } from "./[tokenId]/asset-profile/asset-profile-mapping";
 import {
   classifyAuthorityControl,

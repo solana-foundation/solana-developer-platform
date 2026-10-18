@@ -13,7 +13,8 @@ import {
   type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types/payments";
 import { z } from "zod";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IdempotencyOutcomeUnknownError, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
@@ -25,7 +26,6 @@ export const RECURRING_PAYMENTS_PAGE_SIZE = 100;
 
 export const RECURRING_LIST_DEFAULT_PAGE_SIZE = 25;
 
-export { PAYMENT_RECURRING_PAYMENT_STATUSES as RECURRING_PAYMENT_STATUSES };
 export type RecurringPaymentAction = PaymentRecurringPaymentAction;
 
 export interface RecurringPaymentsListOptions {

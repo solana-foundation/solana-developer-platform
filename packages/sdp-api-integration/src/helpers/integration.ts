@@ -746,7 +746,6 @@ async function createFundedLocalWallet(input: {
 export {
   app,
   createMosaicService,
-  env,
   INTEGRATION_CUSTODY_PROVIDER,
   KORA_CONFIGURED,
   PRIVY_CONFIGURED,

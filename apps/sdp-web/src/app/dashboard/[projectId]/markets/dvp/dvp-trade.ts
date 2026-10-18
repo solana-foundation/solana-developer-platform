@@ -10,14 +10,11 @@ import {
   DVP_LEG_TRANSFER_KINDS,
   DVP_TRADE_SIDES,
   type DvpLegOutcome,
-  type DvpLegTransferKind,
   type DvpSettlementAvailability,
   type DvpTradeSide,
   type DvpTradeStatus,
 } from "@sdp/types/dvp";
 import { z } from "zod";
-
-export type { DvpLegTransferKind, DvpSettlementAvailability, DvpTradeStatus };
 
 /**
  * The caller's standing on a trade, derived per caller by the API.

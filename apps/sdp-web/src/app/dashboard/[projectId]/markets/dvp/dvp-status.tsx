@@ -1,8 +1,8 @@
 "use client";
 
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import { Badge } from "@sdp/ui/badge";
 import { useTranslations } from "@/i18n/provider";
-import type { DvpSettlementAvailability, DvpTradeStatus } from "./dvp-trade";
 
 /**
  * Status tone.

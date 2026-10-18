@@ -1,6 +1,7 @@
 import type { PaymentTransferSummary } from "@sdp/types/payments";
 import type { PublicTokenTransaction, TokenTransactionListItem } from "@sdp/types/tokens";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import type { SdpApiClient } from "@/lib/sdp-api";

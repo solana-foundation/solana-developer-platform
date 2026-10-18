@@ -4,7 +4,8 @@ import type {
   TokenTransactionListItem,
   TokenTransactionStatus,
 } from "@sdp/types/tokens";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { readTransactionParam, toTitleCase } from "./activity-format-utils";

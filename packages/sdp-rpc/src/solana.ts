@@ -34,8 +34,6 @@ import { withReadSocketRetry } from "./socket-retry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
 
-export { withReadSocketRetry };
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
@@ -831,6 +829,3 @@ export async function getTransaction(
     instructions: [...topLevel, ...inner].map(toParsedInstruction),
   };
 }
-
-// Re-export types
-export type { Blockhash, Commitment, Signature };

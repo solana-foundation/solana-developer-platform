@@ -1,4 +1,4 @@
-import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
+import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates/definitions";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Token } from "@sdp/types/tokens";
 import type { Context } from "hono";

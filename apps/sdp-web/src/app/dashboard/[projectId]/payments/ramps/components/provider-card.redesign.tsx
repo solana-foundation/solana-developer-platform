@@ -6,8 +6,9 @@ import { cn } from "@sdp/ui/cn";
 import { Loader2Icon } from "lucide-react";
 import { domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { RAMP_PROVIDER_LOGOS, type RampProviderOption } from "@/lib/ramps";
 
 interface ProviderCardProps {

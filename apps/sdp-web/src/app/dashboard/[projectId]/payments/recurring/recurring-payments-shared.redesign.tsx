@@ -9,7 +9,8 @@ import {
 } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { shortenAddress } from "../payments-overview.utils";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 

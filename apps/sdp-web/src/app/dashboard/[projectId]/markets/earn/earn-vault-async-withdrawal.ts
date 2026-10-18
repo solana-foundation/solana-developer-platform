@@ -4,7 +4,8 @@ import type {
   EarnVaultWithdrawalOptions,
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types/earn";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 /**
  * Product-level asynchronous exit routes.

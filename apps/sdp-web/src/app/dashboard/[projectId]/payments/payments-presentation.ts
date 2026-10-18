@@ -5,7 +5,8 @@ import type {
   PaymentTransferSummary,
 } from "@sdp/types/payments";
 import type { StatusTone } from "@sdp/ui/status-text";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 /**
  * How each transfer status reads in a refresh list. Finer than the shared success / pending /

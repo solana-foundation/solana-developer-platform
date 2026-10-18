@@ -18,8 +18,9 @@ import {
   fetchTransferById,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { offrampPairs } from "@/lib/ramps";

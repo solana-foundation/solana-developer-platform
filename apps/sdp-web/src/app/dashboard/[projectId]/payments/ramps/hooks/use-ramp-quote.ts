@@ -3,8 +3,9 @@
 import type { PaymentRampQuote } from "@sdp/types/payments";
 import { useEffect, useRef, useState } from "react";
 import { getPaymentApiError as getApiError } from "@/app/dashboard/[projectId]/payments/payment-api-errors";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
