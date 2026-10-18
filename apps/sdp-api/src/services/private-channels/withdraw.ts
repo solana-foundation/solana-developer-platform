@@ -46,11 +46,11 @@ import {
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
-  createPrivateChannelWithdrawalRepository,
   mapPrivateChannelWithdrawalRow,
   type PrivateChannelWithdrawalRepository,
   type PrivateChannelWithdrawalRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-withdrawal.repository";
+import { createPrivateChannelWithdrawalRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest } from "@/lib/errors";
 import { buildPrivateChannelWithdrawalFingerprint } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";

@@ -37,23 +37,3 @@ export function assertLocalSigningAllowed(env: Pick<Env, "SDP_DEPLOYMENT_MODE">)
     );
   }
 }
-
-export {
-  BaseKeychainAdapter,
-  KeychainCoinbaseAdapter,
-  type KeychainCoinbaseConfig,
-  KeychainDfnsAdapter,
-  type KeychainDfnsConfig,
-  KeychainFireblocksAdapter,
-  type KeychainFireblocksConfig,
-  KeychainIbmHavenAdapter,
-  KeychainMemoryAdapter,
-  KeychainParaAdapter,
-  type KeychainParaConfig,
-  KeychainPrivyAdapter,
-  type KeychainPrivyConfig,
-  KeychainTurnkeyAdapter,
-  type KeychainTurnkeyConfig,
-  KeychainUtilaAdapter,
-  type KeychainUtilaConfig,
-} from "@sdp/custody/keychain";

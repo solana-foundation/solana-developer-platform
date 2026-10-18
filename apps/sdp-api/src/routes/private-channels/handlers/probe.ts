@@ -1,6 +1,6 @@
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { toProbeResultDto, verifyInstanceConnection } from "@/services/private-channels";
+import { toProbeResultDto, verifyInstanceConnection } from "@/services/private-channels/service";
 import { loadPrivateChannelProjectRpcClient } from "../context";
 import type { probeConnectionSchema } from "../schemas";
 

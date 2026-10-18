@@ -1,5 +1,5 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
-import type { AppDb } from "@/db";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {

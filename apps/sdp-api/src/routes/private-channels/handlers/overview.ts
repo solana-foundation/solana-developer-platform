@@ -1,9 +1,9 @@
 import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types";
-import { mapPrivateChannelInstanceRow } from "@/db/repositories";
+import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getInstanceOverview } from "@/services/private-channels";
+import { getInstanceOverview } from "@/services/private-channels/service";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelInstanceRepository,

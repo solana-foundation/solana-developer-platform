@@ -4,28 +4,25 @@ import {
   type PrivateChannelInstanceEnvelope,
   type PrivateChannelInstanceResponse,
 } from "@sdp/types";
-import { asTransactionalClient, getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db/client";
+import { createPostgresPrivateChannelDepositRepository } from "@/db/repositories/private-channel-deposit.repository.postgres";
 import {
-  createPostgresPrivateChannelDepositRepository,
-  createPostgresPrivateChannelInstanceRepository,
-  createPostgresPrivateChannelTransferRepository,
-  createPostgresPrivateChannelWithdrawalRepository,
   mapPrivateChannelInstanceRow,
   type PrivateChannelInstanceRow,
-  type PrivateChannelUserRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-instance.repository";
+import { createPostgresPrivateChannelInstanceRepository } from "@/db/repositories/private-channel-instance.repository.postgres";
+import { createPostgresPrivateChannelTransferRepository } from "@/db/repositories/private-channel-transfer.repository.postgres";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
+import { createPostgresPrivateChannelWithdrawalRepository } from "@/db/repositories/private-channel-withdrawal.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import {
-  assertApprovedPrivateChannelDestinations,
-  mapPrivateChannelError,
-  provisionPrincipal,
-  toProbeResultDto,
-  verifyInstanceConnection,
-} from "@/services/private-channels";
+import { assertApprovedPrivateChannelDestinations } from "@/services/private-channels/egress";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
+import { provisionPrincipal } from "@/services/private-channels/members";
+import { toProbeResultDto, verifyInstanceConnection } from "@/services/private-channels/service";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelInstanceRepository,

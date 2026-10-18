@@ -15,7 +15,7 @@
 
 import { PrivateChannelError } from "@sdp/private-channels";
 import type { SpcAuthClient } from "@sdp/private-channels/auth";
-import type { PrivateChannelUserRow } from "@/db/repositories";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import { createSpcCredentialCipher } from "@/lib/spc-credential-crypto";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";

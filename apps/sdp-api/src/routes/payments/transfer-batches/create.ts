@@ -1,5 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentTransferBatchRow,
@@ -18,7 +18,7 @@ import {
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
@@ -152,7 +152,7 @@ export async function createTransferBatch(
     "payments.transfer_batch"
   );
   const [signer, feePayer, lifetime] = await Promise.all([
-    solanaServices.createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet(
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,

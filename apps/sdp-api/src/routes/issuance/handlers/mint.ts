@@ -4,7 +4,7 @@ import type { TokenTransaction } from "@sdp/types";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";

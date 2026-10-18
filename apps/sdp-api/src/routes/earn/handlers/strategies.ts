@@ -11,7 +11,7 @@ import {
   type SdpEnvironment,
   SURFACED_EARN_PROVIDERS,
 } from "@sdp/types";
-import type { EarnStrategyRow } from "@/db/repositories";
+import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";

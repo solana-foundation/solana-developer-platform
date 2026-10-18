@@ -1,3 +1,4 @@
+import type { CounterpartyRow } from "@sdp/payments";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
@@ -22,7 +23,6 @@ import {
   getTransferSubscriptionOverlayInstructionAsync,
 } from "@solana/subscriptions";
 import { z } from "zod";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,

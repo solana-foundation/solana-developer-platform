@@ -1,5 +1,9 @@
 import type { SdpEnvironment } from "@sdp/types";
-import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
+import {
+  type DatabaseClient as AppDb,
+  asTransactionalClient,
+  type DatabaseExecutor,
+} from "@/db/client";
 import {
   fulfilledQueueQuantity,
   queuedFulfillmentMovementId,

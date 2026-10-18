@@ -32,18 +32,18 @@ import {
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
+import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
+import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
 import {
-  activateRecurringPayment as activateRecurringPaymentRecord,
-  cancelRecurringPayment as cancelRecurringPaymentRecord,
-  collectRecurringPayment as collectRecurringPaymentRecord,
   createRecurringPayment as createRecurringPaymentRecord,
-  resumeRecurringPayment as resumeRecurringPaymentRecord,
-  updateRecurringPayment as updateRecurringPaymentRecord,
-} from "@/services/payments/recurring-payments";
-import {
   findKeyedRecurringPayment,
   type RecurringPaymentIdempotency,
 } from "@/services/payments/recurring-payments/create";
+import {
+  cancelRecurringPayment as cancelRecurringPaymentRecord,
+  resumeRecurringPayment as resumeRecurringPaymentRecord,
+} from "@/services/payments/recurring-payments/lifecycle";
+import { updateRecurringPayment as updateRecurringPaymentRecord } from "@/services/payments/recurring-payments/update";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {
   type AppContext,

@@ -7,8 +7,6 @@ import { privateChannelsUnifiedTransactionSource } from "./private-channels";
 import { ringsUnifiedTransactionSource } from "./rings";
 import type { UnifiedTransactionSource } from "./types";
 
-export type { UnifiedTransactionSource } from "./types";
-
 export const UNIFIED_TRANSACTION_SOURCES = {
   payments: paymentsUnifiedTransactionSource,
   earn: earnUnifiedTransactionSource,

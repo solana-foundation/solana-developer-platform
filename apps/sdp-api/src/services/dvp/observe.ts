@@ -10,8 +10,8 @@
  * inferred from account state, and is only ever a description of one moment.
  */
 
-import type { DvpSettlementAvailability } from "@sdp/types";
-import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import type { DvpCloseResolution } from "./closing-transaction";
 
 /** One escrow, as read. `exists: false` means the account is not on chain. */

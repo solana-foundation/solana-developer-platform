@@ -7,7 +7,7 @@ import type {
 } from "@sdp/earn/types";
 import type { SdpEnvironment } from "@sdp/types";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {
@@ -23,6 +23,7 @@ import {
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -54,7 +55,6 @@ import {
 } from "@/services/earn/vault-queued-withdraw.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import type { AppContext } from "../context";
-import { resolveSdpEnvironment } from "../context";
 import {
   type earnExternalWalletQueuedWithdrawalPreviewSchema,
   type earnExternalWalletSubmitSchema,

@@ -23,11 +23,9 @@
 import { isAddress } from "@sdp/solana/address";
 import { MEMO_PROGRAM_ADDRESS, type PrivateChannelInstance } from "@sdp/types";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import {
-  mapPrivateChannelInstanceRow,
-  type PrivateChannelUserRow,
-  type PrivateChannelVerifiedWalletRow,
-} from "@/db/repositories";
+import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
+import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories/private-channel-verified-wallet.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden } from "@/lib/errors";
 import {

@@ -44,11 +44,11 @@ import {
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
-  createPrivateChannelDepositRepository,
   mapPrivateChannelDepositRow,
   type PrivateChannelDepositRepository,
   type PrivateChannelDepositRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-deposit.repository";
+import { createPrivateChannelDepositRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest } from "@/lib/errors";
 import { buildPrivateChannelDepositFingerprint } from "@/lib/idempotency";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";

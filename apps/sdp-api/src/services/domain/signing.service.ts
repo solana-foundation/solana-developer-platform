@@ -22,18 +22,19 @@ import {
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
 } from "@sdp/custody/dfns";
+import { KeychainFireblocksAdapter } from "@sdp/custody/keychain";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import type { MovementId } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
-import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
+import type { SigningConfigRecord } from "@/services/adapters/signing/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {

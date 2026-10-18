@@ -1,4 +1,4 @@
-import { mapPrivateChannelInstanceRow } from "@/db/repositories";
+import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";

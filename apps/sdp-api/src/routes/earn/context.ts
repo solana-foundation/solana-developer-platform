@@ -1,16 +1,14 @@
 import type { EarnRuntimeContext } from "@sdp/earn/types";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Context } from "hono";
-import { createEarnRepository } from "@/db/repositories";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
+import { createEarnRepository } from "@/db/repositories/repository-factory";
 import { getOptionalAuth } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
-
-export { resolveSdpEnvironment } from "@/lib/sdp-environment";
 
 /**
  * The shelf an optional-auth catalogue read answers (PRO-1998).

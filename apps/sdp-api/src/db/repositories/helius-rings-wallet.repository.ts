@@ -1,5 +1,5 @@
 import type { MaterialTag, PrivateWallet, WalletStatus } from "@sdp/helius-rings";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateHeliusRingsWalletId(): string {
   return `hrw_${crypto.randomUUID()}`;

@@ -1,3 +1,4 @@
+import type { CounterpartyRow } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   COUNTERPARTY_ENTITY_TYPES,
@@ -10,9 +11,8 @@ import {
   type ListProjectCounterpartyAccountsResponse,
 } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {

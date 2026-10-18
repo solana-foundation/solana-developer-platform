@@ -1,5 +1,5 @@
 import type { KycProvider, KycStatus } from "@sdp/types";
-import type { AppDb } from "@/db";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   generateKycWalletId,
   type KycWalletRow,

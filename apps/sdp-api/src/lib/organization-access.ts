@@ -1,7 +1,7 @@
 import { organizationStatusMayAuthenticate } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";

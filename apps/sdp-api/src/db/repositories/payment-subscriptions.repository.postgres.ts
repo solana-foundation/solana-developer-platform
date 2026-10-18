@@ -6,7 +6,7 @@ import {
   paymentSubscriptionCollectionAttemptMetadataSchema,
 } from "@sdp/types";
 import { z } from "zod";
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,

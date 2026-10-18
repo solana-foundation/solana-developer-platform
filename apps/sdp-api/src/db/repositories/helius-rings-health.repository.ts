@@ -1,6 +1,6 @@
 import type { RuntimeHealth, RuntimeHealthComponent, RuntimeHealthStatus } from "@sdp/helius-rings";
 import { RUNTIME_HEALTH_COMPONENTS } from "@sdp/helius-rings";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /**
  * One row per (project, component). Overwritten in place rather than appended:

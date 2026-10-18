@@ -1,11 +1,11 @@
+import type { CounterpartyRow } from "@sdp/payments";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Address } from "@solana/kit";
+import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
-} from "@/db/repositories";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
+} from "@/db/repositories/repository-factory";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";

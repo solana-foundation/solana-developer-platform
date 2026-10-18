@@ -43,12 +43,12 @@ import {
 } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import {
   createCounterpartyAccountsRepository,
   createDvpTradeRepository,
-  type DvpTradeRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";

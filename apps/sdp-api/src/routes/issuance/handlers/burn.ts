@@ -1,7 +1,7 @@
 import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";

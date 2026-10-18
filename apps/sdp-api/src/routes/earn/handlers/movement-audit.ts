@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";

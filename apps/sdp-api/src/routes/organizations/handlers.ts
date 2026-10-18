@@ -7,7 +7,7 @@ import {
   type OrganizationTier,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { getAuth } from "@/lib/auth";

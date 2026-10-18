@@ -11,7 +11,8 @@
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
-import { createDvpTradeRepository, type DvpCloseClaim } from "@/db/repositories";
+import type { DvpCloseClaim } from "@/db/repositories/dvp-trade.repository";
+import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { conflict, notFound } from "@/lib/errors";
 import type { Env } from "@/types/env";
 

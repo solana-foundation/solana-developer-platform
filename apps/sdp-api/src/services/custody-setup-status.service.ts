@@ -7,7 +7,7 @@ import {
   type CustodyProviderSetupStatus,
   type CustodySetupStatusResponse,
 } from "@sdp/types";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 
 interface ProviderCountRow {
   provider: string;

@@ -5,7 +5,7 @@ import {
   type RampCryptoDeposit,
   type RampTransferSettlement,
 } from "@sdp/types";
-import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories";
+import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import {
   isRampTransferType,
   type PaymentTransferRow as TransferRow,

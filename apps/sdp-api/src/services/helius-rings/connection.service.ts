@@ -1,7 +1,7 @@
 import { createRingsGateway, probeRingRpcHealth } from "@sdp/helius-rings-sdk";
 import { assertReachableTenantEndpoint } from "@sdp/rpc/blocked-address";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { canManageOrganizationCredentials, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, notFound } from "@/lib/errors";

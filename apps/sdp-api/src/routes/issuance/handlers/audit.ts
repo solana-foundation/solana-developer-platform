@@ -6,7 +6,7 @@ import {
   isAssetAuditStatus,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { badRequest, notFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
 import { type AuditAction, AuditService, isAuditAction } from "@/services/audit.service";

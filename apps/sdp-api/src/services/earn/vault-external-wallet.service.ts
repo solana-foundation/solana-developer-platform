@@ -11,7 +11,7 @@ import {
   type SignatureBytes,
   verifySignature,
 } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnExternalWalletTransactionsRepository,
   type EarnExternalWalletTransactionRow,

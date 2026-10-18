@@ -7,11 +7,11 @@ import {
   type PrivateChannelEventType,
 } from "@sdp/types";
 import {
-  createPrivateChannelEventRepository,
   generatePrivateChannelEventId,
   type PrivateChannelEventRepository,
   type PrivateChannelEventWriteInput,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-event.repository";
+import { createPrivateChannelEventRepository } from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { createDbEventSink } from "./sinks/db-sink";

@@ -9,18 +9,15 @@ import {
   type SdpEnvironment,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { asTransactionalClient, getDb } from "@/db";
-import type {
-  PaymentsRepository,
-  PaymentTransferRow,
-  PaymentTransferStatus,
-} from "@/db/repositories";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
+import { isRampTransferType } from "@sdp/types/payments";
+import { asTransactionalClient, getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import {
-  createPostgresCounterpartyProviderAccountsRepository,
   createSystemPaymentsRepository,
   createSystemTransactionalPaymentsRepository,
-  isRampTransferType,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 

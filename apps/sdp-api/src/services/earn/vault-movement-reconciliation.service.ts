@@ -19,7 +19,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import type { Signature } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,

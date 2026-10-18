@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getClerkAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import { success } from "@/lib/response";

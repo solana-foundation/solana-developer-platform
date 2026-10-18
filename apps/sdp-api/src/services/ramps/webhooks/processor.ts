@@ -8,8 +8,6 @@ export type AppContext = Context<{ Bindings: Env }>;
 
 export class TerminalRampWebhookError extends Error {}
 
-export type { RampWebhookProcessResult } from "@sdp/types";
-
 export interface WebhookProcessor<Event = unknown> extends RampProviderWebhook<Event> {
   readonly provider: RampProviderId;
   verify(context: RampWebhookValidationContext): Promise<string>;

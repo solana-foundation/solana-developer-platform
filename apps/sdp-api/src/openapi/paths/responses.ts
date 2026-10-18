@@ -1,27 +1,49 @@
 import { z } from "zod";
-
+import { allowlistEntriesResponseSchema, allowlistEntrySchema } from "@/openapi/schemas/admin";
 import {
-  actionSuccessSchema,
-  addressScreeningResponseSchema,
-  allowlistEntriesResponseSchema,
-  allowlistEntrySchema,
   apiKeyDetailSchema,
   apiKeyResponseSchema,
+  listApiKeysResponseSchema,
+  revokeApiKeyResponseSchema,
+  rotateApiKeyResponseSchema,
+} from "@/openapi/schemas/api-keys";
+import {
   assetProfileFieldOptionsResponseSchema,
   assetProfileResponseSchema,
+  listAssetProfilesResponseSchema,
+} from "@/openapi/schemas/asset-profiles";
+import {
+  actionSuccessSchema,
+  paginatedResponseSchema,
+  successResponseSchema,
+} from "@/openapi/schemas/base";
+import { addressScreeningResponseSchema } from "@/openapi/schemas/compliance";
+import {
   counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
   counterpartyResponseSchema,
+  listCounterpartiesResponseSchema,
+  listCounterpartyAccountsResponseSchema,
+  listCounterpartyProviderAccountsResponseSchema,
+} from "@/openapi/schemas/counterparties";
+import {
   custodyConfigsResponseSchema,
   custodyWalletAggregateResponseSchema,
   custodyWalletByIdResponseSchema,
   custodyWalletResponseSchema,
   custodyWalletsResponseSchema,
   deleteWalletResponseSchema,
+  signerCheckResponseSchema,
+} from "@/openapi/schemas/custody";
+import {
   dvpCloseResponseSchema,
   dvpLegActionResponseSchema,
   dvpTradeResponseSchema,
+  listDvpInboundTradesResponseSchema,
+  listDvpTradesResponseSchema,
+} from "@/openapi/schemas/dvp";
+import {
   executeBurnResponseSchema,
   executeForceBurnResponseSchema,
   executeMintResponseSchema,
@@ -31,26 +53,36 @@ import {
   executeUpdateAuthorityResponseSchema,
   frozenAccountResponseSchema,
   frozenAccountSchema,
-  inviteMemberResponseSchema,
-  listApiKeysResponseSchema,
-  listAssetProfilesResponseSchema,
-  listCounterpartiesResponseSchema,
-  listCounterpartyAccountsResponseSchema,
-  listCounterpartyProviderAccountsResponseSchema,
-  listDvpInboundTradesResponseSchema,
-  listDvpTradesResponseSchema,
-  listMembersResponseSchema,
-  listProjectApiKeysResponseSchema,
-  listProjectMembersResponseSchema,
-  listProjectsResponseSchema,
   listTemplatesResponseSchema,
-  offrampCurrenciesResponseSchema,
+  prepareBurnResponseSchema,
+  prepareDeployMetadataResponseSchema,
+  prepareDeployResponseSchema,
+  prepareForceBurnResponseSchema,
+  prepareMintResponseSchema,
+  prepareSeizeResponseSchema,
+  prepareUpdateAuthorityResponseSchema,
+  tokenAllowlistEntrySchema,
+  tokenAllowlistResponseSchema,
+  tokenResponseSchema,
+  tokenSchema,
+  tokenTemplateResponseSchema,
+  tokenTransactionListItemSchema,
+  tokenTransactionSchema,
+  tokenWithAssetProfileResponseSchema,
+} from "@/openapi/schemas/issuance";
+import {
   onboardingCompleteResponseSchema,
   onboardingStatusResponseSchema,
+} from "@/openapi/schemas/onboarding";
+import {
+  inviteMemberResponseSchema,
+  listMembersResponseSchema,
+  organizationSchema,
+} from "@/openapi/schemas/organizations";
+import {
+  offrampCurrenciesResponseSchema,
   onrampCurrenciesResponseSchema,
   onrampQuoteResponseSchema,
-  organizationSchema,
-  paginatedResponseSchema,
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
@@ -60,40 +92,26 @@ import {
   paymentSubscriptionPlanListResponseSchema,
   paymentSubscriptionPlanResponseSchema,
   paymentSubscriptionResponseSchema,
-  prepareBurnResponseSchema,
-  prepareDeployMetadataResponseSchema,
-  prepareDeployResponseSchema,
-  prepareForceBurnResponseSchema,
-  prepareMintResponseSchema,
   preparePaymentSubscriptionAuthorizationResponseSchema,
   preparePaymentSubscriptionCollectionResponseSchema,
   preparePaymentSubscriptionLifecycleResponseSchema,
   preparePaymentSubscriptionPlanResponseSchema,
-  prepareSeizeResponseSchema,
-  prepareUpdateAuthorityResponseSchema,
-  projectMemberResponseSchema,
-  projectProviderAvailabilityResponseSchema,
-  projectResponseSchema,
-  revokeApiKeyResponseSchema,
-  rotateApiKeyResponseSchema,
-  rpcRelayResponseSchema,
-  signerCheckResponseSchema,
-  successResponseSchema,
-  tokenAllowlistEntrySchema,
-  tokenAllowlistResponseSchema,
-  tokenResponseSchema,
-  tokenSchema,
-  tokenTemplateResponseSchema,
-  tokenTransactionListItemSchema,
-  tokenTransactionSchema,
-  tokenWithAssetProfileResponseSchema,
   transferBatchEstimateResponseSchema,
   transferBatchResponseSchema,
   transferBatchSchema,
   transferResponseSchema,
   transferSchema,
   walletBalancesResponseSchema,
-} from "../schemas";
+} from "@/openapi/schemas/payments";
+import {
+  listProjectApiKeysResponseSchema,
+  listProjectMembersResponseSchema,
+  listProjectsResponseSchema,
+  projectMemberResponseSchema,
+  projectProviderAvailabilityResponseSchema,
+  projectResponseSchema,
+} from "@/openapi/schemas/projects";
+import { rpcRelayResponseSchema } from "@/openapi/schemas/rpc";
 
 export const organizationResponse = successResponseSchema(organizationSchema);
 

@@ -12,7 +12,7 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
 export {

@@ -16,8 +16,6 @@ import {
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 
-export { SOL_MINT } from "@/services/payment-operation.service";
-
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;

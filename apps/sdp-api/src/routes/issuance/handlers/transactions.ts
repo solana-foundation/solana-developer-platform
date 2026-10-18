@@ -8,7 +8,7 @@ import {
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";

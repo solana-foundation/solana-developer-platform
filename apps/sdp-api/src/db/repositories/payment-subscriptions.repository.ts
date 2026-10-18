@@ -4,7 +4,7 @@ import type {
   PaymentSubscriptionPlanStatus,
   PaymentSubscriptionStatus,
 } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface PaymentSubscriptionPlanRow {
   id: string;

@@ -1,5 +1,5 @@
 import { HeliusRingsError } from "@sdp/helius-rings";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   type CredentialSecretPayload,
   createCredentialSecretStore,

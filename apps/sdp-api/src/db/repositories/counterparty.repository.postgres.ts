@@ -1,18 +1,18 @@
+import type { CounterpartyRow } from "@sdp/payments";
+import { generateCounterpartyId } from "@sdp/payments";
 import { readRecord } from "@sdp/payments/json";
 import type { CounterpartyProviderData, CounterpartyStatus } from "@sdp/types";
-import type { AppDb, DatabaseExecutor } from "@/db";
+import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
 import type {
   ArchiveCounterpartyInput,
   CounterpartiesRepository,
-  CounterpartyRow,
   CreateCounterpartyInput,
   ListCounterpartiesInput,
   ListCounterpartiesResult,
   MutateCounterpartyProviderDataInput,
   UpdateCounterpartyInput,
 } from "./counterparty.repository";
-import { generateCounterpartyId } from "./counterparty.repository";
 
 function assertString(value: unknown, field: string): string {
   if (typeof value !== "string") {

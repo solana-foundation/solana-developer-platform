@@ -4,7 +4,7 @@
 
 import { EGRESS_READINESS_SERVES_TRAFFIC, resolveSdpReleaseChannel } from "@sdp/types";
 import { Hono } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { pingRedis } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 

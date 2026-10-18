@@ -7,7 +7,7 @@ import {
   type Permission,
 } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -22,7 +22,7 @@ import {
 import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 

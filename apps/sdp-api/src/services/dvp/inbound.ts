@@ -12,9 +12,11 @@
  * who has never used the product.
  */
 
+import type { DvpTradeSide } from "@sdp/types";
 import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
-import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeSide } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import type { ApiKeyContext } from "@/lib/auth";
 import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";

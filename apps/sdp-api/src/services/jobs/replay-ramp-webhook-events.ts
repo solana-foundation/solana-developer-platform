@@ -4,7 +4,7 @@ import type {
   SdpRampProviderStages,
 } from "@sdp/types";
 import { RAMP_PROVIDERS } from "@sdp/types";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,

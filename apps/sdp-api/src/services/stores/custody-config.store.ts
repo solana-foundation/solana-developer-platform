@@ -1,5 +1,5 @@
 import { type CustodyConfigStatus, UNARCHIVED_CUSTODY_CONFIG_STATUSES } from "@sdp/types";
-import type { PreparedStatement } from "@/db";
+import type { PreparedStatement } from "@/db/client";
 import { buildInClause } from "@/db/postgres-utils";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";

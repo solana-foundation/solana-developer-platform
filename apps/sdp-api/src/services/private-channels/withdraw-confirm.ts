@@ -21,7 +21,7 @@ import type { Signature } from "@solana/kit";
 import type {
   PrivateChannelWithdrawalRepository,
   PrivateChannelWithdrawalRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-withdrawal.repository";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 

@@ -4,7 +4,7 @@ import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,

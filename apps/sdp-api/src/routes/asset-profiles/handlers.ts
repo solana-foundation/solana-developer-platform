@@ -10,7 +10,7 @@ import {
   type ListAssetProfilesResponse,
 } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {

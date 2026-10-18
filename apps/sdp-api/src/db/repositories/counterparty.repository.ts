@@ -5,10 +5,7 @@ import type {
   RampProviderId,
   SdpEnvironment,
 } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
-
-export type { CounterpartyRow } from "@sdp/payments";
-export { generateCounterpartyId } from "@sdp/payments";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface CreateCounterpartyInput {
   organizationId: string;

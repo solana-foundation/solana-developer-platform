@@ -1,6 +1,6 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider, normalizeOrganizationTier } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";

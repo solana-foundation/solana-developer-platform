@@ -1,14 +1,8 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES } from "@sdp/types";
+import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES, type DvpTradeSide } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import {
-  createCounterpartyAccountsRepository,
-  createDvpTradeRepository,
-  type DvpTradeRow,
-  type DvpTradeSide,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
 import {
   createPostgresDvpLegFundingClaimRepository,
   type DvpLegFundingClaim,
@@ -17,6 +11,11 @@ import {
   createPostgresDvpLegTransferRepository,
   type DvpTradeLegTransfers,
 } from "@/db/repositories/dvp-leg-transfer.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import {
+  createCounterpartyAccountsRepository,
+  createDvpTradeRepository,
+} from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";

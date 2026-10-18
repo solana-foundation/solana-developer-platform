@@ -1,6 +1,6 @@
 import type { ProjectProviderAvailability } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { isModuleInChannel, isRampProviderInChannel } from "@/middleware/require-module";

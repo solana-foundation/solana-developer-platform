@@ -1,5 +1,5 @@
-import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type { AppContext } from "../counterparties/context";
 
 /**

@@ -2,14 +2,14 @@ import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn
 import { createRpc } from "@sdp/rpc/solana";
 import type { MovementId, SolanaCluster } from "@sdp/types";
 import { address } from "@solana/kit";
-import { type AppDb, getDb } from "@/db";
+import { type DatabaseClient as AppDb, getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
 import { badRequest, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 import {
@@ -176,7 +176,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
   let signed: SignedVaultTransaction;
   try {
     const signer = await input.deadline.run(`Resolving the vault ${operation} signer`, () =>
-      solanaServices.createOrgSignerForCustodyWallet(
+      createOrgSignerForCustodyWallet(
         env,
         input.organizationId,
         input.projectId,

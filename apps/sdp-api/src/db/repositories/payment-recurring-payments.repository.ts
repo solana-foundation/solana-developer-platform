@@ -10,15 +10,6 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 
-export type {
-  PaymentRecurringPaymentActivationAttemptStage,
-  PaymentRecurringPaymentAttemptStatus,
-  PaymentRecurringPaymentLifecycleAttemptStage,
-  PaymentRecurringPaymentLifecycleOperation,
-  PaymentRecurringPaymentUpdateAttemptMode,
-  PaymentRecurringPaymentUpdateAttemptStage,
-} from "@sdp/types";
-
 export interface PaymentRecurringPaymentRow {
   id: string;
   organization_id: string;

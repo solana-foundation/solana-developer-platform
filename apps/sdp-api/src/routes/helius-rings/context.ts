@@ -1,20 +1,20 @@
 import { HeliusRingsError } from "@sdp/helius-rings";
 import type { Permission } from "@sdp/types";
 import type { Context } from "hono";
+import type { HeliusRingsOperationRow } from "@/db/repositories/helius-rings-operation.repository";
+import type { HeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";
 import {
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
   createHeliusRingsZoneRepository,
-  type HeliusRingsOperationRow,
-  type HeliusRingsWalletRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { getAuth } from "@/lib/auth";
 import { AppError, type ErrorCode, notFound } from "@/lib/errors";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
-import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings";
+import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings/service";
 import type { Env } from "@/types/env";
 
 /** Hono request context bound to the app `Env`. */

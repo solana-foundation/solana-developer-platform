@@ -7,7 +7,7 @@ import {
   WELL_KNOWN_TOKEN_BY_MINT,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";

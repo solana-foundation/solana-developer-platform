@@ -1,5 +1,5 @@
 import type { KycProvider, KycStatus } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateKycWalletId(): string {
   return `kyc_wallet_${crypto.randomUUID()}`;

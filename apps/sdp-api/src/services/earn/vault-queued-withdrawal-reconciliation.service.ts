@@ -8,7 +8,7 @@ import type {
 } from "@sdp/earn";
 import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import { address, type Signature } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnVaultWithdrawalRequestActionRow,

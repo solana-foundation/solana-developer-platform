@@ -9,7 +9,7 @@ import {
 } from "@sdp/dvp";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -29,9 +29,9 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
+import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";

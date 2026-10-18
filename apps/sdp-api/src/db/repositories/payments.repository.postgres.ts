@@ -6,7 +6,7 @@ import {
   tokenFilterAliases,
 } from "@sdp/types";
 import { z } from "zod";
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";

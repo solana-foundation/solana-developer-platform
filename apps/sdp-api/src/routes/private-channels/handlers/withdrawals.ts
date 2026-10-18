@@ -1,21 +1,21 @@
 import {
   mapPrivateChannelWithdrawalRow,
   type PrivateChannelWithdrawalRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-withdrawal.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { isAbandonedReservation } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
+import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import {
   createChannelWithdrawal,
   getChannelWithdrawal,
   listChannelWithdrawals,
-  mapPrivateChannelError,
-} from "@/services/private-channels";
-import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
-import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
-import { resolveAbandonedWithdrawalReservation } from "@/services/private-channels/withdraw";
+  resolveAbandonedWithdrawalReservation,
+} from "@/services/private-channels/withdraw";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelWithdrawalRepository,

@@ -16,11 +16,11 @@ import { createChannelGatewayRpc, PrivateChannelError } from "@sdp/private-chann
 import { createAuthClient, type SpcAuthClient } from "@sdp/private-channels/auth";
 import { isUnauthorizedRpcError } from "@sdp/rpc";
 import type { SolanaRpc } from "@sdp/rpc/solana";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import {
   createPrivateChannelInstanceRepository,
   createPrivateChannelUserRepository,
-  type PrivateChannelUserRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { forbidden } from "@/lib/errors";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";

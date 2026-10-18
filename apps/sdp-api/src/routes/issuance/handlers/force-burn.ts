@@ -1,6 +1,6 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";

@@ -1,5 +1,5 @@
 import { hasPermission } from "@sdp/types";
-import type { PrivateChannelReferenceWalletScope } from "@/db/repositories";
+import type { PrivateChannelReferenceWalletScope } from "@/db/repositories/private-channel-reference.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";

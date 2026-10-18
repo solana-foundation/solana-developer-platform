@@ -39,7 +39,7 @@
  */
 
 import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { apiKeyCacheKey, apiKeyHashFromCacheKey, refreshApiKeyCache } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";

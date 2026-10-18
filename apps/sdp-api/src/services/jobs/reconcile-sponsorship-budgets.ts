@@ -2,7 +2,7 @@ import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   SPONSORSHIP_BREAKER_OPERATOR,
   type SponsorshipBudgetPolicy,

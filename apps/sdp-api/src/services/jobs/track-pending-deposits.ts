@@ -23,13 +23,15 @@
 
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
+import type {
+  PrivateChannelDepositRepository,
+  PrivateChannelDepositRow,
+} from "@/db/repositories/private-channel-deposit.repository";
+import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import {
   createPrivateChannelDepositRepository,
   createPrivateChannelInstanceRepository,
-  type PrivateChannelDepositRepository,
-  type PrivateChannelDepositRow,
-  type PrivateChannelInstanceRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
 import { emitDepositEvent } from "@/services/private-channels/deposit-events";
 import {

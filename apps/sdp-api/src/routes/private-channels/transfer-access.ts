@@ -1,5 +1,6 @@
 import type { PrivateChannelInstance, PrivateChannelTransferRecipientDto } from "@sdp/types";
-import { mapPrivateChannelInstanceRow, type PrivateChannelUserRow } from "@/db/repositories";
+import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, notFound } from "@/lib/errors";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";

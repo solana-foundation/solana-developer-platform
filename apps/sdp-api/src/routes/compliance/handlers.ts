@@ -4,7 +4,7 @@ import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { createComplianceService } from "@/services/compliance";
+import { createComplianceService } from "@/services/compliance/service";
 import {
   loadProjectProviderVerdict,
   refuseProjectProvider,

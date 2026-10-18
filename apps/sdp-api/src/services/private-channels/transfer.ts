@@ -26,11 +26,11 @@ import {
 import { getTransferCheckedInstruction as getToken2022TransferCheckedInstruction } from "@solana-program/token-2022";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
-  createPrivateChannelTransferRepository,
   mapPrivateChannelTransferRow,
   type PrivateChannelTransferRepository,
   type PrivateChannelTransferRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-transfer.repository";
+import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest } from "@/lib/errors";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";

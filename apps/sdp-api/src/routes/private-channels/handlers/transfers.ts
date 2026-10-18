@@ -1,12 +1,18 @@
-import { mapPrivateChannelTransferRow, type PrivateChannelTransferRow } from "@/db/repositories";
+import {
+  mapPrivateChannelTransferRow,
+  type PrivateChannelTransferRow,
+} from "@/db/repositories/private-channel-transfer.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { isAbandonedReservation } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { createChannelTransfer, mapPrivateChannelError } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
-import { resolveAbandonedTransferReservation } from "@/services/private-channels/transfer";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
+import {
+  createChannelTransfer,
+  resolveAbandonedTransferReservation,
+} from "@/services/private-channels/transfer";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import type { AppContext } from "../context";
 import {

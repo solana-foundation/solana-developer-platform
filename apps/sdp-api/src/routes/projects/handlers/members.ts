@@ -1,6 +1,6 @@
 import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";

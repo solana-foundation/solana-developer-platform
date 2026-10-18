@@ -19,7 +19,7 @@ import {
   type Signature,
   type Transaction,
 } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   type CreateSponsorshipReservationInput,
   type SignaturePersistResult,

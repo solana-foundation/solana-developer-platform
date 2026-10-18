@@ -1,7 +1,7 @@
 import { normalizePrivyWalletId } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
 import type { Context } from "hono";
-import { type DatabaseClient, getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {

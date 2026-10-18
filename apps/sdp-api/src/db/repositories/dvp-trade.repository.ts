@@ -8,9 +8,7 @@
 
 import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
-import type { RepositoryDbClient } from "./base";
-
-export type { DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface DvpTradeRow {
   id: string;

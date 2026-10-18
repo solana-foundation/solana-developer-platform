@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /** The scope a key is unique within, plus the request it was first used for. */
 export interface IdempotencyKeyClaimInput {

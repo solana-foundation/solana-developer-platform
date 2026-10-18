@@ -6,12 +6,12 @@ import { type TransactionSigner, unwrapOption } from "@solana/kit";
 import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -417,7 +417,7 @@ async function loadResolvedAuthoritySigner(params: {
   currentAuthority: string;
   movement: IssuanceMovement;
 }): Promise<TransactionSigner> {
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet(
     params.env,
     params.auth.organizationId,
     requireAuthProjectId(params.auth),
@@ -518,7 +518,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw walletNotFound();
   }
 
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet(
     env,
     auth.organizationId,
     projectId,

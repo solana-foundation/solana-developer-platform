@@ -4,13 +4,13 @@ import {
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   recurringPaymentInFlightLifecycleOperation,
 } from "@sdp/types";
-import { getDb } from "@/db";
-import {
-  type CollectibleRecurringPaymentRow,
-  createPostgresPaymentRecurringPaymentsRepository,
-  type PaymentRecurringPaymentRow,
-  type RecoverableCollectionRecurringPaymentRow,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type {
+  CollectibleRecurringPaymentRow,
+  PaymentRecurringPaymentRow,
+  RecoverableCollectionRecurringPaymentRow,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import {
@@ -22,14 +22,16 @@ import {
 } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { activateRecurringPayment } from "@/services/payments/recurring-payments/activation";
 import {
-  activateRecurringPayment,
-  cancelRecurringPayment,
   collectRecurringPayment,
   journalAutomatedCollectionFailure,
-  resumeRecurringPayment,
   skipRefusedRecurringCollectionPeriod,
-} from "@/services/payments/recurring-payments";
+} from "@/services/payments/recurring-payments/collection";
+import {
+  cancelRecurringPayment,
+  resumeRecurringPayment,
+} from "@/services/payments/recurring-payments/lifecycle";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 

@@ -39,7 +39,8 @@ import type {
   ProviderStrategyMetrics,
 } from "@sdp/earn/types";
 import type { SdpEnvironment } from "@sdp/types";
-import { createEarnRepository, type EarnRepository } from "@/db/repositories";
+import type { EarnRepository } from "@/db/repositories/earn.repository";
+import { createEarnRepository } from "@/db/repositories/repository-factory";
 import type { BackgroundRunner } from "@/runtime/background";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";

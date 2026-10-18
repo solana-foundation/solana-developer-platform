@@ -8,7 +8,7 @@ import type {
   SolanaCluster,
 } from "@sdp/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
-import { type AppDb, asTransactionalClient } from "@/db";
+import { type DatabaseClient as AppDb, asTransactionalClient } from "@/db/client";
 import type {
   DeprecateUnlistedEarnStrategiesInput,
   EarnProviderWalletRow,

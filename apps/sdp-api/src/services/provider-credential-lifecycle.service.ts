@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { isProviderCredentialCreationInProgress } from "@sdp/types";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {

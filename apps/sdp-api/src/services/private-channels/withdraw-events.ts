@@ -13,7 +13,7 @@ import {
   type PrivateChannelEventStatus,
   type PrivateChannelEventType,
 } from "@sdp/types";
-import type { PrivateChannelWithdrawalRow } from "@/db/repositories";
+import type { PrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";
 import { createPrivateChannelEventService } from "@/services/private-channels/event.service";
 import type { Env } from "@/types/env";
 

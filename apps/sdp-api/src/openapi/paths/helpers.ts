@@ -1,5 +1,6 @@
 import type { IdempotencyKeyMode } from "@sdp/types";
-import { idempotencyKeyHeaderSchema, projectScopeHeaderSchema, z } from "../schemas";
+import { z } from "zod";
+import { idempotencyKeyHeaderSchema, projectScopeHeaderSchema } from "@/openapi/schemas/base";
 
 export const jsonContent = (schema: z.ZodTypeAny) => ({
   "application/json": { schema },

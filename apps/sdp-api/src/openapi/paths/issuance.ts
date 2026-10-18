@@ -1,34 +1,35 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { TOKEN_TRANSACTION_TYPES } from "@sdp/types";
 import { z } from "zod";
-
+import {
+  allowlistEntryIdParamSchema,
+  custodyWalletIdParamSchema,
+  errorResponseSchema,
+  pageQuerySchema,
+  pageSizeQuerySchema,
+  tokenIdParamSchema,
+  tokenTransactionStatusQuerySchema,
+  walletIdParamSchema,
+} from "@/openapi/schemas/base";
 import {
   addTokenAllowlistRequestSchema,
-  allowlistEntryIdParamSchema,
   burnRequestSchema,
   confirmDeployRequestSchema,
   createTokenRequestSchema,
-  custodyWalletIdParamSchema,
   deployTokenRequestSchema,
-  errorResponseSchema,
   forceBurnRequestSchema,
   freezeAccountRequestSchema,
   getTokenQueryOpenApiSchema,
   listTokensQueryOpenApiSchema,
   mintRequestSchema,
-  pageQuerySchema,
-  pageSizeQuerySchema,
   pauseTokenRequestSchema,
   removeTokenAllowlistQuerySchema,
   seizeRequestSchema,
   templateIdParamSchema,
-  tokenIdParamSchema,
-  tokenTransactionStatusQuerySchema,
   unfreezeAccountRequestSchema,
   updateAuthorityRequestSchema,
   updateTokenRequestSchema,
-  walletIdParamSchema,
-} from "../schemas";
+} from "@/openapi/schemas/issuance";
 import {
   errorResponses,
   jsonContent,

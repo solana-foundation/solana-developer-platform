@@ -6,32 +6,34 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { MovementId } from "@sdp/types";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isPendingActivationRecurringPaymentStatus,
+  type MovementId,
 } from "@sdp/types";
+import type { PaymentRecurringPaymentLifecycleAttemptStage } from "@sdp/types/payments";
 import type { Address, Instruction, MaybeAccount, Signature, TransactionSigner } from "@solana/kit";
 import type { SubscriptionDelegation } from "@solana/subscriptions";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import type {
+  PaymentRecurringPaymentLifecycleAttemptRow,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type { PaymentSubscriptionRow } from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
-  createPostgresPaymentRecurringPaymentsRepository,
-  createPostgresPaymentSubscriptionsRepository,
-  type PaymentRecurringPaymentLifecycleAttemptRow,
-  type PaymentRecurringPaymentLifecycleAttemptStage,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  type PaymentSubscriptionRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
@@ -610,7 +612,7 @@ async function runRecurringPaymentLifecycle(
     if (input.operation === "resume") {
       await input.admitStart();
     }
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,

@@ -13,7 +13,7 @@ import {
   type RampProviderId,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
-import type { AppDb } from "@/db";
+import type { DatabaseClient as AppDb } from "@/db/client";
 
 export function generateRampWebhookEventId(): string {
   return `rwe_${crypto.randomUUID()}`;

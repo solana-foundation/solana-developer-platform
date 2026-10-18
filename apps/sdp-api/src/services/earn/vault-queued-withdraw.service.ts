@@ -10,7 +10,7 @@ import type {
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
-import { type AppDb, getDb } from "@/db";
+import { type DatabaseClient as AppDb, getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnExternalWalletWithdrawalRequestTransactionRow,
@@ -29,7 +29,7 @@ import {
   buildEarnVaultQueuedWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import {
   earnClusterFor,
@@ -423,7 +423,7 @@ async function prepareCustodyTransaction(
     );
   }
   const signer = await deadline.run("Resolving the queued withdrawal signer", () =>
-    solanaServices.createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet(
       env,
       input.actor.organizationId,
       input.actor.projectId,
@@ -573,7 +573,7 @@ export async function createCustodyQueuedWithdrawal(
       );
     }
     const signer = await executionDeadline.run("Resolving the queued withdrawal signer", () =>
-      solanaServices.createOrgSignerForCustodyWallet(
+      createOrgSignerForCustodyWallet(
         env,
         input.actor.organizationId,
         input.actor.projectId,

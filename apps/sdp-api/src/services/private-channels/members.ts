@@ -3,11 +3,11 @@
 
 import { PrivateChannelError, spcLogin, spcRegister } from "@sdp/private-channels";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type { ProjectScope } from "@/db/repositories/private-channel-instance.repository";
 import type {
   PrivateChannelUserRepository,
   PrivateChannelUserRow,
-  ProjectScope,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-user.repository";
 import { conflict } from "@/lib/errors";
 import {
   createSpcCredentialCipher,

@@ -2,7 +2,7 @@ import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";

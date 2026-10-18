@@ -4,7 +4,7 @@ import type {
   UnifiedTransactionModule,
   UnifiedTransactionStatus,
 } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface UnifiedTransactionModuleWalletScope {
   module: UnifiedTransactionModule;

@@ -12,12 +12,12 @@
  */
 
 import type { DvpLegOutcome, DvpLegTransferKind, DvpSettlementAvailability } from "@sdp/types";
-import type { DvpTradeRow } from "@/db/repositories";
 import type {
   DvpLegTransfer,
   DvpLegTransferDirection,
   DvpTradeLegTransfers,
 } from "@/db/repositories/dvp-leg-transfer.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 import { deriveDvpLegOutcome } from "@/services/dvp/leg-outcome";
 import { deriveDvpLegTransferKinds } from "@/services/dvp/leg-transfer-kind";

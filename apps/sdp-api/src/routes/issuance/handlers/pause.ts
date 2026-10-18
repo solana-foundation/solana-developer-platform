@@ -1,6 +1,6 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";

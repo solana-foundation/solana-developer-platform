@@ -38,24 +38,28 @@ import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
 } from "@solana-program/token-2022";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db/client";
+import type {
+  CollectibleRecurringPaymentRow,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+  RecurringPaymentCollectionCycleRow,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type {
+  PaymentSubscriptionCollectionAttemptRow,
+  PaymentSubscriptionRow,
+  PaymentSubscriptionsRepository,
+} from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
+import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import {
-  type CollectibleRecurringPaymentRow,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
-  createPostgresPaymentRecurringPaymentsRepository,
-  createPostgresPaymentSubscriptionsRepository,
-  createPostgresPaymentsRepository,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  type PaymentSubscriptionCollectionAttemptRow,
-  type PaymentSubscriptionRow,
-  type PaymentSubscriptionsRepository,
-  type PaymentTransferRow,
-  type RecurringPaymentCollectionCycleRow,
-} from "@/db/repositories";
-import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+} from "@/db/repositories/repository-factory";
 import {
   AppError,
   badRequest,
@@ -76,7 +80,7 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
@@ -1721,7 +1725,7 @@ export async function collectRecurringPayment(input: {
       "destinationAddress"
     );
     const mint = assertValidAddress(input.recurringPayment.token, "token");
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,

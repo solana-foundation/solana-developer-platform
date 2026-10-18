@@ -17,9 +17,10 @@ import type {
 } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { z } from "zod";
-import { getDb, runWithSystemDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type { EarnProviderWalletRow } from "@/db/repositories";
+import type { EarnProviderWalletRow } from "@/db/repositories/earn.repository";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -34,6 +35,7 @@ import {
   resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -48,7 +50,7 @@ import {
   assertEarnProviderConfigured,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
-import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
+import { type AppContext, earnRuntime, getEarnRepository } from "../context";
 import {
   type earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
@@ -62,15 +64,6 @@ import {
 } from "../schemas";
 import { recordEarnWithdrawalAudit } from "./movement-audit";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
-
-export type {
-  EarnProgram,
-  EarnProgramDepositsResponse,
-  EarnProgramResponse,
-  EarnProgramWithdrawalPreviewResponse,
-  EarnProgramWithdrawalResponse,
-  ListEarnProgramsResponse,
-} from "@sdp/types";
 
 /**
  * Earn "programs": provider-managed portfolio wallets, N per (organization,

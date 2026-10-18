@@ -16,8 +16,8 @@ import {
   normalizeDfnsWalletId,
   resolveDfnsNetwork,
 } from "@sdp/custody/dfns";
+import { KeychainFireblocksAdapter } from "@sdp/custody/keychain";
 import { SigningError } from "@sdp/custody/signing";
-import { KeychainFireblocksAdapter } from "@/services/adapters";
 import {
   deleteAnchorageWallet,
   provisionAnchorageWallet,

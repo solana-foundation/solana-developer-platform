@@ -8,7 +8,7 @@ import {
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { routePath } from "hono/route";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresIdempotencyKeyRepository,
   type IdempotencyKeyRepository,

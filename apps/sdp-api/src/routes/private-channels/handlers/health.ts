@@ -1,6 +1,6 @@
 import { badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { probeInstanceHealth } from "@/services/private-channels";
+import { probeInstanceHealth } from "@/services/private-channels/service";
 import type { AppContext } from "../context";
 import { healthQuerySchema } from "../schemas";
 

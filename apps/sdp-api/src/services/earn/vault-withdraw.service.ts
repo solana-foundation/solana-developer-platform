@@ -2,7 +2,7 @@ import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,

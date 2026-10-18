@@ -10,7 +10,7 @@ import { getCancelDvpInstruction, getSettleDvpInstruction } from "@sdp/dvp";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
-import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import type { DvpCloseAction } from "./settle";
 import type { DvpSettleAtas } from "./settle-atas";
 

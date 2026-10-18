@@ -15,7 +15,7 @@ import {
 } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";

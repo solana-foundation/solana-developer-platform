@@ -6,7 +6,7 @@
  */
 
 import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_CLOSE_REFUSAL } from "@sdp/types";
+import { DVP_CLOSE_REFUSAL, type DvpTradeStatus } from "@sdp/types";
 import {
   appendTransactionMessageInstructions,
   createNoopSigner,
@@ -21,9 +21,10 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
+import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { badRequest, conflict, transactionFailed } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";

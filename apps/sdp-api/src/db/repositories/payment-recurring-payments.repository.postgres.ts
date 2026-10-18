@@ -14,7 +14,7 @@ import {
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
 } from "@sdp/types";
 import { z } from "zod";
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import type {
   ClaimPaymentRecurringPaymentLifecycleInput,

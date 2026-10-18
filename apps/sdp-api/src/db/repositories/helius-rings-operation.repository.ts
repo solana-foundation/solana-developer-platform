@@ -5,7 +5,7 @@ import type {
   PrivateOperationSummary,
   TransferMode,
 } from "@sdp/helius-rings";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 
 export function generateHeliusRingsOperationId(): string {

@@ -10,6 +10,7 @@ import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
 
 import { SigningError } from "@sdp/custody/signing";
 import { SdpEarnError } from "@sdp/earn/errors";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import {
   redactCredentialSecrets,
@@ -66,7 +67,6 @@ import { webhooks } from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
-import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {

@@ -16,7 +16,7 @@
 import type { CustodyWalletOwnerTarget, SdpEnvironment } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { conflict, notFound } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";

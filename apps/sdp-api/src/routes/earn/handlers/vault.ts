@@ -13,7 +13,7 @@ import type {
 } from "@sdp/types";
 import { type EarnProviderId, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import {
   createPostgresEarnMovementsRepository,
@@ -36,6 +36,7 @@ import {
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -62,12 +63,7 @@ import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-mov
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import type { AppContext } from "../context";
-import {
-  earnRuntime,
-  getEarnRepository,
-  requireEarnStrategyForCaller,
-  resolveSdpEnvironment,
-} from "../context";
+import { earnRuntime, getEarnRepository, requireEarnStrategyForCaller } from "../context";
 import {
   earnVaultDepositParamsSchema,
   type earnVaultDepositPreviewSchema,

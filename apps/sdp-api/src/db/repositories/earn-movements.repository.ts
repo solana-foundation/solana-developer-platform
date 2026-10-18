@@ -10,7 +10,11 @@ import {
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   EARN_PROVIDER_WITHDRAWAL_SETTLEMENT,
 } from "@sdp/types";
-import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
+import {
+  type DatabaseClient as AppDb,
+  asTransactionalClient,
+  type DatabaseExecutor,
+} from "@/db/client";
 import { conflict } from "@/lib/errors";
 
 /**

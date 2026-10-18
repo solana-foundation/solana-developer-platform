@@ -13,9 +13,9 @@ import type {
   PaymentTransferStatus as TransferStatus,
 } from "@/db/repositories/payments.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import { getSplTokenAccountAddresses } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import type { AppContext } from "../context";
-import * as tokenAccounts from "../token-accounts";
 
 export const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
 
@@ -275,7 +275,7 @@ export async function resolveWalletTokenAccountAddresses(
   walletId: string
 ): Promise<Address[]> {
   try {
-    return await tokenAccounts.getSplTokenAccountAddresses(rpc, owner);
+    return await getSplTokenAccountAddresses(rpc, owner);
   } catch (error) {
     getLogger().error(
       {

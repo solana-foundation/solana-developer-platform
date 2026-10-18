@@ -1,6 +1,6 @@
 import type { EarnMovementRecord, EarnMovementsPage } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -9,9 +9,9 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import type { AppContext } from "../context";
-import { resolveSdpEnvironment } from "../context";
 import { earnMovementsQuerySchema } from "../schemas";
 import { parseQuery } from "./shared";
 import { listReadableEarnVaultWallets } from "./vault";

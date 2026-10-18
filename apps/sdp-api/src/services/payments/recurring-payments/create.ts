@@ -1,8 +1,6 @@
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import {
-  createPaymentRecurringPaymentsRepository,
-  type PaymentRecurringPaymentRow,
-} from "@/db/repositories";
+import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
+import { createPaymentRecurringPaymentsRepository } from "@/db/repositories/repository-factory";
 import { internalError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";

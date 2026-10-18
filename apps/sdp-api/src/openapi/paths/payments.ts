@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { walletBalancesQuerySchema } from "../../routes/payments/wallet-balances/schemas";
+import { errorResponseSchema } from "@/openapi/schemas/base";
 
 import {
   createOnrampQuoteRequestSchema,
@@ -9,7 +9,6 @@ import {
   createSubscriptionRequestSchema,
   createTransferBatchRequestSchema,
   createTransferRequestSchema,
-  errorResponseSchema,
   estimateTransferBatchRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
@@ -32,7 +31,8 @@ import {
   simulateSandboxTransferRequestSchema,
   updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
-} from "../schemas";
+} from "@/openapi/schemas/payments";
+import { walletBalancesQuerySchema } from "../../routes/payments/wallet-balances/schemas";
 import {
   errorResponses,
   jsonContent,

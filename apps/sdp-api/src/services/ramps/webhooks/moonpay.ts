@@ -8,16 +8,16 @@ import {
   moonpayTransactionSettlementEvent,
 } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { RampWebhookProcessResult, SdpEnvironment } from "@sdp/types";
 import { z } from "zod";
-import { createSystemPaymentsRepository } from "@/db/repositories";
+import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
-import type { RampWebhookProcessResult, WebhookProcessor } from "./processor";
+import type { WebhookProcessor } from "./processor";
 
 /**
  * The key that signs `environment`'s MoonPay events. SDP holds the sandbox key

@@ -7,7 +7,7 @@ import type {
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { asTransactionalClient, getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db/client";
 import {
   dropApiKeyCacheEntry,
   isApiKeyCacheWritable,

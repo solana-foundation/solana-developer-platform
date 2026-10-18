@@ -1,8 +1,5 @@
 import { buildKeychainUtilaConfig } from "@sdp/custody";
 import { createDfnsApiClient, createIbmHavenApiClient } from "@sdp/custody/dfns";
-import { SigningError, type SigningPort } from "@sdp/custody/signing";
-import type { Address } from "@solana/kit";
-import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import {
   KeychainCoinbaseAdapter,
   KeychainDfnsAdapter,
@@ -13,9 +10,12 @@ import {
   KeychainPrivyAdapter,
   KeychainTurnkeyAdapter,
   KeychainUtilaAdapter,
-  type SigningConfigRecord,
-} from "@/services/adapters";
+} from "@sdp/custody/keychain";
+import { SigningError, type SigningPort } from "@sdp/custody/signing";
+import type { Address } from "@solana/kit";
+import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
+import type { SigningConfigRecord } from "@/services/adapters/signing/index";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";

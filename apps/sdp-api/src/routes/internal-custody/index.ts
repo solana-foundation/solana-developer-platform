@@ -5,7 +5,7 @@ import {
 } from "@sdp/types";
 import { Hono } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestParams } from "@/lib/errors";
 import { created, success } from "@/lib/response";

@@ -1,9 +1,3 @@
-export {
-  earnVaultDepositRecordSchema,
-  earnVaultDepositSchema,
-  earnVaultWithdrawalSchema,
-} from "@sdp/types/earn-wire";
-
 import {
   EARN_MOVEMENT_STATUSES,
   EARN_PORTFOLIO_DEPOSIT_STATUSES,

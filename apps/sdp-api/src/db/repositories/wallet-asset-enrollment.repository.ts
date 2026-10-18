@@ -1,5 +1,5 @@
 import type { ReviewMode, WalletEnrollmentStatus } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateWalletAssetEnrollmentId(): string {
   return `wallet_asset_enrollment_${crypto.randomUUID()}`;

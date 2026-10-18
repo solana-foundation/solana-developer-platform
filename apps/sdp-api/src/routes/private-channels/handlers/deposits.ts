@@ -1,15 +1,18 @@
-import { mapPrivateChannelDepositRow, type PrivateChannelDepositRow } from "@/db/repositories";
+import {
+  mapPrivateChannelDepositRow,
+  type PrivateChannelDepositRow,
+} from "@/db/repositories/private-channel-deposit.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import {
   createChannelDeposit,
   getChannelDeposit,
   listChannelDeposits,
-  mapPrivateChannelError,
-} from "@/services/private-channels";
-import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+} from "@/services/private-channels/deposit";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import type { AppContext } from "../context";
 import { getPrivateChannelDepositRepository, loadPrivateChannelProjectRpcClient } from "../context";

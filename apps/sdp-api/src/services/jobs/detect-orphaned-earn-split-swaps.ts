@@ -1,7 +1,7 @@
 import { createRpc } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {

@@ -14,8 +14,10 @@
  */
 
 import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
+import type { DvpTradeStatus } from "@sdp/types";
 import type { Signature } from "@solana/kit";
-import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { resolveDvpClose } from "./closing-transaction";

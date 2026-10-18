@@ -19,7 +19,7 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   generatePaymentTransferId,
@@ -60,6 +60,7 @@ import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -72,7 +73,7 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
@@ -86,7 +87,6 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
 import { transferIdParamsSchema } from "../schemas";
-import * as tokenAccounts from "../token-accounts";
 import {
   admitPaymentWalletRuntimeExecution,
   assertPaymentWalletReadAccess,
@@ -556,7 +556,7 @@ async function executeSponsoredTransfer(
   }
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet(
     c.env,
     auth.organizationId,
     requireProjectId(c),
@@ -649,7 +649,7 @@ async function executeSplTransfer(
     submissionStore,
     buildInstructions: async ({ signer, feePayer, rpc }) => {
       const { createDestinationAtaInstruction, transferInstruction } =
-        await tokenAccounts.buildSplTransferInstructions(rpc, {
+        await buildSplTransferInstructions(rpc, {
           authority: signer,
           destination: destinationAddress,
           mint: mintAddress,

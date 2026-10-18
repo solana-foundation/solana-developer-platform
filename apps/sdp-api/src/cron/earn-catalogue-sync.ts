@@ -43,7 +43,8 @@ import type {
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
-import { createEarnRepository, type EarnRepository } from "@/db/repositories";
+import type { EarnRepository } from "@/db/repositories/earn.repository";
+import { createEarnRepository } from "@/db/repositories/repository-factory";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";

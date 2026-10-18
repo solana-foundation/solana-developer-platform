@@ -1,5 +1,5 @@
 import type { ApiKeyWalletScope, Permission } from "@sdp/types";
-import type { PreparedStatement } from "@/db";
+import type { PreparedStatement } from "@/db/client";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getLogger } from "@/runtime/logger";
 

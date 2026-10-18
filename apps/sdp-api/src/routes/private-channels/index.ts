@@ -4,44 +4,55 @@ import { isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import { getPrivateChannelBalance } from "@/routes/private-channels/handlers/balance";
+import {
+  createChannel,
+  deleteChannel,
+  getChannel,
+  listChannels,
+} from "@/routes/private-channels/handlers/channels";
+import {
+  createPrivateChannelDeposit,
+  getPrivateChannelDepositById,
+  listPrivateChannelDeposits,
+} from "@/routes/private-channels/handlers/deposits";
+import { listPrivateChannelEventReferences } from "@/routes/private-channels/handlers/event-references";
+import { listChannelEvents, listProjectEvents } from "@/routes/private-channels/handlers/events";
+import { getPrivateChannelHealth } from "@/routes/private-channels/handlers/health";
+import {
+  connectPrivateChannelInstance,
+  deletePrivateChannelInstance,
+  disconnectPrivateChannelInstance,
+  getPrivateChannelInstance,
+  updatePrivateChannelInstance,
+} from "@/routes/private-channels/handlers/instance";
 import {
   addPrincipalChannelMembership,
-  connectPrivateChannelInstance,
-  createChannel,
-  createPrivateChannelDeposit,
   createPrivateChannelPrincipal,
-  createPrivateChannelTransfer,
-  createPrivateChannelWithdrawal,
-  deleteChannel,
-  deletePrivateChannelInstance,
-  deleteVerifiedWallet,
   disablePrivateChannelPrincipal,
-  disconnectPrivateChannelInstance,
-  getChannel,
-  getPrivateChannelBalance,
-  getPrivateChannelDepositById,
-  getPrivateChannelHealth,
-  getPrivateChannelInstance,
-  getPrivateChannelOverview,
-  getPrivateChannelTransferById,
-  getPrivateChannelWithdrawalById,
-  listChannelEvents,
-  listChannels,
-  listPrivateChannelDeposits,
-  listPrivateChannelEventReferences,
   listPrivateChannelPrincipals,
-  listPrivateChannelTokenEligibility,
+  removePrincipalChannelMembership,
+} from "@/routes/private-channels/handlers/members";
+import { getPrivateChannelOverview } from "@/routes/private-channels/handlers/overview";
+import { probePrivateChannelConnection } from "@/routes/private-channels/handlers/probe";
+import { listPrivateChannelTokenEligibility } from "@/routes/private-channels/handlers/tokens";
+import {
+  createPrivateChannelTransfer,
+  getPrivateChannelTransferById,
   listPrivateChannelTransferRecipients,
   listPrivateChannelTransfers,
-  listPrivateChannelWithdrawals,
-  listProjectEvents,
+} from "@/routes/private-channels/handlers/transfers";
+import {
+  deleteVerifiedWallet,
   listVerifiedWallets,
-  probePrivateChannelConnection,
-  removePrincipalChannelMembership,
-  updatePrivateChannelInstance,
   verifyWallet,
-} from "./handlers";
+} from "@/routes/private-channels/handlers/wallets";
+import {
+  createPrivateChannelWithdrawal,
+  getPrivateChannelWithdrawalById,
+  listPrivateChannelWithdrawals,
+} from "@/routes/private-channels/handlers/withdrawals";
+import type { Env } from "@/types/env";
 import {
   addPrincipalMembershipBodySchema,
   connectPrivateChannelInstanceSchema,

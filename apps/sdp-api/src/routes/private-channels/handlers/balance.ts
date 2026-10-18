@@ -1,10 +1,11 @@
-import { mapPrivateChannelInstanceRow } from "@/db/repositories";
+import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
-import { getChannelBalance, mapPrivateChannelError } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { getChannelBalance } from "@/services/private-channels/balance";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelInstanceRepository,

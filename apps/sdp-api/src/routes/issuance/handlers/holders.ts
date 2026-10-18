@@ -5,7 +5,7 @@ import {
   createCounterpartiesRepository,
   createKycWalletsRepository,
   createWalletAssetEnrollmentsRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { badRequest, notFound } from "@/lib/errors";
 import { parsePagination } from "@/lib/query";
 import { created, success } from "@/lib/response";

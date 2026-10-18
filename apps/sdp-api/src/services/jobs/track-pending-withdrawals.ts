@@ -35,15 +35,17 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types";
 import { address, type Signature } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
+import type { PrivateChannelSettlementObservationRepository } from "@/db/repositories/private-channel-settlement-observation.repository";
+import type {
+  PrivateChannelWithdrawalRepository,
+  PrivateChannelWithdrawalRow,
+} from "@/db/repositories/private-channel-withdrawal.repository";
 import {
   createPrivateChannelInstanceRepository,
   createPrivateChannelSettlementObservationRepository,
   createPrivateChannelWithdrawalRepository,
-  type PrivateChannelInstanceRow,
-  type PrivateChannelSettlementObservationRepository,
-  type PrivateChannelWithdrawalRepository,
-  type PrivateChannelWithdrawalRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { knownMintToken } from "@/services/private-channels/mint";

@@ -1,5 +1,5 @@
 import { RAMP_PROVIDERS, UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
 import { forbidden, insufficientPermissions } from "@/lib/errors";

@@ -31,7 +31,7 @@ import {
   type SdpRampProviderStages,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, forbidden } from "@/lib/errors";

@@ -5,16 +5,15 @@ import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
 import {
   admitTransferBatchExecution,
   authorizeTransferBatch,
   createTransferBatch,
-  estimateTransferBatch,
   findTransferBatchRecordReplay,
-  getTransferBatch,
-  listTransferBatches,
-} from "./handlers";
+} from "@/routes/payments/transfer-batches/create";
+import { estimateTransferBatch } from "@/routes/payments/transfer-batches/estimate";
+import { getTransferBatch, listTransferBatches } from "@/routes/payments/transfer-batches/read";
+import type { Env } from "@/types/env";
 import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 import { createTransferBatchSchema, estimateTransferBatchSchema } from "./schemas";
 

@@ -27,7 +27,33 @@ import {
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
 import { HELIUS_RINGS_OPERATION_MOVEMENTS } from "@sdp/types";
-import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
+import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db/client";
+import type { HeliusRingsAssetRepository } from "@/db/repositories/helius-rings-asset.repository";
+import {
+  type HeliusRingsEventRepository,
+  mapHeliusRingsEventRow,
+} from "@/db/repositories/helius-rings-event.repository";
+import {
+  type HeliusRingsHealthRepository,
+  mapHeliusRingsHealthRows,
+} from "@/db/repositories/helius-rings-health.repository";
+import {
+  type HeliusRingsOperationRepository,
+  type HeliusRingsOperationRow,
+  RETIRED_APPROVAL_FAILURE,
+} from "@/db/repositories/helius-rings-operation.repository";
+import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
+import {
+  type HeliusRingsProjectRingRepository,
+  type HeliusRingsProjectRingRow,
+  mapHeliusRingsProjectRingRow,
+} from "@/db/repositories/helius-rings-project-ring.repository";
+import {
+  type HeliusRingsWalletRepository,
+  type HeliusRingsWalletRow,
+  mapHeliusRingsWalletRow,
+} from "@/db/repositories/helius-rings-wallet.repository";
+import { createPostgresHeliusRingsWalletRepository } from "@/db/repositories/helius-rings-wallet.repository.postgres";
 import {
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
@@ -35,23 +61,7 @@ import {
   createHeliusRingsOperationRepository,
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
-  createPostgresHeliusRingsOperationRepository,
-  createPostgresHeliusRingsWalletRepository,
-  type HeliusRingsAssetRepository,
-  type HeliusRingsEventRepository,
-  type HeliusRingsHealthRepository,
-  type HeliusRingsOperationRepository,
-  type HeliusRingsOperationRow,
-  type HeliusRingsProjectRingRepository,
-  type HeliusRingsProjectRingRow,
-  type HeliusRingsWalletRepository,
-  type HeliusRingsWalletRow,
-  mapHeliusRingsEventRow,
-  mapHeliusRingsHealthRows,
-  mapHeliusRingsProjectRingRow,
-  mapHeliusRingsWalletRow,
-  RETIRED_APPROVAL_FAILURE,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { AppError } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";

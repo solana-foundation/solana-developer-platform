@@ -31,7 +31,7 @@ import type {
 import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
 import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -44,6 +44,7 @@ import { badRequest, internalError, notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
@@ -62,7 +63,7 @@ import {
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import type { AppContext } from "../context";
-import { requireEarnStrategyForCaller, resolveSdpEnvironment } from "../context";
+import { requireEarnStrategyForCaller } from "../context";
 import {
   type earnExternalWalletDepositTransactionSchema,
   earnExternalWalletEarningsQuerySchema,

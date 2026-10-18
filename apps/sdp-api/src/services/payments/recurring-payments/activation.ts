@@ -12,6 +12,7 @@ import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isActivatingRecurringPaymentStatus,
 } from "@sdp/types";
+import type { PaymentRecurringPaymentActivationAttemptStage } from "@sdp/types/payments";
 import {
   type Address,
   createNoopSigner,
@@ -20,20 +21,23 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import type {
+  PaymentRecurringPaymentActivationAttemptRow,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type {
+  PaymentSubscriptionPlanRow,
+  PaymentSubscriptionRow,
+  PaymentSubscriptionsRepository,
+} from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
-  createPostgresPaymentRecurringPaymentsRepository,
-  createPostgresPaymentSubscriptionsRepository,
-  type PaymentRecurringPaymentActivationAttemptRow,
-  type PaymentRecurringPaymentActivationAttemptStage,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  type PaymentSubscriptionPlanRow,
-  type PaymentSubscriptionRow,
-  type PaymentSubscriptionsRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -43,7 +47,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
@@ -695,7 +699,7 @@ export async function activateRecurringPayment(input: {
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");
     const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
     const mint = assertValidAddress(claimed.token, "token");
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,

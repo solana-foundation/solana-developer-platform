@@ -4,8 +4,8 @@ import {
   organizationStatusMayStartMoney,
   type ProjectEnvironment,
 } from "@sdp/types";
-import { getDb } from "@/db";
 import type { DatabaseExecutor } from "@/db/client";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";

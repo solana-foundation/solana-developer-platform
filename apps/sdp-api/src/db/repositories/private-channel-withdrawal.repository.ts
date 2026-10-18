@@ -3,7 +3,7 @@ import type {
   PrivateChannelTransferStatus,
   PrivateChannelWithdrawal,
 } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelWithdrawalId(): string {
   return `wd_${crypto.randomUUID()}`;

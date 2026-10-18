@@ -3,7 +3,7 @@
  */
 
 import { Hono } from "hono";
-import { runWithSystemDatabaseIdentity } from "@/db";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";

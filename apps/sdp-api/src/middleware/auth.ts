@@ -22,7 +22,8 @@ import type {
 } from "@sdp/types";
 import { organizationStatusMayAuthenticate } from "@sdp/types";
 import type { Context, Next } from "hono";
-import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import {
   apiKeyCacheKey,
   fillApiKeyCache,

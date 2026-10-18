@@ -37,7 +37,7 @@ import type { Signature } from "@solana/kit";
 import type {
   PrivateChannelTransferRepository,
   PrivateChannelTransferRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-transfer.repository";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";

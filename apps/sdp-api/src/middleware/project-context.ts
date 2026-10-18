@@ -1,7 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Context, Next } from "hono";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db/client";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";
 import { isProductionEntitled, productionNotEnabled } from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";

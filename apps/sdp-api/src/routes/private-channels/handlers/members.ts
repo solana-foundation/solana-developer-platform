@@ -6,16 +6,14 @@ import {
 import type {
   PrivateChannelMembershipWithChannelRow,
   PrivateChannelUserRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-user.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import {
-  mapPrivateChannelError,
-  provisionPrincipal,
-  revokePrivateChannelPrincipalWallets,
-} from "@/services/private-channels";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
+import { provisionPrincipal } from "@/services/private-channels/members";
+import { revokePrivateChannelPrincipalWallets } from "@/services/private-channels/wallets";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelInstanceRepository,

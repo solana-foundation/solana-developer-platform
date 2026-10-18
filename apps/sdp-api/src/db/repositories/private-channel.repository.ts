@@ -1,5 +1,5 @@
 import type { PrivateChannelRow } from "@sdp/private-channels/channels";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type { PrivateChannelRow };
 

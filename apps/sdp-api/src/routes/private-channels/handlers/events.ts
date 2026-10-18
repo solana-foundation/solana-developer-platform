@@ -4,7 +4,7 @@ import type {
   PrivateChannelEventStatus,
 } from "@sdp/types";
 import { hasPermission, PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/types";
-import type { PrivateChannelEventRow } from "@/db/repositories";
+import type { PrivateChannelEventRow } from "@/db/repositories/private-channel-event.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";

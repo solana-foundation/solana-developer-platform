@@ -3,7 +3,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS } from "@sdp/types";
+import { SOL_DECIMALS, SOL_MINT } from "@sdp/types";
 import {
   type AccountMeta,
   AccountRole,
@@ -26,11 +26,11 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, rateLimited } from "@/lib/errors";
-import { buildSplTransferInstructions, SOL_MINT } from "@/routes/payments/token-accounts";
+import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import {
   createSponsorshipFeePayment,

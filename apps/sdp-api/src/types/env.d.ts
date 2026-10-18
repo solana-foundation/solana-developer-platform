@@ -400,5 +400,5 @@ declare module "hono" {
 }
 
 declare global {
-  type DatabaseClient = import("@/db").DatabaseClient;
+  type DatabaseClient = import("@/db/client").DatabaseClient;
 }

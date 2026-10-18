@@ -25,18 +25,18 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { TransferChainVerdictStatus } from "@sdp/types";
+import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
-import {
-  createSystemPaymentsRepository,
-  createSystemPaymentTransferBatchesRepository,
-  type PaymentsRepository,
-  WALLET_TRANSFER_TYPES,
-} from "@/db/repositories";
 import type {
   ConfirmedTransferPollVerdict,
+  PaymentsRepository,
   PaymentTransferRow,
   UpdatePaymentTransferInput,
 } from "@/db/repositories/payments.repository";
+import {
+  createSystemPaymentsRepository,
+  createSystemPaymentTransferBatchesRepository,
+} from "@/db/repositories/repository-factory";
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";

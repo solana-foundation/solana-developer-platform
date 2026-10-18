@@ -26,7 +26,7 @@
 import { createHash } from "node:crypto";
 import { createRpc } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresDvpLegActionRequestRepository,
   type DvpLegActionAttempt,

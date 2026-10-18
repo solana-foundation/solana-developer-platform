@@ -13,7 +13,7 @@ import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";

@@ -1,5 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types";
-import type { AppDb } from "@/db";
+import type { DatabaseClient as AppDb } from "@/db/client";
 
 /**
  * Orphaned split-swap advisories (PRO-1864): the record that SDP handed a

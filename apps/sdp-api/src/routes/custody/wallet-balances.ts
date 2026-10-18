@@ -14,9 +14,9 @@
 
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import { type CustodyWalletTokenBalance, SOL_MINT } from "@sdp/types";
 import { type Address, isAddress } from "@solana/kit";
-import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { getSplTokenBalances } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 
 const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
@@ -77,7 +77,7 @@ async function readWalletBalance(
   const generation = cacheGeneration;
   const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
     lamportsRead,
-    tokenAccounts.getSplTokenBalances(rpc, walletAddress),
+    getSplTokenBalances(rpc, walletAddress),
   ]);
 
   if (solBalanceResult.status === "rejected") {
@@ -110,7 +110,7 @@ async function readWalletBalance(
   const balances: CustodyWalletTokenBalance[] = [
     {
       token: "SOL",
-      mint: tokenAccounts.SOL_MINT,
+      mint: SOL_MINT,
       amount: lamports.toString(),
       uiAmount: formatDecimalAmount(lamports, 9),
       decimals: 9,

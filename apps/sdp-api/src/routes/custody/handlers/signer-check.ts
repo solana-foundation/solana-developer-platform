@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
@@ -17,7 +18,7 @@ import {
   verifySignature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -29,8 +30,7 @@ import {
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { FeePaymentError } from "@/services/ports";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,

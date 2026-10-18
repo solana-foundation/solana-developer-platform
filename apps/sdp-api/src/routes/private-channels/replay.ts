@@ -1,9 +1,7 @@
 import { hasAllPermissions } from "@sdp/types";
-import type {
-  PrivateChannelDepositRow,
-  PrivateChannelTransferRow,
-  PrivateChannelWithdrawalRow,
-} from "@/db/repositories";
+import type { PrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
+import type { PrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
+import type { PrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
 import {

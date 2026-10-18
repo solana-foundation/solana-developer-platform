@@ -1,5 +1,5 @@
 import { Hono, type Next } from "hono";
-import { runWithSystemDatabaseIdentity } from "@/db";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";

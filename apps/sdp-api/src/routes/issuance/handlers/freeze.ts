@@ -3,7 +3,7 @@ import { type Address, assertValidAddress } from "@sdp/solana/address";
 import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sdp/types";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";

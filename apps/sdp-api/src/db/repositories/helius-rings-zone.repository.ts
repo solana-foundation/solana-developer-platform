@@ -1,5 +1,5 @@
 import type { Zone, ZoneKind } from "@sdp/helius-rings";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateHeliusRingsZoneId(): string {
   return `hrz_${crypto.randomUUID()}`;
