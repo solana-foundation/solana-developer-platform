@@ -1,5 +1,5 @@
 import { PrivySigner } from "@solana/keychain-privy";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { KeychainPrivyAdapter } from "./keychain-privy.adapter";
 
 const WALLET_ADDRESS = "11111111111111111111111111111111";
@@ -24,7 +24,9 @@ describe("privy adapter", () => {
     await expect(adapter.getPublicKey("privy_wallet-1")).resolves.toBe(WALLET_ADDRESS);
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/wallets/wallet-1");
+    const retryCall = fetchSpy.mock.calls[1];
+    assert.isDefined(retryCall);
+    expect(String(retryCall[0])).toContain("/wallets/wallet-1");
   });
 
   it("creates the Privy signer from its config and the unprefixed wallet id", async () => {
