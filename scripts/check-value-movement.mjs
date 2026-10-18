@@ -337,8 +337,7 @@ function handsModuleOut(checker, node, pinnedNamespaces) {
 }
 
 /** Resolves a package specifier (an external constructor) the way the program does. */
-function resolveModuleSource(program, specifier) {
-  const containingFile = program.getRootFileNames()[0];
+function resolveModuleSource(program, specifier, containingFile) {
   const resolved = ts.resolveModuleName(
     specifier,
     containingFile,
@@ -348,10 +347,37 @@ function resolveModuleSource(program, specifier) {
   return resolved ? program.getSourceFile(resolved.resolvedFileName) : undefined;
 }
 
-/** Resolves a capability's declared symbols in the program (`name: "*"` is every value export). */
-function resolveSymbol(checker, program, rootDir, capabilitySymbol) {
+/**
+ * The file a capability's `module` symbols resolve from: the first program source file under its
+ * first owner directory, or the program's first root file for a capability every workspace may
+ * import (no owners).
+ */
+function ownerSourceFile(program, rootDir, capability) {
+  if (capability.owners.length === 0) {
+    return program.getRootFileNames()[0];
+  }
+  const ownerDir = path.join(rootDir, capability.owners[0], "/");
+  const source = program.getSourceFiles().find((file) => file.fileName.startsWith(ownerDir));
+  if (!source) {
+    throw new Error(
+      `Capability ${capability.id} owner ${capability.owners[0]} has no file in the program`
+    );
+  }
+  return source.fileName;
+}
+
+/**
+ * Resolves a capability's declared symbols in the program (`name: "*"` is every value export).
+ * A `module` symbol is resolved from a source file inside the capability's first owner, since
+ * only the owner declares the dependency and pnpm's strict `node_modules` hides it everywhere else.
+ */
+function resolveSymbol(checker, program, rootDir, capability, capabilitySymbol) {
   const source = capabilitySymbol.module
-    ? resolveModuleSource(program, capabilitySymbol.module)
+    ? resolveModuleSource(
+        program,
+        capabilitySymbol.module,
+        ownerSourceFile(program, rootDir, capability)
+      )
     : program.getSourceFile(path.join(rootDir, capabilitySymbol.file));
   if (!source) {
     throw new Error(
@@ -407,7 +433,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
   const targets = new Map();
   for (const capability of capabilities) {
     for (const capabilitySymbol of capability.symbols) {
-      for (const symbol of resolveSymbol(checker, program, rootDir, capabilitySymbol)) {
+      for (const symbol of resolveSymbol(checker, program, rootDir, capability, capabilitySymbol)) {
         targets.set(symbol, capability);
       }
     }
