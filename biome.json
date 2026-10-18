@@ -43,7 +43,8 @@
         "noNonNullAssertion": "warn",
         "useConst": "error",
         "noEnum": "error",
-        "useImportType": "error"
+        "useImportType": "error",
+        "noDefaultExport": "error"
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
@@ -279,6 +280,52 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/app/**/page.ts",
+        "**/app/**/page.tsx",
+        "**/app/**/layout.ts",
+        "**/app/**/layout.tsx",
+        "**/app/**/loading.ts",
+        "**/app/**/loading.tsx",
+        "**/app/**/error.ts",
+        "**/app/**/error.tsx",
+        "**/app/**/not-found.ts",
+        "**/app/**/not-found.tsx",
+        "**/app/**/template.ts",
+        "**/app/**/template.tsx",
+        "**/app/**/default.ts",
+        "**/app/**/default.tsx",
+        "**/app/**/global-error.ts",
+        "**/app/**/global-error.tsx",
+        "**/app/**/opengraph-image.ts",
+        "**/app/**/opengraph-image.tsx",
+        "**/app/**/twitter-image.ts",
+        "**/app/**/twitter-image.tsx",
+        "**/app/**/sitemap.ts",
+        "**/app/**/sitemap.tsx",
+        "**/app/**/robots.ts",
+        "**/app/**/robots.tsx",
+        "**/app/**/manifest.ts",
+        "**/app/**/manifest.tsx",
+        "**/src/middleware.ts",
+        "**/src/proxy.ts",
+        "**/src/instrumentation.ts",
+        "**/*.config.ts",
+        "**/*.config.mts",
+        "**/*.config.js",
+        "**/*.config.mjs",
+        "**/mdx-components.tsx",
+        "**/agents/sdp-translation-agent/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
           }
         }
       }

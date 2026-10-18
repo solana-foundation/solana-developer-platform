@@ -4,7 +4,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { CounterpartyCreateProvider } from "../counterparty-create-context.redesign";
 import { CounterpartyCreatePage } from "../counterparty-create-page.redesign";
 
-async function CounterpartyCreateRoute() {
+export async function CounterpartyCreateRoute() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -19,5 +19,3 @@ async function CounterpartyCreateRoute() {
     </CounterpartyCreateProvider>
   );
 }
-
-export default CounterpartyCreateRoute;

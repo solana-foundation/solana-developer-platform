@@ -54,7 +54,7 @@ const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
 // Rotation retries must not consume the budget for rollback or candidate cancellation.
 const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
 
-const internalCustody = new Hono<{ Bindings: Env }>();
+export const internalCustody = new Hono<{ Bindings: Env }>();
 
 internalCustody.use("*", credentialAdminAuthMiddleware());
 internalCustody.use("*", projectContextMiddleware());
@@ -280,5 +280,3 @@ internalCustody.post("/connections/:connectionId/cancel", async (c) => {
     await privySetup.deactivate({ context: c, connectionId: params.data.connectionId })
   );
 });
-
-export default internalCustody;

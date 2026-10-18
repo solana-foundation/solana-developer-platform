@@ -6,7 +6,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterparty } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../payments-page.data";
-import RedesignRecurringPaymentsPage from "./page.redesign";
+import { RecurringPaymentsPage as RedesignRecurringPaymentsPage } from "./page.redesign";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,

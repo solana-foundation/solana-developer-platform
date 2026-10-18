@@ -1,5 +1,5 @@
 import { PaymentsDepositPageSkeleton } from "../payments-route-skeletons.redesign";
 
-export default function DepositLoading() {
+export function DepositLoading() {
   return <PaymentsDepositPageSkeleton />;
 }

@@ -15,7 +15,7 @@ import {
 } from "./handlers";
 import { updateAssetProfileSchema } from "./schemas";
 
-const assetProfiles = new Hono<{ Bindings: Env }>();
+export const assetProfiles = new Hono<{ Bindings: Env }>();
 
 assetProfiles.use("*", unifiedAuthMiddleware());
 assetProfiles.use("*", projectContextMiddleware());
@@ -41,5 +41,3 @@ assetProfiles.patch(
   updateAssetProfile
 );
 assetProfiles.delete("/:profileId", requirePermissions("tokens:write"), archiveAssetProfile);
-
-export default assetProfiles;

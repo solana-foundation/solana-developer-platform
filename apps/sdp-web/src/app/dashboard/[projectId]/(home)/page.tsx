@@ -14,7 +14,7 @@ import {
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "../payments/payments-page.data";
-import RedesignCurrentDashboardPage from "./page.redesign";
+import { CurrentDashboardPage as RedesignCurrentDashboardPage } from "./page.redesign";
 
 async function DashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([

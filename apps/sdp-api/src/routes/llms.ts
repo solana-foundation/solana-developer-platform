@@ -11,7 +11,7 @@ import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
 
-const llms = new Hono<{ Bindings: Env }>();
+export const llms = new Hono<{ Bindings: Env }>();
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
@@ -97,5 +97,3 @@ llms.get("/", (c) => {
   c.header("Cache-Control", "public, max-age=3600");
   return c.body(body);
 });
-
-export default llms;

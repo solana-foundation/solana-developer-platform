@@ -16,7 +16,7 @@ import {
   fetchRecurringPaymentById,
   fetchRecurringPaymentCollectionAttempts,
 } from "../recurring-payments.data";
-import RedesignRecurringPaymentDetailRoute from "./page.redesign";
+import { RecurringPaymentDetailRoute as RedesignRecurringPaymentDetailRoute } from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 

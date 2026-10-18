@@ -15,7 +15,7 @@ import {
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { fetchConnectionPickerOptions } from "../connections/connections.data";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
-import RedesignCurrentCustodySetupPage from "./page.redesign";
+import { CurrentCustodySetupPage as RedesignCurrentCustodySetupPage } from "./page.redesign";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 interface CustodySetupPageProps {

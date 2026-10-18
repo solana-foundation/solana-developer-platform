@@ -1,6 +1,6 @@
 import { DesignSwitch } from "@/components/new-design";
 import { RecurringPaymentDetailSkeleton } from "../../payments-route-skeletons";
-import RedesignRecurringPaymentDetailLoading from "./loading.redesign";
+import { RecurringPaymentDetailLoading as RedesignRecurringPaymentDetailLoading } from "./loading.redesign";
 
 export function PreviousRecurringPaymentDetailLoading() {
   return <RecurringPaymentDetailSkeleton />;

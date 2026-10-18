@@ -6,7 +6,7 @@ import { fetchCounterparties } from "../../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
 import { RecurringPaymentCreateWorkspace } from "../recurring-payment-create-workspace.redesign";
 
-async function RecurringPaymentCreatePage() {
+export async function RecurringPaymentCreatePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -66,5 +66,3 @@ async function RecurringPaymentCreatePage() {
     }
   );
 }
-
-export default RecurringPaymentCreatePage;

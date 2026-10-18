@@ -8,7 +8,7 @@ import { getDb } from "@/db";
 import { pingRedis } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
-const health = new Hono<{ Bindings: Env }>();
+export const health = new Hono<{ Bindings: Env }>();
 
 health.get("/", async (c) => {
   const timestamp = new Date().toISOString();
@@ -53,5 +53,3 @@ health.get("/ready", async (c) => {
 
   return body.status === "ready" ? c.json(body) : c.json(body, 503);
 });
-
-export default health;

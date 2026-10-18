@@ -789,7 +789,5 @@ curl http://localhost:8787/health`}</pre>
   );
 }
 
-export default EnvConfigurator;
-
 // Re-export field renderers for consumers / tests.
 export { FieldRow, SectionBlock } from "./FieldRenderer";

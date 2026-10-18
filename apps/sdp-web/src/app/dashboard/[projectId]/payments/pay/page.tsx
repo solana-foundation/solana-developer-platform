@@ -4,7 +4,7 @@ import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { loadPaymentsActionPageData } from "../ramps/payments-action-page.server";
 import { PaymentsActionPage } from "../ramps/ramp-action-page";
-import RedesignPaymentsPayPage from "./page.redesign";
+import { PaymentsPayPage as RedesignPaymentsPayPage } from "./page.redesign";
 
 async function PaymentsPayPage() {
   const { userId, orgId } = await auth();

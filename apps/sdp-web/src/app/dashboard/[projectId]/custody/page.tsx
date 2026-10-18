@@ -24,7 +24,7 @@ import {
 } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 import type { OnboardingStatusResponse } from "../onboarding-status";
-import RedesignCurrentCustodyPage from "./page.redesign";
+import { CurrentCustodyPage as RedesignCurrentCustodyPage } from "./page.redesign";
 import type { CustodyAvailabilityResult } from "./wallets-create-area";
 import { WalletsWorkspace } from "./wallets-workspace";
 

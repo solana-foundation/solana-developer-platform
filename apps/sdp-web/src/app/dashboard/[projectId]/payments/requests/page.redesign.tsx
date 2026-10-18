@@ -18,7 +18,7 @@ import {
 } from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace.redesign";
 
-async function PaymentRequestsPage({
+export async function PaymentRequestsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -90,5 +90,3 @@ async function PaymentRequestsPage({
     );
   });
 }
-
-export default PaymentRequestsPage;

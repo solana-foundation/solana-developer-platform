@@ -18,7 +18,7 @@ import {
 import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 import { createTransferBatchSchema, estimateTransferBatchSchema } from "./schemas";
 
-const transferBatches = new Hono<{ Bindings: Env }>();
+export const transferBatches = new Hono<{ Bindings: Env }>();
 
 transferBatches.post(
   "/estimate",
@@ -48,5 +48,3 @@ transferBatches.post(
 );
 transferBatches.get("/", requirePermissions("payments:read"), listTransferBatches);
 transferBatches.get("/:batchId", requirePermissions("payments:read"), getTransferBatch);
-
-export default transferBatches;

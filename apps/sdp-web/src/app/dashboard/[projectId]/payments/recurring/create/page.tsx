@@ -6,7 +6,7 @@ import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterparties } from "../../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
 import { RecurringPaymentCreateWorkspace } from "../recurring-payment-create-workspace";
-import RedesignRecurringPaymentCreatePage from "./page.redesign";
+import { RecurringPaymentCreatePage as RedesignRecurringPaymentCreatePage } from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 

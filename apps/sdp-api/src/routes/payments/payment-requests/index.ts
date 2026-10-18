@@ -8,7 +8,7 @@ import { authorizePaymentRequest } from "../access";
 import { createPaymentRequest, listPaymentRequests } from "./handlers";
 import { createPaymentRequestSchema } from "./schemas";
 
-const paymentRequests = new Hono<{ Bindings: Env }>();
+export const paymentRequests = new Hono<{ Bindings: Env }>();
 
 paymentRequests.get("/", requirePermissions("payments:read"), listPaymentRequests);
 paymentRequests.post(
@@ -19,5 +19,3 @@ paymentRequests.post(
   idempotent({ key: "accepted", serverErrors: "store" }),
   createPaymentRequest
 );
-
-export default paymentRequests;

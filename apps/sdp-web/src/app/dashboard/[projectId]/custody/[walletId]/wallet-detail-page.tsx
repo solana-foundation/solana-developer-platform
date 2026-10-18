@@ -149,11 +149,7 @@ async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Ow
   }
 }
 
-export default async function WalletDetailPage({
-  params,
-}: {
-  params: Promise<{ walletId: string }>;
-}) {
+export async function WalletDetailPage({ params }: { params: Promise<{ walletId: string }> }) {
   const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),

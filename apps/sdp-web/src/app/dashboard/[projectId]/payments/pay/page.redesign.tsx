@@ -6,7 +6,7 @@ import { PaymentsPayPageSkeleton } from "../payments-route-skeletons.redesign";
 import { loadPaymentsActionPageData } from "../ramps/payments-action-page.server";
 import { PaymentsActionPage } from "../ramps/ramp-action-page.redesign";
 
-async function PaymentsPayPage() {
+export async function PaymentsPayPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -24,5 +24,3 @@ async function PaymentsPayPage() {
     </Suspense>
   );
 }
-
-export default PaymentsPayPage;

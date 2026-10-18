@@ -46,5 +46,3 @@ export function CurrentDashboardLoading() {
     </div>
   );
 }
-
-export default CurrentDashboardLoading;

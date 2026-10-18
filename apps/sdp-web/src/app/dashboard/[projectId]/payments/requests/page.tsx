@@ -6,7 +6,7 @@ import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "../payments-page.data";
-import RedesignPaymentRequestsPage from "./page.redesign";
+import { PaymentRequestsPage as RedesignPaymentRequestsPage } from "./page.redesign";
 import { fetchPaymentRequests } from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
 

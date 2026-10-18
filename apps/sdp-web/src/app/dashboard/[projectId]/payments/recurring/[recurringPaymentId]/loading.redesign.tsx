@@ -1,5 +1,5 @@
 import { RecurringPaymentDetailSkeleton } from "../../payments-route-skeletons.redesign";
 
-export default function RecurringPaymentDetailLoading() {
+export function RecurringPaymentDetailLoading() {
   return <RecurringPaymentDetailSkeleton />;
 }

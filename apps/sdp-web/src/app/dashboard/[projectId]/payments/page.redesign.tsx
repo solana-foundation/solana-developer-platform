@@ -79,7 +79,7 @@ async function PaymentsPlaygroundData({
   );
 }
 
-async function PaymentsPage() {
+export async function PaymentsPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -116,5 +116,3 @@ async function PaymentsPage() {
     />
   );
 }
-
-export default PaymentsPage;

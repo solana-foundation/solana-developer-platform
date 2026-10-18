@@ -56,7 +56,7 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) {
+export async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -130,5 +130,3 @@ async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) 
     />
   );
 }
-
-export default CurrentCustodySetupPage;

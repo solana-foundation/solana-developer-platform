@@ -1,6 +1,6 @@
 import { DesignSwitch } from "@/components/new-design";
 import { CounterpartyMenuLoading } from "../counterparty-menu-loading";
-import RedesignCounterpartyLoading from "./loading.redesign";
+import { CounterpartyLoading as RedesignCounterpartyLoading } from "./loading.redesign";
 
 export function PreviousCounterpartyLoading() {
   return <CounterpartyMenuLoading overview="counterparty-directory" />;

@@ -7,7 +7,7 @@ import { requestProjectHref } from "@/lib/sdp-api";
 import { fetchCounterpartyDetail, fetchCounterpartyPayouts } from "../counterparty-detail.data";
 import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace.redesign";
 
-async function CounterpartyDetailRoute({
+export async function CounterpartyDetailRoute({
   params,
 }: {
   params: Promise<{ counterpartyId: string }>;
@@ -69,5 +69,3 @@ async function CounterpartyDetailRoute({
     }
   );
 }
-
-export default CounterpartyDetailRoute;

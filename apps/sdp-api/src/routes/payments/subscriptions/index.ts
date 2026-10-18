@@ -22,7 +22,7 @@ import {
   prepareSubscriptionLifecycleSchema,
 } from "./schemas";
 
-const subscriptions = new Hono<{ Bindings: Env }>();
+export const subscriptions = new Hono<{ Bindings: Env }>();
 
 subscriptions.post(
   "/",
@@ -63,5 +63,3 @@ subscriptions.get(
   requirePermissions("payments:read"),
   listSubscriptionCollectionAttempts
 );
-
-export default subscriptions;

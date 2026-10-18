@@ -21,7 +21,7 @@ import {
 
 // Mounted under /counterparties/:counterpartyId/accounts. Auth and project
 // context middleware are applied by the parent counterparties router.
-const counterpartyAccounts = new Hono<{ Bindings: Env }>();
+export const counterpartyAccounts = new Hono<{ Bindings: Env }>();
 
 counterpartyAccounts.get("/", requirePermissions("counterparties:read"), listCounterpartyAccounts);
 counterpartyAccounts.post(
@@ -55,5 +55,3 @@ counterpartyAccounts.delete(
   idempotent({ key: "accepted", serverErrors: "store" }),
   archiveCounterpartyAccount
 );
-
-export default counterpartyAccounts;

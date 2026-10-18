@@ -21,7 +21,7 @@ const verifyApiKeySchema = z.object({
     .regex(/^sk_(test|live)_[A-Za-z0-9_-]+$/),
 });
 
-const playgroundInternal = new Hono<{ Bindings: Env }>();
+export const playgroundInternal = new Hono<{ Bindings: Env }>();
 
 playgroundInternal.use("*", unifiedAuthMiddleware());
 playgroundInternal.use("*", requireClerkSession());
@@ -61,5 +61,3 @@ playgroundInternal.post(
     return success(c, identity);
   }
 );
-
-export default playgroundInternal;

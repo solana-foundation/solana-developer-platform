@@ -19,7 +19,7 @@ import {
   updateSubscriptionPlanSchema,
 } from "./schemas";
 
-const subscriptionPlans = new Hono<{ Bindings: Env }>();
+export const subscriptionPlans = new Hono<{ Bindings: Env }>();
 
 subscriptionPlans.post(
   "/",
@@ -46,5 +46,3 @@ subscriptionPlans.patch(
   idempotent({ key: "accepted", serverErrors: "store" }),
   updateSubscriptionPlan
 );
-
-export default subscriptionPlans;

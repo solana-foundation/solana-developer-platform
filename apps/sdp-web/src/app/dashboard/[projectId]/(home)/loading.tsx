@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useHomeQuickStartPending } from "../use-home-quick-start";
-import RedesignDashboardLoading from "./loading.redesign";
+import { CurrentDashboardLoading as RedesignDashboardLoading } from "./loading.redesign";
 
 // Mirrors the hero: three context figures under the balance, then the allocation.
 const HERO_STAT_IDS = ["home-hero-stat-1", "home-hero-stat-2", "home-hero-stat-3"];

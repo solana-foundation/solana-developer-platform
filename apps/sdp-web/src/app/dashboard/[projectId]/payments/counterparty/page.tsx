@@ -6,7 +6,7 @@ import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { fetchCounterparties } from "./counterparty-page.data";
 import { CounterpartyWorkspace } from "./counterparty-workspace";
-import RedesignCounterpartyPage from "./page.redesign";
+import { CounterpartyPage as RedesignCounterpartyPage } from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 

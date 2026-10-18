@@ -14,7 +14,7 @@ import {
   fetchPaymentsWallets,
 } from "../payments/payments-page.data";
 
-async function CurrentDashboardPage() {
+export async function CurrentDashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
@@ -94,5 +94,3 @@ async function CurrentDashboardPage() {
     throw error;
   }
 }
-
-export default CurrentDashboardPage;

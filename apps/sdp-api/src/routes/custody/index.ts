@@ -41,7 +41,7 @@ import {
   updateWalletSchema,
 } from "./schemas";
 
-const wallets = new Hono<{ Bindings: Env }>();
+export const wallets = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 wallets.use("*", unifiedAuthMiddleware());
@@ -99,5 +99,3 @@ wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/aggregate", requirePermissions("wallets:read"), getWalletAggregate);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
 wallets.get("/:walletId", requirePermissions("wallets:read"), getWalletById);
-
-export default wallets;

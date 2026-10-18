@@ -20,7 +20,7 @@ interface TransactionsPageProps {
 // API's maximum page size; a contact beyond it still filters by id from a deep link.
 const CONTACT_OPTION_LIMIT = 100;
 
-async function TransactionsPage({ searchParams }: TransactionsPageProps) {
+export async function TransactionsPage({ searchParams }: TransactionsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
@@ -65,5 +65,3 @@ async function TransactionsPage({ searchParams }: TransactionsPageProps) {
     />
   );
 }
-
-export default TransactionsPage;

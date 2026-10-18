@@ -13,7 +13,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
-import RedesignPaymentsPage from "./page.redesign";
+import { PaymentsPage as RedesignPaymentsPage } from "./page.redesign";
 import { PaymentsCommandCenter } from "./payments-command-center";
 import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
 import { PaymentsPlaygroundWorkspace } from "./payments-workspace";

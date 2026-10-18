@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
 
-const openapi = new Hono<{ Bindings: Env }>();
+export const openapi = new Hono<{ Bindings: Env }>();
 
 export function createWeakEtag(value: string): string {
   let hash = 2_166_136_261;
@@ -71,5 +71,3 @@ openapi.get("/", (c) => {
   c.header("Content-Type", "application/json; charset=UTF-8");
   return c.body(document.body);
 });
-
-export default openapi;

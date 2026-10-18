@@ -7,7 +7,7 @@ import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { requestProjectHref } from "@/lib/sdp-api";
 import { fetchCounterpartyDetail } from "../counterparty-detail.data";
 import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace";
-import RedesignCounterpartyDetailRoute from "./page.redesign";
+import { CounterpartyDetailRoute as RedesignCounterpartyDetailRoute } from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 

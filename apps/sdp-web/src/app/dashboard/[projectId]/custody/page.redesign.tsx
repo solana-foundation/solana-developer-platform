@@ -77,7 +77,7 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-async function CurrentCustodyPage() {
+export async function CurrentCustodyPage() {
   const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -155,5 +155,3 @@ async function CurrentCustodyPage() {
     throw error;
   }
 }
-
-export default CurrentCustodyPage;

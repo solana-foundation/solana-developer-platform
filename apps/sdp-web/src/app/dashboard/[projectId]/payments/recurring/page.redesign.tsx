@@ -15,7 +15,7 @@ interface RecurringPaymentsPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
+export async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -101,5 +101,3 @@ async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProp
     }
   );
 }
-
-export default RecurringPaymentsPage;

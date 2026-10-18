@@ -10,9 +10,7 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { createApp } from "@/app";
 import { noopObservability } from "@/runtime/observability";
 
-const app = createApp({
+export const app = createApp({
   observability: noopObservability,
   rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
 });
-
-export default app;

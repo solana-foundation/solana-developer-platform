@@ -55,7 +55,7 @@ import {
   verifyWalletBodySchema,
 } from "./schemas";
 
-const privateChannels = new Hono<{ Bindings: Env }>();
+export const privateChannels = new Hono<{ Bindings: Env }>();
 
 /**
  * Router-wide gate: 403 FORBIDDEN unless the feature flag is enabled. Applied
@@ -250,5 +250,3 @@ privateChannels.delete(
   requirePermissions("projects:write"),
   disablePrivateChannelPrincipal
 );
-
-export default privateChannels;

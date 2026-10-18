@@ -1,5 +1,5 @@
 import { CounterpartyMenuLoading } from "../counterparty-menu-loading.redesign";
 
-export default function PaymentRequestsLoading() {
+export function PaymentRequestsLoading() {
   return <CounterpartyMenuLoading overview="payment-requests" />;
 }

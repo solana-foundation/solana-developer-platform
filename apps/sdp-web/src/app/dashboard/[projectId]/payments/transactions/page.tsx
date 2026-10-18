@@ -6,7 +6,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchIssuedTokensByMint } from "../payments-page.data";
-import RedesignTransactionsPage from "./page.redesign";
+import { TransactionsPage as RedesignTransactionsPage } from "./page.redesign";
 import { enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data";
 import { parseTransactionFilters } from "./transactions-query";

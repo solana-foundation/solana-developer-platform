@@ -24,7 +24,7 @@ const connectionInputSchema = z.strictObject({
 });
 const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().min(1) });
 
-const routes = new Hono<{ Bindings: Env }>();
+export const routes = new Hono<{ Bindings: Env }>();
 routes.use("*", requireModule("helius_rings"));
 routes.use("*", organizationCredentialAdminAuthMiddleware());
 routes.use("*", projectContextMiddleware());
@@ -61,5 +61,3 @@ function parseParams(value: unknown) {
   }
   return parsed.data;
 }
-
-export default routes;

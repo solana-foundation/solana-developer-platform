@@ -69,7 +69,7 @@ async function fetchAllCounterpartyWalletAccounts(
   return accounts;
 }
 
-async function RecurringPaymentDetailRoute({
+export async function RecurringPaymentDetailRoute({
   params,
 }: {
   params: Promise<{ recurringPaymentId: string }>;
@@ -165,5 +165,3 @@ async function RecurringPaymentDetailRoute({
     }
   );
 }
-
-export default RecurringPaymentDetailRoute;
