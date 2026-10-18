@@ -1,4 +1,5 @@
-import { closeDatabasePools, getDb, runWithSystemDatabaseIdentity } from "../src/db";
+import { closeDatabasePools, getDb } from "../src/db/client";
+import { runWithSystemDatabaseIdentity } from "../src/db/identity";
 import { getProcessEnv } from "../src/lib/runtime-env";
 import { createCustodyCipher } from "../src/services/custody-cipher/cipher-router";
 import { migrateNestedCustodySecrets } from "../src/services/custody-cipher/nested-secret-migration";

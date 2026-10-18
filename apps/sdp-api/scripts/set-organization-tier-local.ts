@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDatabaseClient, runWithSystemDatabaseIdentity } from "../src/db";
+import { createDatabaseClient } from "../src/db/client";
+import { runWithSystemDatabaseIdentity } from "../src/db/identity";
 import { ClerkOrganizationsService } from "../src/services/clerk-organizations.service";
 import {
   parseProviderOverridesFromClerkMetadata,

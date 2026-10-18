@@ -1,4 +1,5 @@
-import { closeDatabasePools, getDb, runWithSystemDatabaseIdentity } from "../src/db";
+import { closeDatabasePools, getDb } from "../src/db/client";
+import { runWithSystemDatabaseIdentity } from "../src/db/identity";
 import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
