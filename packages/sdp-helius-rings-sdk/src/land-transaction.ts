@@ -32,6 +32,7 @@ export async function landTransaction(
   const signed = await deps.signTransaction(unsigned, owner);
   const signature = await deps.submitTransaction(signed);
 
+  // SAFETY: submitTransaction returns the base58 signature the broadcasting RPC reported.
   await deps.client.confirmTransaction(signature as Signature);
 
   return signature;
