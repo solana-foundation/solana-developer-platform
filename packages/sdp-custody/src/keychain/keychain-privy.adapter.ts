@@ -17,7 +17,7 @@ import type { KeychainPrivyConfig } from "./types";
 export class KeychainPrivyAdapter extends BaseKeychainAdapter {
   readonly providerId = "privy";
 
-  private readonly config: KeychainPrivyConfig;
+  readonly config: KeychainPrivyConfig;
   private readonly signerByWalletId = new Map<string, Promise<PrivySigner>>();
 
   constructor(config: KeychainPrivyConfig) {

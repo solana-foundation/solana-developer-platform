@@ -26,7 +26,8 @@
       "correctness": {
         "noUnusedVariables": "error",
         "noUnusedImports": "error",
-        "useExhaustiveDependencies": "warn"
+        "useExhaustiveDependencies": "warn",
+        "noUnusedPrivateClassMembers": "error"
       },
       "suspicious": {
         "noExplicitAny": "error",
@@ -35,11 +36,14 @@
         "noConfusingVoidType": "error",
         "noAsyncPromiseExecutor": "error",
         "noUnsafeDeclarationMerging": "error",
-        "noVar": "error"
+        "noVar": "error",
+        "noTsIgnore": "error"
       },
       "style": {
         "noNonNullAssertion": "warn",
-        "useConst": "error"
+        "useConst": "error",
+        "noEnum": "error",
+        "useImportType": "error"
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
@@ -49,7 +53,8 @@
           }
         },
         "noBannedTypes": "error",
-        "noUselessTypeConstraint": "error"
+        "noUselessTypeConstraint": "error",
+        "noStaticOnlyClass": "error"
       },
       "security": {
         "noDangerouslySetInnerHtml": "error",
@@ -216,7 +221,7 @@
       }
     },
     {
-      "includes": ["**/apps/sdp-api/**/*.ts", "**/packages/**/*.ts"],
+      "includes": ["**/apps/sdp-api/**/*.ts", "**/packages/**/*.ts", "!**/packages/sdp-custody/**"],
       "linter": {
         "rules": {
           "style": {
@@ -233,7 +238,13 @@
                     "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
-                }
+                },
+                "patterns": [
+                  {
+                    "group": ["@solana/keychain-*"],
+                    "message": "Vendor signers are wrapped by @sdp/custody only. Import the SigningPort adapter from @sdp/custody/keychain; a direct vendor import bypasses the custody port and money admission."
+                  }
+                ]
               }
             }
           }

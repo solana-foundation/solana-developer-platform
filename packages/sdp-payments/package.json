@@ -84,7 +84,6 @@
     "@sdp/redaction": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
-    "@solana/addresses": "catalog:",
     "@solana/fixed-points": "7.1.1",
     "@solana/kit": "catalog:",
     "zod": "4.6.5"

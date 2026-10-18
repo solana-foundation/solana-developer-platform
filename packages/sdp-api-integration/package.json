@@ -18,8 +18,6 @@
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana/codecs": "catalog:",
-    "@solana/keychain-cdp": "1.4.0",
-    "@solana/keychain-para": "1.4.0",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
