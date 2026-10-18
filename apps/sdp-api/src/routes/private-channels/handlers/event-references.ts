@@ -1,4 +1,4 @@
-import { hasPermission } from "@sdp/types";
+import { hasPermission } from "@sdp/types/permissions";
 import type { PrivateChannelReferenceWalletScope } from "@/db/repositories/private-channel-reference.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";

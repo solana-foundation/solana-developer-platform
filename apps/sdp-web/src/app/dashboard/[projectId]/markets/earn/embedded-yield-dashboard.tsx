@@ -5,8 +5,16 @@ import type {
   EarnExternalWalletPositionSummary,
   EarnExternalWalletStrategyTotal,
   EarnStrategy,
-  SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/earn";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { TableCell } from "@sdp/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   AlertTriangleIcon,
   ChevronRightIcon,
@@ -21,24 +29,10 @@ import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { truncateMiddle } from "../truncate-middle";
 import { isPositiveDecimal } from "./earn-decimal";

@@ -2,7 +2,7 @@
 // The config you add here will be used whenever the server handles a request.
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
-import { sentryScrubbingHooks } from "@sdp/redaction";
+import { sentryScrubbingHooks } from "@sdp/redaction/sentry";
 import * as Sentry from "@sentry/nextjs";
 
 const sentryDsn =

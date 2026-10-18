@@ -1,5 +1,5 @@
-import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES, type DvpTradeSide } from "@sdp/types";
+import { createRpc } from "@sdp/rpc/solana";
+import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES, type DvpTradeSide } from "@sdp/types/dvp";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
@@ -1018,7 +1018,7 @@ export const inspectMint = async (c: AppContext) => {
 
   let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
   try {
-    inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+    inspection = await inspectDvpMint(createRpc(c.env), parsed);
   } catch {
     // The read failed, so nothing is known about the mint: retryable, never "not found".
     throw solanaRpcError("Could not read the mint from Solana. Try again.");

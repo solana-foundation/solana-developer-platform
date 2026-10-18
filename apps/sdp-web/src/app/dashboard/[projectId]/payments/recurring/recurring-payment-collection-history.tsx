@@ -3,22 +3,16 @@
 import type {
   PaymentSubscriptionCollectionAttempt,
   PaymentSubscriptionCollectionAttemptStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { RepeatIcon } from "lucide-react";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import {
   CopyableValue,

@@ -1,10 +1,6 @@
-import type {
-  MovementOf,
-  PaymentTransferType,
-  PersistedRampProviderId,
-  RampDirection,
-  RampProviderId,
-} from "@sdp/types";
+import type { MovementOf } from "@sdp/types/movements";
+import type { PaymentTransferType, RampDirection } from "@sdp/types/payments";
+import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";

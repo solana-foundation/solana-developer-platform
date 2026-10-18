@@ -1,4 +1,4 @@
-import { PAYMENT_SUBSCRIPTION_PLAN_STATUSES } from "@sdp/types";
+import { PAYMENT_SUBSCRIPTION_PLAN_STATUSES } from "@sdp/types/payments";
 import { z } from "zod";
 import {
   paymentAmountSchema,

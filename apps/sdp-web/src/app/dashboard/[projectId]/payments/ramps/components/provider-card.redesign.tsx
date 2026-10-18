@@ -1,14 +1,14 @@
 "use client";
 
-import type { PaymentRampEstimateFees, RampProviderEstimateResult } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type { PaymentRampEstimateFees, RampProviderEstimateResult } from "@sdp/types/payments";
+import { cn } from "@sdp/ui/cn";
 import { Loader2Icon } from "lucide-react";
 import { domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { RAMP_PROVIDER_LOGOS, type RampProviderOption } from "@/lib/ramps";
-import { cn } from "@/lib/utils";
 
 interface ProviderCardProps {
   option: RampProviderOption;

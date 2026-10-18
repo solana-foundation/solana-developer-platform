@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types";
+import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types/custody";
 import { redirect } from "next/navigation";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";

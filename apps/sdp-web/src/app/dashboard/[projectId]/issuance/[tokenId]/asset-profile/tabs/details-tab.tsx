@@ -1,11 +1,11 @@
 "use client";
 
-import type { Token } from "@sdp/types";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import type { Token } from "@sdp/types/tokens";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { Label } from "@sdp/ui/label";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { AdvancedSettingsEditor } from "../../../create/advanced-settings-editor";
 import { ReadOnlyField, TextField } from "../../../create/form-primitives";
 import type { DraftState } from "../../../create/issuance-draft-wizard.types";

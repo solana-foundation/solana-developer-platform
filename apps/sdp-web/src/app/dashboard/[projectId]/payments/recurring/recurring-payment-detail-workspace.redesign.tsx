@@ -1,11 +1,12 @@
 "use client";
 
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
-  CounterpartyAccount,
   PaymentRecurringPayment,
   PaymentRecurringPaymentStatus,
   PaymentSubscriptionCollectionAttempt,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
 import { ArrowUpRightIcon, Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -22,7 +23,6 @@ import {
   StateBand,
   type StateBandTone,
 } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";

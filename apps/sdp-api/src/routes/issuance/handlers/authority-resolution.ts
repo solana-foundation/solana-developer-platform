@@ -1,7 +1,9 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
 import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { MovementOf, Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
+import type { MovementOf } from "@sdp/types/movements";
+import type { Permission } from "@sdp/types/permissions";
+import type { TokenTransaction, TokenTransactionType } from "@sdp/types/tokens";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
 import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";

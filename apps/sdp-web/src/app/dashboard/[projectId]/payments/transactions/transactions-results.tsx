@@ -1,21 +1,15 @@
 "use client";
 
-import type { UnifiedTransaction, UnifiedTransactionStatus } from "@sdp/types";
+import type { UnifiedTransaction, UnifiedTransactionStatus } from "@sdp/types/unified-transactions";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Modal } from "@sdp/ui/modal";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ExternalLinkIcon, ReceiptTextIcon } from "lucide-react";
 import { useState } from "react";
 import { EntityLink } from "@/components/entity-link";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Modal } from "@/components/ui/modal";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";

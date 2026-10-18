@@ -1,10 +1,10 @@
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import {
   ONDO_DEPOSIT_TOKEN_SYMBOLS,
   type OndoDeployment,
   ondoDeployment,
   ondoDepositMints,
 } from "@sdp/types/ondo-programs";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { internalError, providerNotConfigured } from "../../errors";
 import {
   assertRpcServesCluster,

@@ -1,4 +1,4 @@
-import { COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS } from "@sdp/types";
+import { COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS } from "@sdp/types/counterparties";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { buildInClause } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";

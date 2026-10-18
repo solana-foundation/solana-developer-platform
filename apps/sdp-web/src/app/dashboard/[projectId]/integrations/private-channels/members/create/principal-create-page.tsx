@@ -1,17 +1,17 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { IdCardIcon, Loader2Icon, WalletCardsIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { formatCustodyProviderName } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";

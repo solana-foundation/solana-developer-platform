@@ -1,6 +1,7 @@
 "use client";
 
-import type { AssetProfile, Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";

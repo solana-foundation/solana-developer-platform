@@ -3,8 +3,8 @@ import type {
   PaymentTransferRecipient,
   PaymentTransferStatus,
   PaymentTransferSummary,
-} from "@sdp/types";
-import type { StatusTone } from "@/components/ui/status-text";
+} from "@sdp/types/payments";
+import type { StatusTone } from "@sdp/ui/status-text";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 /**

@@ -1,4 +1,4 @@
-import { hasPermission } from "@sdp/types";
+import { hasPermission } from "@sdp/types/permissions";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import type { AppContext } from "./context";

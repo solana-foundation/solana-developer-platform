@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
-import { derivationMessageBase64 } from "@sdp/helius-rings-sdk";
-import type { MovementId, MovementOf } from "@sdp/types";
+import { derivationMessageBase64 } from "@sdp/helius-rings-sdk/custody-ka/seed";
+import type { MovementId, MovementOf } from "@sdp/types/movements";
 import { getBase64Codec } from "@solana/codecs";
 import {
   address,

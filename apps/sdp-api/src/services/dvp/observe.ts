@@ -10,7 +10,7 @@
  * inferred from account state, and is only ever a description of one moment.
  */
 
-import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import type { DvpCloseResolution } from "./closing-transaction";
 

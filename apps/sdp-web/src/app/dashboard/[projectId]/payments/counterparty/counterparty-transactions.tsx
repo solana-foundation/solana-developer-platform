@@ -1,10 +1,12 @@
 "use client";
 
-import type {
-  PaymentTransferSummary,
-  PaymentTransferType,
-  PersistedRampProviderId,
-} from "@sdp/types";
+import type { PaymentTransferSummary, PaymentTransferType } from "@sdp/types/payments";
+import type { PersistedRampProviderId } from "@sdp/types/provider-access";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Modal } from "@sdp/ui/modal";
 import {
   ArrowRightIcon,
   BanknoteArrowDownIcon,
@@ -17,15 +19,10 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { MemoJsonView } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "../../activity-format-utils";
 import {
   formatPaymentTransferType,

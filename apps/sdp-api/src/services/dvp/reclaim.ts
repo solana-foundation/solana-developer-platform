@@ -10,8 +10,8 @@
  */
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
-import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -108,7 +108,7 @@ export async function reclaimDvpTradeLeg(
   const tokenProgram = isA ? trade.tokenProgramA : trade.tokenProgramB;
   const escrow = isA ? trade.escrowA : trade.escrowB;
 
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createRpc(env);
   const held = await readReclaimableEscrow(rpc, trade, side);
 
   await refuseTransferHookMint(rpc, trade.id, mint);
@@ -156,7 +156,7 @@ export async function reclaimDvpTradeLeg(
     createNoopSigner(sponsor)
   );
 
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
@@ -255,7 +255,7 @@ export async function reclaimDvpTradeLeg(
 }
 
 type FundingClaims = ReturnType<typeof createPostgresDvpLegFundingClaimRepository>;
-type Rpc = ReturnType<typeof solanaRpc.createRpc>;
+type Rpc = ReturnType<typeof createRpc>;
 
 /**
  * Reads the leg's escrow live and refuses anything reclaim cannot act on: a
@@ -382,7 +382,7 @@ async function releaseOnceConfirmed(
   reclaimSignature: Signature
 ) {
   try {
-    const confirmation = await solanaRpc.confirmTransaction(rpc, reclaimSignature, {
+    const confirmation = await confirmTransaction(rpc, reclaimSignature, {
       timeoutMs: RECLAIM_CONFIRM_TIMEOUT_MS,
     });
     if (

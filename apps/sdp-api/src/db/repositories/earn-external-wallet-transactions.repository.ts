@@ -1,4 +1,5 @@
-import type { EarnMovementDirection, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnMovementDirection } from "@sdp/types/earn";
 import type { DatabaseClient as AppDb } from "@/db/client";
 
 /**

@@ -1,6 +1,10 @@
 "use client";
 
-import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types";
+import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { Input } from "@sdp/ui/input";
+import { useThemeScope } from "@sdp/ui/theme-scope";
 import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, Dispatch, ReactNode, SetStateAction } from "react";
@@ -15,9 +19,6 @@ import {
   type IdentifyPendingApiKey,
   PendingApiKeyContext,
 } from "@/components/playground-pending-api-key";
-import { useThemeScope } from "@/components/theme-scope";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -33,7 +34,6 @@ import {
 } from "@/lib/playground-api-keys";
 import { setNestedValue } from "@/lib/set-nested-value";
 import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
-import { cn } from "@/lib/utils";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 

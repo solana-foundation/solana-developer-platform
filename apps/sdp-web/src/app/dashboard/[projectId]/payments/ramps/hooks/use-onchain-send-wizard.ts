@@ -1,11 +1,8 @@
 "use client";
 
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type {
-  CounterpartyAccount,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import { address } from "@solana/kit";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";

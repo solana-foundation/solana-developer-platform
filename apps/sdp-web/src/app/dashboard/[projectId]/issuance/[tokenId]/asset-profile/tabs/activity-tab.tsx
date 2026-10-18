@@ -5,22 +5,16 @@ import {
   ASSET_AUDIT_ACTOR_TYPES,
   ASSET_AUDIT_STATUSES,
   type AssetAuditEvent,
-} from "@sdp/types";
+} from "@sdp/types/audit";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Select, SelectItem } from "@/components/ui/select";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { getPageCount, getPageSummary } from "../../../pagination.utils";

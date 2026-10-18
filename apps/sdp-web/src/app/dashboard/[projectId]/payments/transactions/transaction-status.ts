@@ -1,12 +1,8 @@
 "use client";
 
-import {
-  PAYMENT_TRANSFER_STATUSES,
-  type PaymentTransferStatus,
-  type UnifiedTransaction,
-  type UnifiedTransactionStatus,
-} from "@sdp/types";
-import type { StatusTone } from "@/components/ui/status-text";
+import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types/payments";
+import type { UnifiedTransaction, UnifiedTransactionStatus } from "@sdp/types/unified-transactions";
+import type { StatusTone } from "@sdp/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { statusMessageKey } from "../payments-overview.utils";

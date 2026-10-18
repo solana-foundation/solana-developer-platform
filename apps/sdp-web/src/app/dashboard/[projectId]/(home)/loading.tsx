@@ -1,16 +1,10 @@
 "use client";
 
+import { Card, CardContent, CardHeader } from "@sdp/ui/card";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { DesignSwitch } from "@/components/new-design";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useHomeQuickStartPending } from "../use-home-quick-start";
 import { CurrentDashboardLoading as RedesignDashboardLoading } from "./loading.redesign";
 

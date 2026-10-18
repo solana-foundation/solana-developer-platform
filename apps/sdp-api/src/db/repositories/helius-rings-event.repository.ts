@@ -1,4 +1,4 @@
-import type { OperationEvent } from "@sdp/helius-rings";
+import type { OperationEvent } from "@sdp/helius-rings/types";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 import { REDACTED_LEAF_FIELDS, REDACTION_CENSOR } from "@/runtime/log-redaction";
 

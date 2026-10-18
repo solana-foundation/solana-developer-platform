@@ -1,15 +1,15 @@
 import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnExecutionModel,
   EarnMovementDirection,
   EarnMovementStatus,
-  SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/earn";
+import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types/earn";
 import {
-  EARN_MOVEMENT_TRANSITIONS,
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   EARN_PROVIDER_WITHDRAWAL_SETTLEMENT,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import {
   type DatabaseClient as AppDb,
   asTransactionalClient,

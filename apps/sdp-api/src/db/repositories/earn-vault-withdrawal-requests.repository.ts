@@ -1,4 +1,4 @@
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type DatabaseClient as AppDb,
   asTransactionalClient,

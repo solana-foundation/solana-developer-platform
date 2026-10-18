@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types";
+import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";

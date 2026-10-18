@@ -1,18 +1,18 @@
 "use client";
 
-import type { CounterpartyAccount, CounterpartyAccountResponse } from "@sdp/types";
+import type { CounterpartyAccount, CounterpartyAccountResponse } from "@sdp/types/counterparties";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { useState } from "react";
 import { toast } from "sonner";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
-import { cn } from "@/lib/utils";
 import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import { SOLANA_ADDRESS } from "./counterparty-create-schemas.redesign";
 

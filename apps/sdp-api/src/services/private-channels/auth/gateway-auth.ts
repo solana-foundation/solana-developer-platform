@@ -12,10 +12,11 @@
  * of which retries ONCE on a strict 401 with a re-minted token.
  */
 
-import { createChannelGatewayRpc, PrivateChannelError } from "@sdp/private-channels";
 import { createAuthClient, type SpcAuthClient } from "@sdp/private-channels/auth";
-import { isUnauthorizedRpcError } from "@sdp/rpc";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
+import { createChannelGatewayRpc } from "@sdp/private-channels/gateway";
 import type { SolanaRpc } from "@sdp/rpc/solana";
+import { isUnauthorizedRpcError } from "@sdp/rpc/transient";
 import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import {
   createPrivateChannelInstanceRepository,

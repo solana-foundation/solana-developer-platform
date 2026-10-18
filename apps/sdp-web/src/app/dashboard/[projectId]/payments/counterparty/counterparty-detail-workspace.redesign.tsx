@@ -1,7 +1,14 @@
 "use client";
 
 import { addDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
-import type { Counterparty, CounterpartyAccount, PaymentTransferSummary } from "@sdp/types";
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { DetailList, DetailRow } from "@sdp/ui/detail-list";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { StatusText } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
@@ -9,18 +16,6 @@ import { toast } from "sonner";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
-import { DetailList, DetailRow } from "@/components/ui/detail-list";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { StatusText } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";

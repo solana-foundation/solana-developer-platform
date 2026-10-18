@@ -1,4 +1,4 @@
-import type { Token, TokenTemplate } from "@sdp/types";
+import type { Token, TokenTemplate } from "@sdp/types/tokens";
 
 type AccessControlTokenShape = Pick<Token, "template" | "requiresAllowlist">;
 

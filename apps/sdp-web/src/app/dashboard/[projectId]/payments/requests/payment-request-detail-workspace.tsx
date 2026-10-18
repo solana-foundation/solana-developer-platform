@@ -1,6 +1,8 @@
 "use client";
 
-import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentRequest } from "@sdp/types";
+import type { PaymentRequest } from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -9,7 +11,6 @@ import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";

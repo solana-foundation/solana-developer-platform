@@ -1,29 +1,30 @@
-import {
-  EARN_PROVIDER_CLIENTS as CATALOGUE_PROVIDER_CLIENTS,
-  isEarnProviderId,
-  providerNotConfigured,
-} from "@sdp/earn";
+import { EARN_PROVIDER_CLIENTS as CATALOGUE_PROVIDER_CLIENTS, isEarnProviderId } from "@sdp/earn";
+import { providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
 import {
   assertNotPortfolioProvider as assertHastraNotPortfolioProvider,
   HastraVaultDirectClient,
-} from "@sdp/hastra";
+} from "@sdp/hastra/client";
 import {
   assertJupiterLendNotPortfolioProvider,
   JupiterLendVaultDirectClient,
-} from "@sdp/jupiter-lend";
-import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
+} from "@sdp/jupiter-lend/client";
+import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino/client";
 import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
-} from "@sdp/ondo";
-import { resolveClusterRpcUrl } from "@sdp/rpc";
-import type { EarnProviderId, SolanaCluster } from "@sdp/types";
+} from "@sdp/ondo/client";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
+import type { EarnProviderId } from "@sdp/types/provider-access";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
-} from "@sdp/veda";
-import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
+} from "@sdp/veda/client";
+import {
+  assertWisdomTreeNotPortfolioProvider,
+  WisdomTreeVaultDirectClient,
+} from "@sdp/wisdomtree/client";
 import { assertClusterEndpoint } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";

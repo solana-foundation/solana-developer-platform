@@ -1,4 +1,5 @@
-import { ALLOWED_OPERATIONS, PERMISSIONS } from "@sdp/types";
+import { ALLOWED_OPERATIONS } from "@sdp/types/allowed-operations";
+import { PERMISSIONS } from "@sdp/types/permissions";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
 import { custodyWalletOwnerSchema } from "../custody/schemas";

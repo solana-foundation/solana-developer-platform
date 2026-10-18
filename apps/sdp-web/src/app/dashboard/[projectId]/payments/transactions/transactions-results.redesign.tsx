@@ -1,24 +1,18 @@
 "use client";
 
-import type { UnifiedTransaction } from "@sdp/types";
+import type { UnifiedTransaction } from "@sdp/types/unified-transactions";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { StatusText } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ReceiptTextIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { KeyboardEvent } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { StatusText } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { transactionHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { resolveTokenByMint, shortenAddress } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";

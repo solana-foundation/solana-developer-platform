@@ -1,6 +1,15 @@
 "use client";
 
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
 import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
@@ -10,18 +19,9 @@ import {
   requestDevnetSolanaFaucetAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { cn } from "@/lib/utils";
 
 interface WalletActionsMenuProps {
   walletAddress: string;

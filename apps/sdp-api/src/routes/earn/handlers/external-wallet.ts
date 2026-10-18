@@ -1,12 +1,13 @@
-import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { isEarnProviderId } from "@sdp/earn";
 import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
-import { notImplemented } from "@sdp/earn/errors";
+import { notImplemented, providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import {
   addDecimalAmounts,
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnDepositSwap,
   EarnExternalWalletDepositResponse,
@@ -26,10 +27,13 @@ import type {
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
-  SdpEnvironment,
-} from "@sdp/types";
-import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
-import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
+} from "@sdp/types/earn";
+import {
+  earnDepositStyle,
+  earnProviderDepositSettlement,
+  earnProviderWithdrawalSettlement,
+  earnWithdrawSlippageFloor,
+} from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
 import {

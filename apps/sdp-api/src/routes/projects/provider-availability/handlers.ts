@@ -1,4 +1,4 @@
-import type { ProjectProviderAvailability } from "@sdp/types";
+import type { ProjectProviderAvailability } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";

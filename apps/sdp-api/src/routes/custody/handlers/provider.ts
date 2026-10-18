@@ -1,7 +1,7 @@
-import { normalizePem } from "@sdp/custody/provisioning";
+import { normalizePem } from "@sdp/custody/provisioning/common";
 import { SigningError } from "@sdp/custody/signing";
-import { redactCredentialString } from "@sdp/redaction";
-import type { InitializeSigningResponse } from "@sdp/types";
+import { redactCredentialString } from "@sdp/redaction/credentials";
+import type { InitializeSigningResponse } from "@sdp/types/custody";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";

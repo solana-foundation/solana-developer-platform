@@ -1,6 +1,14 @@
 "use client";
 
-import type { DvpLegOutcome, DvpTradeSide, SolanaCluster } from "@sdp/types";
+import type { DvpLegOutcome, DvpTradeSide } from "@sdp/types/dvp";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { cn } from "@sdp/ui/cn";
+import { HeightReveal } from "@sdp/ui/height-reveal";
+import { TableCell } from "@sdp/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   ArrowDownLeftIcon,
   ArrowUpRightIcon,
@@ -21,24 +29,11 @@ import { Fragment, type ReactNode, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { HeightReveal } from "@/components/ui/height-reveal";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "../../activity-format-utils";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
 import { DvpCloseActions } from "./dvp-close-actions";

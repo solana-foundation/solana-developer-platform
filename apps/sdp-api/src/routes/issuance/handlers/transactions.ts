@@ -1,10 +1,11 @@
-import { type Address, assertValidAddress } from "@sdp/solana/address";
+import { assertValidAddress } from "@sdp/solana/address";
 import {
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
   type TokenTransactionStatus,
   type TokenTransactionType,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
+import type { Address } from "@solana/addresses";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";

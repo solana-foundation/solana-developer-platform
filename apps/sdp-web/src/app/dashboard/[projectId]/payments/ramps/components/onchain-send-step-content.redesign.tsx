@@ -1,7 +1,14 @@
 "use client";
 
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import { type PaymentsDashboardWallet, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { Combobox } from "@sdp/ui/combobox";
+import { DetailList, DetailRow } from "@sdp/ui/detail-list";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import {
   ArrowUpRightIcon,
   ExternalLinkIcon,
@@ -18,16 +25,10 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
-import { DetailList, DetailRow } from "@/components/ui/detail-list";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard.redesign";
 import { walletComboboxOptions } from "../wallet-options";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";

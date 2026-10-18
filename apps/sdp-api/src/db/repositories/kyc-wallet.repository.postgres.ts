@@ -1,4 +1,4 @@
-import type { KycProvider, KycStatus } from "@sdp/types";
+import type { KycProvider, KycStatus } from "@sdp/types/kyc";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   generateKycWalletId,

@@ -13,16 +13,6 @@
       "types": "./src/port.ts",
       "import": "./src/port.ts",
       "default": "./src/port.ts"
-    },
-    "./kora": {
-      "types": "./src/kora.adapter.ts",
-      "import": "./src/kora.adapter.ts",
-      "default": "./src/kora.adapter.ts"
-    },
-    "./native": {
-      "types": "./src/native.adapter.ts",
-      "import": "./src/native.adapter.ts",
-      "default": "./src/native.adapter.ts"
     }
   },
   "scripts": {

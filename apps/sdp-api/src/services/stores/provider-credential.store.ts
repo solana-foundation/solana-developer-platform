@@ -1,4 +1,4 @@
-import type { CustodyConnectionCheckStatus, CustodyProvider } from "@sdp/types";
+import type { CustodyConnectionCheckStatus, CustodyProvider } from "@sdp/types/custody";
 import type { DatabaseExecutor } from "@/db/client";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";

@@ -1,6 +1,6 @@
+import { Badge } from "@sdp/ui/badge";
+import { Card } from "@sdp/ui/card";
 import { notFound } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { ChannelTokensPanel } from "../../../channels/channel-tokens-panel";

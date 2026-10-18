@@ -2,7 +2,7 @@ import type {
   PrivateChannelTransferContext,
   PrivateChannelTransferStatus,
   PrivateChannelWithdrawal,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelWithdrawalId(): string {

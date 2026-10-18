@@ -14,6 +14,15 @@
  * stays client-side because that list is small and complete.
  */
 
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { SearchInput } from "@sdp/ui/search-input";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   ArrowDownLeftIcon,
   ArrowLeftRightIcon,
@@ -29,26 +38,11 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { SearchInput } from "@/components/ui/search-input";
-import { Select, SelectItem } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { type UrlTableQueryAdapter, useUrlTableFilters } from "@/lib/use-url-table-filters";
-import { cn } from "@/lib/utils";
 import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { InboundRows } from "./dvp-inbound-rows";
 import { DvpPartyCell } from "./dvp-party-cell";

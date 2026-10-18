@@ -1,16 +1,14 @@
-import { buildKeychainUtilaConfig } from "@sdp/custody";
-import { createDfnsApiClient, createIbmHavenApiClient } from "@sdp/custody/dfns";
-import {
-  KeychainCoinbaseAdapter,
-  KeychainDfnsAdapter,
-  KeychainFireblocksAdapter,
-  KeychainIbmHavenAdapter,
-  KeychainMemoryAdapter,
-  KeychainParaAdapter,
-  KeychainPrivyAdapter,
-  KeychainTurnkeyAdapter,
-  KeychainUtilaAdapter,
-} from "@sdp/custody/keychain";
+import { createDfnsApiClient, createIbmHavenApiClient } from "@sdp/custody/dfns/client";
+import { KeychainCoinbaseAdapter } from "@sdp/custody/keychain/keychain-coinbase.adapter";
+import { KeychainDfnsAdapter } from "@sdp/custody/keychain/keychain-dfns.adapter";
+import { KeychainFireblocksAdapter } from "@sdp/custody/keychain/keychain-fireblocks.adapter";
+import { KeychainIbmHavenAdapter } from "@sdp/custody/keychain/keychain-ibm-haven.adapter";
+import { KeychainMemoryAdapter } from "@sdp/custody/keychain/keychain-memory.adapter";
+import { KeychainParaAdapter } from "@sdp/custody/keychain/keychain-para.adapter";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
+import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain/keychain-turnkey.adapter";
+import { KeychainUtilaAdapter } from "@sdp/custody/keychain/keychain-utila.adapter";
+import { buildKeychainUtilaConfig } from "@sdp/custody/keychain/utila-config";
 import { SigningError, type SigningPort } from "@sdp/custody/signing";
 import type { Address } from "@solana/kit";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";

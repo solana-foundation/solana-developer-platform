@@ -1,4 +1,4 @@
-import { hasAllPermissions } from "@sdp/types";
+import { hasAllPermissions } from "@sdp/types/permissions";
 import type { PrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
 import type { PrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
 import type { PrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";

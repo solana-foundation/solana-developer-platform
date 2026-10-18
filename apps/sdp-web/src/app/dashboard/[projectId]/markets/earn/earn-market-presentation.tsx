@@ -1,9 +1,10 @@
 "use client";
 
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import { type EarnStrategy, type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import type { EarnStrategy } from "@sdp/types/earn";
+import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Badge } from "@sdp/ui/badge";
 import { ExternalLinkIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { truncateMiddle } from "../truncate-middle";

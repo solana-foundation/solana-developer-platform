@@ -1,6 +1,6 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction } from "@sdp/types";
+import type { TokenTransaction } from "@sdp/types/tokens";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";

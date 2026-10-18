@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { parseErrorMessage } from "@/app/dashboard/[projectId]/activity-format-utils";
 import {
   loadWalletActivity,
   WALLET_ACTIVITY_LIMIT,
@@ -9,6 +8,7 @@ import {
 } from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
+import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";

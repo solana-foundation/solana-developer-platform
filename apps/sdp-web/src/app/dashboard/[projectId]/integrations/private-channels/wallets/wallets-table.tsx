@@ -1,7 +1,14 @@
 "use client";
 
-import type { CustodyWalletSummary, PrivateChannelVerifiedWalletDto } from "@sdp/types";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
+import type { PrivateChannelVerifiedWalletDto } from "@sdp/types/private-channels";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@sdp/ui/card";
+import { Modal } from "@sdp/ui/modal";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { Loader2Icon, Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
@@ -11,18 +18,6 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Modal } from "@/components/ui/modal";
-import { Select, SelectItem } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";

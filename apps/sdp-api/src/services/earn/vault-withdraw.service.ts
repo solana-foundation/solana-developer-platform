@@ -1,8 +1,8 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { resolveClusterRpcUrl } from "@sdp/rpc";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import {
   assertMovementIsOwnReplay,

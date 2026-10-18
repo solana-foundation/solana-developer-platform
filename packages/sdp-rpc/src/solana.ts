@@ -34,7 +34,6 @@ import { withReadSocketRetry } from "./socket-retry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
 
-export { fetchWithReadSocketRetry } from "./socket-retry";
 export { withReadSocketRetry };
 
 // ═══════════════════════════════════════════════════════════════════════════

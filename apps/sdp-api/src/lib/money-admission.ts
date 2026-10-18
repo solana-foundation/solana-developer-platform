@@ -1,9 +1,6 @@
-import {
-  MOVEMENTS,
-  type MovementId,
-  organizationStatusMayStartMoney,
-  type ProjectEnvironment,
-} from "@sdp/types";
+import { MOVEMENTS, type MovementId } from "@sdp/types/movements";
+import { organizationStatusMayStartMoney } from "@sdp/types/organizations";
+import type { ProjectEnvironment } from "@sdp/types/projects";
 import type { DatabaseExecutor } from "@/db/client";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";

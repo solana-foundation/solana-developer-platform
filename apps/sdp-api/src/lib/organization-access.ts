@@ -1,4 +1,4 @@
-import { organizationStatusMayAuthenticate } from "@sdp/types";
+import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db/client";

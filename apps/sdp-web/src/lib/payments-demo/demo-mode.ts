@@ -1,13 +1,13 @@
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
   EARN_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
   type ProviderAvailabilityEntry,
   // biome-ignore lint/style/noRestrictedImports: the keys of the availability record only; which ones are on comes from the channel-capped flags
   RAMP_PROVIDERS,
   type RampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
 import { parseDashboardPathname } from "../dashboard-project-path";

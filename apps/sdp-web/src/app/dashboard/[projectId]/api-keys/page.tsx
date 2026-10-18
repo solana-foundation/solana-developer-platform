@@ -1,9 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import type { PaymentsDashboardWallet } from "@sdp/types";
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
 import {
   Card,
   CardAction,
@@ -11,7 +8,10 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@sdp/ui/card";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";

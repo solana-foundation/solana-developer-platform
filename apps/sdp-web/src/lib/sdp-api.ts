@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { ListProjectsResponse, Project } from "@sdp/types";
+import type { ListProjectsResponse, Project } from "@sdp/types/projects";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";

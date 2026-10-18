@@ -1,24 +1,21 @@
 "use client";
 
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type Counterparty,
-  type CounterpartyAccount,
-  type PaymentRequest,
-  type PaymentsDashboardWallet,
-} from "@sdp/types";
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
+import type { PaymentRequest, PaymentsDashboardWallet } from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { Combobox } from "@sdp/ui/combobox";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
-import { InfoHint } from "@/components/ui/info-hint";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -30,7 +27,6 @@ import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
-import { cn } from "@/lib/utils";
 import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";

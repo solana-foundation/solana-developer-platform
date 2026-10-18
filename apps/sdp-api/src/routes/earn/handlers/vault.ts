@@ -1,7 +1,8 @@
-import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { isEarnProviderId } from "@sdp/earn";
 import { supportsVaultDepositQuote, supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
-import { notImplemented } from "@sdp/earn/errors";
+import { notImplemented, providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultDepositQuote, EarnVaultWithdrawQuote } from "@sdp/earn/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnVaultDepositRecord,
   EarnVaultDepositResponse,
@@ -9,8 +10,7 @@ import type {
   EarnVaultWithdrawal,
   EarnVaultWithdrawalResponse,
   EarnVaultWithdrawalsPage,
-  SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { type EarnProviderId, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db/client";

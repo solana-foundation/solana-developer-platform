@@ -32,7 +32,7 @@
  * Adding a file to any list below is a security-reviewed change.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -110,7 +110,10 @@ export const CAPABILITIES = [
   {
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
-    symbols: [{ file: `${KEYCHAIN}/index.ts`, name: "*" }],
+    symbols: readdirSync(path.join(process.cwd(), KEYCHAIN))
+      .filter((file) => file.endsWith(".adapter.ts") && !file.endsWith(".test.ts"))
+      .sort()
+      .map((file) => ({ file: `${KEYCHAIN}/${file}`, name: "*" })),
     owners: [CUSTODY_PACKAGE],
     allow: [
       `${API}/services/domain/signing.service.ts`,
@@ -122,7 +125,10 @@ export const CAPABILITIES = [
     id: "provider-signer",
     why: "A provider signer or API client builds signing authority from a stored credential; only the signing service, the adapter factory and the wallet lifecycle may use one.",
     symbols: [
-      { file: "packages/sdp-custody/src/dfns/index.ts", name: "*" },
+      ...readdirSync(path.join(process.cwd(), "packages/sdp-custody/src/dfns"))
+        .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+        .sort()
+        .map((file) => ({ file: `packages/sdp-custody/src/dfns/${file}`, name: "*" })),
       ...KEYCHAIN_SDKS.map((module) => ({ module, name: "*" })),
     ],
     owners: [CUSTODY_PACKAGE],
@@ -137,7 +143,7 @@ export const CAPABILITIES = [
     why: "Signs as fee payer with a process key and no budget; the sponsorship waist builds fee payers.",
     symbols: [
       { file: `${FEE_PAYMENT}/native.adapter.ts`, name: "NativeAdapter" },
-      { file: `${FEE_PAYMENT}/index.ts`, name: "KoraClient" },
+      { module: "@solana/kora", name: "KoraClient" },
     ],
     owners: [FEE_PAYMENT_PACKAGE],
     allow: [],

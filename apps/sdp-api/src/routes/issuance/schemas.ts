@@ -1,6 +1,6 @@
-import { isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
-import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
+import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types/tokens";
+import { isAddress } from "@solana/addresses";
 import { isSignature } from "@solana/kit";
 import { z } from "zod";
 import {

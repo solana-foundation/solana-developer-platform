@@ -1,7 +1,7 @@
-import type { CounterpartyRow } from "@sdp/payments";
-import { generateCounterpartyId } from "@sdp/payments";
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
+import { generateCounterpartyId } from "@sdp/payments/counterparty";
 import { readRecord } from "@sdp/payments/json";
-import type { CounterpartyProviderData, CounterpartyStatus } from "@sdp/types";
+import type { CounterpartyProviderData, CounterpartyStatus } from "@sdp/types/counterparties";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
 import type {

@@ -1,11 +1,15 @@
 "use client";
 
-import {
-  type ApiKeyRole,
-  getPermissionsForApiKeyRole,
-  operationTypesInFamily,
-  type PaymentsDashboardWallet,
-} from "@sdp/types";
+import { operationTypesInFamily } from "@sdp/types/allowed-operations";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { type ApiKeyRole, getPermissionsForApiKeyRole } from "@sdp/types/permissions";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { DateTimePicker } from "@sdp/ui/date-picker";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import {
   CircleCheck,
   FileText,
@@ -20,17 +24,10 @@ import {
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { DateTimePicker } from "@/components/ui/date-picker";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { recordQuickStartStep } from "@/lib/dashboard-quick-start.redesign";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
   API_KEY_AUTHORING_STEPS,

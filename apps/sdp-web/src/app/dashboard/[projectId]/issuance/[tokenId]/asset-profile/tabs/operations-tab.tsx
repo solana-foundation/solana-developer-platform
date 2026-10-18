@@ -1,10 +1,10 @@
 "use client";
 
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
 import { AnimatedSection } from "../animated-section";

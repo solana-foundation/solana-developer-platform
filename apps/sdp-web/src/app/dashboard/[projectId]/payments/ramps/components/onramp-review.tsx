@@ -1,9 +1,10 @@
 "use client";
 
-import { CUSTODY_PROVIDER_CATALOG_BY_ID, type PaymentRampEstimate } from "@sdp/types";
+import { CUSTODY_PROVIDER_CATALOG_BY_ID } from "@sdp/types/custody";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type { PaymentRampEstimate } from "@sdp/types/payments";
+import { Callout } from "@sdp/ui/callout";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { Callout } from "@/components/ui/callout";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
 import { formatRampQuoteTimeRemaining } from "../../payments-overview.utils";

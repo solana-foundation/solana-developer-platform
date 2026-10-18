@@ -1,4 +1,4 @@
-import { PAYMENT_TRANSFER_STATUSES, PAYMENT_TRANSFER_TYPES } from "@sdp/types";
+import { PAYMENT_TRANSFER_STATUSES, PAYMENT_TRANSFER_TYPES } from "@sdp/types/payments";
 import { z } from "zod";
 import { rampProviderSchema } from "../ramps/schemas";
 import { paymentAmountSchema, paymentTokenSchema, solanaAddressSchema } from "../schemas";

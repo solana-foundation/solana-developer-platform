@@ -1,5 +1,5 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types";
+import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types/tokens";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db/client";

@@ -1,6 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { SOL_MINT } from "@sdp/types";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { badRequestQuery, providerUnavailable } from "@/lib/errors";

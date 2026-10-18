@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { hasPermission } from "@sdp/types";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { hasPermission } from "@sdp/types/permissions";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { getTranslations } from "@/i18n/server";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestProjectId } from "@/lib/sdp-api";

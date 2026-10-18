@@ -1,16 +1,16 @@
+import { AUTHORITY_VALUED_SETTINGS } from "@sdp/issuance/capabilities/resolver";
 import {
   ADVANCED_SETTINGS,
-  AUTHORITY_VALUED_SETTINGS,
   findIncompatibleExtensionPair,
   type SettingKey,
-} from "@sdp/issuance/capabilities";
+} from "@sdp/issuance/capabilities/settings";
 import { decimalScale, isDecimalString } from "@sdp/solana/amount";
+import type { AdvancedSetting } from "@sdp/types/advanced-settings";
 import {
-  type AdvancedSetting,
   type AssetCategory,
   getAssetTypeRegistryEntry,
   type IssuanceMetadata,
-} from "@sdp/types";
+} from "@sdp/types/asset-profiles";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type AdvancedSettingsDraft,

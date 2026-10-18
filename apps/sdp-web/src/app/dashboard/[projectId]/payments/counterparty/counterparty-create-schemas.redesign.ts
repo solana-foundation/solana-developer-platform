@@ -1,4 +1,4 @@
-import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { z } from "zod";
 
 /** A base58 Solana public key: 32 to 44 characters of the base58 alphabet. */

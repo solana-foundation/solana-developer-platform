@@ -1,13 +1,12 @@
 "use client";
 
+import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
 import {
-  type CounterpartyAccountSummary,
   isWellKnownTokenSymbol,
-  type PaymentsDashboardWallet,
   type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
   wellKnownMint,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import {
   addDecimalFixedPoint,
   decimalFixedPoint,

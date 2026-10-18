@@ -1,12 +1,12 @@
 "use client";
 
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
 import Link from "next/link";
 import { use, useMemo, useState } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
-import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { toTitleCase } from "../../activity-format-utils";

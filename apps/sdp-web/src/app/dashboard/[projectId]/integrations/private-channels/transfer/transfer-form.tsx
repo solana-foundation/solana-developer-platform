@@ -1,18 +1,18 @@
 "use client";
 
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
-  CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
   PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
+import { Button } from "@sdp/ui/button";
+import { Label } from "@sdp/ui/label";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import {

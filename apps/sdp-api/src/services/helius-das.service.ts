@@ -2,11 +2,8 @@
 import { fetchHeliusDas, isHeliusDasConfigured } from "@sdp/rpc/helius-das";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import {
-  type CustodyWalletTokenBalance,
-  WELL_KNOWN_TOKEN_BY_MINT,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { WELL_KNOWN_TOKEN_BY_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";

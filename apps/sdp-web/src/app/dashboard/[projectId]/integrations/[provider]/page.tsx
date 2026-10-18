@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, ProjectProviderAvailability, RampProviderId } from "@sdp/types";
+import type { CustodyConfigSummary } from "@sdp/types/custody";
+import type { ProjectProviderAvailability, RampProviderId } from "@sdp/types/provider-access";
 import { notFound, redirect } from "next/navigation";
 import {
   buildConnectionsPageUrl,

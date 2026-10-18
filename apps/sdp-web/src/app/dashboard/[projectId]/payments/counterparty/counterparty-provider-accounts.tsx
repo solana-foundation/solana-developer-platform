@@ -3,18 +3,18 @@
 import type {
   CounterpartyProviderAccount,
   CounterpartyProviderCustomerLink,
-  PersistedRampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
+import type { PersistedRampProviderId } from "@sdp/types/provider-access";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { ChevronDownIcon, LoaderCircleIcon, WalletIcon } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
-import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
 import { formatDisplayAmount, formatTimestamp } from "../payments-overview.utils";
 import {

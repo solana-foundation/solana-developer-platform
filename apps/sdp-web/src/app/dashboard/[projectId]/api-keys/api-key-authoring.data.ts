@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";

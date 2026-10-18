@@ -1,10 +1,7 @@
 "use client";
 
-import {
-  getCryptoRailAssetLabel,
-  type PaymentOnrampQuoteRequest,
-  type PaymentTransferSummary,
-} from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type { PaymentOnrampQuoteRequest, PaymentTransferSummary } from "@sdp/types/payments";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";

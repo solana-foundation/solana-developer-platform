@@ -2,8 +2,8 @@
  * Wallet API Schemas
  */
 
-import { CUSTODY_PROVIDERS } from "@sdp/custody";
-import type { CustodyWalletOwnerTarget } from "@sdp/types";
+import type { CustodyWalletOwnerTarget } from "@sdp/types/custody";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);

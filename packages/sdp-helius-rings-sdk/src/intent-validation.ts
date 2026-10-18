@@ -5,7 +5,7 @@ import {
   SENDER_SLOT_COUNT,
   type WithdrawalTarget,
 } from "@heliuslabs/zolana/transaction";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import type { Address } from "@solana/kit";
 import { canonicalShieldedIdentity } from "./material.js";
 

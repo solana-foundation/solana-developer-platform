@@ -1,8 +1,8 @@
 "use client";
 
+import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
-import { Combobox } from "@/components/ui/combobox";
 import { useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";

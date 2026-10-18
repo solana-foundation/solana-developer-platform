@@ -4,7 +4,12 @@ import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   type PrivateChannelEventDto,
   type PrivateChannelEventFamily,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ChevronRightIcon, Loader2Icon } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -12,17 +17,6 @@ import {
   formatTokenAmount,
   resolveTransferTokenLabel,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Select, SelectItem } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { type LoadEventsResult, loadProjectEventsAction } from "./actions";

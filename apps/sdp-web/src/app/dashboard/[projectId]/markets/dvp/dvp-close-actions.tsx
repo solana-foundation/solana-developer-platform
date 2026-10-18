@@ -13,10 +13,10 @@
  * friction on an irreversible step.
  */
 
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { formatTimestamp } from "../../payments/payments-overview.utils";
 import type { DvpTrade } from "./dvp-trade";

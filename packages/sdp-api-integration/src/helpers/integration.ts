@@ -1,5 +1,5 @@
 import { type ApiTestCustodyWallet, apiTestSupport } from "@sdp/api/test-support";
-import { resolveDefaultCluster } from "@sdp/rpc";
+import { resolveDefaultCluster } from "@sdp/rpc/config";
 import {
   confirmTransaction,
   createRpc,

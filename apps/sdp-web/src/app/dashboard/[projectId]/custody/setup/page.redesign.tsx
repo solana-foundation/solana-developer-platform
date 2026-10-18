@@ -1,7 +1,7 @@
 // The Wallets create flow as the 2026 design lays it out. It loads what the previous design's
 // page loads (page.tsx), and differs only in the flow it renders.
 import { auth } from "@clerk/nextjs/server";
-import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types";
+import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types/custody";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";

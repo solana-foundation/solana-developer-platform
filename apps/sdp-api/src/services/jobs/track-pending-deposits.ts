@@ -21,7 +21,7 @@
  * worker can't regress state.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import type {
   PrivateChannelDepositRepository,
@@ -158,7 +158,7 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
   // Pass 2 — one batched status read per project RPC, then per-row verdicts.
   await Promise.all(
     [...buckets.values()].map(async (bucket) => {
-      let statuses: Array<solanaRpc.SignatureStatusInfo | null>;
+      let statuses: Array<SignatureStatusInfo | null>;
       try {
         // searchTransactionHistory because every caller of this is already past the
         // node's short recent-status cache: a submitted row is only polled on the
@@ -166,7 +166,7 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
         // strictly AFTER STUCK_AFTER_MS. Without it an executed deposit reads null,
         // gets failed as "not found on chain", and the dashboard hands the caller a
         // fresh idempotency key for a deposit that already moved funds.
-        statuses = await solanaRpc.getSignatureStatuses(
+        statuses = await getSignatureStatuses(
           (await bucket.projectRpc).rpc,
           bucket.deposits.map((deposit) => deposit.signature as Signature),
           { searchTransactionHistory: true }
@@ -255,7 +255,7 @@ async function applySubmittedVerdict(
   env: Env,
   repo: PrivateChannelDepositRepository,
   deposit: PrivateChannelDepositRow,
-  status: solanaRpc.SignatureStatusInfo | null,
+  status: SignatureStatusInfo | null,
   now: number
 ): Promise<void> {
   if (!status) {

@@ -1,4 +1,4 @@
-import type { DvpLegOutcome, DvpTradeSide } from "@sdp/types";
+import type { DvpLegOutcome, DvpTradeSide } from "@sdp/types/dvp";
 import type { DvpLegTransfer } from "@/db/repositories/dvp-leg-transfer.repository";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { internalError } from "@/lib/errors";

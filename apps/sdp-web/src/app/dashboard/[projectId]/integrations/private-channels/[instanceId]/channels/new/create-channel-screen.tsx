@@ -1,13 +1,13 @@
 "use client";
 
-import type { PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";

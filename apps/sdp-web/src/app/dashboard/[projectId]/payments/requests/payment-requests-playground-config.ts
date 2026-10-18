@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,

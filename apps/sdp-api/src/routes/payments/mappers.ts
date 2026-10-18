@@ -1,11 +1,10 @@
 import {
   isRampTransferType,
-  isRetiredRampProviderId,
   type PaymentSubscriptionCollectionAttempt,
-  type PersistedRampProviderId,
   type RampCryptoDeposit,
   type RampTransferSettlement,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/types/provider-access";
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";

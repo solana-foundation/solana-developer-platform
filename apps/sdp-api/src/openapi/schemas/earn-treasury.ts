@@ -13,7 +13,7 @@ import {
   type EarnProgram,
   type EarnProgramWithdrawalRecord,
   type EarnVaultPosition,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { z } from "zod";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {

@@ -1,5 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletMetadataResponse, CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletMetadataResponse, CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { Badge } from "@sdp/ui/badge";
+import { Callout } from "@sdp/ui/callout";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
@@ -23,8 +25,6 @@ import {
   WalletBalancesSkeleton,
 } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Badge } from "@/components/ui/badge";
-import { Callout } from "@/components/ui/callout";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";

@@ -5,8 +5,8 @@
  * fees and ATA rent; closing never selects or provisions another wallet.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_CLOSE_REFUSAL, type DvpTradeStatus } from "@sdp/types";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { DVP_CLOSE_REFUSAL, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   appendTransactionMessageInstructions,
   createNoopSigner,
@@ -150,7 +150,7 @@ export async function closeDvpTrade(
   // After the local refusals, so a trade the row already rules out is answered
   // without a chain read, and an unreachable RPC cannot mask that answer. Before
   // the custody signer, so a refusal here never calls the provider.
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createRpc(env);
   const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
     a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
     b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
@@ -205,7 +205,7 @@ export async function closeDvpTrade(
       : buildCancelInstruction(trade, atas, signer),
   ];
 
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
@@ -302,14 +302,14 @@ export async function closeDvpTrade(
  */
 async function closeOutcome(
   trades: ReturnType<typeof createDvpTradeRepository>,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: ReturnType<typeof createRpc>,
   tradeId: string,
   action: DvpCloseAction,
   closeSignature: Signature
 ): Promise<boolean> {
-  let confirmation: Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>;
+  let confirmation: Awaited<ReturnType<typeof confirmTransaction>>;
   try {
-    confirmation = await solanaRpc.confirmTransaction(rpc, closeSignature, {
+    confirmation = await confirmTransaction(rpc, closeSignature, {
       timeoutMs: CLOSE_CONFIRM_TIMEOUT_MS,
     });
   } catch (error) {

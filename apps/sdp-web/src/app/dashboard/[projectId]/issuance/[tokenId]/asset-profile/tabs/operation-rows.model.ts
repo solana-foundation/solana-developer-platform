@@ -1,4 +1,4 @@
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import {
   ArrowRightLeft,
   Coins,

@@ -1,16 +1,13 @@
+import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "@sdp/types/custody";
 import {
-  type CustodyWalletAggregate,
-  type CustodyWalletTokenBalance,
   PAYMENT_TRANSFER_STATUS_TONE,
   type PaymentTransferStatus,
   type PaymentTransferStatusTone,
-  SOL_DECIMALS,
-  SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
-import type { BadgeVariant } from "@/components/ui/badge";
+} from "@sdp/types/payments";
+import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { toTitleCase } from "../activity-format-utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";

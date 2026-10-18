@@ -1,5 +1,6 @@
 "use client";
 
+import { HeightReveal } from "@sdp/ui/height-reveal";
 import {
   Loader2Icon,
   type LucideIcon,
@@ -11,7 +12,6 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { HeightReveal } from "@/components/ui/height-reveal";
 import { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS, type ComplianceProviderResult } from "@/lib/compliance";
 import {

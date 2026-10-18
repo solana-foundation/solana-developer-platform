@@ -5,7 +5,9 @@ import {
   isDecimalString,
   scaleDecimalAmountByBps,
 } from "@sdp/solana/amount";
-import type { EarnProviderId, SdpEnvironment, SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnProviderId } from "@sdp/types/provider-access";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import {
   type DatabaseClient as AppDb,

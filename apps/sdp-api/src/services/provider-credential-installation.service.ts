@@ -1,4 +1,4 @@
-import { normalizePrivyWalletId } from "@sdp/custody";
+import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import type { ProvisionPrivyResult } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import type { Context } from "hono";

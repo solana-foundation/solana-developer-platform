@@ -1,6 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import type {
+  CounterpartyAccount,
+  ListCounterpartyAccountsResponse,
+} from "@sdp/types/counterparties";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { withLegacyDesign } from "@/flags/new-design";

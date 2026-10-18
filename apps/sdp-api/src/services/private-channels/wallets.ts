@@ -17,8 +17,8 @@
  * This module is the single writer of `private_channel_verified_wallets`.
  */
 
-import { PrivateChannelError } from "@sdp/private-channels";
 import { createAuthClient, type SpcAuthClient } from "@sdp/private-channels/auth";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
 import { getBase58Codec } from "@solana/codecs";
 import { createSignableMessage, isMessagePartialSigner } from "@solana/signers";
 import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";

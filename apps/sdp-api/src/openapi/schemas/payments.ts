@@ -1,13 +1,11 @@
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
-  COUNTERPARTY_ENTITY_TYPES,
-  OFFRAMP_CRYPTO_RAILS,
-  ONRAMP_CRYPTO_RAILS,
-  PERSISTED_RAMP_PROVIDERS,
   paymentSubscriptionCollectionAttemptMetadataSchema,
-  RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
-  UNIFIED_TRANSACTION_MODULE_CONTRACTS,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { z } from "zod";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {

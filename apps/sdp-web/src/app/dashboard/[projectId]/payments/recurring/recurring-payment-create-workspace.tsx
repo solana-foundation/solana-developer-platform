@@ -1,13 +1,17 @@
 "use client";
 
 import { compareDecimalAmounts, decimalScale, isDecimalString } from "@sdp/solana/amount";
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import {
-  type Counterparty,
-  type CounterpartyAccount,
   PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
   type PaymentRecurringPaymentSchedulePreset,
   type PaymentsDashboardWallet,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { BadgeVariant } from "@sdp/ui/badge";
+import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
+import { DateTimePicker } from "@sdp/ui/date-picker";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
@@ -16,11 +20,6 @@ import useSWR, { preload } from "swr";
 import { z } from "zod";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { TokenMark } from "@/components/token-mark";
-import type { BadgeVariant } from "@/components/ui/badge";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { DateTimePicker } from "@/components/ui/date-picker";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";

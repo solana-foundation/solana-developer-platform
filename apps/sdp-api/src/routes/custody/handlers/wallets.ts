@@ -1,17 +1,19 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getAccountInfo } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type {
   CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
   CustodyWalletMetadataResponse,
   CustodyWalletResponse,
+  CustodyWalletSummary,
   CustodyWalletsResponse,
+  CustodyWalletTokenBalance,
   DeleteWalletResponse,
-} from "@sdp/types";
-import { type CustodyWalletSummary, type CustodyWalletTokenBalance, SOL_MINT } from "@sdp/types";
+} from "@sdp/types/custody";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -672,7 +674,7 @@ export const getWalletById = async (c: AppContext) => {
   let lamports: bigint;
   try {
     const rpc = createClusterRpc();
-    const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
+    const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
     getLogger().error(

@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
-import { summarizeUpstreamErrorBody } from "@sdp/redaction";
+import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
 import { assertHttpsBaseUrl } from "../provisioning/common";
 import { SigningError } from "../signing";
 

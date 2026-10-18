@@ -1,13 +1,13 @@
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
-  type PaymentTransactionKind,
   type PaymentTransferStatus,
-  PERSISTED_RAMP_PROVIDERS,
   RAMP_TRANSFER_TRANSITIONS,
   type RampTransferType,
-  SDP_ENVIRONMENTS,
-  tokenFilterAliases,
   WALLET_TRANSFER_TYPES,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { PERSISTED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
+import { tokenFilterAliases } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";

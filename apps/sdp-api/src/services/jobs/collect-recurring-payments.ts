@@ -3,7 +3,7 @@ import {
   isActivatingRecurringPaymentStatus,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   recurringPaymentInFlightLifecycleOperation,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import type {
   CollectibleRecurringPaymentRow,

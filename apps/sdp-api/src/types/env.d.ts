@@ -1,16 +1,14 @@
 /** Environment variables consumed by the Node API runtime. */
 
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  EgressReadiness,
-  OrganizationEntitlements,
-  OrganizationRpcProvider,
-  Permission,
-  SdpRampProviderStages,
-} from "@sdp/types";
-import type { ManagedRpcEnv } from "@sdp/rpc";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
+import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
+import type { EgressReadiness } from "@sdp/types/health";
+import type { OrganizationEntitlements } from "@sdp/types/organization-entitlements";
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
+import type { Permission } from "@sdp/types/permissions";
+import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { ManagedRpcEnv } from "@sdp/rpc/types";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";

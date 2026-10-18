@@ -1,8 +1,8 @@
 "use client";
 
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { HashIcon, IdCardIcon } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { EntityTypeToggle } from "../components/entity-type-toggle";
 import { useCounterpartyCreate } from "../counterparty-create-context";

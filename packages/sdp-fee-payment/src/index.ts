@@ -5,19 +5,11 @@
  * Kora is the primary provider for gasless transactions.
  */
 
-import { resolveDefaultCluster } from "@sdp/rpc";
-import type { SolanaCluster } from "@sdp/types";
+import { resolveDefaultCluster } from "@sdp/rpc/config";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { KoraAdapter, type KoraAdapterConfig } from "./kora.adapter";
 import { NativeAdapter } from "./native.adapter";
 import { type FeePaymentEnv, FeePaymentError, type FeePaymentPort } from "./port";
-
-export type {
-  FeePaymentEnv,
-  FeePaymentErrorCode,
-  FeePaymentPort,
-  SponsorshipProviderConfiguration,
-} from "./port";
-export { FeePaymentError } from "./port";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -148,11 +140,3 @@ export function createKoraAdapter(
 
   return new KoraAdapter(config);
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Re-exports
-// ═══════════════════════════════════════════════════════════════════════════
-
-export { KoraClient } from "@solana/kora";
-export { KoraAdapter, type KoraAdapterConfig } from "./kora.adapter";
-export { NativeAdapter } from "./native.adapter";

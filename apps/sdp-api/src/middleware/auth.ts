@@ -11,16 +11,15 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
 import type {
-  AllowedOperation,
   ApiKeyEnvironment,
-  ApiKeyRole,
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
   CachedApiKey,
-  Permission,
-} from "@sdp/types";
-import { organizationStatusMayAuthenticate } from "@sdp/types";
+} from "@sdp/types/api-keys";
+import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
+import type { ApiKeyRole, Permission } from "@sdp/types/permissions";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";

@@ -4,7 +4,11 @@ import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_STATUSES,
   type UnifiedTransactionModule,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { DateRangePicker } from "@sdp/ui/date-picker";
+import { Input } from "@sdp/ui/input";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { ReceiptTextIcon, SearchIcon, XIcon } from "lucide-react";
 import {
   createContext,
@@ -21,10 +25,6 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
-import { DateRangePicker } from "@/components/ui/date-picker";
-import { Input } from "@/components/ui/input";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import {

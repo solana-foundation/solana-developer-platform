@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";

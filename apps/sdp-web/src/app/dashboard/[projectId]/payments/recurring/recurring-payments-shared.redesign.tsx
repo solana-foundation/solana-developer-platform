@@ -1,13 +1,13 @@
 "use client";
 
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import {
-  type CounterpartyAccount,
   PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
   type PaymentRecurringPaymentSchedulePreset,
   type PaymentRecurringPaymentStatus,
   type PaymentsDashboardWallet,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { shortenAddress } from "../payments-overview.utils";

@@ -1,7 +1,8 @@
-import type { SolanaRpcProbeResult } from "@sdp/private-channels";
+import type { SolanaRpcProbeResult } from "@sdp/private-channels/rpc";
 import { createClusterRpc, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { getDb } from "@/db/client";
 import type { Env } from "@/types/env";
 

@@ -1,6 +1,9 @@
 "use server";
 
-import type { PrivateChannelTransfer, PrivateChannelTransferRecipientDto } from "@sdp/types";
+import type {
+  PrivateChannelTransfer,
+  PrivateChannelTransferRecipientDto,
+} from "@sdp/types/private-channels";
 import type { MessageKey } from "@/i18n/messages";
 import type { ApiAnswer } from "@/lib/idempotency";
 import {

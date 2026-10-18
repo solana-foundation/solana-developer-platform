@@ -1,6 +1,8 @@
 "use client";
 
-import type { UnifiedTransactionModule } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -22,7 +24,6 @@ import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integra
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
-import { Button } from "@/components/ui/button";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
@@ -35,7 +36,6 @@ import {
   PAYMENT_TRANSACTIONS_HREF,
 } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
   title: string;

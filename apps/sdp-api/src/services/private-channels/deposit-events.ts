@@ -12,7 +12,7 @@ import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   type PrivateChannelEventStatus,
   type PrivateChannelEventType,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import type { PrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
 import { createPrivateChannelEventService } from "@/services/private-channels/event.service";
 import type { Env } from "@/types/env";

@@ -1,4 +1,4 @@
-import type { PrivateChannelTransferContext } from "@sdp/types";
+import type { PrivateChannelTransferContext } from "@sdp/types/private-channels";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   type CreateWithdrawalInput,

@@ -1,6 +1,16 @@
 "use client";
 
-import type { PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
+import { Button } from "@sdp/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { Modal } from "@sdp/ui/modal";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import {
   ChevronDownIcon,
   Settings2Icon,
@@ -12,16 +22,6 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useNewDesign } from "@/components/new-design";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Modal } from "@/components/ui/modal";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {

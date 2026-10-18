@@ -1,6 +1,7 @@
 import { createRpcForSdk } from "@sdp/rpc/solana";
-import { type Address, assertValidAddress } from "@sdp/solana/address";
-import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sdp/types";
+import { assertValidAddress } from "@sdp/solana/address";
+import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sdp/types/tokens";
+import type { Address } from "@solana/addresses";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";

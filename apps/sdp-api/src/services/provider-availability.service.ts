@@ -1,24 +1,30 @@
-import { hasMoonpayManagedKeys, hasStripeManagedKeys } from "@sdp/payments/ramps";
+import { hasMoonpayManagedKeys } from "@sdp/payments/ramps/providers/moonpay/client";
+import { hasStripeManagedKeys } from "@sdp/payments/ramps/providers/stripe/client";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
-  COMPLIANCE_PROVIDERS,
-  type ComplianceProviderId,
   CUSTODY_MODES,
   CUSTODY_PROVIDERS,
   type CustodyMode,
   type CustodyProvider,
   type CustodySetupRefusalReason,
+  isCustodyModeAllowedInEnvironment,
+} from "@sdp/types/custody";
+import {
+  normalizeOrganizationTier,
+  type OrganizationSettings,
+  type OrganizationTier,
+} from "@sdp/types/organizations";
+import {
+  COMPLIANCE_PROVIDERS,
+  type ComplianceProviderId,
   EARN_PROVIDERS,
   type EarnProviderId,
-  isCustodyModeAllowedInEnvironment,
   isEarnProviderSurfaced,
   isRampProviderSurfaced,
-  normalizeOrganizationTier,
   ORGANIZATION_PROVIDER_FAMILIES,
   type OrganizationProviderAvailabilityResponse,
   type OrganizationProviderFamily,
   type OrganizationProviderOverrides,
-  type OrganizationSettings,
-  type OrganizationTier,
   type ProjectProviderAvailability,
   type ProjectProviderAvailabilityEntry,
   type ProjectProviderRefusalReason,
@@ -26,10 +32,8 @@ import {
   RAMP_PROVIDERS,
   type RampProviderId,
   resolveOrganizationProviderEntitlements,
-  SDP_RAMP_PROVIDER_STAGES,
-  type SdpEnvironment,
-  type SdpRampProviderStages,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types/release-channels";
 import type { Context } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";

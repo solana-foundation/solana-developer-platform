@@ -11,7 +11,7 @@ import {
   type PaymentSubscriptionCollectionAttempt,
   paymentSubscriptionCollectionAttemptMetadataSchema,
   type UpdatePaymentRecurringPaymentRequest,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { dashboardRequest } from "@/lib/dashboard-fetch";

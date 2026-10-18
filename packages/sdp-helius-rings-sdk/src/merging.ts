@@ -1,5 +1,5 @@
 import { buildSetMergingEnabledTransaction, fetchUserRecord } from "@heliuslabs/zolana/wallet";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { address } from "@solana/kit";
 import { landTransaction, type ProvisionDeps } from "./provision.js";
 

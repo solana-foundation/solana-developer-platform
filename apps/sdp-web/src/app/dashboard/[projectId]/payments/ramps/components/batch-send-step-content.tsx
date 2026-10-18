@@ -1,6 +1,15 @@
 "use client";
 
-import type { PaymentTransferBatchRecipientStatus, PaymentTransferBatchStatus } from "@sdp/types";
+import type {
+  PaymentTransferBatchRecipientStatus,
+  PaymentTransferBatchStatus,
+} from "@sdp/types/payments";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { cn } from "@sdp/ui/cn";
+import { Combobox } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ExternalLink, PlusIcon, SearchIcon, WalletIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
@@ -9,15 +18,9 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import type { BatchSendWizard } from "../hooks/use-batch-send-wizard";
 import { MAX_BATCH_RECIPIENTS } from "../schema";
 import { walletComboboxOptions } from "../wallet-options";

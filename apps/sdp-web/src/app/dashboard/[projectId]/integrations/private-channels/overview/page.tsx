@@ -1,14 +1,8 @@
+import { Button } from "@sdp/ui/button";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";

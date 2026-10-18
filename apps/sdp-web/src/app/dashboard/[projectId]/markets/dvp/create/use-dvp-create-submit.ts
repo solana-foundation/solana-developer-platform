@@ -7,7 +7,7 @@
  * stays out of the code that decides whether it can be sent at all.
  */
 
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";

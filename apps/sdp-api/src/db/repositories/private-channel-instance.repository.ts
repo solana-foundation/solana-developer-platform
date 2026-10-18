@@ -1,4 +1,7 @@
-import type { PrivateChannelInstance, PrivateChannelInstanceInput } from "@sdp/types";
+import type {
+  PrivateChannelInstance,
+  PrivateChannelInstanceInput,
+} from "@sdp/types/private-channels";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelInstanceId(): string {

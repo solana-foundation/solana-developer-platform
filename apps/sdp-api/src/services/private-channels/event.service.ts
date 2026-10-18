@@ -1,11 +1,11 @@
-import { redactCredentialSecrets } from "@sdp/redaction";
+import { redactCredentialSecrets } from "@sdp/redaction/credentials";
 import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   type PrivateChannelEventFamily,
   type PrivateChannelEventStatus,
   type PrivateChannelEventType,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import {
   generatePrivateChannelEventId,
   type PrivateChannelEventRepository,

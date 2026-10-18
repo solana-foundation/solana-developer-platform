@@ -1,6 +1,7 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import {
   ArrowLeft,
   ArrowRight,
@@ -21,7 +22,6 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";

@@ -1,4 +1,5 @@
-import { createRingsGateway, probeRingRpcHealth } from "@sdp/helius-rings-sdk";
+import { createRingsGateway } from "@sdp/helius-rings-sdk/gateway";
+import { probeRingRpcHealth } from "@sdp/helius-rings-sdk/health";
 import { assertReachableTenantEndpoint } from "@sdp/rpc/blocked-address";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";

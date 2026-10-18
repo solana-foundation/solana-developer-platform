@@ -1,18 +1,17 @@
 import {
   createFeePaymentAdapter,
-  FeePaymentError,
-  type FeePaymentPort,
   resolveFeePaymentProvider,
   resolveKoraEndpoint,
-  type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type MovementId,
-  type ProjectEnvironment,
-  type SolanaCluster,
-} from "@sdp/types";
+  FeePaymentError,
+  type FeePaymentPort,
+  type SponsorshipProviderConfiguration,
+} from "@sdp/fee-payment/port";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { MovementId } from "@sdp/types/movements";
+import type { ProjectEnvironment } from "@sdp/types/projects";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";

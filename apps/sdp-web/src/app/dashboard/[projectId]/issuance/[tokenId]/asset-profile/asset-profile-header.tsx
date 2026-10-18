@@ -1,11 +1,12 @@
 "use client";
 
-import type { AssetProfile, Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import { ArrowUpRightIcon, CopyIcon, PlayIcon, RefreshCw, RocketIcon } from "lucide-react";
 import { TokenLogo } from "@/components/token-logo";
-import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { getCategoryPresentation } from "../../create/asset-taxonomy";
 import { formatSupply, tokenStatusPresentation } from "../../issuance-token-fields";
 import { shortenAddress } from "../../wallet-identity";

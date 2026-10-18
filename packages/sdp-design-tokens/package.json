@@ -8,14 +8,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./tokens.css": {
-      "style": "./src/tokens.css",
-      "default": "./src/tokens.css"
-    },
-    "./theme.css": {
-      "style": "./src/theme.css",
-      "default": "./src/theme.css"
     }
   },
   "scripts": {

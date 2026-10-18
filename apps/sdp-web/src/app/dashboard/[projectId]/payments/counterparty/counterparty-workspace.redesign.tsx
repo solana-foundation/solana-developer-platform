@@ -1,6 +1,22 @@
 "use client";
 
-import type { Counterparty, CounterpartyAccountSummary } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { CounterpartyAccountSummary } from "@sdp/types/payments";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { MoreHorizontalIcon, Trash2Icon, UserIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -8,30 +24,9 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDate } from "../payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";

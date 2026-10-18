@@ -1,8 +1,5 @@
 import {
   type AllowedOperation,
-  type ApiKeyEnvironment,
-  type ApiKeyRole,
-  type ApiKeyWalletScope,
   isOperationFamily,
   normalizeAllowedOperations,
   OPERATION_FAMILIES,
@@ -10,8 +7,9 @@ import {
   type OperationFamily,
   type OperationType,
   operationTypesInFamily,
-  type Permission,
-} from "@sdp/types";
+} from "@sdp/types/allowed-operations";
+import type { ApiKeyEnvironment, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { ApiKeyRole, Permission } from "@sdp/types/permissions";
 
 export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
 

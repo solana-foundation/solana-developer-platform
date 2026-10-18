@@ -1,4 +1,4 @@
-import { DVP_TRADE_STATUSES, type DvpSettlementAvailability } from "@sdp/types";
+import { DVP_TRADE_STATUSES, type DvpSettlementAvailability } from "@sdp/types/dvp";
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import { z } from "zod";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";

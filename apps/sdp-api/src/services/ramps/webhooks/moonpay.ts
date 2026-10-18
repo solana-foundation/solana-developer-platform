@@ -8,7 +8,8 @@ import {
   moonpayTransactionSettlementEvent,
 } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { RampWebhookProcessResult, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { RampWebhookProcessResult } from "@sdp/types/payments";
 import { z } from "zod";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";

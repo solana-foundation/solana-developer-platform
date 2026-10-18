@@ -1,4 +1,7 @@
-import type { PrivateChannelInstance, PrivateChannelTransferRecipientDto } from "@sdp/types";
+import type {
+  PrivateChannelInstance,
+  PrivateChannelTransferRecipientDto,
+} from "@sdp/types/private-channels";
 import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";

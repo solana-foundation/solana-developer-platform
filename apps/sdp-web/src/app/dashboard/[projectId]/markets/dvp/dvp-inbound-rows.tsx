@@ -12,10 +12,11 @@
  * announcing it.
  */
 
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { TableCell } from "@sdp/ui/table";
+import { TableRow } from "@solana/design-system/table";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";

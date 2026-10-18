@@ -1,5 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
+import type {
+  CounterpartyAccount,
+  ListCounterpartyAccountsResponse,
+} from "@sdp/types/counterparties";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";

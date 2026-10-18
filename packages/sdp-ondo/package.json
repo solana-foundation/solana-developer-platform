@@ -4,20 +4,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
     },
     "./types": {
       "types": "./src/types.ts",
       "import": "./src/types.ts",
       "default": "./src/types.ts"
-    },
-    "./errors": {
-      "types": "./src/errors.ts",
-      "import": "./src/errors.ts",
-      "default": "./src/errors.ts"
     }
   },
   "scripts": {

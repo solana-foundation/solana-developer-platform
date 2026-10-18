@@ -1,4 +1,4 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { getDb } from "@/db/client";
 import {
   type CredentialSecretPayload,

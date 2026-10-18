@@ -1,4 +1,5 @@
-import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
+import type { EgressReadiness } from "@sdp/types/health";
+import type { SdpRampProviderStages } from "@sdp/types/release-channels";
 /**
  * SDP API — Hono application factory.
  *
@@ -12,12 +13,8 @@ import { SigningError } from "@sdp/custody/signing";
 import { SdpEarnError } from "@sdp/earn/errors";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
-import {
-  redactCredentialSecrets,
-  redactCredentialString,
-  scrubError,
-  scrubTelemetry,
-} from "@sdp/redaction";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
+import { scrubError, scrubTelemetry } from "@sdp/redaction/scrub";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";

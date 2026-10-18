@@ -1,11 +1,8 @@
-import type {
-  Counterparty,
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { Counterparty } from "@sdp/types/counterparties";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId, RampCurrencyLimit } from "@sdp/types/payment-rails";
+import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@solana/kit";
 import { z } from "zod";

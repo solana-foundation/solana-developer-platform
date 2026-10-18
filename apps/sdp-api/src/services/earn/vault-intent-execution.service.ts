@@ -1,6 +1,7 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { createRpc } from "@sdp/rpc/solana";
-import type { MovementId, SolanaCluster } from "@sdp/types";
+import type { MovementId } from "@sdp/types/movements";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { type DatabaseClient as AppDb, getDb } from "@/db/client";
 import {

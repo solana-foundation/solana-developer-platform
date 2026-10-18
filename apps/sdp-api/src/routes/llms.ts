@@ -1,10 +1,9 @@
+import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import {
   DEFAULT_SDP_AI_GUIDE_URL,
   DEFAULT_SDP_API_URL,
   DEFAULT_SDP_DOCS_URL,
-  resolveSdpReleaseChannel,
-  type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/site";
 import { Hono } from "hono";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 

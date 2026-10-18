@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { Suspense, use } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
@@ -12,19 +16,9 @@ import {
   StateBand,
 } from "@/components/refresh-record";
 import { TokenMark } from "@/components/token-mark";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,

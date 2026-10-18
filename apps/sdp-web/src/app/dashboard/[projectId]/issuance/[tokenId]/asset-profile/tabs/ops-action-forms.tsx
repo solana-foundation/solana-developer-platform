@@ -1,6 +1,6 @@
 "use client";
 
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { TokenActionForms } from "../../token-action-forms";

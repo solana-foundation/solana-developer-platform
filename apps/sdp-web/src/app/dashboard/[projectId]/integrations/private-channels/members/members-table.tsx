@@ -1,29 +1,23 @@
 "use client";
 
-import type { PrivateChannelDto, PrivateChannelPrincipalDto } from "@sdp/types";
-import { EllipsisIcon, Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
-import Link from "next/link";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import type { PrivateChannelDto, PrivateChannelPrincipalDto } from "@sdp/types/private-channels";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Modal } from "@/components/ui/modal";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+} from "@sdp/ui/dropdown-menu";
+import { Modal } from "@sdp/ui/modal";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
+import { EllipsisIcon, Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
+import Link from "next/link";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import {
   addPrincipalToChannelAction,
   disablePrincipalAction,

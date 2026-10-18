@@ -1,4 +1,4 @@
-import { ASSET_CATEGORIES, isAssetTypeSupported } from "@sdp/types";
+import { ASSET_CATEGORIES, isAssetTypeSupported } from "@sdp/types/asset-profiles";
 import { z } from "zod";
 import { queryBooleanSchema } from "@/openapi/schemas/base";
 

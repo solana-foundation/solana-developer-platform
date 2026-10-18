@@ -5,8 +5,8 @@ import type {
   EarnVaultQueuedWithdrawalLifecycleEvent,
   EarnVaultQueuedWithdrawalRequestLookup,
   EarnVaultQueuedWithdrawProvider,
-} from "@sdp/earn";
-import { resolveClusterRpcUrl } from "@sdp/rpc";
+} from "@sdp/earn/types";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";

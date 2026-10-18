@@ -1,9 +1,9 @@
 "use client";
 
-import { RAMPS_MEMO_LIMITS } from "@sdp/types";
+import { RAMPS_MEMO_LIMITS } from "@sdp/types/payments";
+import { InfoHint } from "@sdp/ui/info-hint";
 import { PlusIcon, XIcon } from "lucide-react";
 import { type ClipboardEvent, useState } from "react";
-import { InfoHint } from "@/components/ui/info-hint";
 import { useTranslations } from "@/i18n/provider";
 import {
   emptyMemoRow,

@@ -4,8 +4,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals"],
     "paths": {
-      "@/*": ["./src/*"],
-      "@sdp/types": ["../../packages/sdp-types/src/index.ts"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src/**/*.ts"],

@@ -2,7 +2,7 @@ import {
   CUSTODY_CONNECTION_FAILURE_CODES,
   CUSTODY_PROVIDERS,
   type CustodyProvider,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db/client";

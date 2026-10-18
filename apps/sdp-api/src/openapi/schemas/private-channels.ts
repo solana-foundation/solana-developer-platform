@@ -3,7 +3,7 @@ import {
   PRIVATE_CHANNEL_EVENT_STATUS_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPE_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPES,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { z } from "zod";
 import { privateChannelTransferAmountSchema } from "@/lib/private-channel-transfer-amount";
 import { solanaAddressSchema, withOpenApi } from "@/openapi/schemas/base";

@@ -7,16 +7,16 @@
  * without scrolling past the other seven.
  */
 
+import { cn } from "@sdp/ui/cn";
+import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { HashIcon, UsersIcon, WalletIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { TokenMark } from "@/components/token-mark";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { shortenAddress } from "../../../payments/payments-overview.utils";
 import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
 import { toBaseUnits } from "./dvp-amount";

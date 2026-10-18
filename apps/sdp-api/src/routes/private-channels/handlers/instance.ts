@@ -1,9 +1,9 @@
-import { redactCredentialSecrets } from "@sdp/redaction";
+import { redactCredentialSecrets } from "@sdp/redaction/credentials";
 import {
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelInstanceEnvelope,
   type PrivateChannelInstanceResponse,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { createPostgresPrivateChannelDepositRepository } from "@/db/repositories/private-channel-deposit.repository.postgres";
 import {

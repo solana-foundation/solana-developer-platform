@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import {
-  assertNever,
   type IdempotencyKeyMode,
   isBodylessHttpStatus,
   isIdempotencyUnstoredStatus,
-} from "@sdp/types";
+} from "@sdp/types/idempotency";
+import { assertNever } from "@sdp/types/payments";
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { routePath } from "hono/route";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";

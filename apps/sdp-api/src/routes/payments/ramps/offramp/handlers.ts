@@ -1,6 +1,6 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type { PaymentRampQuote } from "@sdp/types";
 import { OFFRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
+import type { PaymentRampQuote } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";

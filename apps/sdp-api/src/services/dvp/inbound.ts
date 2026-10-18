@@ -12,7 +12,7 @@
  * who has never used the product.
  */
 
-import type { DvpTradeSide } from "@sdp/types";
+import type { DvpTradeSide } from "@sdp/types/dvp";
 import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";

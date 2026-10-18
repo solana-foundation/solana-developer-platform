@@ -1,4 +1,6 @@
-import type { AssetProfile, IssuanceMetadata, PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { AssetProfile, IssuanceMetadata } from "@sdp/types/asset-profiles";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token } from "@sdp/types/tokens";
 import { getTokenAccessControlMode } from "../../access-control.utils";
 import { getDefaultPublicFields } from "../../create/draft-mapping";
 import {

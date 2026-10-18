@@ -1,17 +1,18 @@
 "use client";
 
-import type { EarnStrategy, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnStrategy } from "@sdp/types/earn";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { Card, CardContent } from "@sdp/ui/card";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { SegmentedControl } from "@solana/design-system/segmented-control";
 import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { Card, CardContent } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/code-block";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";

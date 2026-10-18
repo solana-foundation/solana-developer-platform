@@ -1,7 +1,7 @@
 import type { MosaicService } from "@sdp/issuance/mosaic/service";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction } from "@sdp/types";
+import type { TokenTransaction } from "@sdp/types/tokens";
 import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";

@@ -1,6 +1,6 @@
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import type { Context } from "hono";
 import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db/client";

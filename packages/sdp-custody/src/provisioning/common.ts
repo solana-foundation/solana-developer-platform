@@ -1,4 +1,4 @@
-import { redactCredentialString } from "@sdp/redaction";
+import { redactCredentialString } from "@sdp/redaction/credentials";
 import { SigningError } from "../signing";
 import type { CustodyProvisioningRuntime } from "./runtime";
 

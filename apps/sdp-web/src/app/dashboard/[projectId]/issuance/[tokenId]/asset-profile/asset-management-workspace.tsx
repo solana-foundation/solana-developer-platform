@@ -1,6 +1,7 @@
 "use client";
 
-import type { AssetProfile, Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { Loader2 } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { useSearchParams } from "next/navigation";

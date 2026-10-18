@@ -1,9 +1,6 @@
-import {
-  COUNTERPARTY_ENTITY_TYPES,
-  COUNTRY_CODES,
-  PERSISTED_RAMP_PROVIDERS,
-  RAMP_PROVIDERS,
-} from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import { COUNTRY_CODES } from "@sdp/types/countries";
+import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
 import {

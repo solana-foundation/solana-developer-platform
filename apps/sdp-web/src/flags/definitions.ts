@@ -1,11 +1,11 @@
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
-  type RampProviderId,
   type SdpModule,
   type SdpRampProviderStages,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import type { Adapter, Identify } from "flags";
 import { flag } from "flags/next";
 import { capAdapterToReleaseChannel } from "./release-channel";

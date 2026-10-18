@@ -1,4 +1,4 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { simulateTransaction } from "@sdp/rpc/solana";
 import { getBase64EncodedWireTransaction, getTransactionEncoder } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { asTransactionalClient, getDb } from "@/db/client";
@@ -203,7 +203,7 @@ export async function executeChunk(params: {
 
   if (params.preflight) {
     try {
-      const simulated = await solanaRpc.simulateTransaction(resolved.rpc, txBytes);
+      const simulated = await simulateTransaction(resolved.rpc, txBytes);
       if (!simulated.success) {
         throw transactionFailed(
           `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,

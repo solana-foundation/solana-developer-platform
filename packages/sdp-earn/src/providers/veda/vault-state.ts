@@ -1,5 +1,5 @@
-import type { SolanaCluster } from "@sdp/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { internalError } from "../../errors";
 import {
   assertRpcServesCluster,

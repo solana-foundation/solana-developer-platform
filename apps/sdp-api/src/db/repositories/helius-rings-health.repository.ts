@@ -1,5 +1,9 @@
-import type { RuntimeHealth, RuntimeHealthComponent, RuntimeHealthStatus } from "@sdp/helius-rings";
-import { RUNTIME_HEALTH_COMPONENTS } from "@sdp/helius-rings";
+import { RUNTIME_HEALTH_COMPONENTS } from "@sdp/helius-rings/constants";
+import type {
+  RuntimeHealth,
+  RuntimeHealthComponent,
+  RuntimeHealthStatus,
+} from "@sdp/helius-rings/types";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /**

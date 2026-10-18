@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { resolveSdpReleaseChannel } from "@sdp/types";
+import { resolveSdpReleaseChannel } from "@sdp/types/release-channels";
 
 import { createPublicOpenApiDocument, createPublicSurfaceManifest } from "../src/openapi/spec";
 

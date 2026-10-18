@@ -1,4 +1,4 @@
-import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types";
+import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
 import { z } from "zod";
 import {
   acceptSchema as acceptSchemaBase,

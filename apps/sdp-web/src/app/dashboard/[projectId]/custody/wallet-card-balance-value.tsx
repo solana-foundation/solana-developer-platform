@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";

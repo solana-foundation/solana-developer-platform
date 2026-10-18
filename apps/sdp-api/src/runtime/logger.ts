@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction";
+import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction/scrub";
 import pino, { type Logger, type LoggerOptions } from "pino";
 import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 

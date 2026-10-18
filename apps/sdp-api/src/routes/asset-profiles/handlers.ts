@@ -5,10 +5,10 @@ import {
   type AssetProfileFieldOptionsResponse,
   type AssetProfileResponse,
   getAssetTypeRegistryEntry,
-  hasPermission,
   isAssetTypeSupported,
   type ListAssetProfilesResponse,
-} from "@sdp/types";
+} from "@sdp/types/asset-profiles";
+import { hasPermission } from "@sdp/types/permissions";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";

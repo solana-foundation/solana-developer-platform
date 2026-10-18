@@ -1,4 +1,4 @@
-import type { CounterpartyRow } from "@sdp/payments";
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";

@@ -1,5 +1,9 @@
 import { hashString } from "@sdp/payments/hash";
-import { normalizeOrganizationRole, type OrganizationRole, type Permission } from "@sdp/types";
+import {
+  normalizeOrganizationRole,
+  type OrganizationRole,
+  type Permission,
+} from "@sdp/types/permissions";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { isPlausibleEmail } from "@/lib/clerk-token";

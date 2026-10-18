@@ -1,5 +1,8 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import {
   ChevronDown,
   Coins,
@@ -10,9 +13,6 @@ import {
   UserCog,
 } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Select, SelectItem } from "@/components/ui/select";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";

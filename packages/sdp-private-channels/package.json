@@ -4,11 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
     "./auth": {
       "types": "./src/auth.ts",
       "import": "./src/auth.ts",
@@ -28,6 +23,11 @@
       "types": "./src/errors.ts",
       "import": "./src/errors.ts",
       "default": "./src/errors.ts"
+    },
+    "./gateway": {
+      "types": "./src/gateway.ts",
+      "import": "./src/gateway.ts",
+      "default": "./src/gateway.ts"
     },
     "./health": {
       "types": "./src/health.ts",
@@ -53,21 +53,6 @@
       "types": "./src/transport.ts",
       "import": "./src/transport.ts",
       "default": "./src/transport.ts"
-    },
-    "./types": {
-      "types": "./src/types.ts",
-      "import": "./src/types.ts",
-      "default": "./src/types.ts"
-    },
-    "./url": {
-      "types": "./src/url.ts",
-      "import": "./src/url.ts",
-      "default": "./src/url.ts"
-    },
-    "./gateway": {
-      "types": "./src/gateway.ts",
-      "import": "./src/gateway.ts",
-      "default": "./src/gateway.ts"
     }
   },
   "scripts": {

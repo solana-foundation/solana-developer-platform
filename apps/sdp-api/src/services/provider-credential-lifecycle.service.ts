@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import { isProviderCredentialCreationInProgress } from "@sdp/types";
+import { isProviderCredentialCreationInProgress } from "@sdp/types/custody";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";

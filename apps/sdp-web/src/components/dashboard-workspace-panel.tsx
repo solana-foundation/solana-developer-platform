@@ -1,5 +1,5 @@
+import { cn } from "@sdp/ui/cn";
 import type { ComponentProps } from "react";
-import { cn } from "@/lib/utils";
 
 // `scrollbar-gutter: stable` reserves the scrollbar track permanently on this
 // scroll container. Without it, expanding content (e.g. an issuance list row)

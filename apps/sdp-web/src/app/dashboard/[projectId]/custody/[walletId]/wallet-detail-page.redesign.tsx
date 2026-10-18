@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletMetadataResponse } from "@sdp/types";
+import type { CustodyWalletMetadataResponse } from "@sdp/types/custody";
 import { notFound, redirect } from "next/navigation";
 import {
   formatCustodyProviderName,

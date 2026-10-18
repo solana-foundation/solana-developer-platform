@@ -1,10 +1,21 @@
 "use client";
 
+import { CUSTODY_PROVIDER_CATALOG_BY_ID } from "@sdp/types/custody";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import {
-  CUSTODY_PROVIDER_CATALOG_BY_ID,
-  type PaymentsDashboardWallet,
-  type PaymentTransferSummary,
-} from "@sdp/types";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { StatusText } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ChevronDownIcon, CopyIcon, InfoIcon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -12,28 +23,8 @@ import QRCode from "qrcode";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { StatusText } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import {
   resolveTransferTokenLabel,
   shortenAddress,

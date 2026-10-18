@@ -1,5 +1,8 @@
-import { PrivateChannelError } from "@sdp/private-channels";
-import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelVerifiedWalletDto } from "@sdp/types";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
+import {
+  PRIVATE_CHANNEL_EVENT_TYPES,
+  type PrivateChannelVerifiedWalletDto,
+} from "@sdp/types/private-channels";
 import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories/private-channel-verified-wallet.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";

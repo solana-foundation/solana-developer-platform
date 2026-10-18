@@ -1,5 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
-import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
+import type { CreateApiKeyResponse } from "@sdp/types/api-keys";
+import type { ApiKeyRole } from "@sdp/types/permissions";
 import type { Context } from "hono";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";

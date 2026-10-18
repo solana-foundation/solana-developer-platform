@@ -1,4 +1,4 @@
-import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types";
+import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types/payments";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";

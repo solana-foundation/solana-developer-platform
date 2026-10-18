@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@sdp/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import type { DvpSettlementAvailability, DvpTradeStatus } from "./dvp-trade";
 

@@ -3,19 +3,13 @@
 import type {
   CounterpartyProviderAccount,
   CounterpartyProviderCustomerLink,
-  PersistedRampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
+import type { PersistedRampProviderId } from "@sdp/types/provider-access";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
 import { toTitleCase } from "../../activity-format-utils";

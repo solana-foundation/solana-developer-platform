@@ -4,30 +4,30 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { ArrowPagination, ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button, Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { FilterMenu, FilterMenu, FilterMenuOptions, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListEmptyState, ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar, ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
+import { SearchInput, SearchInput } from "@sdp/ui/search-input";
+import { StatusText, StatusText, type StatusTone, type StatusTone } from "@sdp/ui/status-text";
+import { 
+  Table,
+  TableBody,TableCell, 
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,} from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { z } from "zod";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import {
   formatDisplayAmount,
   resolveTokenByMint,

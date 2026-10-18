@@ -1,4 +1,4 @@
-import type { ReviewMode, WalletEnrollmentStatus } from "@sdp/types";
+import type { ReviewMode, WalletEnrollmentStatus } from "@sdp/types/kyc";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   type EnrolledWalletRow,

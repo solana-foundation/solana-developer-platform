@@ -1,14 +1,17 @@
 "use client";
 
-import { isPrivateChannelDepositTerminal, type PrivateChannelDeposit } from "@sdp/types";
+import {
+  isPrivateChannelDepositTerminal,
+  type PrivateChannelDeposit,
+} from "@sdp/types/private-channels";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import useSWR from "swr";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import { privateChannelsQueryKeys } from "../private-channels-query-key";
 import { fetchDepositAction } from "./actions";
 

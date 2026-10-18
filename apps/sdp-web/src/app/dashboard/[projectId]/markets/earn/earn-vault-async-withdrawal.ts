@@ -3,7 +3,7 @@ import type {
   EarnVaultQueuedWithdrawalTerms,
   EarnVaultWithdrawalOptions,
   EarnVaultWithdrawalRequestRecord,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 /**

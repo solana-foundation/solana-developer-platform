@@ -1,10 +1,10 @@
 "use client";
 
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import { Button } from "@sdp/ui/button";
 import { motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-dialog";
-import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { CancelTransactionDialog } from "./cancel-transaction-dialog";

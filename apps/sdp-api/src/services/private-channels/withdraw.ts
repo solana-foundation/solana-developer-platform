@@ -24,11 +24,14 @@
  * release is a settlement issue → operator alert, never auto-`failed`.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { getWithdrawFundsInstructionAsync } from "@sdp/spc-withdraw";
-import type { PrivateChannelInstance } from "@sdp/types";
-import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelWithdrawal } from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
+import {
+  PRIVATE_CHANNEL_EVENT_TYPES,
+  type PrivateChannelWithdrawal,
+} from "@sdp/types/private-channels";
 import {
   type Address,
   address,
@@ -159,10 +162,7 @@ async function broadcastWithdrawal(
 
   // Blockhash + broadcast on the gateway; whole sequence is the withGatewayRpc retry unit.
   return withGatewayRpc(env, input.instance.gatewayUrl, input.gatewayAuth, async (gatewayRpc) => {
-    const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-      gatewayRpc,
-      "confirmed"
-    );
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(gatewayRpc, "confirmed");
 
     const message = pipe(
       createTransactionMessage({ version: 0 }),
@@ -174,7 +174,7 @@ async function broadcastWithdrawal(
     const signed = await signTransactionMessageWithSigners(message);
     await input.onSigned(getSignatureFromTransaction(signed));
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
-    return solanaRpc.sendTransaction(gatewayRpc, signedBytes);
+    return sendTransaction(gatewayRpc, signedBytes);
   });
 }
 

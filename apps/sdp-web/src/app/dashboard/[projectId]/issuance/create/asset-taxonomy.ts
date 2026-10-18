@@ -3,7 +3,7 @@ import {
   type AssetCategory,
   getAssetTypeRegistryEntry,
   isAssetTypeSupported,
-} from "@sdp/types";
+} from "@sdp/types/asset-profiles";
 import {
   Banknote,
   Bitcoin,

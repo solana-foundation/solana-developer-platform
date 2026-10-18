@@ -20,8 +20,9 @@
  * have its channel balance burned, without ever having been enrolled.
  */
 
-import { isAddress } from "@sdp/solana/address";
-import { MEMO_PROGRAM_ADDRESS, type PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import { isAddress } from "@solana/addresses";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";

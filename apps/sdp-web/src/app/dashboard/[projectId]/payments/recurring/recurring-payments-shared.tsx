@@ -1,19 +1,19 @@
 "use client";
 
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import {
-  type CounterpartyAccount,
   PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
   type PaymentRecurringPaymentSchedulePreset,
   type PaymentRecurringPaymentStatus,
   type PaymentsDashboardWallet,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
 import { CopyIcon, ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";

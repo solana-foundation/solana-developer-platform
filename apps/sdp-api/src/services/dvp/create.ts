@@ -25,8 +25,8 @@
  */
 
 import { findDvpNonceTombstonePda, findSwapDvpPda, getCreateDvpInstruction } from "@sdp/dvp";
-import * as solanaRpc from "@sdp/rpc/solana";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -257,7 +257,7 @@ async function resolveParties(
  * not fail one side, it strands a trade both parties have already funded.
  */
 async function assertNamedDestinationsUsable(
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: ReturnType<typeof createRpc>,
   input: Pick<CreateDvpTradeInput, "userASettlementDestination" | "userBSettlementDestination">
 ): Promise<void> {
   const named = [
@@ -334,7 +334,7 @@ export async function createDvpTrade(
   // here means a request naming a mint the program refuses costs one batched
   // account read and nothing else. These are the rules `validateDvpTerms`
   // excludes as needing chain state, "handled where the trade is built".
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createRpc(env);
   const mintProblems = await validateDvpMints(rpc, [
     { label: "mintA", mint: mintA, tokenProgram: tokenProgramA },
     { label: "mintB", mint: mintB, tokenProgram: tokenProgramB },
@@ -516,10 +516,7 @@ export async function createDvpTrade(
           : some(input.earliestSettlementTimestamp),
     });
 
-    const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-      rpc,
-      "confirmed"
-    );
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayer(sponsor, m),

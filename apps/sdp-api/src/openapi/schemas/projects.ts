@@ -2,7 +2,7 @@ import {
   type ProjectProviderAvailabilityEntry,
   projectProviderAvailabilityEntrySchema,
   projectProviderAvailabilitySchema,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { z } from "zod";
 import {
   addMemberSchema as addMemberSchemaBase,

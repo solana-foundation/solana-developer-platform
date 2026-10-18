@@ -1,6 +1,7 @@
 "use client";
 
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token } from "@sdp/types/tokens";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";

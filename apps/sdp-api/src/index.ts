@@ -6,7 +6,7 @@
  * application factory.
  */
 
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { createApp } from "@/app";
 import { noopObservability } from "@/runtime/observability";
 

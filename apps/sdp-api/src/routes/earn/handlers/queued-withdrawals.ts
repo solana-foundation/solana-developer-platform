@@ -5,7 +5,7 @@ import type {
   EarnVaultQueuedWithdrawalQuote,
   EarnVaultWithdrawalOptions,
 } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";

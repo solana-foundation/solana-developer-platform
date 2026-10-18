@@ -1,4 +1,4 @@
-import type { EarnVaultPosition } from "@sdp/types";
+import type { EarnVaultPosition } from "@sdp/types/earn";
 import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
 
 export type VaultMovementKind = "deposit" | "withdrawal";

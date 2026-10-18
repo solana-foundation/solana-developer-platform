@@ -1,10 +1,7 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import type {
-  Counterparty,
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments";
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";

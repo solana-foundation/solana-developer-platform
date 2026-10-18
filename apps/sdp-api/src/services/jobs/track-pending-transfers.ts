@@ -19,12 +19,12 @@
  * transfers whose project is in the scope's environment and reads them through that cluster.
  */
 
-import { withTransientRpcRetry } from "@sdp/rpc";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
-import type { TransferChainVerdictStatus } from "@sdp/types";
+import { getSignatureStatuses } from "@sdp/rpc/solana";
+import { withTransientRpcRetry } from "@sdp/rpc/transient";
+import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
 import type {
@@ -311,7 +311,7 @@ async function finalizeConfirmedTransfers(
   let statuses: Array<SignatureStatusInfo | null>;
   try {
     const rpc = createClusterRpc();
-    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
+    statuses = await getSignatureStatuses(rpc, signatures, {
       searchTransactionHistory: true,
     });
   } catch (err) {
@@ -471,7 +471,7 @@ async function syncProcessingTransfersOnChain(
   let rpc: SolanaRpc;
   try {
     rpc = createClusterRpc();
-    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
+    statuses = await getSignatureStatuses(rpc, signatures);
   } catch (err) {
     getLogger().error(
       {
@@ -683,7 +683,7 @@ async function getArchivedStatuses(
   }
 
   try {
-    const statuses = await solanaRpc.getSignatureStatuses(
+    const statuses = await getSignatureStatuses(
       rpc,
       transfers.map((transfer) => transfer.signature),
       { searchTransactionHistory: true }

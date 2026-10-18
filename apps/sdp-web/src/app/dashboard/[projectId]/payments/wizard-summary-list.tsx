@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { ChevronLeftIcon, ExternalLinkIcon, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 export interface WizardSummaryDetail {

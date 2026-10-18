@@ -1,4 +1,4 @@
-import type { CustodyConfigsResponse } from "@sdp/types";
+import type { CustodyConfigsResponse } from "@sdp/types/custody";
 import { requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";

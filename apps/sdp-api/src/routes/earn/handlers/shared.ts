@@ -1,5 +1,5 @@
-import type { SdpEnvironment } from "@sdp/types";
-import { EARN_SWAP_DEFAULT_SLIPPAGE_BPS, earnSwapSourceTokens } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { EARN_SWAP_DEFAULT_SLIPPAGE_BPS, earnSwapSourceTokens } from "@sdp/types/earn";
 import { z } from "zod";
 import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { earnClusterFor } from "@/services/earn/execution-registry";

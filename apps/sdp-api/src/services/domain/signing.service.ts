@@ -5,7 +5,14 @@
  * Handles DB-backed config resolution and Kit signer access for exact custody wallets.
  */
 
-import type { CustodyProvider } from "@sdp/custody";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  IBM_HAVEN_PROVIDER_LABEL,
+  normalizeDfnsWalletId,
+  resolveDfnsNetwork,
+} from "@sdp/custody/dfns/client";
+import { KeychainFireblocksAdapter } from "@sdp/custody/keychain/keychain-fireblocks.adapter";
 import {
   normalizeAnchorageWalletId,
   normalizeCoinbaseCdpWalletId,
@@ -14,18 +21,11 @@ import {
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
   normalizeUtilaWalletId,
-} from "@sdp/custody";
-import {
-  createDfnsApiClient,
-  createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
-  normalizeDfnsWalletId,
-  resolveDfnsNetwork,
-} from "@sdp/custody/dfns";
-import { KeychainFireblocksAdapter } from "@sdp/custody/keychain";
+} from "@sdp/custody/provider-wallet-ids";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
-import type { MovementId } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import type { MovementId } from "@sdp/types/movements";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";

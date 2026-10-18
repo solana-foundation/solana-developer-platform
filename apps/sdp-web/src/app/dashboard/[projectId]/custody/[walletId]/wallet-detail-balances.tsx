@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import Link from "next/link";
 import useSWR from "swr";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";

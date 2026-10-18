@@ -36,13 +36,16 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { EARN_PROVIDER_CLIENTS, isStrategyWithinDeclaredSupport, SdpEarnError } from "@sdp/earn";
+import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
+import { SdpEarnError } from "@sdp/earn/errors";
+import { isStrategyWithinDeclaredSupport } from "@sdp/earn/support";
 import type {
   EarnRuntimeContext,
   EarnVaultProvider,
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { EarnRepository } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";
 import type { BackgroundRunner } from "@/runtime/background";

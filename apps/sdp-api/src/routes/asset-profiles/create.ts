@@ -1,6 +1,6 @@
-import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities";
+import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities/resolver";
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
-import { getAssetTypeRegistryEntry } from "@sdp/types";
+import { getAssetTypeRegistryEntry } from "@sdp/types/asset-profiles";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories/asset-profile.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";

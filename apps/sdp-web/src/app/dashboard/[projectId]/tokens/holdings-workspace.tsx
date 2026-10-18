@@ -1,17 +1,11 @@
 "use client";
 
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { Card, CardContent } from "@sdp/ui/card";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { TokenMark } from "@/components/token-mark";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {

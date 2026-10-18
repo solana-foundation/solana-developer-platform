@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
+import type { PaymentTransferSummary as TransferRecord } from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {

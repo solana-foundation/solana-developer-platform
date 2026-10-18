@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
+import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types/custody";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import {

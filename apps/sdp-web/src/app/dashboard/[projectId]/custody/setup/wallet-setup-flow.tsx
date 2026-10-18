@@ -1,12 +1,17 @@
 "use client";
 
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type ByokCustodyProvider,
   CUSTODY_MODES,
   type CustodyMode,
   isByokCustodyProvider,
-  type SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
@@ -24,11 +29,6 @@ import {
 import { PrivyCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
 import { useWalletInventoryRefresh } from "@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh";
 import { WalletProviderChoices } from "@/app/dashboard/[projectId]/custody/wallet-provider-choices";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
-import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";

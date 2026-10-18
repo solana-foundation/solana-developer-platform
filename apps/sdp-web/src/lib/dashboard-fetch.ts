@@ -1,9 +1,6 @@
-import {
-  type IdempotencyRequiredRoute,
-  isBodylessHttpStatus,
-  isMoneyMovementStatus,
-  type MoneyMovementStatus,
-} from "@sdp/types";
+import { isBodylessHttpStatus } from "@sdp/types/idempotency";
+import type { IdempotencyRequiredRoute } from "@sdp/types/idempotency-required-routes";
+import { isMoneyMovementStatus, type MoneyMovementStatus } from "@sdp/types/payments";
 import { z } from "zod";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";

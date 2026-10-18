@@ -1,5 +1,6 @@
 import { createRpcForSdk } from "@sdp/rpc/solana";
-import { type Address, assertValidAddress } from "@sdp/solana/address";
+import { assertValidAddress } from "@sdp/solana/address";
+import type { Address } from "@solana/addresses";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";

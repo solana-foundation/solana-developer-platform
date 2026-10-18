@@ -1,8 +1,7 @@
 /** Shared custody adapter types, startup guard, and provider re-exports. */
 
-import type { CustodyProvider } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
-import type { CustodyConfigStatus } from "@sdp/types";
+import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types/custody";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 

@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   RAMP_WEBHOOK_APPLY_OUTCOMES,
   RAMP_WEBHOOK_EVENT_STATUSES,
@@ -5,8 +6,7 @@ import {
   type RampWebhookDischargeOutcome,
   type RampWebhookEventStatus,
   type RampWebhookFailureOutcome,
-  type SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import {
   PERSISTED_RAMP_PROVIDERS,
   type PersistedRampProviderId,

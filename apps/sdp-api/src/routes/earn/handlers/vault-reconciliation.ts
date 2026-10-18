@@ -1,4 +1,4 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db/client";

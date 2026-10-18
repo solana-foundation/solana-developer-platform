@@ -1,7 +1,7 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";

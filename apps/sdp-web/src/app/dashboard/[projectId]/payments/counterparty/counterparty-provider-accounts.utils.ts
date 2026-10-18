@@ -1,8 +1,8 @@
 import type {
   CounterpartyProviderAccount,
   CounterpartyProviderCustomerLink,
-  PersistedRampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
+import type { PersistedRampProviderId } from "@sdp/types/provider-access";
 
 export type FundingWalletAccount = CounterpartyProviderAccount & { fiatCurrency: string };
 

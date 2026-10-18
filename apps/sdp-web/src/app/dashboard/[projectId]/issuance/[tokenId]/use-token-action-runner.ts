@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";

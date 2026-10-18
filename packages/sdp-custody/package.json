@@ -4,30 +4,95 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./dfns/client": {
+      "types": "./src/dfns/client.ts",
+      "import": "./src/dfns/client.ts",
+      "default": "./src/dfns/client.ts"
     },
-    "./signing": {
-      "types": "./src/signing.ts",
-      "import": "./src/signing.ts",
-      "default": "./src/signing.ts"
+    "./keychain/keychain-coinbase.adapter": {
+      "types": "./src/keychain/keychain-coinbase.adapter.ts",
+      "import": "./src/keychain/keychain-coinbase.adapter.ts",
+      "default": "./src/keychain/keychain-coinbase.adapter.ts"
     },
-    "./keychain": {
-      "types": "./src/keychain/index.ts",
-      "import": "./src/keychain/index.ts",
-      "default": "./src/keychain/index.ts"
+    "./keychain/keychain-dfns.adapter": {
+      "types": "./src/keychain/keychain-dfns.adapter.ts",
+      "import": "./src/keychain/keychain-dfns.adapter.ts",
+      "default": "./src/keychain/keychain-dfns.adapter.ts"
     },
-    "./dfns": {
-      "types": "./src/dfns/index.ts",
-      "import": "./src/dfns/index.ts",
-      "default": "./src/dfns/index.ts"
+    "./keychain/keychain-fireblocks.adapter": {
+      "types": "./src/keychain/keychain-fireblocks.adapter.ts",
+      "import": "./src/keychain/keychain-fireblocks.adapter.ts",
+      "default": "./src/keychain/keychain-fireblocks.adapter.ts"
+    },
+    "./keychain/keychain-ibm-haven.adapter": {
+      "types": "./src/keychain/keychain-ibm-haven.adapter.ts",
+      "import": "./src/keychain/keychain-ibm-haven.adapter.ts",
+      "default": "./src/keychain/keychain-ibm-haven.adapter.ts"
+    },
+    "./keychain/keychain-memory.adapter": {
+      "types": "./src/keychain/keychain-memory.adapter.ts",
+      "import": "./src/keychain/keychain-memory.adapter.ts",
+      "default": "./src/keychain/keychain-memory.adapter.ts"
+    },
+    "./keychain/keychain-para.adapter": {
+      "types": "./src/keychain/keychain-para.adapter.ts",
+      "import": "./src/keychain/keychain-para.adapter.ts",
+      "default": "./src/keychain/keychain-para.adapter.ts"
+    },
+    "./keychain/keychain-privy.adapter": {
+      "types": "./src/keychain/keychain-privy.adapter.ts",
+      "import": "./src/keychain/keychain-privy.adapter.ts",
+      "default": "./src/keychain/keychain-privy.adapter.ts"
+    },
+    "./keychain/keychain-turnkey.adapter": {
+      "types": "./src/keychain/keychain-turnkey.adapter.ts",
+      "import": "./src/keychain/keychain-turnkey.adapter.ts",
+      "default": "./src/keychain/keychain-turnkey.adapter.ts"
+    },
+    "./keychain/keychain-utila.adapter": {
+      "types": "./src/keychain/keychain-utila.adapter.ts",
+      "import": "./src/keychain/keychain-utila.adapter.ts",
+      "default": "./src/keychain/keychain-utila.adapter.ts"
+    },
+    "./keychain/utila-config": {
+      "types": "./src/keychain/utila-config.ts",
+      "import": "./src/keychain/utila-config.ts",
+      "default": "./src/keychain/utila-config.ts"
+    },
+    "./provider-wallet-ids": {
+      "types": "./src/provider-wallet-ids.ts",
+      "import": "./src/provider-wallet-ids.ts",
+      "default": "./src/provider-wallet-ids.ts"
+    },
+    "./providers": {
+      "types": "./src/providers.ts",
+      "import": "./src/providers.ts",
+      "default": "./src/providers.ts"
     },
     "./provisioning": {
       "types": "./src/provisioning/index.ts",
       "import": "./src/provisioning/index.ts",
       "default": "./src/provisioning/index.ts"
+    },
+    "./provisioning/anchorage": {
+      "types": "./src/provisioning/anchorage.ts",
+      "import": "./src/provisioning/anchorage.ts",
+      "default": "./src/provisioning/anchorage.ts"
+    },
+    "./provisioning/common": {
+      "types": "./src/provisioning/common.ts",
+      "import": "./src/provisioning/common.ts",
+      "default": "./src/provisioning/common.ts"
+    },
+    "./provisioning/runtime": {
+      "types": "./src/provisioning/runtime.ts",
+      "import": "./src/provisioning/runtime.ts",
+      "default": "./src/provisioning/runtime.ts"
+    },
+    "./signing": {
+      "types": "./src/signing.ts",
+      "import": "./src/signing.ts",
+      "default": "./src/signing.ts"
     }
   },
   "scripts": {

@@ -1,7 +1,7 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { resolveClusterRpcUrl } from "@sdp/rpc";
-import type { SdpEnvironment } from "@sdp/types";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
   address,

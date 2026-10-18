@@ -6,7 +6,7 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { ParsedInstruction } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { type createRpc, getTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -19,7 +19,7 @@ import {
   type PaymentSubscriptionCollectionAttemptInitialStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import {
   AccountRole,
   type Address,
@@ -346,7 +346,7 @@ function subscriptionsInstructionFromRpc(parsed: ParsedInstruction): Instruction
 }
 
 async function matchesRecurringTransferInstruction(input: {
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: ReturnType<typeof createRpc>;
   instruction: Instruction;
   amountBaseUnits: bigint;
   sourceAddress: string;
@@ -495,7 +495,7 @@ async function verifyRecurringPaymentCollection(input: {
     resolveMintDecimals(rpc, mint),
   ]);
   const amountBaseUnits = parseDecimalAmount(input.recurringPayment.amount, decimals);
-  const confirmedTransaction = await solanaRpc.getTransaction(rpc, input.signature);
+  const confirmedTransaction = await getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {
     throw solanaRpcError(
       "Recurring payment collection is confirmed but not yet indexed; retry shortly"

@@ -1,6 +1,11 @@
 "use client";
 
-import type { PaymentsDashboardWallet, TokenAllowlistEntry } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { TokenAllowlistEntry } from "@sdp/types/tokens";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Select, SelectItem } from "@sdp/ui/select";
 import {
   Flame,
   HandCoins,
@@ -24,10 +29,6 @@ import {
   useId,
   useState,
 } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useDebounce } from "@/lib/use-debounce";

@@ -3,9 +3,9 @@ import {
   FeePaymentError,
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
-} from "@sdp/fee-payment";
+} from "@sdp/fee-payment/port";
 import { createRpc, getTransactionNetworkFee, type SolanaRpc } from "@sdp/rpc/solana";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   assertIsFullySignedTransaction,

@@ -1,5 +1,6 @@
-import { isClusterFundableInEnvironment, supportsPortfolioWallets } from "@sdp/earn";
+import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
+import { isClusterFundableInEnvironment } from "@sdp/earn/support";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import type {
   EarnPortfolioAllocationInput,
@@ -14,7 +15,7 @@ import type {
   EarnProgramWithdrawalResponse,
   ListEarnProgramsResponse,
   ListEarnProgramWithdrawalsResponse,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db/client";

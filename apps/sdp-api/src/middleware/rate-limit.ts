@@ -1,4 +1,4 @@
-import type { RateLimitTier } from "@sdp/types";
+import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";

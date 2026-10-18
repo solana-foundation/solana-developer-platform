@@ -1,6 +1,17 @@
 "use client";
 
-import type { PaymentTransferBatchRecipientStatus, PaymentTransferBatchStatus } from "@sdp/types";
+import type {
+  PaymentTransferBatchRecipientStatus,
+  PaymentTransferBatchStatus,
+} from "@sdp/types/payments";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { cn } from "@sdp/ui/cn";
+import { Combobox } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { SearchInput } from "@sdp/ui/search-input";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ExternalLink, PlusIcon, UploadIcon, XIcon } from "lucide-react";
 import { domAnimation, LazyMotion, m } from "motion/react";
 import { type ReactNode, useMemo, useRef, useState } from "react";
@@ -10,17 +21,9 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { SearchInput } from "@/components/ui/search-input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import {
   bulkCsvTemplate,
   bulkRowErrorMessage,

@@ -1,10 +1,10 @@
 // biome-ignore lint/style/noRestrictedImports: observed transfers read wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type * as solanaRpc from "@sdp/rpc/solana";
-import type { SolanaRpc } from "@sdp/rpc/solana";
+import type { getSignaturesForAddress, SolanaRpc } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { SOL_MINT, type PaymentTransferStatus as TransferStatus } from "@sdp/types";
+import type { PaymentTransferStatus as TransferStatus } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address, Signature } from "@solana/kit";
 import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
@@ -85,7 +85,7 @@ interface ObservedTransferContext {
   walletIdsByAddress: Map<string, string>;
 }
 
-type SignatureHistoryEntry = Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number];
+type SignatureHistoryEntry = Awaited<ReturnType<typeof getSignaturesForAddress>>[number];
 
 function resolveWalletIdForTokenAccount(
   context: ObservedTransferContext,
@@ -754,7 +754,7 @@ function buildObservedTransferRows(
 }
 
 export async function buildObservedTransfersForSignatures(
-  signatures: Array<Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number]>,
+  signatures: Array<Awaited<ReturnType<typeof getSignaturesForAddress>>[number]>,
   context: ObservedTransferContext
 ): Promise<TransferRow[]> {
   if (signatures.length === 0 || context.walletIdsByAddress.size === 0) {

@@ -1,4 +1,4 @@
-import type { MaterialTag, PrivateWallet, WalletStatus } from "@sdp/helius-rings";
+import type { MaterialTag, PrivateWallet, WalletStatus } from "@sdp/helius-rings/types";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateHeliusRingsWalletId(): string {

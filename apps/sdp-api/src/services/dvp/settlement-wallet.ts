@@ -13,7 +13,8 @@
  * SDP's leg, never a reuse of it.
  */
 
-import type { CustodyWalletOwnerTarget, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { CustodyWalletOwnerTarget } from "@sdp/types/custody";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";

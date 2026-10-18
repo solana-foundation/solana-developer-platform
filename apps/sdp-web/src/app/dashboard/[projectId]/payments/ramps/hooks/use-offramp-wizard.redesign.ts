@@ -1,11 +1,11 @@
 "use client";
 
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type {
   PaymentOfframpQuoteRequest,
   PaymentTransferSummary,
   RampCryptoDeposit,
-} from "@sdp/types";
-import { getCryptoRailAssetLabel } from "@sdp/types";
+} from "@sdp/types/payments";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useMemo } from "react";

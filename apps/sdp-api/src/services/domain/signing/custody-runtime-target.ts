@@ -1,4 +1,4 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider, normalizePrivyWalletId } from "@sdp/custody";
+import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
 import type {
   CustodyConfigStatus,
@@ -7,10 +7,12 @@ import type {
   CustodyMode,
   CustodyWalletPurpose,
   CustodyWalletStatus,
-  OrganizationProviderAvailabilityResponse,
   ProviderCredentialStatus,
-} from "@sdp/types";
-import { type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+} from "@sdp/types/custody";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
+import type { MovementId } from "@sdp/types/movements";
+import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";

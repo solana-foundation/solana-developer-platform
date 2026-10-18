@@ -1,12 +1,12 @@
 "use client";
 
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
+import { cn } from "@sdp/ui/cn";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import { CheckCircle2Icon, InfoIcon, Loader2Icon, XCircleIcon } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 interface TransferStatusCopy {
   title: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { EarnVaultPosition } from "@sdp/types";
+import type { EarnVaultPosition } from "@sdp/types/earn";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useEarnFundingWallets } from "../earn/deposit/earn-funding-wallets";
 import { useEarnVaultPositions } from "../earn/earn-program-data";

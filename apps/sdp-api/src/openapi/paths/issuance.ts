@@ -1,5 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { TOKEN_TRANSACTION_TYPES } from "@sdp/types";
+import { TOKEN_TRANSACTION_TYPES } from "@sdp/types/tokens";
 import { z } from "zod";
 import {
   allowlistEntryIdParamSchema,

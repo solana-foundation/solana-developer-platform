@@ -1,4 +1,4 @@
-import type { PrivateChannelProbeResult } from "@sdp/types";
+import type { PrivateChannelProbeResult } from "@sdp/types/private-channels";
 
 type ConnectionProbeDetails = Omit<PrivateChannelProbeResult, "ok">;
 

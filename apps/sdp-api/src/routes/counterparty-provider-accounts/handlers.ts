@@ -1,8 +1,8 @@
-import {
-  type CounterpartyProviderAccount,
-  isRetiredRampProviderId,
-  type ListCounterpartyProviderAccountsResponse,
-} from "@sdp/types";
+import type {
+  CounterpartyProviderAccount,
+  ListCounterpartyProviderAccountsResponse,
+} from "@sdp/types/counterparties";
+import { isRetiredRampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";

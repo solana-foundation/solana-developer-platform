@@ -1,4 +1,4 @@
-import type { Token, TokenStatus } from "@sdp/types";
+import type { Token, TokenStatus } from "@sdp/types/tokens";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface ListTokensOptions {

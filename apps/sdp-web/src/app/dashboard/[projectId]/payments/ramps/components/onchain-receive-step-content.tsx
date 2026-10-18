@@ -1,8 +1,8 @@
 "use client";
 
+import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
-import { Combobox } from "@/components/ui/combobox";
 import { useTranslations } from "@/i18n/provider";
 import type { OnchainReceiveWizard } from "../hooks/use-onchain-receive-wizard";
 import { walletComboboxOptions } from "../wallet-options";

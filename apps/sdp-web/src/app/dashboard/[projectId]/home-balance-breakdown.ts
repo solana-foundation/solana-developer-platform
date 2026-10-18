@@ -1,4 +1,4 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 
 export interface HomeBalanceSlice {
   /** Mint address — the stable identity, and the React key. */

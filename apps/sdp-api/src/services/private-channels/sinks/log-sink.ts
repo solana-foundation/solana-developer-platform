@@ -1,4 +1,4 @@
-import { PRIVATE_CHANNEL_EVENT_FAMILIES } from "@sdp/types";
+import { PRIVATE_CHANNEL_EVENT_FAMILIES } from "@sdp/types/private-channels";
 import { getLogger } from "@/runtime/logger";
 import type { PrivateChannelEventSink } from "../event.service";
 

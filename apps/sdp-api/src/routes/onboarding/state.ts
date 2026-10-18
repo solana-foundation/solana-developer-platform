@@ -1,4 +1,5 @@
-import type { CustodyProvider, OrganizationOnboardingSetup } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import type { OrganizationOnboardingSetup } from "@sdp/types/organizations";
 
 export const ONBOARDING_VERSION = 1;
 

@@ -333,19 +333,61 @@
       }
     },
     {
-      "includes": ["**/apps/sdp-api/src/**/*.ts"],
+      "includes": [
+        "**/apps/*/src/**/*.ts",
+        "**/apps/*/src/**/*.tsx",
+        "**/packages/*/src/**/*.ts",
+        "**/packages/*/src/**/*.tsx",
+        "!**/packages/sdp-dvp/**",
+        "!**/packages/sdp-spc-escrow/**",
+        "!**/packages/sdp-spc-withdraw/**",
+        "!**/packages/bigint-buffer/**",
+        "!**/app/**/page.ts",
+        "!**/app/**/page.tsx",
+        "!**/app/**/layout.ts",
+        "!**/app/**/layout.tsx",
+        "!**/app/**/loading.ts",
+        "!**/app/**/loading.tsx",
+        "!**/app/**/error.ts",
+        "!**/app/**/error.tsx",
+        "!**/app/**/not-found.ts",
+        "!**/app/**/not-found.tsx",
+        "!**/app/**/template.ts",
+        "!**/app/**/template.tsx",
+        "!**/app/**/default.ts",
+        "!**/app/**/default.tsx",
+        "!**/app/**/global-error.ts",
+        "!**/app/**/global-error.tsx",
+        "!**/app/**/opengraph-image.ts",
+        "!**/app/**/opengraph-image.tsx",
+        "!**/app/**/twitter-image.ts",
+        "!**/app/**/twitter-image.tsx",
+        "!**/app/**/sitemap.ts",
+        "!**/app/**/sitemap.tsx",
+        "!**/app/**/robots.ts",
+        "!**/app/**/robots.tsx",
+        "!**/app/**/manifest.ts",
+        "!**/app/**/manifest.tsx"
+      ],
       "linter": {
         "rules": {
           "performance": {
             "noBarrelFile": "error",
             "noReExportAll": "error"
-          },
-          "style": {
-            "noExportedImports": "error"
           }
         }
       },
       "plugins": ["./.biome-plugins/no-export-from.grit"]
+    },
+    {
+      "includes": ["**/apps/sdp-api/src/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noExportedImports": "error"
+          }
+        }
+      }
     }
   ],
   "files": {

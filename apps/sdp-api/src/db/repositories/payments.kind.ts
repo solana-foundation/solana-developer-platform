@@ -1,4 +1,4 @@
-import type { PaymentTransactionKind } from "@sdp/types";
+import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
 import type { PaymentTransferDirection } from "./payments.repository";
 
 export const PAYMENT_TRANSACTION_KIND_SQL = `CASE

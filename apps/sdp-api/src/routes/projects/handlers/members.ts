@@ -1,4 +1,5 @@
-import type { ListProjectMembersResponse, ProjectMemberResponse, ProjectRole } from "@sdp/types";
+import type { ProjectRole } from "@sdp/types/permissions";
+import type { ListProjectMembersResponse, ProjectMemberResponse } from "@sdp/types/projects";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";

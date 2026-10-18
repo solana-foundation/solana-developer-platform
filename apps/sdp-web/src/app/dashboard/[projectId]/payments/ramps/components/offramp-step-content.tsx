@@ -1,8 +1,8 @@
 "use client";
 
+import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
-import { Combobox } from "@/components/ui/combobox";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";

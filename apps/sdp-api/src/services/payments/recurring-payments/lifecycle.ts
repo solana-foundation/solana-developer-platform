@@ -6,12 +6,12 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { MovementId } from "@sdp/types/movements";
+import type { PaymentRecurringPaymentLifecycleAttemptStage } from "@sdp/types/payments";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isPendingActivationRecurringPaymentStatus,
-  type MovementId,
-} from "@sdp/types";
-import type { PaymentRecurringPaymentLifecycleAttemptStage } from "@sdp/types/payments";
+} from "@sdp/types/payments";
 import type { Address, Instruction, MaybeAccount, Signature, TransactionSigner } from "@solana/kit";
 import type { SubscriptionDelegation } from "@solana/subscriptions";
 import * as subscriptionsProgram from "@solana/subscriptions";

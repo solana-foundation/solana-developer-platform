@@ -2,8 +2,8 @@ import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
-import type { SignerCheckResponse } from "@sdp/types";
-import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
+import type { SignerCheckResponse } from "@sdp/types/custody";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,

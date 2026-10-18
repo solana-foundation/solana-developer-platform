@@ -14,7 +14,7 @@
  */
 
 import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
-import type { DvpTradeStatus } from "@sdp/types";
+import type { DvpTradeStatus } from "@sdp/types/dvp";
 import type { Signature } from "@solana/kit";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { createDvpTradeRepository } from "@/db/repositories/repository-factory";

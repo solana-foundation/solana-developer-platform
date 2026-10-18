@@ -16,7 +16,7 @@ import {
   DVP_SETTLEMENT_AVAILABILITY,
   DVP_TRADE_SIDES,
   DVP_TRADE_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/dvp";
 import { z } from "zod";
 import { errorSchema, isoDateTimeSchema, withOpenApi } from "@/openapi/schemas/base";
 import {

@@ -1,8 +1,5 @@
-import {
-  deriveAblListAddress,
-  MintMetadataUpdateError,
-  PACKET_DATA_SIZE,
-} from "@sdp/issuance/mosaic";
+import { deriveAblListAddress, PACKET_DATA_SIZE } from "@sdp/issuance/mosaic/service";
+import { MintMetadataUpdateError } from "@sdp/issuance/mosaic/types";
 import {
   createRpc,
   getAccountInfo,
@@ -10,7 +7,7 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";

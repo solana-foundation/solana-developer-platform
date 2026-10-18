@@ -1,10 +1,10 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { ArrowLeftRight, Banknote } from "lucide-react";
 import type { ReactNode } from "react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 export type PaymentMethod = "onchain" | "ramp";
 

@@ -1,5 +1,6 @@
-import { isAddress } from "@sdp/solana";
-import type { PaymentsDashboardWallet, Token, TokenAllowlistEntry } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token, TokenAllowlistEntry } from "@sdp/types/tokens";
+import { isAddress } from "@solana/kit";
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { dashboardFetch } from "@/lib/dashboard-fetch";

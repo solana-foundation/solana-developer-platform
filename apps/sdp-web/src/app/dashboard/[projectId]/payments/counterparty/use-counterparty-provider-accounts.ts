@@ -3,7 +3,7 @@
 import type {
   CounterpartyProviderAccount,
   ListCounterpartyProviderAccountsResponse,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";

@@ -1,24 +1,20 @@
 "use client";
 
-import type { CustodyWalletTokenBalance, PaymentsDashboardWallet, SolanaCluster } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { StatusText } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { CoinsIcon, KeyIcon, ReceiptIcon, WalletIcon } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useMemo } from "react";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { StatusText } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";

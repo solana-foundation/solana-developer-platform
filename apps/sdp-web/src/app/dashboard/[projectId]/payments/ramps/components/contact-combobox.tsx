@@ -1,9 +1,9 @@
 "use client";
 
+import { Combobox } from "@sdp/ui/combobox";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { useThemeScope } from "@sdp/ui/theme-scope";
 import { type ReactNode, useMemo } from "react";
-import { useThemeScope } from "@/components/theme-scope";
-import { Combobox } from "@/components/ui/combobox";
-import { InfoHint } from "@/components/ui/info-hint";
 import { useTranslations } from "@/i18n/provider";
 import type { CounterpartiesResult } from "../../payments-workspace.data";
 

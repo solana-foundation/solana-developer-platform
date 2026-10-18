@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import type { AssetProfile, Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { withLegacyDesign } from "@/flags/new-design";

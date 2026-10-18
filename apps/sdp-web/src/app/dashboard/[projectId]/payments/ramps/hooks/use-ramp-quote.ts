@@ -1,8 +1,8 @@
 "use client";
 
-import type { PaymentRampQuote } from "@sdp/types";
+import type { PaymentRampQuote } from "@sdp/types/payments";
 import { useEffect, useRef, useState } from "react";
-import { getApiError } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { getPaymentApiError as getApiError } from "@/app/dashboard/[projectId]/payments/payment-api-errors";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";

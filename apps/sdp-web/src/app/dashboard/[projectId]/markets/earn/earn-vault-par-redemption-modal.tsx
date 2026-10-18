@@ -1,29 +1,31 @@
 "use client";
 
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type EarnVaultParRedemptionPreview,
-  type EarnVaultParRedemptionTerms,
-  type EarnVaultParRedemptionTermsRequest,
-  type EarnVaultPosition,
-  type EarnVaultWithdrawalRequestRecord,
-  type SdpEnvironment,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type {
+  EarnVaultParRedemptionPreview,
+  EarnVaultParRedemptionTerms,
+  EarnVaultParRedemptionTermsRequest,
+  EarnVaultPosition,
+  EarnVaultWithdrawalRequestRecord,
+} from "@sdp/types/earn";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useSWRConfig } from "swr";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
+import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
+import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
+import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
-import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatProviderAmount, formatTokenValue, shortenMarketAddress } from "./earn-format";
 import { TransactionLink } from "./earn-market-presentation";
 import {

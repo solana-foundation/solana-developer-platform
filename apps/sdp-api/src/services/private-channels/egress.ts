@@ -32,7 +32,7 @@
  * deployment config is the operator approving that one destination. Nothing a
  * project sends can add an entry or change how one is classified.
  */
-import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
 import type { ProbeRequest, ProbeResponse, ProbeTransport } from "@sdp/private-channels/transport";
 import { isBlockedAddress } from "@sdp/rpc/blocked-address";
 import { badRequest } from "@/lib/errors";

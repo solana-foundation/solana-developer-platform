@@ -1,15 +1,15 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { Combobox } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import {
   formatCurrencyAmount,
   resolveTotalBalance,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
 import { findWalletBalanceForToken } from "../wallet-options";

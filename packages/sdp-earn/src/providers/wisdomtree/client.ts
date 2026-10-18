@@ -1,4 +1,4 @@
-import { wellKnownMint } from "@sdp/types";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { wisdomTreeFundByMint, wisdomTreeFundsForCluster } from "@sdp/types/wisdomtree-programs";
 import type {
   EarnDeclaredStrategySupport,

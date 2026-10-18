@@ -7,9 +7,9 @@ import {
   SwapDvpVerificationError,
   verifySwapDvpAccount,
 } from "@sdp/dvp";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types";
+import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -191,7 +191,7 @@ export async function executeDvpFunding(
 
   const { side, mint, tokenProgram, escrow, amount } = plan.leg;
 
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createRpc(env);
 
   // Read the escrow NOW rather than trusting the reconciler's last sweep. The
   // sweep runs once a minute, so acting on it would let two funding requests a
@@ -384,7 +384,7 @@ export async function executeDvpFunding(
     { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },
     { programAddress: tokenProgram }
   );
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),

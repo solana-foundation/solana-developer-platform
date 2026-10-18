@@ -1,8 +1,8 @@
 "use client";
 
-import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { COUNTRIES } from "@sdp/types/countries";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
+import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types/places";
 import {
   type CollectedFieldData,
   offeredCountryCodes,
@@ -10,16 +10,16 @@ import {
   type RequirementField,
   requirementFieldName,
 } from "@sdp/types/ramp-requirements";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
 import { autocompletePlaces, fetchPlaceDetails, newPlacesSessionToken } from "@/lib/places";
-import { cn } from "@/lib/utils";
 import { applyRequirementMask, requirementFieldError } from "../schema";
 
 /**

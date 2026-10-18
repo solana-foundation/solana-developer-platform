@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./counterparty": {
+      "types": "./src/counterparty.ts",
+      "import": "./src/counterparty.ts",
+      "default": "./src/counterparty.ts"
     },
     "./decimal": {
       "types": "./src/decimal.ts",
@@ -29,11 +29,6 @@
       "import": "./src/json.ts",
       "default": "./src/json.ts"
     },
-    "./recurring-payment-lifecycle": {
-      "types": "./src/recurring-payment-lifecycle.ts",
-      "import": "./src/recurring-payment-lifecycle.ts",
-      "default": "./src/recurring-payment-lifecycle.ts"
-    },
     "./ramps": {
       "types": "./src/ramps/index.ts",
       "import": "./src/ramps/index.ts",
@@ -43,21 +38,6 @@
       "types": "./src/ramps/fetch.ts",
       "import": "./src/ramps/fetch.ts",
       "default": "./src/ramps/fetch.ts"
-    },
-    "./ramps/requirements": {
-      "types": "./src/ramps/requirements.ts",
-      "import": "./src/ramps/requirements.ts",
-      "default": "./src/ramps/requirements.ts"
-    },
-    "./ramps/shared": {
-      "types": "./src/ramps/shared.ts",
-      "import": "./src/ramps/shared.ts",
-      "default": "./src/ramps/shared.ts"
-    },
-    "./ramps/types": {
-      "types": "./src/ramps/types.ts",
-      "import": "./src/ramps/types.ts",
-      "default": "./src/ramps/types.ts"
     },
     "./ramps/providers/moonpay/client": {
       "types": "./src/ramps/providers/moonpay/client.ts",
@@ -73,6 +53,21 @@
       "types": "./src/ramps/providers/stripe/client.ts",
       "import": "./src/ramps/providers/stripe/client.ts",
       "default": "./src/ramps/providers/stripe/client.ts"
+    },
+    "./ramps/shared": {
+      "types": "./src/ramps/shared.ts",
+      "import": "./src/ramps/shared.ts",
+      "default": "./src/ramps/shared.ts"
+    },
+    "./ramps/types": {
+      "types": "./src/ramps/types.ts",
+      "import": "./src/ramps/types.ts",
+      "default": "./src/ramps/types.ts"
+    },
+    "./recurring-payment-lifecycle": {
+      "types": "./src/recurring-payment-lifecycle.ts",
+      "import": "./src/recurring-payment-lifecycle.ts",
+      "default": "./src/recurring-payment-lifecycle.ts"
     }
   },
   "scripts": {

@@ -4,7 +4,7 @@ import {
   type AssetAuditStatus,
   isAssetAuditActorType,
   isAssetAuditStatus,
-} from "@sdp/types";
+} from "@sdp/types/audit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { badRequest, notFound } from "@/lib/errors";

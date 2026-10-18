@@ -1,6 +1,6 @@
-import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment";
+import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {

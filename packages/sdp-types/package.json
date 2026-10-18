@@ -4,15 +4,30 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./advanced-settings": {
+      "types": "./src/advanced-settings.ts",
+      "import": "./src/advanced-settings.ts",
+      "default": "./src/advanced-settings.ts"
     },
-    "./organizations": {
-      "types": "./src/organizations.ts",
-      "import": "./src/organizations.ts",
-      "default": "./src/organizations.ts"
+    "./allowed-operations": {
+      "types": "./src/allowed-operations.ts",
+      "import": "./src/allowed-operations.ts",
+      "default": "./src/allowed-operations.ts"
+    },
+    "./api-keys": {
+      "types": "./src/api-keys.ts",
+      "import": "./src/api-keys.ts",
+      "default": "./src/api-keys.ts"
+    },
+    "./asset-profiles": {
+      "types": "./src/asset-profiles.ts",
+      "import": "./src/asset-profiles.ts",
+      "default": "./src/asset-profiles.ts"
+    },
+    "./audit": {
+      "types": "./src/audit.ts",
+      "import": "./src/audit.ts",
+      "default": "./src/audit.ts"
     },
     "./counterparties": {
       "types": "./src/counterparties.ts",
@@ -29,105 +44,185 @@
       "import": "./src/custody.ts",
       "default": "./src/custody.ts"
     },
-    "./api-keys": {
-      "types": "./src/api-keys.ts",
-      "import": "./src/api-keys.ts",
-      "default": "./src/api-keys.ts"
-    },
-    "./earn-wire": {
-      "types": "./src/earn-wire.ts",
-      "import": "./src/earn-wire.ts",
-      "default": "./src/earn-wire.ts"
-    },
-    "./network-metrics": {
-      "types": "./src/network-metrics.ts",
-      "import": "./src/network-metrics.ts",
-      "default": "./src/network-metrics.ts"
+    "./dvp": {
+      "types": "./src/dvp.ts",
+      "import": "./src/dvp.ts",
+      "default": "./src/dvp.ts"
     },
     "./earn": {
       "types": "./src/earn.ts",
       "import": "./src/earn.ts",
       "default": "./src/earn.ts"
     },
-    "./hastra-programs": {
-      "types": "./src/hastra-programs.ts",
-      "import": "./src/hastra-programs.ts",
-      "default": "./src/hastra-programs.ts"
-    },
-    "./kamino-programs": {
-      "types": "./src/kamino-programs.ts",
-      "import": "./src/kamino-programs.ts",
-      "default": "./src/kamino-programs.ts"
-    },
-    "./jupiter-lend-programs": {
-      "types": "./src/jupiter-lend-programs.ts",
-      "import": "./src/jupiter-lend-programs.ts",
-      "default": "./src/jupiter-lend-programs.ts"
-    },
-    "./veda-programs": {
-      "types": "./src/veda-programs.ts",
-      "import": "./src/veda-programs.ts",
-      "default": "./src/veda-programs.ts"
-    },
-    "./ondo-programs": {
-      "types": "./src/ondo-programs.ts",
-      "import": "./src/ondo-programs.ts",
-      "default": "./src/ondo-programs.ts"
-    },
-    "./wisdomtree-programs": {
-      "types": "./src/wisdomtree-programs.ts",
-      "import": "./src/wisdomtree-programs.ts",
-      "default": "./src/wisdomtree-programs.ts"
-    },
-    "./payments": {
-      "types": "./src/payments.ts",
-      "import": "./src/payments.ts",
-      "default": "./src/payments.ts"
-    },
-    "./payment-rails": {
-      "types": "./src/payment-rails.ts",
-      "import": "./src/payment-rails.ts",
-      "default": "./src/payment-rails.ts"
-    },
-    "./private-channels": {
-      "types": "./src/private-channels.ts",
-      "import": "./src/private-channels.ts",
-      "default": "./src/private-channels.ts"
-    },
-    "./provider-access": {
-      "types": "./src/provider-access.ts",
-      "import": "./src/provider-access.ts",
-      "default": "./src/provider-access.ts"
-    },
-    "./release-channels": {
-      "types": "./src/release-channels.ts",
-      "import": "./src/release-channels.ts",
-      "default": "./src/release-channels.ts"
-    },
-    "./ramp-requirements": {
-      "types": "./src/ramp-requirements.ts",
-      "import": "./src/ramp-requirements.ts",
-      "default": "./src/ramp-requirements.ts"
-    },
-    "./ramp-destinations": {
-      "types": "./src/ramp-destinations.ts",
-      "import": "./src/ramp-destinations.ts",
-      "default": "./src/ramp-destinations.ts"
+    "./earn-wire": {
+      "types": "./src/earn-wire.ts",
+      "import": "./src/earn-wire.ts",
+      "default": "./src/earn-wire.ts"
     },
     "./generated/ramp": {
       "types": "./src/generated/ramp.generated.ts",
       "import": "./src/generated/ramp.generated.ts",
       "default": "./src/generated/ramp.generated.ts"
     },
-    "./site": {
-      "types": "./src/site.ts",
-      "import": "./src/site.ts",
-      "default": "./src/site.ts"
+    "./generated/ramp.generated": {
+      "types": "./src/generated/ramp.generated.ts",
+      "import": "./src/generated/ramp.generated.ts",
+      "default": "./src/generated/ramp.generated.ts"
+    },
+    "./hastra-programs": {
+      "types": "./src/hastra-programs.ts",
+      "import": "./src/hastra-programs.ts",
+      "default": "./src/hastra-programs.ts"
+    },
+    "./health": {
+      "types": "./src/health.ts",
+      "import": "./src/health.ts",
+      "default": "./src/health.ts"
+    },
+    "./helius-rings": {
+      "types": "./src/helius-rings.ts",
+      "import": "./src/helius-rings.ts",
+      "default": "./src/helius-rings.ts"
+    },
+    "./idempotency": {
+      "types": "./src/idempotency.ts",
+      "import": "./src/idempotency.ts",
+      "default": "./src/idempotency.ts"
+    },
+    "./idempotency-required-routes": {
+      "types": "./src/idempotency-required-routes.ts",
+      "import": "./src/idempotency-required-routes.ts",
+      "default": "./src/idempotency-required-routes.ts"
+    },
+    "./jupiter-lend-programs": {
+      "types": "./src/jupiter-lend-programs.ts",
+      "import": "./src/jupiter-lend-programs.ts",
+      "default": "./src/jupiter-lend-programs.ts"
+    },
+    "./kamino-programs": {
+      "types": "./src/kamino-programs.ts",
+      "import": "./src/kamino-programs.ts",
+      "default": "./src/kamino-programs.ts"
+    },
+    "./kyc": {
+      "types": "./src/kyc.ts",
+      "import": "./src/kyc.ts",
+      "default": "./src/kyc.ts"
+    },
+    "./movements": {
+      "types": "./src/movements.ts",
+      "import": "./src/movements.ts",
+      "default": "./src/movements.ts"
+    },
+    "./network-metrics": {
+      "types": "./src/network-metrics.ts",
+      "import": "./src/network-metrics.ts",
+      "default": "./src/network-metrics.ts"
+    },
+    "./ondo-programs": {
+      "types": "./src/ondo-programs.ts",
+      "import": "./src/ondo-programs.ts",
+      "default": "./src/ondo-programs.ts"
+    },
+    "./organization-entitlements": {
+      "types": "./src/organization-entitlements.ts",
+      "import": "./src/organization-entitlements.ts",
+      "default": "./src/organization-entitlements.ts"
+    },
+    "./organizations": {
+      "types": "./src/organizations.ts",
+      "import": "./src/organizations.ts",
+      "default": "./src/organizations.ts"
+    },
+    "./pagination": {
+      "types": "./src/pagination.ts",
+      "import": "./src/pagination.ts",
+      "default": "./src/pagination.ts"
+    },
+    "./payment-rails": {
+      "types": "./src/payment-rails.ts",
+      "import": "./src/payment-rails.ts",
+      "default": "./src/payment-rails.ts"
+    },
+    "./payments": {
+      "types": "./src/payments.ts",
+      "import": "./src/payments.ts",
+      "default": "./src/payments.ts"
     },
     "./permissions": {
       "types": "./src/permissions.ts",
       "import": "./src/permissions.ts",
       "default": "./src/permissions.ts"
+    },
+    "./places": {
+      "types": "./src/places.ts",
+      "import": "./src/places.ts",
+      "default": "./src/places.ts"
+    },
+    "./private-channels": {
+      "types": "./src/private-channels.ts",
+      "import": "./src/private-channels.ts",
+      "default": "./src/private-channels.ts"
+    },
+    "./projects": {
+      "types": "./src/projects.ts",
+      "import": "./src/projects.ts",
+      "default": "./src/projects.ts"
+    },
+    "./provider-access": {
+      "types": "./src/provider-access.ts",
+      "import": "./src/provider-access.ts",
+      "default": "./src/provider-access.ts"
+    },
+    "./ramp-destinations": {
+      "types": "./src/ramp-destinations.ts",
+      "import": "./src/ramp-destinations.ts",
+      "default": "./src/ramp-destinations.ts"
+    },
+    "./ramp-requirements": {
+      "types": "./src/ramp-requirements.ts",
+      "import": "./src/ramp-requirements.ts",
+      "default": "./src/ramp-requirements.ts"
+    },
+    "./release-channels": {
+      "types": "./src/release-channels.ts",
+      "import": "./src/release-channels.ts",
+      "default": "./src/release-channels.ts"
+    },
+    "./site": {
+      "types": "./src/site.ts",
+      "import": "./src/site.ts",
+      "default": "./src/site.ts"
+    },
+    "./tokens": {
+      "types": "./src/tokens.ts",
+      "import": "./src/tokens.ts",
+      "default": "./src/tokens.ts"
+    },
+    "./unified-transactions": {
+      "types": "./src/unified-transactions.ts",
+      "import": "./src/unified-transactions.ts",
+      "default": "./src/unified-transactions.ts"
+    },
+    "./veda-programs": {
+      "types": "./src/veda-programs.ts",
+      "import": "./src/veda-programs.ts",
+      "default": "./src/veda-programs.ts"
+    },
+    "./well-known-programs": {
+      "types": "./src/well-known-programs.ts",
+      "import": "./src/well-known-programs.ts",
+      "default": "./src/well-known-programs.ts"
+    },
+    "./well-known-tokens": {
+      "types": "./src/well-known-tokens.ts",
+      "import": "./src/well-known-tokens.ts",
+      "default": "./src/well-known-tokens.ts"
+    },
+    "./wisdomtree-programs": {
+      "types": "./src/wisdomtree-programs.ts",
+      "import": "./src/wisdomtree-programs.ts",
+      "default": "./src/wisdomtree-programs.ts"
     }
   },
   "scripts": {

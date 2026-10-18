@@ -1,4 +1,4 @@
-import { PAYMENT_RECURRING_PAYMENT_STATUSES } from "@sdp/types";
+import { PAYMENT_RECURRING_PAYMENT_STATUSES } from "@sdp/types/payments";
 import { z } from "zod";
 import { paymentAmountSchema, paymentTokenSchema, recurringTimestampSchema } from "../schemas";
 

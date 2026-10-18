@@ -1,4 +1,5 @@
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -10,7 +11,6 @@ import type {
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
 import { docsHref } from "@/components/dashboard-nav";
-import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";

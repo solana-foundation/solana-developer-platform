@@ -5,7 +5,7 @@ import type {
   PaymentSubscriptionPlan,
   PaymentSubscriptionPlanResponse,
   PreparePaymentSubscriptionPlanResponse,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
 import { getCreatePlanOverlayInstructionAsync } from "@solana/subscriptions";

@@ -11,7 +11,7 @@
  * `symbolA`/`symbolB` ARE included; they are read off the mint on chain.
  */
 
-import type { DvpLegOutcome, DvpLegTransferKind, DvpSettlementAvailability } from "@sdp/types";
+import type { DvpLegOutcome, DvpLegTransferKind, DvpSettlementAvailability } from "@sdp/types/dvp";
 import type {
   DvpLegTransfer,
   DvpLegTransferDirection,

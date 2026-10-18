@@ -7,8 +7,8 @@ import type {
   PaymentRecurringPayment,
   PaymentRecurringPaymentCollectionResponse,
   PaymentRecurringPaymentResponse,
-} from "@sdp/types";
-import { isInFlightRecurringPaymentAttemptStatus } from "@sdp/types";
+} from "@sdp/types/payments";
+import { isInFlightRecurringPaymentAttemptStatus } from "@sdp/types/payments";
 import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";

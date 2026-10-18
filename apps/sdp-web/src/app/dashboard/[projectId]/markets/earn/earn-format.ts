@@ -1,10 +1,7 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import {
-  type EarnProviderId,
-  type EarnStrategy,
-  SOLANA_CLUSTER_LABELS,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+import type { EarnStrategy } from "@sdp/types/earn";
+import type { EarnProviderId } from "@sdp/types/provider-access";
+import { SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { truncateMiddle } from "../truncate-middle";
 import {

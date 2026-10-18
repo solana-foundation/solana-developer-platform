@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { OverviewNetworkSkeleton } from "../overview-network";
 
 const BALANCE_ROW_IDS = ["overview-balance-1", "overview-balance-2", "overview-balance-3"];

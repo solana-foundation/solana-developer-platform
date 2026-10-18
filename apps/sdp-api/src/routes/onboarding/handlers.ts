@@ -1,4 +1,5 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider, normalizeOrganizationTier } from "@sdp/types";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
+import { normalizeOrganizationTier } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";

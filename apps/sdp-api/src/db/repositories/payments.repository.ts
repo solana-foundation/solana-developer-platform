@@ -1,12 +1,12 @@
 import { PAYMENT_TRANSFER_ID_PREFIX } from "@sdp/payments/ramps/shared";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
-  PaymentTransactionKind,
   PaymentTransferStatus,
   PaymentTransferType,
   RampTransferTransitionId,
-  SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
+import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type PaymentTransferDirection = "inbound" | "outbound";

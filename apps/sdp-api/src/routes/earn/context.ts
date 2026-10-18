@@ -1,5 +1,5 @@
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context } from "hono";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";

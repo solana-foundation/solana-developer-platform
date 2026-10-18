@@ -1,13 +1,13 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnApyType,
   EarnLiquidityTerm,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
-  SdpEnvironment,
-  SolanaCluster,
-} from "@sdp/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+} from "@sdp/types/earn";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { type DatabaseClient as AppDb, asTransactionalClient } from "@/db/client";
 import type {
   DeprecateUnlistedEarnStrategiesInput,

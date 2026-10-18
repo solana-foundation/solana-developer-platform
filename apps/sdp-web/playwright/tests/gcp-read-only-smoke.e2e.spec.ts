@@ -1,11 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
-import type {
-  ListProjectsResponse,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
-  Project,
-  TokenTransactionListItem,
-} from "@sdp/types";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import type { ListProjectsResponse, Project } from "@sdp/types/projects";
+import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import {
   formatCurrencyAmount,

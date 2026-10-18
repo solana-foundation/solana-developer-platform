@@ -15,28 +15,31 @@ import type {
 import {
   assertNotPortfolioProvider as assertHastraNotPortfolioProvider,
   HastraVaultDirectClient,
-} from "@sdp/hastra";
+} from "@sdp/hastra/client";
 import {
   assertJupiterLendNotPortfolioProvider,
   JupiterLendVaultDirectClient,
-} from "@sdp/jupiter-lend";
-import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino";
+} from "@sdp/jupiter-lend/client";
+import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino/client";
 import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
-} from "@sdp/ondo";
-import * as solanaRpc from "@sdp/rpc/solana";
+} from "@sdp/ondo/client";
+import { createRpc } from "@sdp/rpc/solana";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   GENESIS_HASH_BY_CLUSTER,
-  type SdpEnvironment,
   type SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
-} from "@sdp/veda";
-import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
+} from "@sdp/veda/client";
+import {
+  assertWisdomTreeNotPortfolioProvider,
+  WisdomTreeVaultDirectClient,
+} from "@sdp/wisdomtree/client";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
@@ -153,7 +156,7 @@ export async function assertClusterEndpoint(
 }
 
 async function getGenesisHash(env: Env, rpcUrl: string): Promise<string> {
-  const rpc = solanaRpc.createRpc(env, { rpcUrl });
+  const rpc = createRpc(env, { rpcUrl });
   return String(await rpc.getGenesisHash().send());
 }
 

@@ -1,12 +1,12 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import { TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
 import type { PermissionRow } from "./token-management-workspace.types";

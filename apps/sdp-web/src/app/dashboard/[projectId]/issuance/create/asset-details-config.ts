@@ -1,4 +1,4 @@
-import type { AssetCategory } from "@sdp/types";
+import type { AssetCategory } from "@sdp/types/asset-profiles";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {

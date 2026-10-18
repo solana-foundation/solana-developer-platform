@@ -1,4 +1,5 @@
-import { PAYMENT_TRANSFER_STATUSES, type RampProviderId } from "@sdp/types";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,

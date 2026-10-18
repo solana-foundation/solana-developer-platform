@@ -12,9 +12,14 @@
  * the RPC recovered.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  GET_MULTIPLE_ACCOUNTS_LIMIT,
+  getMultipleAccountsLamports,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { type CustodyWalletTokenBalance, SOL_MINT } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, isAddress } from "@solana/kit";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
@@ -67,7 +72,7 @@ function errorMessage(error: unknown): string {
 }
 
 async function readWalletBalance(
-  rpc: solanaRpc.SolanaRpc,
+  rpc: SolanaRpc,
   wallet: WalletBalanceTarget,
   walletAddress: Address,
   cacheKey: string,
@@ -136,7 +141,7 @@ async function readWalletBalance(
  * @param requestId - For the failure logs.
  */
 export async function readWalletBalances(
-  rpc: solanaRpc.SolanaRpc,
+  rpc: SolanaRpc,
   cacheScope: string,
   wallets: readonly WalletBalanceTarget[],
   requestId: string | undefined
@@ -169,13 +174,9 @@ export async function readWalletBalances(
 
   // One SOL read per chunk of addresses; a failed chunk fails only its own wallets.
   const unreadEntries = [...unread.entries()];
-  for (
-    let start = 0;
-    start < unreadEntries.length;
-    start += solanaRpc.GET_MULTIPLE_ACCOUNTS_LIMIT
-  ) {
-    const chunk = unreadEntries.slice(start, start + solanaRpc.GET_MULTIPLE_ACCOUNTS_LIMIT);
-    const chunkRead = solanaRpc.getMultipleAccountsLamports(
+  for (let start = 0; start < unreadEntries.length; start += GET_MULTIPLE_ACCOUNTS_LIMIT) {
+    const chunk = unreadEntries.slice(start, start + GET_MULTIPLE_ACCOUNTS_LIMIT);
+    const chunkRead = getMultipleAccountsLamports(
       rpc,
       chunk.map(([, { walletAddress }]) => walletAddress)
     );

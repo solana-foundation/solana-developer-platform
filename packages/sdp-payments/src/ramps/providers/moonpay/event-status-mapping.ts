@@ -1,4 +1,4 @@
-import type { MoonpayRampSettlement } from "@sdp/types";
+import type { MoonpayRampSettlement } from "@sdp/types/payments";
 import { z } from "zod";
 import { decimalStringFromNumber } from "../../../decimal";
 import type { RampOnchainTransfer, RampSettlementEvent } from "../../types";

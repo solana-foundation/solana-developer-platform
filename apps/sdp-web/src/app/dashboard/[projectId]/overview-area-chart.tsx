@@ -1,6 +1,6 @@
+import { cn } from "@sdp/ui/cn";
 import { type KeyboardEvent, memo, useId, useMemo, useRef, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { CHART_VIEW, type ChartPaths, chartPaths } from "./overview-chart-path";
 
 /** The data sits 7px inside the plot so the end dot never clips on the right edge. */

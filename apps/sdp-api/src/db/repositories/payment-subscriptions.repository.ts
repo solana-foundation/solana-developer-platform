@@ -3,7 +3,7 @@ import type {
   PaymentSubscriptionCollectionAttemptStatus,
   PaymentSubscriptionPlanStatus,
   PaymentSubscriptionStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface PaymentSubscriptionPlanRow {

@@ -4,7 +4,8 @@ import {
   fetchUserRecord,
   type UserRecord,
 } from "@heliuslabs/zolana/wallet";
-import { HeliusRingsError, type ProvisionIdentityResult } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type { ProvisionIdentityResult } from "@sdp/helius-rings/port";
 import {
   address,
   getBase64Codec,

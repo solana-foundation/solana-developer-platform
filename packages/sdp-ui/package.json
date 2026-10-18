@@ -24,11 +24,6 @@
       "import": "./src/button.tsx",
       "default": "./src/button.tsx"
     },
-    "./calendar": {
-      "types": "./src/calendar.tsx",
-      "import": "./src/calendar.tsx",
-      "default": "./src/calendar.tsx"
-    },
     "./callout": {
       "types": "./src/callout.tsx",
       "import": "./src/callout.tsx",
@@ -59,20 +54,10 @@
       "import": "./src/date-picker.tsx",
       "default": "./src/date-picker.tsx"
     },
-    "./date-value": {
-      "types": "./src/date-value.ts",
-      "import": "./src/date-value.ts",
-      "default": "./src/date-value.ts"
-    },
     "./detail-list": {
       "types": "./src/detail-list.tsx",
       "import": "./src/detail-list.tsx",
       "default": "./src/detail-list.tsx"
-    },
-    "./drawer": {
-      "types": "./src/drawer.tsx",
-      "import": "./src/drawer.tsx",
-      "default": "./src/drawer.tsx"
     },
     "./dropdown-menu": {
       "types": "./src/dropdown-menu.tsx",
@@ -124,20 +109,10 @@
       "import": "./src/list-toolbar.tsx",
       "default": "./src/list-toolbar.tsx"
     },
-    "./modal-close-button": {
-      "types": "./src/modal-close-button.tsx",
-      "import": "./src/modal-close-button.tsx",
-      "default": "./src/modal-close-button.tsx"
-    },
     "./modal": {
       "types": "./src/modal.tsx",
       "import": "./src/modal.tsx",
       "default": "./src/modal.tsx"
-    },
-    "./portal-container": {
-      "types": "./src/portal-container.tsx",
-      "import": "./src/portal-container.tsx",
-      "default": "./src/portal-container.tsx"
     },
     "./provider-selection-card": {
       "types": "./src/provider-selection-card.tsx",
@@ -179,20 +154,15 @@
       "import": "./src/testing/english-ui-i18n.tsx",
       "default": "./src/testing/english-ui-i18n.tsx"
     },
-    "./theme-scope-provider": {
-      "types": "./src/theme-scope-provider.tsx",
-      "import": "./src/theme-scope-provider.tsx",
-      "default": "./src/theme-scope-provider.tsx"
-    },
     "./theme-scope": {
       "types": "./src/theme-scope.ts",
       "import": "./src/theme-scope.ts",
       "default": "./src/theme-scope.ts"
     },
-    "./time-field": {
-      "types": "./src/time-field.tsx",
-      "import": "./src/time-field.tsx",
-      "default": "./src/time-field.tsx"
+    "./theme-scope-provider": {
+      "types": "./src/theme-scope-provider.tsx",
+      "import": "./src/theme-scope-provider.tsx",
+      "default": "./src/theme-scope-provider.tsx"
     },
     "./toggle-switch": {
       "types": "./src/toggle-switch.tsx",
@@ -203,11 +173,6 @@
       "types": "./src/tooltip.tsx",
       "import": "./src/tooltip.tsx",
       "default": "./src/tooltip.tsx"
-    },
-    "./use-escape-key": {
-      "types": "./src/use-escape-key.ts",
-      "import": "./src/use-escape-key.ts",
-      "default": "./src/use-escape-key.ts"
     },
     "./wizard-step-progress": {
       "types": "./src/wizard-step-progress.tsx",

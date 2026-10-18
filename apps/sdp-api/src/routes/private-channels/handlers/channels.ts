@@ -1,6 +1,6 @@
 import type { PrivateChannelRow } from "@sdp/private-channels/channels";
 import { validatePrivateChannelName } from "@sdp/private-channels/channels";
-import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelDto } from "@sdp/types";
+import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelDto } from "@sdp/types/private-channels";
 import { getAuth } from "@/lib/auth";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";

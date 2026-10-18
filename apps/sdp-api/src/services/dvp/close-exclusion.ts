@@ -10,7 +10,7 @@
  */
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import type { DvpCloseClaim } from "@/db/repositories/dvp-trade.repository";
 import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { conflict, notFound } from "@/lib/errors";

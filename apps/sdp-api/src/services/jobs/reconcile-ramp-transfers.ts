@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import type { Env } from "@/types/env";
 

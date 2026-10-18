@@ -4,10 +4,35 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./custody-ka/seed": {
+      "types": "./src/custody-ka/seed.ts",
+      "import": "./src/custody-ka/seed.ts",
+      "default": "./src/custody-ka/seed.ts"
+    },
+    "./error-bridge": {
+      "types": "./src/error-bridge.ts",
+      "import": "./src/error-bridge.ts",
+      "default": "./src/error-bridge.ts"
+    },
+    "./flows/mint": {
+      "types": "./src/flows/mint.ts",
+      "import": "./src/flows/mint.ts",
+      "default": "./src/flows/mint.ts"
+    },
+    "./gateway": {
+      "types": "./src/gateway.ts",
+      "import": "./src/gateway.ts",
+      "default": "./src/gateway.ts"
+    },
+    "./health": {
+      "types": "./src/health.ts",
+      "import": "./src/health.ts",
+      "default": "./src/health.ts"
+    },
+    "./outer-tx-policy": {
+      "types": "./src/outer-tx-policy.ts",
+      "import": "./src/outer-tx-policy.ts",
+      "default": "./src/outer-tx-policy.ts"
     }
   },
   "scripts": {

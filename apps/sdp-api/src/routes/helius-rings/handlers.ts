@@ -1,5 +1,5 @@
-import type { AssetBalance } from "@sdp/helius-rings";
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { AssetBalance } from "@sdp/helius-rings/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { mapHeliusRingsOperationSummaryRow } from "@/db/repositories/helius-rings-operation.repository";
 import { mapHeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";
 import { mapHeliusRingsZoneRow } from "@/db/repositories/helius-rings-zone.repository";

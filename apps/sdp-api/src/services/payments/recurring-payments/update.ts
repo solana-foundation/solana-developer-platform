@@ -5,9 +5,10 @@ import {
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { PaymentRecurringPaymentUpdateAttemptMode } from "@sdp/types/payments";
 import {
   assertNever,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
@@ -19,8 +20,7 @@ import {
   isUpdatingRecurringPaymentStatus,
   recurringPaymentInFlightLifecycleOperation,
   type UpdatePaymentRecurringPaymentRequest,
-} from "@sdp/types";
-import type { PaymentRecurringPaymentUpdateAttemptMode } from "@sdp/types/payments";
+} from "@sdp/types/payments";
 import {
   type Address,
   createNoopSigner,
@@ -1010,7 +1010,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: ReturnType<typeof createRpc>;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };

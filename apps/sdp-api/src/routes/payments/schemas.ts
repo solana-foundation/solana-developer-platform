@@ -1,6 +1,6 @@
-import { assertIsAddress, isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
-import { isWellKnownTokenSymbol, SOL_MINT } from "@sdp/types";
+import { isWellKnownTokenSymbol, SOL_MINT } from "@sdp/types/well-known-tokens";
+import { assertIsAddress, isAddress } from "@solana/addresses";
 import {
   getI64Encoder,
   getU64Encoder,

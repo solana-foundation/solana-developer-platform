@@ -1,16 +1,15 @@
-import type { RampSettlementEvent } from "@sdp/payments/ramps";
+import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
 import {
-  type CryptoRailId,
-  getCryptoRailAssetLabel,
+  isRampTransferType,
   isTerminalRampTransferStatus,
   RAMP_TRANSFER_TRANSITIONS,
   type RampTransferTransitionId,
   type RampWebhookProcessResult,
-  type SdpEnvironment,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
-import type { PaymentTransferStatus } from "@sdp/types/payments";
-import { isRampTransferType } from "@sdp/types/payments";
+} from "@sdp/types/payments";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";

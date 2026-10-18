@@ -4,7 +4,13 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ChevronRightIcon, PlusIcon, RepeatIcon, SearchIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -16,19 +22,7 @@ import {
 } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
-import { Select, SelectItem } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";

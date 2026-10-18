@@ -2,7 +2,7 @@
  * OpenAPI Spec Route
  */
 
-import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types";
+import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";

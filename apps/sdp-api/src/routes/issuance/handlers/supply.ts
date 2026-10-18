@@ -1,4 +1,4 @@
-import { getSolanaConfig } from "@sdp/rpc";
+import { getSolanaConfig } from "@sdp/rpc/config";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";

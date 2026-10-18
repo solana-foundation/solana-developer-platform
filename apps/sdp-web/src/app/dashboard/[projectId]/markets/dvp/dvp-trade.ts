@@ -14,7 +14,7 @@ import {
   type DvpSettlementAvailability,
   type DvpTradeSide,
   type DvpTradeStatus,
-} from "@sdp/types";
+} from "@sdp/types/dvp";
 import { z } from "zod";
 
 export type { DvpLegTransferKind, DvpSettlementAvailability, DvpTradeStatus };

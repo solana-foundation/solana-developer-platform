@@ -1,5 +1,10 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { TableCell } from "@sdp/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ExternalLink, RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import useSWR from "swr";
@@ -12,17 +17,6 @@ import {
   WALLET_ACTIVITY_HEADING_ID,
   WalletActivitySkeleton,
 } from "@/app/dashboard/[projectId]/custody/wallet-activity-skeleton";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";

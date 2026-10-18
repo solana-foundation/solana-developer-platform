@@ -12,7 +12,7 @@ import {
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";

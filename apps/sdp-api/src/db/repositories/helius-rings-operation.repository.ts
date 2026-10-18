@@ -4,7 +4,7 @@ import type {
   OpType,
   PrivateOperationSummary,
   TransferMode,
-} from "@sdp/helius-rings";
+} from "@sdp/helius-rings/types";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 

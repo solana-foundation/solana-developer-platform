@@ -1,6 +1,6 @@
 "use client";
 
-import type { RampDirection, RampProviderEstimateResult } from "@sdp/types";
+import type { RampDirection, RampProviderEstimateResult } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { useMemo } from "react";
 import useSWR from "swr";

@@ -1,11 +1,11 @@
+import type { MovementId } from "@sdp/types/movements";
 import {
   type ApiKeyRole,
   getPermissionsForApiKeyRole,
   hasAllPermissions,
-  type MovementId,
   PERMISSIONS,
   type Permission,
-} from "@sdp/types";
+} from "@sdp/types/permissions";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";

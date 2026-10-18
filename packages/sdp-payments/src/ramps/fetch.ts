@@ -1,4 +1,4 @@
-import { scrubTelemetryString } from "@sdp/redaction";
+import { scrubTelemetryString } from "@sdp/redaction/scrub";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";

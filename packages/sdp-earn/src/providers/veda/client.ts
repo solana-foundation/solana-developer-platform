@@ -1,14 +1,14 @@
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type SolanaCluster,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
-import {
   isVedaDepositMint,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
   type VedaDeployment,
   vedaDeployment,
 } from "@sdp/types/veda-programs";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types/well-known-tokens";
 import { providerNotConfigured } from "../../errors";
 import type {
   EarnDeclaredStrategySupport,

@@ -1,14 +1,13 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
+import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import {
-  type CryptoRailId,
-  getCryptoRailAssetLabel,
   isWellKnownTokenSymbol,
   SOL_MINT,
   WELL_KNOWN_TOKEN_BY_MINT,
   wellKnownMint,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import { type Address, getI64Encoder, getU64Encoder } from "@solana/kit";
 import { AppError, badRequest, walletNotFound } from "@/lib/errors";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";

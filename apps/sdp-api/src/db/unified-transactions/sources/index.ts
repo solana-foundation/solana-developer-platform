@@ -1,4 +1,4 @@
-import type { UnifiedTransactionModule } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
 import { dvpUnifiedTransactionSource } from "./dvp";
 import { earnUnifiedTransactionSource } from "./earn";
 import { issuanceUnifiedTransactionSource } from "./issuance";

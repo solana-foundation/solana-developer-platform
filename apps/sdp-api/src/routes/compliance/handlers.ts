@@ -1,5 +1,5 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import { COMPLIANCE_PROVIDERS } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";

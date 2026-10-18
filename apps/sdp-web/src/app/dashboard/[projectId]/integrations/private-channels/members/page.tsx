@@ -1,4 +1,4 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";

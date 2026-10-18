@@ -3,8 +3,8 @@ import {
   type EarnPortfolioToken,
   type EarnStrategy,
   earnCuratorLabel,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/earn";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 /**

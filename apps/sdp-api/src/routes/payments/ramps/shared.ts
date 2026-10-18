@@ -1,14 +1,8 @@
-import type { CounterpartyRow } from "@sdp/payments";
-import { SdpPaymentsError } from "@sdp/payments";
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
-import { redactCredentialString } from "@sdp/redaction";
-import {
-  isStagedProviderRefusalReason,
-  type PaymentRampEstimate,
-  type PaymentRampQuote,
-  type PaymentTransferStatus,
-  type RampProviderEstimateResult,
-} from "@sdp/types";
+import { redactCredentialString } from "@sdp/redaction/credentials";
+import { isStagedProviderRefusalReason } from "@sdp/types/custody";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -21,6 +15,12 @@ import type {
   OnrampPairSupport,
   RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
+import type {
+  PaymentRampEstimate,
+  PaymentRampQuote,
+  PaymentTransferStatus,
+  RampProviderEstimateResult,
+} from "@sdp/types/payments";
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";

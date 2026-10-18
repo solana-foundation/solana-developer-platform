@@ -7,9 +7,9 @@ import type {
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
-import { resolveClusterRpcUrl } from "@sdp/rpc";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address } from "@solana/kit";
 import { type DatabaseClient as AppDb, getDb } from "@/db/client";
 import {

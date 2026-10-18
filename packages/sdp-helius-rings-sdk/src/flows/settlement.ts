@@ -5,7 +5,7 @@ import {
   type TransactWithdrawal,
 } from "@heliuslabs/zolana/interface";
 import { WithdrawalTarget } from "@heliuslabs/zolana/transaction";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import {
   type Address,
   createNoopSigner,

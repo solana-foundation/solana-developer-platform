@@ -1,5 +1,5 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types";
+import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types/tokens";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { buildInClause, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";

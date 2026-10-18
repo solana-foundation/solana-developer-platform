@@ -1,17 +1,28 @@
 "use client";
 
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnProgram, EarnVaultDepositRecord } from "@sdp/types/earn";
 import {
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
   type EarnVaultPosition,
   type EarnVaultWithdrawal,
-  earnProgramSolanaPayoutTokens,
   isEarnVaultHoldingEmpty,
+} from "@sdp/types/earn";
+import {
+  earnProgramSolanaPayoutTokens,
   isVaultDirectDepositEnabled,
-  type SdpEnvironment,
-  SOLANA_CLUSTER_LABELS,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
+import { SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Modal } from "@sdp/ui/modal";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   ArrowDownIcon,
   ArrowDownLeftIcon,
@@ -28,21 +39,6 @@ import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Modal } from "@/components/ui/modal";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useDashboardWorkspace,
   useOptionalDashboardWorkspace,
@@ -79,8 +75,6 @@ import {
   EarnWithdrawalOutcomeTracker,
 } from "../earn/earn-outcome-trackers";
 import {
-  type EarnProgram,
-  type EarnVaultDepositRecord,
   isEarnVaultDepositInFlight,
   isEarnVaultWithdrawalInFlight,
   useEarnPrograms,

@@ -1,6 +1,6 @@
 "use server";
 
-import type { PrivateChannelWithdrawal } from "@sdp/types";
+import type { PrivateChannelWithdrawal } from "@sdp/types/private-channels";
 import { revalidatePath } from "next/cache";
 import type { MessageKey } from "@/i18n/messages";
 import type { ApiAnswer } from "@/lib/idempotency";

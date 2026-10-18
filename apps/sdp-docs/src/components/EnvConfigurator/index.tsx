@@ -1,19 +1,11 @@
 "use client";
 
-import {
-  autoSecretKeys,
-  defaultValues,
-  FIELDS,
-  generateEnv,
-  generateLocalSignerKeypair,
-  generateSecret,
-  isFieldVisible,
-  parseList,
-  SECTIONS,
-  type SectionId,
-  type Values,
-  validateValues,
-} from "@sdp/env-config";
+import { FIELDS, isFieldVisible, parseList, SECTIONS } from "@sdp/env-config/fields";
+import { defaultValues, generateEnv } from "@sdp/env-config/generate";
+import { generateLocalSignerKeypair } from "@sdp/env-config/local-keypair";
+import { autoSecretKeys, generateSecret } from "@sdp/env-config/secrets";
+import type { SectionId, Values } from "@sdp/env-config/types";
+import { validateValues } from "@sdp/env-config/validate";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SectionBlock } from "./FieldRenderer";
 
@@ -788,6 +780,3 @@ curl http://localhost:8787/health`}</pre>
     </div>
   );
 }
-
-// Re-export field renderers for consumers / tests.
-export { FieldRow, SectionBlock } from "./FieldRenderer";

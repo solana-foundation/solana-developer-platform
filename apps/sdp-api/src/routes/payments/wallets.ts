@@ -1,6 +1,6 @@
 import { badRequest } from "@sdp/payments/errors";
-import { isAddress } from "@sdp/solana/address";
-import type { Permission } from "@sdp/types";
+import type { Permission } from "@sdp/types/permissions";
+import { isAddress } from "@solana/addresses";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";

@@ -1,11 +1,11 @@
 "use client";
 
-import { SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
+import { SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ArrowRightIcon } from "lucide-react";
 import Image from "next/image";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { formatRelativeTime } from "../../../activity-format-utils";

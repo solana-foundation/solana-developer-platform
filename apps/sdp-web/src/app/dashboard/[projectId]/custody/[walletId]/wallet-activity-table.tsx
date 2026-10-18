@@ -1,17 +1,11 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import type { WalletActivityRow } from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { toTitleCase } from "../../activity-format-utils";
 import { resolveTransferTokenLabel, shortenAddress } from "../../payments/payments-overview.utils";
 import { formatDate } from "../../payments/payments-presentation";

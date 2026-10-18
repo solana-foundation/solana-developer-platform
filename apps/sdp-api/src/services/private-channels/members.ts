@@ -1,7 +1,8 @@
 // Principal provisioning: derive an SPC username, generate a strong random
 // password, register with SPC, encrypt the password, then persist the principal.
 
-import { PrivateChannelError, spcLogin, spcRegister } from "@sdp/private-channels";
+import { spcLogin, spcRegister } from "@sdp/private-channels/auth";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { ProjectScope } from "@/db/repositories/private-channel-instance.repository";
 import type {

@@ -1,4 +1,4 @@
-import type { IdempotencyKeyMode } from "@sdp/types";
+import type { IdempotencyKeyMode } from "@sdp/types/idempotency";
 import { z } from "zod";
 import { idempotencyKeyHeaderSchema, projectScopeHeaderSchema } from "@/openapi/schemas/base";
 

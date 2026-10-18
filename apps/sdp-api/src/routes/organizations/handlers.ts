@@ -5,7 +5,7 @@ import {
   type OrganizationSettings,
   type OrganizationStatus,
   type OrganizationTier,
-} from "@sdp/types";
+} from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";

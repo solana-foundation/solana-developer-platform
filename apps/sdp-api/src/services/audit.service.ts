@@ -4,7 +4,7 @@
  * Records all significant actions for compliance and debugging.
  */
 
-import { scrubAuditMetadata } from "@sdp/redaction";
+import { scrubAuditMetadata } from "@sdp/redaction/scrub";
 import type { Context } from "hono";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";

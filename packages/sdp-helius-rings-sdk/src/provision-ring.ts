@@ -15,12 +15,8 @@ import {
   ringAuthAddress,
   ringProgramDataAddress,
 } from "@heliuslabs/zolana/ring";
-import {
-  HeliusRingsError,
-  type HeliusRingsErrorCode,
-  type ProvisionRingInput,
-  type ProvisionRingResult,
-} from "@sdp/helius-rings";
+import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings/errors";
+import type { ProvisionRingInput, ProvisionRingResult } from "@sdp/helius-rings/port";
 import {
   type Address,
   address,

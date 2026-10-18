@@ -1,10 +1,6 @@
-import type {
-  OperationFamily,
-  OperationType,
-  RampProviderId,
-  SdpModule,
-  SdpReleaseChannel,
-} from "@sdp/types";
+import type { OperationFamily, OperationType } from "@sdp/types/allowed-operations";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import generatedSurface from "../generated/public-surface.json";

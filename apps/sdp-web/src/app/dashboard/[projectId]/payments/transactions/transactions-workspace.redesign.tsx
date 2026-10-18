@@ -4,16 +4,16 @@ import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_STATUSES,
   type UnifiedTransactionModule,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
 import { ReceiptTextIcon, XIcon } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import useSWR from "swr";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@/components/ui/filter-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";

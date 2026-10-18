@@ -1,5 +1,8 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -7,9 +10,6 @@ import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-qu
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { formatDate, formatDateTime } from "../../payments/payments-presentation";

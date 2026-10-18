@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
 import { toast } from "sonner";
 import type { CreateTransferInput, Translate } from "../payments-workspace.data";
 

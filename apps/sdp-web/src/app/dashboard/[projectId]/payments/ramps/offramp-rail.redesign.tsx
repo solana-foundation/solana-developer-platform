@@ -1,9 +1,9 @@
 "use client";
 
-import { getCryptoRailAssetLabel } from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { Button } from "@sdp/ui/button";
 import { SendIcon } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { useProjectHref } from "@/lib/use-dashboard-project";

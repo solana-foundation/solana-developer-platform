@@ -1,7 +1,8 @@
 "use client";
 
-import type { CryptoRailId, RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
@@ -23,7 +24,7 @@ import {
 
 export type { CounterpartyRequirementsParams };
 
-import { getApiError } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { getPaymentApiError as getApiError } from "@/app/dashboard/[projectId]/payments/payment-api-errors";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";

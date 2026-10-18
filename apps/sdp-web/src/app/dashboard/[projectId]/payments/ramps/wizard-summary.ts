@@ -1,4 +1,4 @@
-import type { RampProviderId } from "@sdp/types";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { CreditCardIcon, FileTextIcon, type LucideIcon, UserRoundIcon } from "lucide-react";
 import { formatTokenAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";

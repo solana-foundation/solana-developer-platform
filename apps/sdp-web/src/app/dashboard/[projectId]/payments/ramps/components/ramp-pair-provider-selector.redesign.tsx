@@ -1,20 +1,17 @@
 "use client";
 
-import type {
-  Counterparty,
-  PaymentsDashboardWallet,
-  RampProviderEstimateResult,
-  RampProviderId,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { Counterparty } from "@sdp/types/counterparties";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type { PaymentsDashboardWallet, RampProviderEstimateResult } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { RAMP_PROVIDER_SURFACING } from "@sdp/types/provider-access";
+import { Modal } from "@sdp/ui/modal";
+import { useThemeScope } from "@sdp/ui/theme-scope";
 import { AnimatePresence, domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
-import { useThemeScope } from "@/components/theme-scope";
-import { Modal } from "@/components/ui/modal";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";

@@ -30,9 +30,17 @@
  * memo/withdrawId on the release tx would make it exact.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  createRpc,
+  getSignatureStatuses,
+  getSignaturesForAddress,
+  getTransaction,
+  type ParsedInstruction,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types";
+import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types/private-channels";
 import { address, type Signature } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
@@ -104,11 +112,11 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
 
   // One RPC client per gateway URL per tick, shared by every withdrawal that
   // burns on the same gateway.
-  const gatewayRpcs = new Map<string, solanaRpc.SolanaRpc>();
-  const gatewayRpcFor = (instance: PrivateChannelInstanceRow): solanaRpc.SolanaRpc => {
+  const gatewayRpcs = new Map<string, SolanaRpc>();
+  const gatewayRpcFor = (instance: PrivateChannelInstanceRow): SolanaRpc => {
     let rpc = gatewayRpcs.get(instance.gateway_url);
     if (!rpc) {
-      rpc = solanaRpc.createRpc(env, { rpcUrl: instance.gateway_url });
+      rpc = createRpc(env, { rpcUrl: instance.gateway_url });
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;
@@ -118,10 +126,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   // gateway shares one batched getSignatureStatuses call per tick instead of
   // paying one RPC round trip per row. Buckets stay well under the RPC's
   // 256-signature cap because MAX_PER_RUN bounds the whole tick.
-  const buckets = new Map<
-    string,
-    { rpc: solanaRpc.SolanaRpc; withdrawals: PrivateChannelWithdrawalRow[] }
-  >();
+  const buckets = new Map<string, { rpc: SolanaRpc; withdrawals: PrivateChannelWithdrawalRow[] }>();
 
   const reconcileSubmitted = (
     withdrawal: PrivateChannelWithdrawalRow,
@@ -172,7 +177,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   // Phase 1b — one batched burn-status read per gateway, then per-row verdicts.
   await Promise.all(
     [...buckets.values()].map(async (bucket) => {
-      let statuses: Array<solanaRpc.SignatureStatusInfo | null>;
+      let statuses: Array<SignatureStatusInfo | null>;
       try {
         // Burn is on the gateway (channel chain). No auth here — auth-enabled
         // instances will need to be wired through this call the way
@@ -183,7 +188,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
         // and promoteSignedPending reaches it strictly AFTER STUCK_AFTER_MS. Without
         // it an executed burn reads null and is failed, which invites the caller to
         // burn the same balance twice.
-        statuses = await solanaRpc.getSignatureStatuses(
+        statuses = await getSignatureStatuses(
           bucket.rpc,
           bucket.withdrawals.map((withdrawal) => withdrawal.signature as Signature),
           { searchTransactionHistory: true }
@@ -368,7 +373,7 @@ async function applySubmittedVerdict(
   env: Env,
   repo: PrivateChannelWithdrawalRepository,
   withdrawal: PrivateChannelWithdrawalRow,
-  status: solanaRpc.SignatureStatusInfo | null,
+  status: SignatureStatusInfo | null,
   now: number
 ): Promise<void> {
   if (!status) {
@@ -474,7 +479,7 @@ async function reconcileReleaseGroup(
     tokenProgram,
   });
 
-  const sigInfos = await solanaRpc.getSignaturesForAddress(projectRpc.rpc, vaultAta, {
+  const sigInfos = await getSignaturesForAddress(projectRpc.rpc, vaultAta, {
     limit: RELEASE_SCAN_LIMIT,
   });
 
@@ -613,7 +618,7 @@ interface ReleaseTransfer {
 
 /** Fetch + parse each signature, extracting outgoing SPL token transfers. */
 async function collectReleases(
-  rpc: solanaRpc.SolanaRpc,
+  rpc: SolanaRpc,
   signatures: { signature: Signature; blockTime: bigint | null }[]
 ): Promise<ReleaseTransfer[]> {
   // Bounded: the scan window is capped at RELEASE_SCAN_LIMIT, but a bare
@@ -625,7 +630,7 @@ async function collectReleases(
     signatures,
     RELEASE_LOOKUP_CONCURRENCY,
     async ({ signature, blockTime }) => {
-      const tx = await solanaRpc.getTransaction(rpc, signature);
+      const tx = await getTransaction(rpc, signature);
       if (!tx || tx.err) {
         return [];
       }
@@ -667,7 +672,7 @@ async function collectReleases(
 
 /** Pull (destinationTokenAccount, baseUnits) from a parsed spl-token transfer ix. */
 function parseTokenTransfer(
-  ix: solanaRpc.ParsedInstruction
+  ix: ParsedInstruction
 ): { destination: string; baseUnits: bigint } | null {
   if (ix.parsedType !== "transfer" && ix.parsedType !== "transferChecked") {
     return null;

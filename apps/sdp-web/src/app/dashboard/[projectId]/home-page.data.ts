@@ -1,13 +1,13 @@
+import type { PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types/payments";
 import type {
-  PaymentTransferStatus,
-  PaymentTransferSummary,
   TokenTransaction,
   TokenTransactionListItem,
   TokenTransactionStatus,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { parseErrorMessage } from "@/lib/api-error";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { parseErrorMessage, readTransactionParam, toTitleCase } from "./activity-format-utils";
+import { readTransactionParam, toTitleCase } from "./activity-format-utils";
 import { resolveTransferTokenLabel } from "./payments/payments-overview.utils";
 import type { FetchResult } from "./payments/payments-page.data";
 

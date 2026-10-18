@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { SdpModule } from "@sdp/types";
+import type { SdpModule } from "@sdp/types/release-channels";
 import { expandDocsBlocks } from "../src/lib/docs-blocks";
 import { DOCS_MODULES } from "../src/lib/docs-catalog";
 import { isModulePublished, isPageSourcePublished } from "../src/lib/release-channel";

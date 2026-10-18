@@ -1,4 +1,4 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,

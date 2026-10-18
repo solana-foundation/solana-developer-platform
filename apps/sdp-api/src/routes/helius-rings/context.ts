@@ -1,5 +1,5 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
-import type { Permission } from "@sdp/types";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type { Permission } from "@sdp/types/permissions";
 import type { Context } from "hono";
 import type { HeliusRingsOperationRow } from "@/db/repositories/helius-rings-operation.repository";
 import type { HeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";

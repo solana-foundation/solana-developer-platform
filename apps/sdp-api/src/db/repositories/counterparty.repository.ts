@@ -1,10 +1,7 @@
-import type { CounterpartyRow } from "@sdp/payments";
-import type {
-  CounterpartyEntityType,
-  CounterpartyProviderData,
-  RampProviderId,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { CounterpartyEntityType, CounterpartyProviderData } from "@sdp/types/counterparties";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface CreateCounterpartyInput {

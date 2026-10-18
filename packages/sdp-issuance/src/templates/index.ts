@@ -4,7 +4,7 @@
  * Exposes issuance templates without SDP-specific configuration.
  */
 
-import type { TokenTemplateInfo } from "@sdp/types";
+import type { TokenTemplateInfo } from "@sdp/types/tokens";
 import { normalizeTemplateId, resolveTemplateConfig, TEMPLATE_DEFINITIONS } from "./definitions";
 
 const TEMPLATE_IDS = Object.keys(TEMPLATE_DEFINITIONS) as Array<keyof typeof TEMPLATE_DEFINITIONS>;

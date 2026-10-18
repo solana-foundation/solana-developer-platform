@@ -4,7 +4,7 @@
  * Creates custody wallets for new organizations using provider APIs.
  */
 
-import { summarizeUpstreamErrorBody } from "@sdp/redaction";
+import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { importPKCS8, SignJWT } from "jose";
@@ -34,17 +34,6 @@ import {
   waitForParaWalletReady,
 } from "./para";
 import type { CustodyProvisioningRuntime } from "./runtime";
-
-export {
-  type AnchorageProvisioningConfig,
-  type DeleteAnchorageOptions,
-  deleteAnchorageWallet,
-  type ProvisionAnchorageOptions,
-  type ProvisionAnchorageResult,
-  provisionAnchorageWallet,
-} from "./anchorage";
-export { normalizePem } from "./common";
-export type { CustodyProvisioningRuntime } from "./runtime";
 
 const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";

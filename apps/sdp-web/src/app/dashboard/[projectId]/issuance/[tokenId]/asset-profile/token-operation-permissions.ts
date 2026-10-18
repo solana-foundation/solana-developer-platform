@@ -1,4 +1,5 @@
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token } from "@sdp/types/tokens";
 import type { useTranslations } from "@/i18n/provider";
 import type { PermissionControlStatus } from "../token-management-workspace.types";
 import {

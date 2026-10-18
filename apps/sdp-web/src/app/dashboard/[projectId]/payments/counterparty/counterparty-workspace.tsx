@@ -1,6 +1,27 @@
 "use client";
 
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   ChevronRightIcon,
   MoreHorizontalIcon,
@@ -18,38 +39,11 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";

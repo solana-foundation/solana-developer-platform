@@ -1,4 +1,4 @@
-import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";

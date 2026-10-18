@@ -1,7 +1,11 @@
 "use client";
 
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Combobox } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import {
   ExternalLinkIcon,
   PlusIcon,
@@ -12,10 +16,6 @@ import {
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";

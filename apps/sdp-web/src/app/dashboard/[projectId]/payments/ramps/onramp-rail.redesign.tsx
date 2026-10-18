@@ -1,7 +1,7 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";

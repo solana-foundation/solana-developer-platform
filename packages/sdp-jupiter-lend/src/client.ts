@@ -8,7 +8,7 @@ import {
 } from "@jup-ag/lend/earn";
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
-import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter_lend/client";
+import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter-lend/client";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
@@ -26,8 +26,8 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { readStamp } from "@sdp/rpc/read-context";
-import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type AccountInfo,
   type Commitment,

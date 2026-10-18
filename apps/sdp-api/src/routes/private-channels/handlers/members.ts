@@ -2,7 +2,7 @@ import {
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelMembershipChannelDto,
   type PrivateChannelPrincipalDto,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import type {
   PrivateChannelMembershipWithChannelRow,
   PrivateChannelUserRow,

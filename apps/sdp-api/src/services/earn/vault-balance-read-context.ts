@@ -1,6 +1,6 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";

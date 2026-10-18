@@ -1,4 +1,4 @@
-import type { CounterpartyRow } from "@sdp/payments";
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
@@ -9,7 +9,7 @@ import type {
   PreparePaymentSubscriptionAuthorizationResponse,
   PreparePaymentSubscriptionCollectionResponse,
   PreparePaymentSubscriptionLifecycleResponse,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
 import {

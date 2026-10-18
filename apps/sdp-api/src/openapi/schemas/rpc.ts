@@ -1,4 +1,4 @@
-import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
+import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types/organizations";
 import { z } from "zod";
 import {
   RPC_RELAY_MAX_BATCH,

@@ -1,19 +1,18 @@
 "use client";
 
 import { compareDecimalAmounts, decimalScale, isDecimalString } from "@sdp/solana/amount";
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
-  Counterparty,
-  CounterpartyAccount,
   PaymentRecurringPaymentSchedulePreset,
   PaymentsDashboardWallet,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { BadgeVariant } from "@sdp/ui/badge";
+import type { ComboboxOption } from "@sdp/ui/combobox";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import type { BadgeVariant } from "@/components/ui/badge";
-import type { ComboboxOption } from "@/components/ui/combobox";
 import { useTranslations } from "@/i18n/provider";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";

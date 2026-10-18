@@ -1,4 +1,4 @@
-import type { EarnMovementRecord, EarnMovementsPage } from "@sdp/types";
+import type { EarnMovementRecord, EarnMovementsPage } from "@sdp/types/earn";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import {

@@ -1,7 +1,7 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { privateChannelCreatePath } from "../private-channels-routes";

@@ -4,11 +4,8 @@ import {
   isDecimalString,
   parseDecimalAmount,
 } from "@sdp/solana/amount";
-import {
-  type EarnVaultPositionIntermediate,
-  isEarnVaultHoldingEmpty,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+import { type EarnVaultPositionIntermediate, isEarnVaultHoldingEmpty } from "@sdp/types/earn";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { isIntlDecimalLiteral } from "../earn/earn-format";
 import { earnStrategyReferenceKey, sumDecimalStrings } from "../earn/earn-market-presentation";

@@ -1,20 +1,20 @@
 "use client";
 
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import {
-  type CounterpartyAccount,
   PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
   type PaymentRecurringPayment,
   type UpdatePaymentRecurringPaymentRequest,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Combobox } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { shortenAddress } from "../payments-overview.utils";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";

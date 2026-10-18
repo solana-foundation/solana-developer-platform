@@ -1,12 +1,6 @@
-import type {
-  AssetCategory,
-  AssetProfile,
-  IssuanceMetadata,
-  PaymentsDashboardWallet,
-  Token,
-  TokenStatus,
-  TokenTemplate,
-} from "@sdp/types";
+import type { AssetCategory, AssetProfile, IssuanceMetadata } from "@sdp/types/asset-profiles";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token, TokenStatus, TokenTemplate } from "@sdp/types/tokens";
 import {
   Banknote,
   Calculator,

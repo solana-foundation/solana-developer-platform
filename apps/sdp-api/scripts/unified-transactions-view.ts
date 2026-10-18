@@ -5,7 +5,7 @@ import {
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
   type UnifiedTransactionStatus,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 import { UNIFIED_TRANSACTION_SOURCES } from "../src/db/unified-transactions/sources";
 
 const TARGET = path.resolve(

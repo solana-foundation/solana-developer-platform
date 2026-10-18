@@ -1,7 +1,8 @@
 # 0010. Module boundaries
 
 Date: 2026-10-18
-Status: Proposed (HOO-2136). Numbers from a one-off knip 6.41.0 audit run outside the tree.
+Status: Accepted in principle (HOO-2136, PRs #2402–#2404, #2406). Numbers from a one-off knip
+6.41.0 audit run outside the tree.
 
 ## Context
 
@@ -30,10 +31,14 @@ files import bare `@sdp/types` through its 38-line `src/index.ts`.
 
 ## Decision
 
-1. **No barrel files.** A file exports only what it defines. No `export * from`, no
-   `export { x } from` in `apps/*` or `packages/*/src`. A package's public surface is its
-   `package.json` `exports` map pointing at real files; `src/index.ts` entry barrels go away and
-   callers import the subpath.
+1. **No barrel files, anywhere.** A file exports only what it defines. No `export * from`, no
+   `export { x } from`, no `import { x } …; export { x }` in `apps/*` or `packages/*/src`. SDP
+   publishes no packages, so there is no single-entry exception. A package's public surface is its
+   `package.json` `exports` map: an explicit list of the files other workspaces import, one entry
+   per file, pointing at the file itself. Not a wildcard: a wildcard exposes every internal file
+   and curates nothing. A `src/index.ts` survives only when it defines code, and then as an ordinary
+   module. Next.js route files that alias another route (`export { default } from "../x/page"`)
+   are the framework's idiom and are exempt like the framework default exports below.
 2. **No default exports**, except where the framework reads the file by convention: Next.js
    special files (`page`, `layout`, `loading`, `error`, `not-found`, `template`, `default`,
    `global-error`, `opengraph-image`, `twitter-image`, `sitemap`, `robots`, `manifest`,
