@@ -1,7 +1,7 @@
 import { buildSetMergingEnabledTransaction, fetchUserRecord } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { address } from "@solana/kit";
-import { landTransaction, type ProvisionDeps } from "./provision.js";
+import { type LandTransactionDeps, landTransaction } from "./land-transaction.js";
 
 /**
  * Merging is gated by a flag on the owner's on-chain registry record, and
@@ -15,11 +15,6 @@ import { landTransaction, type ProvisionDeps } from "./provision.js";
  * operator to decide; the flag is a protocol precondition, not a policy.
  */
 
-export type EnsureMergingEnabledDeps = Pick<
-  ProvisionDeps,
-  "client" | "signTransaction" | "submitTransaction"
->;
-
 export interface EnsureMergingEnabledResult {
   /** Absent when the record already permitted merging and nothing was sent. */
   readonly signature: string | null;
@@ -32,7 +27,7 @@ export interface EnsureMergingEnabledResult {
  * their next merge instead of needing a migration.
  */
 export async function ensureRingsMergingEnabled(
-  deps: EnsureMergingEnabledDeps,
+  deps: LandTransactionDeps,
   input: Readonly<{ owner: string }>
 ): Promise<EnsureMergingEnabledResult> {
   const owner = address(input.owner);

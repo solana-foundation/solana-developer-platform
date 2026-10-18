@@ -17,9 +17,9 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { formatTimestamp, resolveTokenByMint } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { useTransactionFilters } from "./transaction-filters-context";
 import { counterpartyHref, TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs";
 import type { TransactionsPageResult } from "./transactions-page.data";
-import { useTransactionFilters } from "./transactions-workspace";
 import { useCursorPagination } from "./use-cursor-pagination";
 
 const statusVariants = {

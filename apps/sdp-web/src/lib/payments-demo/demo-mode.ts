@@ -10,6 +10,8 @@ import {
 } from "@sdp/types/provider-access";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
+import { paymentsDemoMode } from "@/flags";
+import { isNewDesignOn } from "@/flags/new-design";
 import { parseDashboardPathname } from "../dashboard-project-path";
 import { designModuleForPath } from "../design-modules";
 import { PROJECT_HEADER_NAME } from "../project-cookie";
@@ -67,12 +69,7 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
       return false;
     }
     // Demo data is part of the new design and has a flag of its own: a page on the previous
-    // design never gets it. Imported here, not at the top: the flags module reads auth through
-    // sdp-api, which imports this file.
-    const [{ paymentsDemoMode }, { isNewDesignOn }] = await Promise.all([
-      import("@/flags"),
-      import("@/flags/new-design"),
-    ]);
+    // design never gets it.
     const [demoModeOn, newDesignPage] = await Promise.all([
       paymentsDemoMode(),
       isNewDesignOn(designModuleForPath(page) ?? undefined),

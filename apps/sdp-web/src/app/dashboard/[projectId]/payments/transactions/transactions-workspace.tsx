@@ -10,15 +10,7 @@ import { Input } from "@sdp/ui/input";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { ReceiptTextIcon, SearchIcon, XIcon } from "lucide-react";
-import {
-  createContext,
-  type KeyboardEvent,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import {
   DashboardWorkspaceCard,
@@ -36,6 +28,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { paymentsQueryKeys } from "../payments-query-key";
 import { TransactionsResultsSkeleton } from "../payments-route-skeletons";
+import { TransactionContext } from "./transaction-filters-context";
 import { counterpartyHref, walletHref } from "./transaction-module-hrefs";
 import {
   fetchTransactionsPageFromDashboard,
@@ -48,23 +41,6 @@ import {
   toTransactionUrlUpdates,
 } from "./transactions-query";
 import { TransactionsResults } from "./transactions-results";
-
-interface TransactionContextValue {
-  filters: TransactionFilters;
-  pending: boolean;
-  /** Replaces the whole filter set, cursors included; pagination's entry point. */
-  navigate: (next: TransactionFilters) => void;
-  /** Applies filter changes and drops back to the first page. */
-  update: (changes: Partial<TransactionFilters>) => void;
-}
-
-const TransactionContext = createContext<TransactionContextValue | null>(null);
-
-export function useTransactionFilters(): TransactionContextValue {
-  const value = useContext(TransactionContext);
-  if (value === null) throw new Error("Transaction filter context is missing");
-  return value;
-}
 
 function selectedValue(value: string | null | undefined): string | undefined {
   return value === null || value === undefined || value === "all" ? undefined : value;

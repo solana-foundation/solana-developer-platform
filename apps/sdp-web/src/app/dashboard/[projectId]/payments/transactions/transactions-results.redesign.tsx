@@ -17,9 +17,9 @@ import { resolveTokenByMint, shortenAddress } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
+import { useTransactionFilters } from "./transaction-filters-context.redesign";
 import { kindLabel, useTransactionStatus } from "./transaction-status";
 import type { TransactionsPageResult } from "./transactions-page.data.redesign";
-import { useTransactionFilters } from "./transactions-workspace.redesign";
 import { useCursorPagination } from "./use-cursor-pagination.redesign";
 
 export function TransactionsResults({

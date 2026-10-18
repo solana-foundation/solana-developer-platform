@@ -11,7 +11,7 @@ import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
 import { SearchInput } from "@sdp/ui/search-input";
 import { ReceiptTextIcon, XIcon } from "lucide-react";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
@@ -22,6 +22,7 @@ import { shortenAddress } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { paymentsQueryKeys } from "../payments-query-key";
 import { TransactionsResultsSkeleton } from "../payments-route-skeletons.redesign";
+import { TransactionContext } from "./transaction-filters-context.redesign";
 import {
   fetchTransactionsPageFromDashboard,
   type TransactionsPageResult,
@@ -47,25 +48,8 @@ export interface TransactionCounterpartyOption {
   name: string;
 }
 
-interface TransactionContextValue {
-  filters: TransactionFilters;
-  pending: boolean;
-  /** Replaces the whole filter set, cursors included; pagination's entry point. */
-  navigate: (next: TransactionFilters) => void;
-  /** Applies filter changes and drops back to the first page. */
-  update: (changes: Partial<TransactionFilters>) => void;
-}
-
-const TransactionContext = createContext<TransactionContextValue | null>(null);
-
 /** The two ends of the Date filter's range, as transaction query keys. */
 const DATE_BOUNDS = ["from", "to"] as const;
-
-export function useTransactionFilters(): TransactionContextValue {
-  const value = useContext(TransactionContext);
-  if (value === null) throw new Error("Transaction filter context is missing");
-  return value;
-}
 
 /** "module:kind" for one kind, "module:" for every kind in a module. */
 function typeOptionValue(filters: Pick<TransactionFilters, "module" | "kind">) {

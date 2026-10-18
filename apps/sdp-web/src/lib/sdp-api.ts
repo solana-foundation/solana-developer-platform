@@ -16,6 +16,7 @@ import {
   type TraceContext,
 } from "./request-tracing";
 import { findSdpApiBaseUrl } from "./sdp-api-base-url";
+import { getSdpAuth } from "./sdp-auth";
 
 function getApiBaseUrl(): string {
   const base = findSdpApiBaseUrl({
@@ -47,14 +48,8 @@ export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string
   return token;
 }
 
-const getRequestAuth = cache(async () => auth());
-
-export function getSdpAuth() {
-  return getRequestAuth();
-}
-
 const getRequestClerkToken = cache(async (): Promise<string> => {
-  const { getToken, orgId } = await getRequestAuth();
+  const { getToken, orgId } = await getSdpAuth();
   if (!orgId) {
     throw new Error("Active Clerk organization required");
   }

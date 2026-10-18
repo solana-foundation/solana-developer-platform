@@ -1,7 +1,7 @@
 import { vercelAdapter } from "@flags-sdk/vercel";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { dedupe } from "flags/next";
-import { getSdpAuth } from "@/lib/sdp-api";
+import { getSdpAuth } from "@/lib/sdp-auth";
 import { type DashboardFlagEntities, defineDashboardFlags } from "./definitions";
 import { deploymentReleaseChannel } from "./release-channel";
 

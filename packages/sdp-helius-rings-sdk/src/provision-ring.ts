@@ -44,8 +44,8 @@ import {
   getCreateLookupTableInstructionDataDecoder,
   getExtendLookupTableInstructionDataDecoder,
 } from "@solana-program/address-lookup-table";
+import { landTransaction } from "./land-transaction.js";
 import { expectedRingTable } from "./outer-tx-policy.js";
-import { landTransaction } from "./provision.js";
 
 /**
  * Completes bring-up of a pre-deployed ring program, signing only through

@@ -1,4 +1,3 @@
-import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import {
   buildRegistrationTransaction,
   fetchUserRecord,
@@ -6,13 +5,8 @@ import {
 } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import type { ProvisionIdentityResult } from "@sdp/helius-rings/port";
-import {
-  address,
-  getBase64Codec,
-  getTransactionEncoder,
-  type Signature,
-  type Transaction,
-} from "@solana/kit";
+import { address } from "@solana/kit";
+import { type LandTransactionDeps, landTransaction } from "./land-transaction.js";
 import {
   canonicalShieldedIdentity,
   publishedHalves,
@@ -30,16 +24,8 @@ import { ensureRingsMergingEnabled } from "./merging.js";
  * a shielded identity's nullifier key cannot be rotated once published.
  */
 
-export interface ProvisionDeps {
-  readonly client: ZolanaClient;
+export interface ProvisionDeps extends LandTransactionDeps {
   readonly material: ShieldedMaterialSource;
-  /**
-   * `owner` is passed alongside the bytes because custody has to be told which
-   * key to sign with. A gateway serves every wallet in its tenant, so leaving
-   * the choice to custody's default would sign the wrong wallet's transaction.
-   */
-  readonly signTransaction: (unsignedTxBase64: string, owner: string) => Promise<string>;
-  readonly submitTransaction: (signedTxBase64: string) => Promise<string>;
   readonly organizationId: string;
   readonly projectId: string;
 }
@@ -228,23 +214,4 @@ function firstMismatch(
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
-}
-
-/**
- * Signs through custody, broadcasts, and waits for the chain to accept it.
- * The one place bring-up bytes reach `deps.signTransaction`, shared with ring
- * bring-up in `provision-ring.ts`.
- */
-export async function landTransaction(
-  deps: Pick<ProvisionDeps, "client" | "signTransaction" | "submitTransaction">,
-  transaction: Transaction,
-  owner: string
-): Promise<string> {
-  const unsigned = getBase64Codec().decode(getTransactionEncoder().encode(transaction));
-  const signed = await deps.signTransaction(unsigned, owner);
-  const signature = await deps.submitTransaction(signed);
-
-  await deps.client.confirmTransaction(signature as Signature);
-
-  return signature;
 }
