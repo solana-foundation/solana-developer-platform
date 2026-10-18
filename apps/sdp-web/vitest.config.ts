@@ -23,6 +23,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@/messages": path.resolve(__dirname, "messages"),
+      "@/next.config": path.resolve(__dirname, "next.config.ts"),
       "@": path.resolve(__dirname, "src"),
     },
   },
