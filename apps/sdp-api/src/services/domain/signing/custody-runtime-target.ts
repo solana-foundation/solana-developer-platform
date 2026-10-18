@@ -19,7 +19,7 @@ import { AppError, conflict, internalError, notFound, providerUnavailable } from
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { decideMovement, readMoneyAdmissionFactsWith } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
-import type { SigningConfigRecord } from "@/services/adapters/signing/index";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
 import {
   type CredentialSecretStorageBackend,

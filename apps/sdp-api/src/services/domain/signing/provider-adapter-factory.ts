@@ -14,8 +14,8 @@ import {
 import { SigningError, type SigningPort } from "@sdp/custody/signing";
 import type { Address } from "@solana/kit";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
-import type { SigningConfigRecord } from "@/services/adapters/signing/index";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";

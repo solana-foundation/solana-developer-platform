@@ -33,8 +33,8 @@ import { getDb } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
-import type { SigningConfigRecord } from "@/services/adapters/signing/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
