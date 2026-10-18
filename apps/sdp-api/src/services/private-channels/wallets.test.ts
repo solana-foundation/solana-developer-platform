@@ -296,7 +296,7 @@ describe("verifyPrivateChannelWallet", () => {
       PUBKEY
     );
     expect(getTransactionSigner).toHaveBeenCalledWith(WALLET_ID, PUBKEY);
-    expect(lastPrivyAdapter(getTransactionSigner).config.appId).toBe("pc-connection-app");
+    expect(lastPrivyAdapter(getTransactionSigner).appId).toBe("pc-connection-app");
     expect(signMessages).toHaveBeenCalledTimes(1);
   });
   it("treats an SPC 409 (already verified) as success and still upserts the mirror", async () => {

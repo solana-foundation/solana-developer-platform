@@ -750,7 +750,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     }
     expect(providerSignerMock).toHaveBeenCalledTimes(2);
     expect(providerSignerMock).toHaveBeenCalledWith(ACTOR_WALLET_ID, ACTOR_ADDRESS);
-    expect(lastPrivyAdapter(providerSignerMock).config.appId).toBe("pc-value-connection-app");
+    expect(lastPrivyAdapter(providerSignerMock).appId).toBe("pc-value-connection-app");
   });
 
   it("preserves Config execution while BYOK is out of channel", async () => {

@@ -1046,7 +1046,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(lastPrivyAdapter(getPrivySigner).config.requestDelayMs).toBe(0);
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(0);
 
     await getDb(env).execute(
       "UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?",
@@ -1061,7 +1061,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(lastPrivyAdapter(getPrivySigner).config.requestDelayMs).toBe(250);
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(250);
   });
 
   it.each([

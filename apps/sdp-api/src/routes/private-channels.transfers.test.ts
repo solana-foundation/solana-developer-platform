@@ -632,7 +632,7 @@ describe("Private Channels — transfer access and routes", () => {
     );
     expect(response.status).toBe(200);
     expect(providerSignerMock).toHaveBeenCalledOnce();
-    expect(lastPrivyAdapter(providerSignerMock).config.appId).toBe("pc-transfer-connection-app");
+    expect(lastPrivyAdapter(providerSignerMock).appId).toBe("pc-transfer-connection-app");
     expect(resolveGatewayAuthMock).toHaveBeenCalledOnce();
   });
 
