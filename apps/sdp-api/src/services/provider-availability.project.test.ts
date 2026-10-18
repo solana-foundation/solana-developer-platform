@@ -21,16 +21,12 @@ import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
-  return mockCustodyReleaseChannels(
-    await importOriginal<typeof import("@sdp/types/release-channels")>()
-  );
-});
-
-vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
   const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
   return mockReleaseChannelStages(
-    await importOriginal<typeof import("@sdp/types/release-channels")>(),
+    mockCustodyReleaseChannels(
+      await importOriginal<typeof import("@sdp/types/release-channels")>()
+    ),
     RAMP_PROVIDERS
   );
 });
