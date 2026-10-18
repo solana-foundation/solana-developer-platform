@@ -27,7 +27,9 @@
         "noUnusedVariables": "error",
         "noUnusedImports": "error",
         "useExhaustiveDependencies": "warn",
-        "noUnusedPrivateClassMembers": "error"
+        "noUnusedPrivateClassMembers": "error",
+        "noPrivateImports": "error",
+        "noUndeclaredDependencies": "error"
       },
       "suspicious": {
         "noExplicitAny": "error",
@@ -37,14 +39,18 @@
         "noAsyncPromiseExecutor": "error",
         "noUnsafeDeclarationMerging": "error",
         "noVar": "error",
-        "noTsIgnore": "error"
+        "noTsIgnore": "error",
+        "noImportCycles": "error"
       },
       "style": {
         "noNonNullAssertion": "warn",
         "useConst": "error",
         "noEnum": "error",
         "useImportType": "error",
-        "noDefaultExport": "error"
+        "noDefaultExport": "error",
+        "noExportedImports": "error",
+        "useExportType": "error",
+        "useNodejsImportProtocol": "error"
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
@@ -382,11 +388,11 @@
       "plugins": ["./.biome-plugins/no-export-from.grit"]
     },
     {
-      "includes": ["**/apps/sdp-api/src/**/*.ts"],
+      "includes": ["**/*.mjs", "**/*.cjs", "**/scripts/**", "**/.github/scripts/**"],
       "linter": {
         "rules": {
-          "style": {
-            "noExportedImports": "error"
+          "correctness": {
+            "noUnresolvedImports": "error"
           }
         }
       }

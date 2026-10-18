@@ -139,6 +139,13 @@ jobs:
           git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
+      # Scripts sit outside every TypeScript program, and the diff-scoped lint above never re-reads
+      # one when the package it imports changes its exports, so these are linted in full every run.
+      - name: Lint script imports
+        run: |
+          git ls-files -z ':(glob)**/*.mjs' ':(glob)**/*.cjs' ':(glob)**/scripts/**' ':(glob).github/scripts/**' ':(exclude,glob)examples/**' \
+            | xargs -0 pnpm exec biome lint --no-errors-on-unmatched --diagnostic-level=error
+
       - name: Check pinned dependencies
         run: pnpm check:pinned-dependencies
 
