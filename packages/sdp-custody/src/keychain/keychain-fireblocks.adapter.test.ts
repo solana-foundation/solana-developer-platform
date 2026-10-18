@@ -27,7 +27,7 @@ describe("fireblocks adapter", () => {
   });
 
   it("evicts failed signer initialization so subsequent calls can retry", async () => {
-    const { KeychainFireblocksAdapter } = await import("@sdp/custody/keychain");
+    const { KeychainFireblocksAdapter } = await import("./keychain-fireblocks.adapter");
     const adapter = new KeychainFireblocksAdapter({
       apiKey: "api-key",
       apiSecretPem: "api-secret",

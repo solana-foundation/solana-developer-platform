@@ -1,5 +1,5 @@
-import { KeychainParaAdapter } from "@sdp/custody/keychain";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { KeychainParaAdapter } from "./keychain-para.adapter";
 
 const WALLET_ADDRESS = "11111111111111111111111111111111";
 const WALLET_ID = "0b6f4a8e-2c1d-4e5f-9a7b-3c8d2e1f4a6b";

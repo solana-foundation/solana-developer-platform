@@ -1,6 +1,6 @@
-import type { DfnsApiClient, DfnsWallet } from "@sdp/custody/dfns";
-import { KeychainDfnsAdapter } from "@sdp/custody/keychain";
 import { describe, expect, it, vi } from "vitest";
+import type { DfnsApiClient, DfnsWallet } from "../dfns/client";
+import { KeychainDfnsAdapter } from "./keychain-dfns.adapter";
 
 const WALLET_ADDRESS = "11111111111111111111111111111111";
 

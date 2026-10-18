@@ -1,8 +1,8 @@
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
 import { PrivateChannelError } from "@sdp/private-channels";
 import * as authPkg from "@sdp/private-channels/auth";
-import { PrivySigner } from "@solana/keychain-privy";
 import { address, signatureBytes } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { getDb } from "@/db";
 import * as repositories from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -13,6 +13,7 @@ import {
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedTestDatabase } from "@/test/mocks/db";
 import * as gatewayAuth from "./auth/gateway-auth";
 import * as spcSession from "./auth/spc-session";
@@ -90,7 +91,13 @@ let principalRepo: {
   getById: ReturnType<typeof vi.fn>;
 };
 
-let signMessages: ReturnType<typeof vi.fn<PrivySigner["signMessages"]>>;
+type PrivyTransactionSigner = Awaited<ReturnType<KeychainPrivyAdapter["getTransactionSigner"]>>;
+
+const getProviderSigner = KeychainPrivyAdapter.prototype.getTransactionSigner;
+
+let signMessages: Mock<PrivyTransactionSigner["signMessages"]>;
+
+let getTransactionSigner: Mock<KeychainPrivyAdapter["getTransactionSigner"]>;
 
 beforeEach(async () => {
   originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
@@ -159,7 +166,7 @@ beforeEach(async () => {
     login: vi.fn(),
   };
   signMessages = vi
-    .fn<PrivySigner["signMessages"]>()
+    .fn<PrivyTransactionSigner["signMessages"]>()
     .mockResolvedValue([{ [PUBKEY]: signatureBytes(new Uint8Array(64)) }]);
   vi.spyOn(repositories, "createPrivateChannelInstanceRepository").mockReturnValue({
     getActiveByProject: vi.fn().mockResolvedValue(instance),
@@ -172,10 +179,16 @@ beforeEach(async () => {
   );
   vi.spyOn(authPkg, "createAuthClient").mockReturnValue(client as never);
   vi.spyOn(spcSession, "getSpcSession").mockResolvedValue({ token: "jwt", username: "u" });
-  vi.spyOn(PrivySigner, "create").mockImplementation(async () =>
-    Object.assign(Object.create(PrivySigner.prototype), { address: PUBKEY })
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    Response.json({ id: WALLET_ID, address: PUBKEY, chain_type: "solana" })
   );
-  vi.spyOn(PrivySigner.prototype, "signMessages").mockImplementation(signMessages);
+  getTransactionSigner = vi
+    .spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner")
+    .mockImplementation(async function (this: KeychainPrivyAdapter, walletId, walletPublicKey) {
+      const signer = await getProviderSigner.call(this, walletId, walletPublicKey);
+      vi.spyOn(signer, "signMessages").mockImplementation(signMessages);
+      return signer;
+    });
 });
 
 afterEach(() => {
@@ -201,7 +214,7 @@ describe("verifyPrivateChannelWallet", () => {
       await expect(
         verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID)
       ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
-      expect(PrivySigner.create).not.toHaveBeenCalled();
+      expect(getTransactionSigner).not.toHaveBeenCalled();
       expect(client.challengeWallet).not.toHaveBeenCalled();
     }
   );
@@ -216,7 +229,7 @@ describe("verifyPrivateChannelWallet", () => {
       code: "INTERNAL_ERROR",
       message: "Stored API key permissions are invalid",
     });
-    expect(PrivySigner.create).not.toHaveBeenCalled();
+    expect(getTransactionSigner).not.toHaveBeenCalled();
     expect(client.challengeWallet).not.toHaveBeenCalled();
   });
   it("rejects revoked keys even when their role would allow verification", async () => {
@@ -227,7 +240,7 @@ describe("verifyPrivateChannelWallet", () => {
     await expect(
       verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID)
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(PrivySigner.create).not.toHaveBeenCalled();
+    expect(getTransactionSigner).not.toHaveBeenCalled();
     expect(client.challengeWallet).not.toHaveBeenCalled();
   });
   it("verifies through the exact Connection's stored credential", async () => {
@@ -282,9 +295,8 @@ describe("verifyPrivateChannelWallet", () => {
     expect((await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).row.pubkey).toBe(
       PUBKEY
     );
-    expect(PrivySigner.create).toHaveBeenCalledWith(
-      expect.objectContaining({ walletId: WALLET_ID, appId: "pc-connection-app" })
-    );
+    expect(getTransactionSigner).toHaveBeenCalledWith(WALLET_ID, PUBKEY);
+    expect(lastPrivyAdapter(getTransactionSigner).config.appId).toBe("pc-connection-app");
     expect(signMessages).toHaveBeenCalledTimes(1);
   });
   it("treats an SPC 409 (already verified) as success and still upserts the mirror", async () => {
@@ -322,7 +334,7 @@ describe("verifyPrivateChannelWallet", () => {
       "fresh",
       expect.objectContaining({ nonce: "nB" })
     );
-    expect(PrivySigner.create).toHaveBeenCalledTimes(1);
+    expect(getTransactionSigner).toHaveBeenCalledTimes(1);
     expect(signMessages).toHaveBeenCalledTimes(2);
     expect(verifiedRepo.upsert).toHaveBeenCalledTimes(1);
   });
@@ -417,7 +429,7 @@ describe("verifyPrivateChannelWallet", () => {
   });
   it("resolves the signer before requesting the SPC challenge", async () => {
     await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID);
-    const signerOrder = vi.mocked(PrivySigner.create).mock.invocationCallOrder[0];
+    const signerOrder = getTransactionSigner.mock.invocationCallOrder[0];
     const challengeOrder = client.challengeWallet.mock.invocationCallOrder[0];
     expect(signerOrder).toBeLessThan(challengeOrder);
   });

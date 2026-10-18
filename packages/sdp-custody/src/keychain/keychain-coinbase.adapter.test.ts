@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
-import { KeychainCoinbaseAdapter } from "@sdp/custody/keychain";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { KeychainCoinbaseAdapter } from "./keychain-coinbase.adapter";
 
 const WALLET_ADDRESS = "11111111111111111111111111111111";
 

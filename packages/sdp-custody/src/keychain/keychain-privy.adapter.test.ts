@@ -1,5 +1,6 @@
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
+import { PrivySigner } from "@solana/keychain-privy";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { KeychainPrivyAdapter } from "./keychain-privy.adapter";
 
 const WALLET_ADDRESS = "11111111111111111111111111111111";
 
@@ -24,6 +25,29 @@ describe("privy adapter", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/wallets/wallet-1");
+  });
+
+  it("creates the Privy signer from its config and the unprefixed wallet id", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ id: "wallet-1", address: WALLET_ADDRESS, chain_type: "solana" })
+    );
+    const createSigner = vi.spyOn(PrivySigner, "create");
+    const adapter = new KeychainPrivyAdapter({
+      appId: "app-id",
+      appSecret: "app-secret",
+      apiBaseUrl: "https://privy.test/v1",
+      requestDelayMs: 250,
+    });
+
+    await expect(adapter.getPublicKey("privy_wallet-1")).resolves.toBe(WALLET_ADDRESS);
+
+    expect(createSigner).toHaveBeenCalledExactlyOnceWith({
+      appId: "app-id",
+      appSecret: "app-secret",
+      walletId: "wallet-1",
+      apiBaseUrl: "https://privy.test/v1",
+      requestDelayMs: 250,
+    });
   });
 
   it("reuses one signer construction across successful calls", async () => {

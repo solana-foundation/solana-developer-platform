@@ -1,4 +1,5 @@
 import type { CustodyProvider } from "@sdp/custody";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
 import type { FullSigningPort } from "@sdp/custody/signing";
 import {
   type CachedApiKey,
@@ -9,7 +10,6 @@ import {
   type MovementId,
   type ProviderCredentialStatus,
 } from "@sdp/types";
-import { PrivySigner } from "@solana/keychain-privy";
 import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +32,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -199,7 +200,7 @@ describe("CustodyRuntimeTargets", () => {
   it("admits an active Connection wallet without reading credentials", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
-    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const getPrivySigner = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -210,7 +211,7 @@ describe("CustodyRuntimeTargets", () => {
       })
     ).resolves.toBeUndefined();
     expect(read).not.toHaveBeenCalled();
-    expect(createPrivySigner).not.toHaveBeenCalled();
+    expect(getPrivySigner).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -1033,7 +1034,7 @@ describe("CustodyRuntimeTargets", () => {
       connection.id,
     ]);
     mockStoredCredentialRead();
-    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const getPrivySigner = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
     const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
 
     await expect(
@@ -1045,9 +1046,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(createPrivySigner).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestDelayMs: 0 })
-    );
+    expect(lastPrivyAdapter(getPrivySigner).config.requestDelayMs).toBe(0);
 
     await getDb(env).execute(
       "UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?",
@@ -1062,9 +1061,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(createPrivySigner).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestDelayMs: 250 })
-    );
+    expect(lastPrivyAdapter(getPrivySigner).config.requestDelayMs).toBe(250);
   });
 
   it.each([
