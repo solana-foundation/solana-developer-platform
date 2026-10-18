@@ -5,6 +5,8 @@ import {
   earnVaultDepositSchema,
   earnVaultWithdrawalSchema,
 } from "@sdp/types/earn-wire";
+import { z } from "zod";
+import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import {
   earnMovementSchema,
   earnPortfolioDepositSchema,
@@ -21,7 +23,6 @@ import {
   pageFields,
 } from "@/openapi/schemas/earn-treasury";
 import * as requests from "@/routes/earn/schemas";
-import { errorResponseSchema, successResponseSchema, z } from "../schemas/base";
 import {
   earnExternalWalletWithdrawalRequestResponse,
   earnExternalWalletWithdrawalRequestsResponse,

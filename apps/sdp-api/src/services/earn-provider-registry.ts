@@ -17,14 +17,15 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo";
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import type { EarnProviderId, SolanaCluster } from "@sdp/types";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
 import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
+import { assertClusterEndpoint } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
-import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";
 import { createOndoSwapPort } from "./earn/ondo-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";

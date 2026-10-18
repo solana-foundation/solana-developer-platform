@@ -1,4 +1,5 @@
 import { ASSET_CATEGORIES, ASSET_TYPES } from "@sdp/types";
+import { z } from "zod";
 import {
   assetCategorySchema as assetCategorySchemaBase,
   assetProfileIdSchema as assetProfileIdSchemaBase,
@@ -12,7 +13,6 @@ import {
   projectIdParamSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const assetProfileIdParamSchema = withOpenApi(assetProfileIdSchemaBase, {

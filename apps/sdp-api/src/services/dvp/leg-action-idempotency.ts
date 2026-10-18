@@ -38,8 +38,6 @@ import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { readDvpFundingReceipt } from "./funding-receipt";
 
-export type { DvpLegActionAttempt };
-
 /**
  * A pending key with no recorded attempt, older than this, belongs to a request
  * that died before it signed anything, so nothing was sent. Far above the time a

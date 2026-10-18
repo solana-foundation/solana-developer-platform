@@ -13,8 +13,6 @@ import { type Address, getI64Encoder, getU64Encoder } from "@solana/kit";
 import { AppError, badRequest, walletNotFound } from "@/lib/errors";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
-export { SOL_MINT };
-
 export interface OutboundPaymentOperation {
   sourceWallet: CustodyWallet;
   sourceAddress: Address;

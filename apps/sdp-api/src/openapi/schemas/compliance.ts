@@ -1,8 +1,9 @@
+import { z } from "zod";
+import { isoDateTimeSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
   complianceIntentSchema as complianceIntentSchemaBase,
   screenAddressSchema as screenAddressSchemaBase,
 } from "../../routes/compliance/schemas";
-import { isoDateTimeSchema, withOpenApi, z } from "./base";
 
 export const complianceIntentSchema = withOpenApi(complianceIntentSchemaBase, {
   description: "Business intent for address screening.",

@@ -3,6 +3,7 @@ import {
   projectProviderAvailabilityEntrySchema,
   projectProviderAvailabilitySchema,
 } from "@sdp/types";
+import { z } from "zod";
 import {
   addMemberSchema as addMemberSchemaBase,
   updateMemberSchema as updateMemberSchemaBase,
@@ -16,7 +17,6 @@ import {
   projectMemberIdSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 import { userSchema } from "./organizations";
 

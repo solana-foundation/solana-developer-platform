@@ -8,6 +8,7 @@ import {
   RAMPS_MEMO_LIMITS,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
 } from "@sdp/types";
+import { z } from "zod";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -68,7 +69,6 @@ import {
   WALLET_ID_INPUT_NOTE,
   walletIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 import { preparedTransactionSchema } from "./issuance";
 

@@ -1,8 +1,6 @@
 import type { PrivateChannelRow } from "@sdp/private-channels/channels";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
-export type { PrivateChannelRow };
-
 export function generatePrivateChannelId(): string {
   return `pch_${crypto.randomUUID()}`;
 }

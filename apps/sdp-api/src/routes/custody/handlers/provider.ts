@@ -1,6 +1,7 @@
 import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction";
+import type { InitializeSigningResponse } from "@sdp/types";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
@@ -8,6 +9,7 @@ import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
+import type { InitializeSigningRequest, initializeSigningSchema } from "@/routes/custody/schemas";
 import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
@@ -19,11 +21,6 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { assertCustodySetupAdmitted } from "@/services/provider-availability.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { type AppContext, resolveActor } from "../context";
-import type {
-  InitializeSigningRequest,
-  InitializeSigningResponse,
-  initializeSigningSchema,
-} from "../schemas";
 
 type SigningInitializationResult = {
   configId: string;

@@ -1,9 +1,9 @@
+import type { CustodyConfigsResponse } from "@sdp/types";
 import { requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createSigningService } from "@/services/domain/signing.service";
 import { type AppContext, resolveActor } from "../context";
-import type { CustodyConfigsResponse } from "../schemas";
 
 export const getConfigs = async (c: AppContext) => {
   const actor = resolveActor(c);

@@ -1,5 +1,6 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
@@ -38,7 +39,6 @@ import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
 import {
   earnClusterFor,
-  resolveClusterRpcUrl,
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
 } from "./execution-registry";

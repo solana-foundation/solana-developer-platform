@@ -1,4 +1,5 @@
 import {
+  isRampTransferType,
   isRetiredRampProviderId,
   type PaymentSubscriptionCollectionAttempt,
   type PersistedRampProviderId,
@@ -6,10 +7,7 @@ import {
   type RampTransferSettlement,
 } from "@sdp/types";
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
-import {
-  isRampTransferType,
-  type PaymentTransferRow as TransferRow,
-} from "@/db/repositories/payments.repository";
+import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
 
 /** The stored provider reference for a ramp transfer, including retired providers. */

@@ -7,6 +7,7 @@ import type {
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
@@ -33,7 +34,6 @@ import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import {
   earnClusterFor,
-  resolveClusterRpcUrl,
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "./execution-registry";

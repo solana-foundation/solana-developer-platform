@@ -1,6 +1,6 @@
 import { assertIsAddress, isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
-import { isWellKnownTokenSymbol } from "@sdp/types";
+import { isWellKnownTokenSymbol, SOL_MINT } from "@sdp/types";
 import {
   getI64Encoder,
   getU64Encoder,
@@ -10,7 +10,6 @@ import {
   SOLANA_ERROR__CODECS__INVALID_STRING_FOR_BASE,
 } from "@solana/kit";
 import { z } from "zod";
-import { SOL_MINT } from "@/services/payment-operation.service";
 
 export function solanaAddressSchema(fieldName: string) {
   return z

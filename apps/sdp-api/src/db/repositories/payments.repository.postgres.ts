@@ -2,8 +2,11 @@ import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
   PERSISTED_RAMP_PROVIDERS,
+  RAMP_TRANSFER_TRANSITIONS,
+  type RampTransferType,
   SDP_ENVIRONMENTS,
   tokenFilterAliases,
+  WALLET_TRANSFER_TYPES,
 } from "@sdp/types";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
@@ -18,11 +21,9 @@ import type {
   ListTransfersResult,
   PaymentsRepository,
   PaymentTransferRow,
-  RampTransferType,
   TransferStatusChangeFields,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { RAMP_TRANSFER_TRANSITIONS, WALLET_TRANSFER_TYPES } from "./payments.repository";
 
 function paymentTransferSearchExpression(alias: string): string {
   return `(

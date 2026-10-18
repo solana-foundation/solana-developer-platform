@@ -4,13 +4,12 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { SOL_MINT } from "@sdp/types";
+import { SOL_MINT, type PaymentTransferStatus as TransferStatus } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
-  PaymentTransferStatus as TransferStatus,
 } from "@/db/repositories/payments.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getSplTokenAccountAddresses } from "@/routes/payments/token-accounts";

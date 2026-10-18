@@ -1,4 +1,5 @@
 import { ALLOWED_OPERATIONS, PERMISSIONS } from "@sdp/types";
+import { z } from "zod";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
@@ -10,7 +11,6 @@ import {
   isoDateTimeSchema,
   projectIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 import { custodyWalletOwnerRequestSchema } from "./custody";
 

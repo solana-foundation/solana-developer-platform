@@ -1,5 +1,6 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db/client";
@@ -12,12 +13,8 @@ import {
 import { internalError } from "@/lib/errors";
 import { buildEarnVaultWithdrawalFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
+import { earnClusterFor, resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
-import {
-  earnClusterFor,
-  resolveClusterRpcUrl,
-  resolveVaultWithdrawClient,
-} from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
 import { appendVaultRequestMemo } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";

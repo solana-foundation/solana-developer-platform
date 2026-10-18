@@ -3,18 +3,7 @@
  */
 
 import { CUSTODY_PROVIDERS } from "@sdp/custody";
-import type {
-  CustodyConfigsResponse,
-  CustodyWalletAggregateResponse,
-  CustodyWalletByIdResponse,
-  CustodyWalletMetadataResponse,
-  CustodyWalletOwnerTarget,
-  CustodyWalletResponse,
-  CustodyWalletsResponse,
-  DeleteWalletResponse,
-  InitializeSigningResponse,
-  SignerCheckResponse,
-} from "@sdp/types";
+import type { CustodyWalletOwnerTarget } from "@sdp/types";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
@@ -174,19 +163,3 @@ export const signerCheckSchema = z.object({
 });
 
 export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Response Types
-// ═══════════════════════════════════════════════════════════════════════════
-
-export type {
-  CustodyConfigsResponse,
-  CustodyWalletAggregateResponse,
-  CustodyWalletByIdResponse,
-  CustodyWalletMetadataResponse,
-  CustodyWalletResponse,
-  CustodyWalletsResponse,
-  DeleteWalletResponse,
-  InitializeSigningResponse,
-  SignerCheckResponse,
-};

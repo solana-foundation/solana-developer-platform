@@ -34,9 +34,10 @@
  */
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import type { ProbeRequest, ProbeResponse, ProbeTransport } from "@sdp/private-channels/transport";
+import { isBlockedAddress } from "@sdp/rpc/blocked-address";
 import { badRequest } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import { guardedFetch, isBlockedAddress } from "@/services/guarded-egress";
+import { guardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 
 /**

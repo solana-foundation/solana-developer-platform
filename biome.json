@@ -339,6 +339,9 @@
           "performance": {
             "noBarrelFile": "error",
             "noReExportAll": "error"
+          },
+          "style": {
+            "noExportedImports": "error"
           }
         }
       },

@@ -35,21 +35,16 @@ export type ProvisionFireblocksOptions = CustodyProvisionFireblocksOptions & {
   apiKey?: string;
   apiSecretPem?: string;
 };
-export type { ProvisionFireblocksResult };
 
 export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
-export type { PrivyCredentialAuthentication, ProvisionPrivyResult };
 
 export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
   network?: "solana" | "solana-devnet";
 };
-export type { ProvisionCoinbaseCdpResult };
 
 export type ProvisionParaOptions = CustodyProvisionParaOptions;
-export type { ProvisionParaResult };
 
 export type ProvisionTurnkeyOptions = CustodyProvisionTurnkeyOptions;
-export type { ProvisionTurnkeyResult };
 
 export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
   serviceAccountEmail?: string;
@@ -57,10 +52,8 @@ export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
   vaultId?: string;
   network?: "networks/solana-mainnet" | "networks/solana-devnet";
 };
-export type { ProvisionUtilaResult };
 
 export type ProvisionAnchorageOptions = CustodyProvisionAnchorageOptions;
-export type { ProvisionAnchorageResult };
 
 export type DeleteAnchorageOptions = CustodyDeleteAnchorageOptions;
 

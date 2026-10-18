@@ -1,5 +1,6 @@
 import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types";
-import { isoDateTimeSchema, successResponseSchema, z } from "./base";
+import { z } from "zod";
+import { isoDateTimeSchema, successResponseSchema } from "@/openapi/schemas/base";
 
 // ---------------------------------------------------------------------------
 // The strategy catalogue: the synced shelf of yield opportunities. Partners

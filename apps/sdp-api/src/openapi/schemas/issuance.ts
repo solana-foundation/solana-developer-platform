@@ -1,5 +1,5 @@
 import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
-
+import { z } from "zod";
 import {
   assetCategorySchema as assetCategorySchemaBase,
   assetTypeSchema as assetTypeSchemaBase,
@@ -37,7 +37,6 @@ import {
   tokenIdParamSchema,
   tokenTransactionIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const ISSUANCE_TOKEN_AMOUNT_DESCRIPTION =

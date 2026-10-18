@@ -1,3 +1,4 @@
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db/client";
@@ -6,11 +7,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
+import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconciliation.service";
 import type { AppContext } from "../context";

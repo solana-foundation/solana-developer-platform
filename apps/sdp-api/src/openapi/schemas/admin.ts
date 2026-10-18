@@ -1,5 +1,10 @@
+import { z } from "zod";
+import {
+  allowlistEntryIdParamSchema,
+  isoDateTimeSchema,
+  withOpenApi,
+} from "@/openapi/schemas/base";
 import { addEntrySchema as addEntrySchemaBase } from "../../routes/allowlist/schemas";
-import { allowlistEntryIdParamSchema, isoDateTimeSchema, withOpenApi, z } from "./base";
 
 export const allowlistEntrySchema = z
   .object({

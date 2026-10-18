@@ -4,6 +4,7 @@ import {
   PERSISTED_RAMP_PROVIDERS,
   RAMP_PROVIDERS,
 } from "@sdp/types";
+import { z } from "zod";
 import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
@@ -28,7 +29,6 @@ import {
   projectIdParamSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const counterpartyIdParamSchema = withOpenApi(

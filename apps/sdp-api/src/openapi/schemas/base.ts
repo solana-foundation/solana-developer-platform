@@ -11,8 +11,6 @@ import { IDEMPOTENCY_KEY_PATTERN } from "../../middleware/idempotency-key";
 
 extendZodWithOpenApi(z);
 
-export { z };
-
 type OpenApiArgs = [unknown, unknown?, unknown?];
 type OpenApiMethod = (this: z.ZodType, ...args: OpenApiArgs) => z.ZodType;
 

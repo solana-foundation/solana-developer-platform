@@ -1,4 +1,5 @@
 import { CUSTODY_PROVIDERS } from "@sdp/types";
+import { z } from "zod";
 import {
   connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
   createManagedWalletSchema as createManagedWalletSchemaBase,
@@ -14,7 +15,6 @@ import {
   solanaAddressSchema,
   walletIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {

@@ -6,6 +6,7 @@ import {
   isStagedProviderRefusalReason,
   type PaymentRampEstimate,
   type PaymentRampQuote,
+  type PaymentTransferStatus,
   type RampProviderEstimateResult,
 } from "@sdp/types";
 import {
@@ -23,10 +24,7 @@ import type {
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type {
-  PaymentTransferRow,
-  PaymentTransferStatus,
-} from "@/db/repositories/payments.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, redactErrorForCapture, unsupportedRampCorridor } from "@/lib/errors";

@@ -5,6 +5,7 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type MovementId,
   type PreparedPaymentSubscriptionTransaction,
+  SOL_MINT,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import {
@@ -47,7 +48,6 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
   parseU64String,
-  SOL_MINT,
 } from "@/services/payment-operation.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {

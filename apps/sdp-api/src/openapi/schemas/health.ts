@@ -1,5 +1,6 @@
 import { EGRESS_READINESS_STATES, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types";
-import { isoDateTimeSchema, z } from "./base";
+import { z } from "zod";
+import { isoDateTimeSchema } from "@/openapi/schemas/base";
 
 export const healthResponseSchema = z
   .object({

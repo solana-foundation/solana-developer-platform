@@ -4,8 +4,9 @@ import {
   PRIVATE_CHANNEL_EVENT_TYPE_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPES,
 } from "@sdp/types";
+import { z } from "zod";
 import { privateChannelTransferAmountSchema } from "@/lib/private-channel-transfer-amount";
-import { solanaAddressSchema, withOpenApi, z } from "./base";
+import { solanaAddressSchema, withOpenApi } from "@/openapi/schemas/base";
 
 export const privateChannelInstanceSchema = z
   .object({

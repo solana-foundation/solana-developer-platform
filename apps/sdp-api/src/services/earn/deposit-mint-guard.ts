@@ -27,6 +27,7 @@
  * shipping unmonitored.
  */
 
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import { createRpc } from "@sdp/rpc/solana";
 import {
   EARN_DEPOSIT_TOKEN_SYMBOLS,
@@ -39,7 +40,7 @@ import { address } from "@solana/kit";
 import { z } from "zod";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { assertClusterEndpoint, resolveClusterRpcUrl } from "@/services/earn/execution-registry";
+import { assertClusterEndpoint } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 
 export const EARN_DEPOSIT_MINT_DRIFT_EVENT = "sdp_api_earn_deposit_mint_drift";

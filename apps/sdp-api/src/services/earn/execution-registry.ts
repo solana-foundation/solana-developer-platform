@@ -25,7 +25,6 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo";
-import { resolveClusterRpcUrl } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -66,8 +65,6 @@ import { createVaultRpcFailover } from "./vault-rpc-failover";
  * importing this module's chain SDKs; `assertClusterEndpoint` below still makes
  * every selected URL prove which chain it serves before work begins.
  */
-export { resolveClusterRpcUrl };
-
 /**
  * Briefly memoised genesis observations, keyed by `cluster\nurl`.
  *

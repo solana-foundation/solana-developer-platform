@@ -1,28 +1,16 @@
 import { PAYMENT_TRANSFER_ID_PREFIX } from "@sdp/payments/ramps/shared";
-import {
-  isRampTransferType,
-  type PaymentTransactionKind,
-  type PaymentTransferStatus,
-  type PaymentTransferType,
-  RAMP_TRANSFER_TRANSITIONS,
-  RAMP_TRANSFER_TYPES,
-  type RampTransferTransitionId,
-  type RampTransferType,
-  type SdpEnvironment,
-  WALLET_TRANSFER_TYPES,
+import type {
+  PaymentTransactionKind,
+  PaymentTransferStatus,
+  PaymentTransferType,
+  RampTransferTransitionId,
+  SdpEnvironment,
 } from "@sdp/types";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export {
-  isRampTransferType,
-  RAMP_TRANSFER_TRANSITIONS,
-  RAMP_TRANSFER_TYPES,
-  WALLET_TRANSFER_TYPES,
-};
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
-export type { PaymentTransferStatus, PaymentTransferType, RampTransferType };
 
 export interface PaymentTransferRow {
   id: string;

@@ -1,4 +1,5 @@
 import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types";
+import { z } from "zod";
 import {
   acceptSchema as acceptSchemaBase,
   inviteSchema as inviteSchemaBase,
@@ -11,7 +12,6 @@ import {
   orgIdParamSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const organizationSettingsSchema = z
