@@ -8,6 +8,11 @@
       "types": "./src/client.ts",
       "import": "./src/client.ts",
       "default": "./src/client.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
     }
   },
   "scripts": {

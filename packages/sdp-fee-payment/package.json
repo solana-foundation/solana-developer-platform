@@ -9,6 +9,16 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./kora.adapter": {
+      "types": "./src/kora.adapter.ts",
+      "import": "./src/kora.adapter.ts",
+      "default": "./src/kora.adapter.ts"
+    },
+    "./native.adapter": {
+      "types": "./src/native.adapter.ts",
+      "import": "./src/native.adapter.ts",
+      "default": "./src/native.adapter.ts"
+    },
     "./port": {
       "types": "./src/port.ts",
       "import": "./src/port.ts",

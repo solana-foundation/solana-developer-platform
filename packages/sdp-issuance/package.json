@@ -19,6 +19,11 @@
       "import": "./src/capabilities/settings.ts",
       "default": "./src/capabilities/settings.ts"
     },
+    "./mosaic/authority": {
+      "types": "./src/mosaic/authority.ts",
+      "import": "./src/mosaic/authority.ts",
+      "default": "./src/mosaic/authority.ts"
+    },
     "./mosaic/service": {
       "types": "./src/mosaic/service.ts",
       "import": "./src/mosaic/service.ts",

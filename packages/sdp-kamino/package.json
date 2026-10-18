@@ -13,6 +13,11 @@
       "types": "./src/deposit-receipt.ts",
       "import": "./src/deposit-receipt.ts",
       "default": "./src/deposit-receipt.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
     }
   },
   "scripts": {
