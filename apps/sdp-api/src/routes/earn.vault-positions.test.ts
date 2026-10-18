@@ -4,7 +4,7 @@ import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
 import type { CachedApiKey } from "@sdp/types";
 import type { Address, RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,

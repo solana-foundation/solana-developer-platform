@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from "jose";
 import type { afterAll } from "vitest";
 import { getCurrentTest } from "vitest/suite";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 import type { Env } from "@/types/env";
 
 const kid = "clerk_test_rs256";

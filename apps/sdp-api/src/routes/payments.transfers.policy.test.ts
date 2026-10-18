@@ -1,6 +1,6 @@
 import { address, createNoopSigner } from "@solana/kit";
 import { expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { SigningService } from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";

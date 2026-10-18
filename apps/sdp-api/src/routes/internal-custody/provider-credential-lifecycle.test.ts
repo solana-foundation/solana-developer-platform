@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";

@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, Permission } from "@sdp/types";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
 import { app } from "@/index";

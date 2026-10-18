@@ -1,7 +1,7 @@
 import { CUSTODY_CONNECTION_LIFECYCLES, type CustodySetupStatusResponse } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";

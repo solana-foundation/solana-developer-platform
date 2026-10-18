@@ -1,6 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types";
 import { expect } from "vitest";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 
 export const DEFAULT_PROJECT_SLUG = {
   sandbox: "default-sandbox",

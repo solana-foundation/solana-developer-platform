@@ -8,9 +8,10 @@
  * status-specific cadence.
  */
 
+import type { DvpTradeStatus } from "@sdp/types";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { buildDvpTradeRow } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
@@ -23,8 +24,8 @@ vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight }),
   confirmTransaction: vi.fn(),
 }));
-vi.mock("@/db/repositories", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/db/repositories")>()),
+vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createDvpTradeRepository: () => ({ recordObservation }),
 }));
 vi.mock("./read-chain", () => ({ readDvpTradeObservation }));

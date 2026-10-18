@@ -18,8 +18,8 @@ import {
   getCreateAssociatedTokenIdempotentInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
-import { closeDatabasePools, getDb } from "@/db";
-import { createPostgresEarnRepository } from "@/db/repositories";
+import { closeDatabasePools, getDb } from "@/db/client";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { app } from "@/index";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
@@ -37,7 +37,7 @@ import {
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {

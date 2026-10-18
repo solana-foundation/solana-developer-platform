@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";

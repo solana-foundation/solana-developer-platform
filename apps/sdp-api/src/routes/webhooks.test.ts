@@ -3,7 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import { type PaymentTransferStatus, wellKnownMint } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";

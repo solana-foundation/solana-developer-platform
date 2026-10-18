@@ -10,7 +10,7 @@
 
 import { Context } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   insertTestCustodyConfigRow,

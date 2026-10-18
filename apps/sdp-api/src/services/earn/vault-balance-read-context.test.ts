@@ -7,7 +7,10 @@ import {
 } from "./vault-balance-read-context";
 
 const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn(), prove: vi.fn() }));
-vi.mock("@/db", () => ({ getDb: vi.fn() }));
+vi.mock("@/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/client")>()),
+  getDb: vi.fn(),
+}));
 vi.mock("@/db/repositories/earn-movements.repository", () => ({
   createPostgresEarnMovementsRepository: () => ({ getMovementById: mocks.movement }),
 }));

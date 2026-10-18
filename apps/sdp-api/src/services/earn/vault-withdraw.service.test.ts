@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
@@ -28,8 +28,8 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   simulateVaultPlan,
 }));
 
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
+vi.mock("@/services/solana/signer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet,
 }));
 

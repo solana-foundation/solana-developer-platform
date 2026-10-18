@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import * as providerAvailability from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";

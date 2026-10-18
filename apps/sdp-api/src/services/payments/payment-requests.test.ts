@@ -26,7 +26,7 @@ import {
   type MockInstance,
   vi,
 } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import {
   createPaymentRequestsRepository,

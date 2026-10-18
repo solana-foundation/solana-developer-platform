@@ -2,7 +2,7 @@ import type { CachedApiKey } from "@sdp/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { unifiedAuthMiddleware } from "@/middleware/auth";

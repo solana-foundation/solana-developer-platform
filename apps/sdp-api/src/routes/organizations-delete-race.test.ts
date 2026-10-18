@@ -21,8 +21,8 @@ const raceState = vi.hoisted(() => ({
   onBatch: null as null | (() => Promise<void>),
 }));
 
-vi.mock("@/db", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/db")>();
+vi.mock("@/db/client", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/db/client")>();
   return {
     ...original,
     getDb: (bindings: Parameters<typeof original.getDb>[0]) => {
@@ -47,7 +47,7 @@ vi.mock("@/db", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

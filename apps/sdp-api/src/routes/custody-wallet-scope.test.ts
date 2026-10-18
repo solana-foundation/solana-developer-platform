@@ -4,10 +4,11 @@ import type { CachedApiKey, SdpEnvironment, SignerCheckRequest } from "@sdp/type
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
@@ -45,8 +46,8 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
+vi.mock("@/services/solana/signer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet: signerCheckMocks.createExactSigner,
 }));
 

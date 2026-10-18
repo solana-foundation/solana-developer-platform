@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";

@@ -1,7 +1,7 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createSystemPaymentsRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";

@@ -20,12 +20,9 @@ vi.mock("@sdp/types", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
 import { badRequest, serviceUnavailable } from "@/lib/errors";

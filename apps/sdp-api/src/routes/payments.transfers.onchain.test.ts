@@ -2,7 +2,7 @@ import type * as feePaymentAdapters from "@sdp/fee-payment";
 import { SOL_MINT } from "@sdp/types";
 import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";

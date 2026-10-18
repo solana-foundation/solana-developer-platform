@@ -23,7 +23,7 @@ import {
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { type AppError, conflict } from "@/lib/errors";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import {
@@ -61,7 +61,10 @@ vi.mock("@sdp/dvp", async (importOriginal) => ({
   decodeSwapDvpChecked,
 }));
 const assertTradeNotClosing = vi.hoisted(() => vi.fn());
-vi.mock("@/db", () => ({ getDb: () => ({}) }));
+vi.mock("@/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/client")>()),
+  getDb: () => ({}),
+}));
 vi.mock("./close-exclusion", () => ({ assertTradeNotClosing }));
 vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   createPostgresDvpLegFundingClaimRepository: () => ({

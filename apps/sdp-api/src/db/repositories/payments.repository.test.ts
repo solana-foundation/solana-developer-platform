@@ -1,6 +1,6 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment, WALLET_TRANSFER_TYPES } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

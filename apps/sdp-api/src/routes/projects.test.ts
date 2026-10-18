@@ -4,7 +4,7 @@
 
 import { hashString } from "@sdp/payments/hash";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";

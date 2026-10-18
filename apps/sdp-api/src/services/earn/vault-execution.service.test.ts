@@ -1,4 +1,5 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
+import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
@@ -16,7 +17,6 @@ import {
   type Signature,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FeePaymentPort } from "@/services/ports";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import type { Env } from "@/types/env";
 import { resetClusterEndpointProofs } from "./execution-registry";

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -28,8 +28,8 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   broadcastVaultTransaction,
   compileUnsignedVaultTransaction,
 }));
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
+vi.mock("@/services/solana/signer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet,
 }));
 vi.mock("./vault-sponsorship", async (importOriginal) => ({

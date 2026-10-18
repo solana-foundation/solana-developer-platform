@@ -1,7 +1,7 @@
 import { type Context, Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import * as idempotencyKeysRepository from "@/db/repositories/idempotency-keys.repository";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import type { JsonValue } from "@/lib/idempotency";

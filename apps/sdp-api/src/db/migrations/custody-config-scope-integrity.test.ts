@@ -1,7 +1,7 @@
 import type { CustodyProvider } from "@sdp/custody";
 import type { CustodyConfigStatus } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";

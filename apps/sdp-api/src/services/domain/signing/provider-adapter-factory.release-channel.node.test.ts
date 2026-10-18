@@ -1,5 +1,6 @@
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KeychainPrivyAdapter, type SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   createAdapterFromEncryptedConfig,

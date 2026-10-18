@@ -6,7 +6,7 @@ import {
   SolanaError,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
@@ -50,8 +50,8 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   simulateVaultPlan,
 }));
 
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
+vi.mock("@/services/solana/signer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet,
 }));
 

@@ -2,7 +2,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
 import * as custodyProvisioning from "@/services/custody/provisioning";

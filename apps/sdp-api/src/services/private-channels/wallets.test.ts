@@ -3,8 +3,13 @@ import { PrivateChannelError } from "@sdp/private-channels";
 import * as authPkg from "@sdp/private-channels/auth";
 import { address, signatureBytes } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { getDb } from "@/db";
-import * as repositories from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
+import type {
+  PrivateChannelUserRow,
+  PrivateChannelUserWithIdentityRow,
+} from "@/db/repositories/private-channel-user.repository";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import type { ApiKeyContext } from "@/lib/auth";
 import {
   activateTestCustodyConnection,
@@ -57,13 +62,13 @@ const instance = {
   organization_id: "org_test_pc_wallet",
   project_id: "prj_1",
   auth_url: "http://auth.local:8903",
-} as unknown as repositories.PrivateChannelInstanceRow;
+} as unknown as PrivateChannelInstanceRow;
 
 const pcUser = {
   id: "pcu_1",
   instance_id: "pci_1",
   disabled_at: null,
-} as unknown as repositories.PrivateChannelUserRow;
+} as unknown as PrivateChannelUserRow;
 
 const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 
@@ -168,13 +173,13 @@ beforeEach(async () => {
   signMessages = vi
     .fn<PrivyTransactionSigner["signMessages"]>()
     .mockResolvedValue([{ [PUBKEY]: signatureBytes(new Uint8Array(64)) }]);
-  vi.spyOn(repositories, "createPrivateChannelInstanceRepository").mockReturnValue({
+  vi.spyOn(repositoryFactory, "createPrivateChannelInstanceRepository").mockReturnValue({
     getActiveByProject: vi.fn().mockResolvedValue(instance),
   } as never);
-  vi.spyOn(repositories, "createPrivateChannelUserRepository").mockReturnValue({
+  vi.spyOn(repositoryFactory, "createPrivateChannelUserRepository").mockReturnValue({
     ...principalRepo,
   } as never);
-  vi.spyOn(repositories, "createPrivateChannelVerifiedWalletRepository").mockReturnValue(
+  vi.spyOn(repositoryFactory, "createPrivateChannelVerifiedWalletRepository").mockReturnValue(
     verifiedRepo as never
   );
   vi.spyOn(authPkg, "createAuthClient").mockReturnValue(client as never);
@@ -416,7 +421,7 @@ describe("verifyPrivateChannelWallet", () => {
       ...pcUser,
       id: "pcu_treasury",
       is_default: false,
-    } as repositories.PrivateChannelUserWithIdentityRow;
+    } as PrivateChannelUserWithIdentityRow;
     principalRepo.getById.mockResolvedValue(selectedPrincipal);
     await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID, selectedPrincipal.id);
     expect(principalRepo.getById).toHaveBeenCalledWith(
@@ -458,7 +463,7 @@ describe("deletePrivateChannelWallet", () => {
       ...pcUser,
       id: "pcu_treasury",
       is_default: false,
-    } as repositories.PrivateChannelUserWithIdentityRow;
+    } as PrivateChannelUserWithIdentityRow;
     verifiedRepo.findByInstanceAndPubkey.mockResolvedValue({
       id: "pcvw_treasury",
       organization_id: "org_test_pc_wallet",

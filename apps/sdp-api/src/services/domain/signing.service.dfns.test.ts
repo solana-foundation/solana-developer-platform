@@ -1,7 +1,8 @@
 import { Buffer } from "node:buffer";
+import { KeychainDfnsAdapter } from "@sdp/custody/keychain";
 import { isFullSigningPort } from "@sdp/custody/signing";
 import { describe, expect, it } from "vitest";
-import { KeychainDfnsAdapter, type SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";

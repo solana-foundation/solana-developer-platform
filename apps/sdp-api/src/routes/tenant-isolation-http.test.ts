@@ -8,7 +8,7 @@
 
 import { hashString } from "@sdp/payments/hash";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";

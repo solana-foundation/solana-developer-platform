@@ -52,13 +52,13 @@ vi.mock("@sdp/earn", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnProviderWalletRow,
-  type InsertEarnProviderWalletInput,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type {
+  EarnProviderWalletRow,
+  InsertEarnProviderWalletInput,
+  UpsertEarnStrategyInput,
+} from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";

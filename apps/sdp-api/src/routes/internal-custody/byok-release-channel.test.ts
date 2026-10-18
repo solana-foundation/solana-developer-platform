@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";

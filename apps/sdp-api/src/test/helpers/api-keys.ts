@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import type { ApiKeyRole } from "@sdp/types";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 import type { Env } from "@/types/env";
 
 export interface TestApiKeyMaterial {

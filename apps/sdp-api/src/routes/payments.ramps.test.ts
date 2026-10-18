@@ -10,7 +10,7 @@ import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED } fro
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import * as tokenLabels from "@/routes/payments/token-labels";

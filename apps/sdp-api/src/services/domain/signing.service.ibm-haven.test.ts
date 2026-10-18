@@ -5,8 +5,9 @@ import {
   IBM_HAVEN_PROVIDER_LABEL,
   resolveDfnsNetwork,
 } from "@sdp/custody/dfns";
+import { KeychainIbmHavenAdapter } from "@sdp/custody/keychain";
 import { describe, expect, it } from "vitest";
-import { KeychainIbmHavenAdapter, type SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";

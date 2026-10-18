@@ -17,10 +17,11 @@ import {
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
-import * as solanaServices from "@/services/solana";
+import * as solanaSigner from "@/services/solana/signer";
+
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   seedTestPrivyConnection,
@@ -56,7 +57,7 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
-  solanaServices,
+  solanaSigner,
   "createOrgSignerForCustodyWallet"
 );
 

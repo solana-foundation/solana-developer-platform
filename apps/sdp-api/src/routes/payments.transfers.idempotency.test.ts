@@ -2,7 +2,7 @@ import type * as feePaymentAdapters from "@sdp/fee-payment";
 import { FeePaymentError } from "@sdp/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";

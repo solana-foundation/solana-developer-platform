@@ -1,6 +1,9 @@
 import * as privateChannels from "@sdp/private-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PrivateChannelUserRepository, PrivateChannelUserRow } from "@/db/repositories";
+import type {
+  PrivateChannelUserRepository,
+  PrivateChannelUserRow,
+} from "@/db/repositories/private-channel-user.repository";
 import * as credentialCrypto from "@/lib/spc-credential-crypto";
 import { provisionPrincipal } from "./members";
 

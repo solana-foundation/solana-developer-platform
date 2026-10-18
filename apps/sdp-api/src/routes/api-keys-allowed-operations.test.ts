@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { AllowedOperation, CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

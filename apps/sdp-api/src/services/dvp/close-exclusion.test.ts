@@ -9,15 +9,15 @@
 import { DVP_LEG_REFUSAL } from "@sdp/types";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DvpCloseClaim } from "@/db/repositories";
+import type { DvpCloseClaim } from "@/db/repositories/dvp-trade.repository";
 import { buildDvpTradeRow } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
 const getByIdAsParty = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn());
 
-vi.mock("@/db/repositories", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/db/repositories")>()),
+vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createDvpTradeRepository: () => ({ getByIdAsParty }),
 }));
 

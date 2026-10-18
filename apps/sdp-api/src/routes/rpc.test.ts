@@ -10,7 +10,7 @@ import {
   type MockInstance,
   vi,
 } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";

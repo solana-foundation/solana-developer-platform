@@ -7,8 +7,8 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createSystemPaymentsRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import {

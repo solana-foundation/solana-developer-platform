@@ -28,8 +28,9 @@ import type {
   PrivateChannelTransferRepository,
   PrivateChannelTransferRow,
   UpdatePrivateChannelTransferInput,
-} from "@/db/repositories";
-import * as repositories from "@/db/repositories";
+} from "@/db/repositories/private-channel-transfer.repository";
+import { mapPrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import { isAbandonedReservation } from "@/lib/idempotency";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { matchesTransferReplay } from "@/routes/private-channels/replay";
@@ -121,7 +122,7 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
             gatewayAuth: input.gatewayAuth,
             sdpUserId: input.sdpUserId,
           })
-        : repositories.mapPrivateChannelTransferRow(row);
+        : mapPrivateChannelTransferRow(row);
     },
     recipient: {
       privateChannelUserId: RECIPIENT_PC_USER_ID,
@@ -206,7 +207,7 @@ beforeEach(async () => {
     }),
   } as unknown as PrivateChannelTransferRepository;
 
-  vi.spyOn(repositories, "createPrivateChannelTransferRepository").mockReturnValue(repo);
+  vi.spyOn(repositoryFactory, "createPrivateChannelTransferRepository").mockReturnValue(repo);
   vi.spyOn(balanceService, "getChannelBalance").mockResolvedValue(makeBalance());
   vi.spyOn(gatewayAuthService, "withGatewayRpc").mockImplementation(
     async (_env, _gatewayUrl, _context, run) => run(GATEWAY_RPC as never)

@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, CustodyMode } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { insertTestCustodyConfigRow, seedTestCustodyRows } from "@/test/helpers/custody";

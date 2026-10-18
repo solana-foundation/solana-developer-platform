@@ -2,7 +2,7 @@ import type { ApiKeyWalletBinding, PrivateChannelEventReferencesEnvelope } from 
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";

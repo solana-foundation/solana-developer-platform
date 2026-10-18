@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { Permission, SdpReleaseChannel } from "@sdp/types";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { app } from "@/index";

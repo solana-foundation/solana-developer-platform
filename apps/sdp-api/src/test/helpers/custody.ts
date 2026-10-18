@@ -4,7 +4,7 @@
 
 import type { CustodyProvider } from "@sdp/custody";
 import type { CustodyConfigStatus, CustodyWalletPurpose, CustodyWalletStatus } from "@sdp/types";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db/client";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";

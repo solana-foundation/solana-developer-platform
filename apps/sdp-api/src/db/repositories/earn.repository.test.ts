@@ -1,6 +1,6 @@
 import type { EarnPortfolioWithdrawal } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   applyEarnWithdrawalObservationByReference,

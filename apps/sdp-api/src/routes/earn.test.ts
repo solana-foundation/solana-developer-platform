@@ -19,13 +19,13 @@ vi.mock("@/routes/earn/handlers/curation", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnProviderWalletRow,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type {
+  EarnProviderWalletRow,
+  EarnStrategyRow,
+  UpsertEarnStrategyInput,
+} from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

@@ -2,7 +2,7 @@ import { DVP_SETTLEMENT_AVAILABILITY } from "@sdp/types";
 import { type Address, address, getBase58Decoder, signature } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

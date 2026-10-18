@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
@@ -9,7 +10,6 @@ import { AppError } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { rootLogger } from "@/runtime/logger";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
-import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
 
 const THROW_PATH = "/__internal_error_test_throw";

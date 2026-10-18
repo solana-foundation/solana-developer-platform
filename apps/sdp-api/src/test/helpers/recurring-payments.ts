@@ -3,7 +3,7 @@ import { getBase58Decoder } from "@solana/codecs";
 import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {

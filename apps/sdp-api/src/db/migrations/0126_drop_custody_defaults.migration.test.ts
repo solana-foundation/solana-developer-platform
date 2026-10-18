@@ -8,7 +8,7 @@ import type {
 } from "@sdp/types";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
 import {

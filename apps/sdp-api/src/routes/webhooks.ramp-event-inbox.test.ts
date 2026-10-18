@@ -8,7 +8,7 @@ import {
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { app } from "@/index";
 import { noopObservability } from "@/runtime/observability";

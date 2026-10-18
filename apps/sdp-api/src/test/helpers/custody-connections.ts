@@ -4,7 +4,7 @@ import type {
   CustodyProvider,
   ProviderCredentialStatus,
 } from "@sdp/types";
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import {
   createCredentialSecretStore,
   type StoredCredentialSecret,

@@ -1,6 +1,6 @@
 import { wellKnownMint } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import * as events from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

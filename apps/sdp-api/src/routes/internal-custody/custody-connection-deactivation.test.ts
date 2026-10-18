@@ -5,7 +5,7 @@ import type {
 } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";

@@ -1,6 +1,6 @@
 import type { MovementOf } from "@sdp/types";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import * as moneyAdmission from "@/lib/money-admission";
 import { errorResponseSchema } from "@/openapi/schemas/base";

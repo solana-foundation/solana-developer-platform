@@ -1,8 +1,7 @@
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SOL_MINT } from "@/routes/payments/token-accounts";
 import {
   clearWalletBalanceCache,
   readWalletBalances,

@@ -1,6 +1,6 @@
 import type { SpcAuthClient } from "@sdp/private-channels/auth";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { PrivateChannelUserRow } from "@/db/repositories";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import { createSpcCredentialCipher } from "@/lib/spc-credential-crypto";
 import type { KVPutOptions, KVStore } from "@/runtime/kv";
 import { generateEncryptionKey } from "@/services/encryption.service";

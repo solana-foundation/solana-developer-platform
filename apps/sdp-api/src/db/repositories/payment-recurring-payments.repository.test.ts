@@ -5,7 +5,7 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

@@ -10,7 +10,7 @@
 
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { loadCachedApiKeyFromDb } from "@/lib/api-key-cache";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

@@ -1,7 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PaymentRecurringPaymentRow } from "@/db/repositories";
+import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
@@ -51,7 +51,8 @@ const mocks = vi.hoisted<MockState>(() => ({
   },
 }));
 
-vi.mock("@/db", () => ({
+vi.mock("@/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/client")>()),
   getDb: () => ({}),
 }));
 
@@ -77,19 +78,25 @@ vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
   },
 }));
 
-vi.mock("@/services/payments/recurring-payments", () => ({
+vi.mock("@/services/payments/recurring-payments/activation", () => ({
   activateRecurringPayment: mocks.activateRecurringPayment,
-  cancelRecurringPayment: mocks.cancelRecurringPayment,
+}));
+
+vi.mock("@/services/payments/recurring-payments/collection", () => ({
   collectRecurringPayment: mocks.collectRecurringPayment,
   journalAutomatedCollectionFailure: mocks.journalAutomatedCollectionFailure,
+}));
+
+vi.mock("@/services/payments/recurring-payments/lifecycle", () => ({
+  cancelRecurringPayment: mocks.cancelRecurringPayment,
   resumeRecurringPayment: mocks.resumeRecurringPayment,
 }));
 
 let collectDueRecurringPayments: typeof import("./collect-recurring-payments").collectDueRecurringPayments;
-let activateRecurringPayment: typeof import("@/services/payments/recurring-payments").activateRecurringPayment;
-let cancelRecurringPayment: typeof import("@/services/payments/recurring-payments").cancelRecurringPayment;
-let collectRecurringPayment: typeof import("@/services/payments/recurring-payments").collectRecurringPayment;
-let resumeRecurringPayment: typeof import("@/services/payments/recurring-payments").resumeRecurringPayment;
+let activateRecurringPayment: typeof import("@/services/payments/recurring-payments/activation").activateRecurringPayment;
+let cancelRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").cancelRecurringPayment;
+let collectRecurringPayment: typeof import("@/services/payments/recurring-payments/collection").collectRecurringPayment;
+let resumeRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").resumeRecurringPayment;
 
 function collectDueRecurringPaymentsIn(environment: SdpEnvironment, now: Date) {
   return runInClusterScope({ projectId: null, environment }, () =>
@@ -137,12 +144,15 @@ function recurringRow(
 describe("collectDueRecurringPayments", () => {
   beforeAll(async () => {
     ({ collectDueRecurringPayments } = await import("./collect-recurring-payments"));
-    ({
-      activateRecurringPayment,
-      cancelRecurringPayment,
-      collectRecurringPayment,
-      resumeRecurringPayment,
-    } = await import("@/services/payments/recurring-payments"));
+    ({ activateRecurringPayment } = await import(
+      "@/services/payments/recurring-payments/activation"
+    ));
+    ({ collectRecurringPayment } = await import(
+      "@/services/payments/recurring-payments/collection"
+    ));
+    ({ cancelRecurringPayment, resumeRecurringPayment } = await import(
+      "@/services/payments/recurring-payments/lifecycle"
+    ));
   });
 
   beforeEach(() => {

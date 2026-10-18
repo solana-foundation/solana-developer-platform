@@ -3,7 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, CustodyMode } from "@sdp/types";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { getLogger } from "@/runtime/logger";

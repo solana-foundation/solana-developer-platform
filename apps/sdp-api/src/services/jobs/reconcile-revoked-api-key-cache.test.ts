@@ -54,7 +54,7 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";

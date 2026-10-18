@@ -10,9 +10,10 @@ import {
   type PrivateChannelEventListEnvelope,
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
-import * as pcServices from "@/services/private-channels";
+import * as privateChannelService from "@/services/private-channels/service";
+import * as privateChannelWallets from "@/services/private-channels/wallets";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -20,7 +21,7 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
 const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
-const overviewMock = vi.spyOn(pcServices, "getInstanceOverview");
+const overviewMock = vi.spyOn(privateChannelService, "getInstanceOverview");
 
 function unreachableOverview(error = "gateway down") {
   return {
@@ -377,20 +378,22 @@ describe("Private Channels — event routes", () => {
 
   it("wallet verification events keep the verified pubkey in the payload", async () => {
     const pubkey = "So11111111111111111111111111111111111111112";
-    const verifyMock = vi.spyOn(pcServices, "verifyPrivateChannelWallet").mockResolvedValueOnce({
-      row: {
-        id: "pcvw_event_test",
-        user_id: "pcu_event_test",
-        wallet_id: "wallet_event_test",
-        pubkey,
-        verified_at: "2026-07-30T12:00:00.000Z",
-      },
-      instance: {
-        id: "pci_wallet_event_test",
-        organization_id: TEST_ORG.id,
-        project_id: TEST_PROJECT.id,
-      },
-    } as never);
+    const verifyMock = vi
+      .spyOn(privateChannelWallets, "verifyPrivateChannelWallet")
+      .mockResolvedValueOnce({
+        row: {
+          id: "pcvw_event_test",
+          user_id: "pcu_event_test",
+          wallet_id: "wallet_event_test",
+          pubkey,
+          verified_at: "2026-07-30T12:00:00.000Z",
+        },
+        instance: {
+          id: "pci_wallet_event_test",
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT.id,
+        },
+      } as never);
 
     let res: Response;
     try {
@@ -427,14 +430,16 @@ describe("Private Channels — event routes", () => {
 
   it("wallet revocation events keep the revoked pubkey in the payload", async () => {
     const pubkey = "So11111111111111111111111111111111111111113";
-    const deleteMock = vi.spyOn(pcServices, "deletePrivateChannelWallet").mockResolvedValueOnce({
-      instance: {
-        id: "pci_wallet_event_test",
-        organization_id: TEST_ORG.id,
-        project_id: TEST_PROJECT.id,
-      },
-      deleted: true,
-    } as never);
+    const deleteMock = vi
+      .spyOn(privateChannelWallets, "deletePrivateChannelWallet")
+      .mockResolvedValueOnce({
+        instance: {
+          id: "pci_wallet_event_test",
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT.id,
+        },
+        deleted: true,
+      } as never);
 
     let res: Response;
     try {
@@ -461,14 +466,16 @@ describe("Private Channels — event routes", () => {
 
   it("does not emit a wallet revocation event when no verification was deleted", async () => {
     const pubkey = "So11111111111111111111111111111111111111114";
-    const deleteMock = vi.spyOn(pcServices, "deletePrivateChannelWallet").mockResolvedValueOnce({
-      instance: {
-        id: "pci_wallet_event_test",
-        organization_id: TEST_ORG.id,
-        project_id: TEST_PROJECT.id,
-      },
-      deleted: false,
-    } as never);
+    const deleteMock = vi
+      .spyOn(privateChannelWallets, "deletePrivateChannelWallet")
+      .mockResolvedValueOnce({
+        instance: {
+          id: "pci_wallet_event_test",
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT.id,
+        },
+        deleted: false,
+      } as never);
 
     let res: Response;
     try {

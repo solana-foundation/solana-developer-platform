@@ -46,7 +46,8 @@ vi.mock("@sdp/earn", async (importOriginal) => {
   };
 });
 
-vi.mock("@/db/repositories", () => ({
+vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createEarnRepository: vi.fn(() => ({
     upsertStrategy: mocks.upsertStrategy,
     upsertStrategies: mocks.upsertStrategies,
@@ -65,7 +66,7 @@ vi.mock("@/runtime/kv-redis", () => ({
   })),
 }));
 
-import { createEarnRepository } from "@/db/repositories";
+import { createEarnRepository } from "@/db/repositories/repository-factory";
 
 const env = { DATABASE_URL: "postgres://unit", REDIS_URL: "redis://unit" } as Env;
 

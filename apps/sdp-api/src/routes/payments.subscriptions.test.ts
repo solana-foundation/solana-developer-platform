@@ -1,6 +1,6 @@
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { app } from "@/index";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";

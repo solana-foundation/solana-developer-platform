@@ -7,7 +7,7 @@ import {
   wellKnownMint,
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

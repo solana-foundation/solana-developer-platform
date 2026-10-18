@@ -9,7 +9,7 @@ import {
   partiallySignTransaction,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";

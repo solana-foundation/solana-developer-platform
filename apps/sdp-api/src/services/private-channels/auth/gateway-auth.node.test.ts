@@ -30,7 +30,8 @@ vi.mock("@sdp/private-channels", () => ({
   },
 }));
 vi.mock("@sdp/private-channels/auth", () => ({ createAuthClient: vi.fn() }));
-vi.mock("@/db/repositories", () => ({
+vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createPrivateChannelInstanceRepository: vi.fn(),
   createPrivateChannelUserRepository: vi.fn(),
   createPrivateChannelVerifiedWalletRepository: vi.fn(),

@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { Permission } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";

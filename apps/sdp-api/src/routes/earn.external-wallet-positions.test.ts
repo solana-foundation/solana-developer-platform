@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, EarnExternalWalletPositionSummaryResponse } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   type EarnPositionRow,
   generateEarnMovementId,

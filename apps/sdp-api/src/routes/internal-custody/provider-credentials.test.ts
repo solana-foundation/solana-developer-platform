@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { type DatabaseClient, getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";

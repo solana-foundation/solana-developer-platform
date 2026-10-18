@@ -24,7 +24,7 @@ import {
 import { generateKeyPairSigner } from "@solana/signers";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DvpCloseClaim, DvpTradeRow } from "@/db/repositories";
+import type { DvpCloseClaim, DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { type AppError, conflict, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
@@ -77,9 +77,14 @@ const trades = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("@/db", () => ({ getDb: () => ({}) }));
-vi.mock("@/db/repositories", async () => ({
-  ...(await vi.importActual<typeof import("@/db/repositories")>("@/db/repositories")),
+vi.mock("@/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/client")>()),
+  getDb: () => ({}),
+}));
+vi.mock("@/db/repositories/repository-factory", async () => ({
+  ...(await vi.importActual<typeof import("@/db/repositories/repository-factory")>(
+    "@/db/repositories/repository-factory"
+  )),
   createDvpTradeRepository: () => trades,
 }));
 vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({

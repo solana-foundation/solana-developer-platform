@@ -5,7 +5,8 @@ import {
   type ProjectEnvironment,
 } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb, runWithSystemDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
   assertMoneyStartAdmitted,
   decideMoneyStart,

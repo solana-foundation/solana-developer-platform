@@ -1,6 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";

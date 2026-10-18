@@ -2,7 +2,7 @@ import { NETWORK_METRIC_IDS, networkSnapshotSchema } from "@sdp/types/network-me
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { resetNetworkCachesForTests } from "@/services/network/network.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";

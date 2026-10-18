@@ -1,6 +1,6 @@
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

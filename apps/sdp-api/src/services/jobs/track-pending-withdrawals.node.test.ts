@@ -27,7 +27,8 @@ const { withdrawalRepo, instanceRepo, observationRepo, mocks } = vi.hoisted(() =
     },
   };
 });
-vi.mock("@/db/repositories", () => ({
+vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createPrivateChannelWithdrawalRepository: mocks.createWithdrawalRepo,
   createPrivateChannelInstanceRepository: mocks.createInstanceRepo,
   createPrivateChannelSettlementObservationRepository: mocks.createObservationRepo,

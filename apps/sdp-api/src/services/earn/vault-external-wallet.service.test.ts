@@ -13,7 +13,7 @@ import {
   SolanaError,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
 import {

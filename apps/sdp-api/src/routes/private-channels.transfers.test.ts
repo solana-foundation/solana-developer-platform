@@ -2,8 +2,8 @@ import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, PrivateChannelTransfer } from "@sdp/types";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createPrivateChannelTransferRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
@@ -41,8 +41,8 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-vi.mock("@/services/private-channels", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/private-channels")>();
+vi.mock("@/services/private-channels/transfer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/private-channels/transfer")>();
   return { ...actual, createChannelTransfer: createChannelTransferMock };
 });
 

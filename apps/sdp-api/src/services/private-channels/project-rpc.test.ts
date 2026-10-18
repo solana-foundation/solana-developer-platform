@@ -3,7 +3,7 @@ import type { SolanaRpc } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";

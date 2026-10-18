@@ -6,7 +6,7 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,

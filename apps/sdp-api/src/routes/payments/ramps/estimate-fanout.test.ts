@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/db", () => ({ getDb: () => ({}) }));
+vi.mock("@/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/client")>()),
+  getDb: () => ({}),
+}));
 vi.mock("@/services/provider-availability.service", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   loadProjectProviderVerdict: vi.fn(),
@@ -12,6 +15,9 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   rampRuntime: () => ({}),
+}));
+vi.mock("@/lib/sdp-environment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-environment")>()),
   resolveSdpEnvironment: () => "sandbox",
 }));
 vi.mock("../wallets", async (importOriginal) => ({

@@ -3,11 +3,11 @@ import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPrivateChannelDepositRepository,
   createPrivateChannelWithdrawalRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import {
@@ -48,13 +48,14 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-vi.mock("@/services/private-channels", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/private-channels")>();
-  return {
-    ...actual,
-    createChannelDeposit: createChannelDepositMock,
-    createChannelWithdrawal: createChannelWithdrawalMock,
-  };
+vi.mock("@/services/private-channels/deposit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/private-channels/deposit")>();
+  return { ...actual, createChannelDeposit: createChannelDepositMock };
+});
+
+vi.mock("@/services/private-channels/withdraw", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/private-channels/withdraw")>();
+  return { ...actual, createChannelWithdrawal: createChannelWithdrawalMock };
 });
 
 vi.mock("@/services/private-channels/auth/gateway-auth", async (importOriginal) => {

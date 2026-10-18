@@ -4,7 +4,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";

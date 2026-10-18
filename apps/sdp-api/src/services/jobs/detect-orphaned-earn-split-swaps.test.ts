@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {

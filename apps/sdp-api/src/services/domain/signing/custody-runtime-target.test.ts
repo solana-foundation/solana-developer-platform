@@ -13,11 +13,11 @@ import {
 import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import type { SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";

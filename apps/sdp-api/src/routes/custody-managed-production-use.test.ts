@@ -1,6 +1,6 @@
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";

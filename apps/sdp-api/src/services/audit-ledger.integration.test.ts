@@ -1,6 +1,6 @@
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
 import { adminDatabaseUrl, env } from "@/test/helpers/env";
