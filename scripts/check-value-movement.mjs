@@ -113,8 +113,6 @@ export const CAPABILITIES = [
     symbols: [{ file: `${KEYCHAIN}/index.ts`, name: "*" }],
     owners: [CUSTODY_PACKAGE],
     allow: [
-      `${API}/services/adapters/index.ts`,
-      `${API}/services/adapters/signing/index.ts`,
       `${API}/services/domain/signing.service.ts`,
       `${API}/services/domain/signing/provider-adapter-factory.ts`,
       `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
