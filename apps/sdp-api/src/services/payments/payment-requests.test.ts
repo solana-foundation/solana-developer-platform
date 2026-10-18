@@ -1,6 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   address,
   blockhash,
@@ -34,7 +34,6 @@ import {
 } from "@/db/repositories/repository-factory";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
-import { SOL_MINT } from "@/services/payment-operation.service";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";

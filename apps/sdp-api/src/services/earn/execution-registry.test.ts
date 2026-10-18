@@ -1,17 +1,17 @@
+import { resolveClusterRpcUrl } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { EARN_PROVIDERS, GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "@/types/env";
 import {
   assertClusterEndpoint,
   CLUSTER_ENDPOINT_PROOF_TTL_MS,
   resetClusterEndpointProofs,
-  resolveClusterRpcUrl,
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
   resolveVaultParRedemptionClient,
   resolveVaultWithdrawClient,
-} from "./execution-registry";
+} from "@/services/earn/execution-registry";
+import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
 
 const env = {} as Env;
