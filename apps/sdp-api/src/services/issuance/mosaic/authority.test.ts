@@ -1,8 +1,8 @@
+import { buildAuthorityTransaction } from "@sdp/issuance/mosaic/authority";
 import { address, blockhash, createNoopSigner } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { AuthorityType } from "@solana-program/token-2022";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildAuthorityTransaction } from "../../../../../../packages/sdp-issuance/src/mosaic/authority";
 
 const mint = address("DUbbr2Ps6xCSuQfQFLaKVpyPZJgnbCSka5zLmeinDmP9");
 const currentAuthority = createNoopSigner(address("8NjftgbiNJbaNZRYYXDAZ5SFRBTRg3is9eue1g5RW8m1"));
