@@ -12,12 +12,12 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { formatCustodyProviderName } from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { createPrincipalAction } from "@/app/dashboard/[projectId]/integrations/private-channels/members/actions";
+import { verifyWalletAction } from "@/app/dashboard/[projectId]/integrations/private-channels/wallets/actions";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { verifyWalletAction } from "../../wallets/actions";
-import { createPrincipalAction } from "../actions";
 
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
 

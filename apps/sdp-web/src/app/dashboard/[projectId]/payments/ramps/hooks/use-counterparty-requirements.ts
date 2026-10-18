@@ -22,11 +22,11 @@ import {
   type CounterpartyRequirementsParams,
   paymentsQueryKeys,
 } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { requirementFieldError } from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
-import { requirementFieldError } from "../schema";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 

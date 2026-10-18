@@ -3,14 +3,14 @@
 // rather than an error. It lives in @sdp/types because an @sdp/earn -> @sdp/kamino edge would be a
 // workspace cycle and would make the catalogue cron load a 13MB SDK it never calls.
 import { KAMINO_DEVNET_KVAULT_PROGRAM_ID } from "@sdp/types/kamino-programs";
-import { internalError } from "../../errors";
+import { internalError } from "#/errors";
 import {
   assertRpcServesCluster,
   fromBase64,
   type RpcProgramAccount,
   solanaRpcCall,
   toBase58,
-} from "../../solana-rpc";
+} from "#/solana-rpc";
 
 /**
  * Kamino's DEVNET K-Vault shelf, read on-chain.

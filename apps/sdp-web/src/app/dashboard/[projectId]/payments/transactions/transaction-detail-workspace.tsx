@@ -8,6 +8,24 @@ import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
+import {
+  resolveTokenByMint,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import {
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import {
+  RecordAmount,
+  RecordColumns,
+  RecordList,
+  RecordLoadError,
+  RecordRow,
+  RecordSection,
+  RecordStateBand,
+} from "@/app/dashboard/[projectId]/payments/payments-record";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
@@ -17,18 +35,6 @@ import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { getRampProviderLabel } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { resolveTokenByMint, shortenAddress } from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import {
-  RecordAmount,
-  RecordColumns,
-  RecordList,
-  RecordLoadError,
-  RecordRow,
-  RecordSection,
-  RecordStateBand,
-} from "../payments-record";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
 import { TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs.redesign";
 import { isPaymentTransferStatus, useTransactionStatus } from "./transaction-status";

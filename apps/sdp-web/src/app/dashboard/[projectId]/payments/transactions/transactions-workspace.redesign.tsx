@@ -13,15 +13,15 @@ import { SearchInput } from "@sdp/ui/search-input";
 import { ReceiptTextIcon, XIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { TransactionsResultsSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { shortenAddress } from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { paymentsQueryKeys } from "../payments-query-key";
-import { TransactionsResultsSkeleton } from "../payments-route-skeletons.redesign";
 import { TransactionContext } from "./transaction-filters-context.redesign";
 import {
   fetchTransactionsPageFromDashboard,

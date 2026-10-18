@@ -7,6 +7,27 @@ import { badRequest, conflict, notFound } from "@/lib/errors";
 import { isAbandonedReservation } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/private-channels/context";
+import {
+  getPrivateChannelTransferRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "@/routes/private-channels/context";
+import { requireIdempotencyKey } from "@/routes/private-channels/helpers";
+import {
+  authorizeMovementReplay,
+  matchesTransferReplay,
+  requireMovementWrite,
+} from "@/routes/private-channels/replay";
+import {
+  type createTransferBodySchema,
+  transferChannelIdParamSchema,
+  transferIdParamSchema,
+  transferListQuerySchema,
+} from "@/routes/private-channels/schemas";
+import {
+  resolveTransferCreateContext,
+  resolveTransferRecipients,
+} from "@/routes/private-channels/transfer-access";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import { mapPrivateChannelError } from "@/services/private-channels/errors";
 import {
@@ -14,20 +35,6 @@ import {
   resolveAbandonedTransferReservation,
 } from "@/services/private-channels/transfer";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
-import type { AppContext } from "../context";
-import {
-  getPrivateChannelTransferRepository,
-  loadPrivateChannelProjectRpcClient,
-} from "../context";
-import { requireIdempotencyKey } from "../helpers";
-import { authorizeMovementReplay, matchesTransferReplay, requireMovementWrite } from "../replay";
-import {
-  type createTransferBodySchema,
-  transferChannelIdParamSchema,
-  transferIdParamSchema,
-  transferListQuerySchema,
-} from "../schemas";
-import { resolveTransferCreateContext, resolveTransferRecipients } from "../transfer-access";
 
 function parseChannelId(c: AppContext): string {
   const parsed = transferChannelIdParamSchema.safeParse({

@@ -1,9 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import {
+  fetchActiveApiKeys,
+  resolvePlaygroundApiBaseUrl,
+} from "@/app/dashboard/[projectId]/playground-api-data";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { fetchCounterparties } from "./counterparty-page.data";
 import { CounterpartyWorkspace } from "./counterparty-workspace";
 import { CounterpartyPage as RedesignCounterpartyPage } from "./page.redesign";

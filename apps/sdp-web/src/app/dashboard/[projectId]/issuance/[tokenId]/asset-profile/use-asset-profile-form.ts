@@ -14,7 +14,13 @@ import {
   isMaxSupplyBelowMintedSupply,
   isSupplyLockedOnChain,
   type SignerSelectionState,
-} from "../token-management-workspace.utils";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import {
+  buildIssuanceMetadata,
+  getAssetDetailsErrors,
+} from "@/app/dashboard/[projectId]/issuance/create/draft-mapping";
+import type { DraftState } from "@/app/dashboard/[projectId]/issuance/create/issuance-draft-wizard.types";
+import { useTranslations } from "@/i18n/provider";
 import { updateAssetProfileAction } from "./actions";
 import {
   areDraftsEquivalent,

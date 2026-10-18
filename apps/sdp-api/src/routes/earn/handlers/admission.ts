@@ -13,12 +13,12 @@ import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { getOptionalAuth } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import type { AppContext } from "@/routes/earn/context";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import {
   assertAnonymousEarnProviderOffered,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
-import type { AppContext } from "../context";
 
 /**
  * The ONE money-in admission predicate for an Earn catalogue row.

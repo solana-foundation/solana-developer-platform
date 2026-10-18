@@ -5,9 +5,9 @@ import type { EarnStrategy } from "@sdp/types/earn";
 import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { ExternalLinkIcon } from "lucide-react";
+import { truncateMiddle } from "@/app/dashboard/[projectId]/markets/truncate-middle";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { truncateMiddle } from "../truncate-middle";
 import {
   type EarnDepositAvailabilityLabels,
   earnDepositAvailabilityLabel,

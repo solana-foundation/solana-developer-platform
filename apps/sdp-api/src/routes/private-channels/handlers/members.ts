@@ -11,17 +11,20 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { mapPrivateChannelError } from "@/services/private-channels/errors";
-import { provisionPrincipal } from "@/services/private-channels/members";
-import { revokePrivateChannelPrincipalWallets } from "@/services/private-channels/wallets";
-import type { AppContext } from "../context";
+import type { AppContext } from "@/routes/private-channels/context";
 import {
   getPrivateChannelInstanceRepository,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
-} from "../context";
-import { emitMember } from "../helpers";
-import type { addPrincipalMembershipBodySchema, createPrincipalBodySchema } from "../schemas";
+} from "@/routes/private-channels/context";
+import { emitMember } from "@/routes/private-channels/helpers";
+import type {
+  addPrincipalMembershipBodySchema,
+  createPrincipalBodySchema,
+} from "@/routes/private-channels/schemas";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
+import { provisionPrincipal } from "@/services/private-channels/members";
+import { revokePrivateChannelPrincipalWallets } from "@/services/private-channels/wallets";
 
 function toDto(
   row: PrivateChannelUserRow,

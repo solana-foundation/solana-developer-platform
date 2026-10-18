@@ -40,6 +40,18 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, earnRuntime, getEarnRepository } from "@/routes/earn/context";
+import {
+  type earnProgramCreateSchema,
+  earnProgramDepositsQuerySchema,
+  earnProgramParamsSchema,
+  type earnProgramRetargetSchema,
+  earnProgramsListQuerySchema,
+  type earnProgramWithdrawalCreateSchema,
+  earnProgramWithdrawalParamsSchema,
+  type earnProgramWithdrawalPreviewSchema,
+  earnProgramWithdrawalsListQuerySchema,
+} from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
 import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
@@ -51,18 +63,6 @@ import {
   assertEarnProviderConfigured,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
-import { type AppContext, earnRuntime, getEarnRepository } from "../context";
-import {
-  type earnProgramCreateSchema,
-  earnProgramDepositsQuerySchema,
-  earnProgramParamsSchema,
-  type earnProgramRetargetSchema,
-  earnProgramsListQuerySchema,
-  type earnProgramWithdrawalCreateSchema,
-  earnProgramWithdrawalParamsSchema,
-  type earnProgramWithdrawalPreviewSchema,
-  earnProgramWithdrawalsListQuerySchema,
-} from "../schemas";
 import { recordEarnWithdrawalAudit } from "./movement-audit";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 

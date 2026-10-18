@@ -19,11 +19,14 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { formatDateTime } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import {
+  getPageCount,
+  getPageSummary,
+} from "@/app/dashboard/[projectId]/issuance/pagination.utils";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatDisplayLabel } from "@/lib/utils";
-import { getPageCount, getPageSummary } from "../../pagination.utils";
-import { formatDateTime } from "../token-management-workspace.utils";
 import { auditActionIcon, auditActionLabel } from "./asset-audit-presentation";
 import { fetchTokenTransactionsPage } from "./transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "./transactions-cache";

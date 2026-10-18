@@ -14,6 +14,7 @@ import { Modal } from "@sdp/ui/modal";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
+import { useRampEstimate } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
@@ -29,7 +30,6 @@ import {
   type SelectedRampPair,
   surfacedRampProviderOptions,
 } from "@/lib/ramps";
-import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
 import { ProviderCard } from "./provider-card";
 import { RampSelectionProvider } from "./ramp-selection-context";

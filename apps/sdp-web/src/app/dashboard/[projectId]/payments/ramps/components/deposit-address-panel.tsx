@@ -23,17 +23,21 @@ import QRCode from "qrcode";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
   resolveTransferTokenLabel,
   shortenAddress,
   statusMessageKey,
-} from "../../payments-overview.utils";
-import { formatDate, formatSignedAmount, PAYMENT_STATUS_TONE } from "../../payments-presentation";
-import { paymentsQueryKeys } from "../../payments-query-key";
-import { fetchTransfers } from "../../payments-workspace.data";
-import { usePaymentsActionWallets } from "../hooks/use-payments-action-wallets";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  formatDate,
+  formatSignedAmount,
+  PAYMENT_STATUS_TONE,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { fetchTransfers } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
 const RECENT_DEPOSIT_COUNT = 5;
 // How often the recent deposits re-read while the page is open; the "watching" line is true

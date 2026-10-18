@@ -3,10 +3,10 @@
 import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types/payments";
 import type { UnifiedTransaction, UnifiedTransactionStatus } from "@sdp/types/unified-transactions";
 import type { StatusTone } from "@sdp/ui/status-text";
+import { statusMessageKey } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { PAYMENT_STATUS_TONE } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { statusMessageKey } from "../payments-overview.utils";
-import { PAYMENT_STATUS_TONE } from "../payments-presentation";
 
 const UNIFIED_STATUS_TONE = {
   pending: "attention",

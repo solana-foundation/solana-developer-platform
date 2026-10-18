@@ -3,9 +3,9 @@ import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getTenantTokenService, requireProjectScope } from "@/routes/issuance/helpers";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;

@@ -1,12 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterpartyDetail } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail.data";
+import { CounterpartyDetailWorkspace } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace";
 import { withLegacyDesign } from "@/flags/new-design";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { fetchCounterpartyDetail } from "../counterparty-detail.data";
-import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace";
 import { CounterpartyDetailRoute as RedesignCounterpartyDetailRoute } from "./page.redesign";
 
 export const dynamic = "force-dynamic";

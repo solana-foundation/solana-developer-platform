@@ -1,6 +1,6 @@
 import { Hono } from "hono";
+import { projectMemberAccessMiddleware } from "@/routes/projects/project-access";
 import type { Env } from "@/types/env";
-import { projectMemberAccessMiddleware } from "../project-access";
 import { getProjectProviderAvailabilityHandler } from "./handlers";
 
 // Mounted under /projects/:projectId/provider-availability. Authentication and

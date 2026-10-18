@@ -1,5 +1,5 @@
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
-import { OverviewNetworkSkeleton } from "../overview-network";
+import { OverviewNetworkSkeleton } from "@/app/dashboard/[projectId]/overview-network";
 
 const BALANCE_ROW_IDS = ["overview-balance-1", "overview-balance-2", "overview-balance-3"];
 const TILE_IDS = ["overview-tile-1", "overview-tile-2", "overview-tile-3", "overview-tile-4"];

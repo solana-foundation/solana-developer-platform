@@ -17,13 +17,8 @@ import {
 import Image from "next/image";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
+import { formatRelativeTime } from "@/app/dashboard/[projectId]/activity-format-utils";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { MemoJsonView } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
-import { useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
-import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatRelativeTime } from "../../activity-format-utils";
 import {
   formatPaymentTransferType,
   formatTimestamp,
@@ -31,8 +26,13 @@ import {
   shortenAddress,
   statusMessageKey,
   statusVariant,
-} from "../payments-overview.utils";
-import { providerTransferDetailRows } from "../provider-transfer-details";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
+import { MemoJsonView } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
+import { useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
 function isInboundTransfer(transfer: PaymentTransferSummary): boolean {
   return transfer.type === "onramp" || transfer.direction === "inbound";

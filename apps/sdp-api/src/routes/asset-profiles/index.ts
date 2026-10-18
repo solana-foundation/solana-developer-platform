@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
+import { createTokenWithAssetProfileSchema } from "@/routes/issuance/schemas";
 import type { Env } from "@/types/env";
-import { createTokenWithAssetProfileSchema } from "../issuance/schemas";
 import { createTokenWithAssetProfile } from "./create";
 import {
   archiveAssetProfile,

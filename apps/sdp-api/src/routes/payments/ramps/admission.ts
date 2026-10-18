@@ -8,6 +8,8 @@ import {
   assertRampProviderInChannel,
   assertTransferRampProviderInChannel,
 } from "@/middleware/require-module";
+import type { AppContext } from "@/routes/payments/context";
+import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
 import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import {
   assertProviderAvailable,
@@ -15,8 +17,6 @@ import {
   type ProjectProviderDecision,
   refuseProjectProvider,
 } from "@/services/provider-availability.service";
-import type { AppContext } from "../context";
-import { assertPaymentWalletExactAccess } from "../wallets";
 
 export type RampAdmission =
   | { need: "read"; provider: RampProviderId }

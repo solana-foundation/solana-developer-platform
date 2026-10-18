@@ -3,8 +3,8 @@ import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
+import { authorizeSubscriptionCreate } from "@/routes/payments/access";
 import type { Env } from "@/types/env";
-import { authorizeSubscriptionCreate } from "../access";
 import {
   createSubscription,
   getSubscription,

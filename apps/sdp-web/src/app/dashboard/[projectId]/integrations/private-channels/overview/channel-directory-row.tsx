@@ -6,9 +6,9 @@ import { TableCell } from "@sdp/ui/table";
 import { TableRow } from "@solana/design-system/table";
 import { ArrowRightIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { privateChannelPath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { privateChannelPath } from "../private-channels-routes";
 
 export function ChannelDirectoryRow({
   channel,

@@ -11,6 +11,7 @@ import { generatePaymentTransferId } from "@/db/repositories/payments.repository
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -18,7 +19,6 @@ import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
-import { type AppContext, getPaymentsRepository } from "../context";
 import type { TransactionChunk } from "./transaction";
 import type { ResolvedBatchRequest } from "./types";
 

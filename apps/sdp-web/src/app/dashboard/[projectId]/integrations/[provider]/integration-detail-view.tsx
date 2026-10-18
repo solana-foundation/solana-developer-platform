@@ -10,13 +10,16 @@ import type {
 } from "@/app/dashboard/[projectId]/custody/connections/connections.data";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import {
+  CustodyConnectionCount,
+  CustodyConnectionsSection,
+} from "@/app/dashboard/[projectId]/integrations/custody-connections-section";
+import type { IntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
 import { docsHref } from "@/components/dashboard-nav";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { CustodyConnectionCount, CustodyConnectionsSection } from "../custody-connections-section";
-import type { IntegrationDetail } from "../integration-detail";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 

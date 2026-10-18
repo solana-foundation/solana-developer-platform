@@ -1,10 +1,10 @@
 "use client";
 import type { Token, TokenAllowlistEntry } from "@sdp/types/tokens";
 import { useSWRConfig } from "swr";
+import { fetchTokenAuthorityWallets } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-authority-wallets.data";
+import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance-query-key";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import { issuanceQueryKeys } from "../../issuance-query-key";
-import { fetchTokenAuthorityWallets } from "../token-authority-wallets.data";
 import { isTokenAllowlistKey } from "./allowlist-cache";
 import { fetchFrozenAccountsTotal } from "./frozen-accounts.data";
 import { isTokenTransactionsKey } from "./transactions-cache";

@@ -25,12 +25,12 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { OnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard.redesign";
+import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard.redesign";
-import { walletComboboxOptions } from "../wallet-options";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
 import { AmountFields, SourceWalletField } from "./payment-form-fields";
 

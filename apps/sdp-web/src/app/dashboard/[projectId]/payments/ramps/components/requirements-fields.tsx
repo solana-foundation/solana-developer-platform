@@ -17,10 +17,13 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import {
+  applyRequirementMask,
+  requirementFieldError,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import { useTranslations } from "@/i18n/provider";
 import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
 import { autocompletePlaces, fetchPlaceDetails, newPlacesSessionToken } from "@/lib/places";
-import { applyRequirementMask, requirementFieldError } from "../schema";
 
 /**
  * The last selectable calendar day for an exclusive `before` bound, for the

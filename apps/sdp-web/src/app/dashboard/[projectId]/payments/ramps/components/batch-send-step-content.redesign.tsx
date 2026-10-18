@@ -21,21 +21,21 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
   bulkCsvTemplate,
   bulkRowErrorMessage,
   parseBulkCsv,
   validateBulkRows,
-} from "../bulk-import.redesign";
+} from "@/app/dashboard/[projectId]/payments/ramps/bulk-import.redesign";
 import type {
   BatchEligibleRecipient,
   BatchSendWizard,
-} from "../hooks/use-batch-send-wizard.redesign";
-import { MAX_BATCH_RECIPIENTS } from "../schema";
-import { walletComboboxOptions } from "../wallet-options";
+} from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-batch-send-wizard.redesign";
+import { MAX_BATCH_RECIPIENTS } from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import { useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { BulkImportDialog } from "./bulk-import-dialog.redesign";
 

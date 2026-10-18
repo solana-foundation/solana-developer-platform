@@ -1,8 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { CounterpartyCreateProvider } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-context.redesign";
+import { CounterpartyCreatePage } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-page.redesign";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { CounterpartyCreateProvider } from "../counterparty-create-context.redesign";
-import { CounterpartyCreatePage } from "../counterparty-create-page.redesign";
 
 export async function CounterpartyCreateRoute() {
   const { userId, orgId } = await auth();

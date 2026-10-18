@@ -5,15 +5,15 @@ import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { badRequestQuery, providerUnavailable } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { AppContext } from "@/routes/payments/context";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
+import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
+import { resolveWalletFromParams } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import type { AppContext } from "../context";
-import { resolveIssuedTokenLabelsByMint } from "../token-labels";
-import { resolveWalletFromParams } from "../wallets";
 import { walletBalancesQuerySchema } from "./schemas";
 
 const BALANCE_READ_TIMEOUT_MS = 3_000;

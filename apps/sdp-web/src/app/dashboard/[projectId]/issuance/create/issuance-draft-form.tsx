@@ -22,11 +22,11 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { shortenAddress } from "@/app/dashboard/[projectId]/issuance/wallet-identity";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { shortenAddress } from "../wallet-identity";
 import { saveIssuanceDraft } from "./actions";
 import { type AuthorityKey, buildDraftPayload, type DraftState } from "./draft-model";
 import styles from "./issuance-draft-form.module.css";

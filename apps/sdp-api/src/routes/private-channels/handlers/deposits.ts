@@ -6,6 +6,22 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/private-channels/context";
+import {
+  getPrivateChannelDepositRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "@/routes/private-channels/context";
+import { requireIdempotencyKey } from "@/routes/private-channels/helpers";
+import {
+  authorizeMovementReplay,
+  matchesDepositReplay,
+  requireMovementWrite,
+} from "@/routes/private-channels/replay";
+import {
+  type createDepositBodySchema,
+  depositIdParamSchema,
+} from "@/routes/private-channels/schemas";
+import { resolveDepositCreateContext } from "@/routes/private-channels/value-movement-access";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import {
   createChannelDeposit,
@@ -14,12 +30,6 @@ import {
 } from "@/services/private-channels/deposit";
 import { mapPrivateChannelError } from "@/services/private-channels/errors";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
-import type { AppContext } from "../context";
-import { getPrivateChannelDepositRepository, loadPrivateChannelProjectRpcClient } from "../context";
-import { requireIdempotencyKey } from "../helpers";
-import { authorizeMovementReplay, matchesDepositReplay, requireMovementWrite } from "../replay";
-import { type createDepositBodySchema, depositIdParamSchema } from "../schemas";
-import { resolveDepositCreateContext } from "../value-movement-access";
 
 /**
  * POST /deposits — create + broadcast a deposit from a custody wallet into the

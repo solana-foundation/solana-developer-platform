@@ -1,18 +1,18 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { HomeWorkspace } from "@/app/dashboard/[projectId]/home-workspace.redesign";
+import { resolveTotalBalance } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  fetchPaymentsAggregate,
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { HomeWorkspace } from "../home-workspace.redesign";
-import { resolveTotalBalance } from "../payments/payments-overview.utils";
-import {
-  fetchPaymentsAggregate,
-  fetchPaymentsIssuedTokenSymbols,
-  fetchPaymentsWallets,
-} from "../payments/payments-page.data";
 
 export async function CurrentDashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([

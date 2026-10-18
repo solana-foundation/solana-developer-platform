@@ -6,6 +6,7 @@ import {
   isKnownCustodyProvider,
   type KnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import {
   fetchActiveApiKeys,
   resolvePlaygroundApiBaseUrl,
@@ -20,7 +21,6 @@ import {
   type SdpApiClient,
 } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
-import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace.redesign";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };

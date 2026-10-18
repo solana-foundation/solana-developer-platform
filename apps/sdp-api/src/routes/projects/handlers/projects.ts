@@ -9,11 +9,11 @@ import { getAuth } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { updateProjectSchema } from "@/routes/projects/schemas";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
 import { getOrganizationTierState } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
-import type { updateProjectSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 

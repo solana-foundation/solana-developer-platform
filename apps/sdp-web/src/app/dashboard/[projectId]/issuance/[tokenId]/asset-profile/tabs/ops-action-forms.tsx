@@ -2,11 +2,11 @@
 
 import type { Token } from "@sdp/types/tokens";
 import { useState } from "react";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
+import { TokenActionForms } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-action-forms";
+import type { AdminAction } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
+import { createInitialMetadataForm } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
 import { useTranslations } from "@/i18n/provider";
-import { TokenActionForms } from "../../token-action-forms";
-import type { AdminAction } from "../../token-management-workspace.types";
-import { createInitialMetadataForm } from "../../token-management-workspace.utils";
-import type { TokenOperations } from "../use-token-operations";
 
 /**
  * Binds the reusable TokenActionForms to the operations hook. The

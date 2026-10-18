@@ -9,9 +9,13 @@ import {
   type AppContext,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
-} from "../context";
-import { emitLifecycle, emitMember, requireActiveInstance } from "../helpers";
-import type { createChannelBodySchema } from "../schemas";
+} from "@/routes/private-channels/context";
+import {
+  emitLifecycle,
+  emitMember,
+  requireActiveInstance,
+} from "@/routes/private-channels/helpers";
+import type { createChannelBodySchema } from "@/routes/private-channels/schemas";
 
 function toPrivateChannelDto(row: PrivateChannelRow): PrivateChannelDto {
   return {

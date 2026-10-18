@@ -14,12 +14,12 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
-import type { Env } from "@/types/env";
-import { getManagedSponsorshipProviderConfiguration } from "../sponsorship.service";
+import { getManagedSponsorshipProviderConfiguration } from "@/services/sponsorship.service";
 import {
   createKoraClusterRpc,
   sponsorshipProviderConfigFingerprint,
-} from "../sponsorship-budget.service";
+} from "@/services/sponsorship-budget.service";
+import type { Env } from "@/types/env";
 
 const RECONCILIATION_DELAY_MS = 2 * 60_000;
 const RECONCILIATION_BATCH_SIZE = 250;

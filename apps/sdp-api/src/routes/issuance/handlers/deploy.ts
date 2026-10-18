@@ -15,18 +15,22 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "@/routes/issuance/helpers";
+import type {
+  confirmDeploySchema,
+  deployTokenSchema,
+  legacyDeployTokenSchema,
+} from "@/routes/issuance/schemas";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import type { MosaicFeePayment } from "@/services/issuance/mosaic";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import {
-  createIssuanceMosaicService,
-  getTenantTokenService,
-  requireProjectScope,
-} from "../helpers";
-import type { confirmDeploySchema, deployTokenSchema, legacyDeployTokenSchema } from "../schemas";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import {
   admitIssuanceRuntimeExecution,

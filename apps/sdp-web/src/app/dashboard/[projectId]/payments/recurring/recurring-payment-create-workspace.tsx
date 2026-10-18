@@ -18,29 +18,29 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
 import { z } from "zod";
-import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { TokenMark } from "@/components/token-mark";
-import { useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
-import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
+import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
 import {
   amountInputPlaceholder,
   isHttpUrl,
   isSolBalance,
   resolveTokenByMint,
   shortenAddress,
-} from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
-} from "../payments-workspace.data";
-import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
-import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
-import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
-import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
-import { walletBalanceAssetOptions } from "../ramps/wallet-options";
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { AmountBalanceReadout } from "@/app/dashboard/[projectId]/payments/ramps/components/amount-balance-readout";
+import { CounterpartyPicker } from "@/app/dashboard/[projectId]/payments/ramps/components/counterparty-picker";
+import { RampWizardShell } from "@/app/dashboard/[projectId]/payments/ramps/components/ramp-wizard-shell";
+import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import { TokenMark } from "@/components/token-mark";
+import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createRecurringPayment } from "./recurring-payments.data";
 import { accountAddress, parsePeriodHours } from "./recurring-payments-shared";
 

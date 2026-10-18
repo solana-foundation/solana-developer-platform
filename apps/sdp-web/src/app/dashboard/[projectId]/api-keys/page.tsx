@@ -11,13 +11,13 @@ import {
 } from "@sdp/ui/card";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";
 

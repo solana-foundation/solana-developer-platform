@@ -5,14 +5,14 @@ import { Card, CardContent } from "@sdp/ui/card";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
-import { TokenMark } from "@/components/token-mark";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
   resolveTransferTokenLabel,
-} from "../payments/payments-overview.utils";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { TokenMark } from "@/components/token-mark";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { tokenActivityHref } from "./holdings-links";
 import { buildHoldingsRows } from "./holdings-rows";
 

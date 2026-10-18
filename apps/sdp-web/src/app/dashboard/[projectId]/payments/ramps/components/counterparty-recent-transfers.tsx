@@ -5,12 +5,15 @@ import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ArrowRightIcon } from "lucide-react";
 import Image from "next/image";
 import useSWR from "swr";
+import { formatRelativeTime } from "@/app/dashboard/[projectId]/activity-format-utils";
+import {
+  formatPaymentTransferType,
+  resolveTransferFlow,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { fetchTransfers } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
-import { formatRelativeTime } from "../../../activity-format-utils";
-import { formatPaymentTransferType, resolveTransferFlow } from "../../payments-overview.utils";
-import { fetchTransfers } from "../../payments-workspace.data";
 
 const RECENT_TRANSFERS_MAX_ROWS = 5;
 

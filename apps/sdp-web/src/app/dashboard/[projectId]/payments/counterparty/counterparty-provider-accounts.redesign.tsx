@@ -9,11 +9,11 @@ import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
+import { toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
+import { formatDisplayAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
-import { toTitleCase } from "../../activity-format-utils";
-import { formatDisplayAmount } from "../payments-overview.utils";
 
 const PROVIDER_ACCOUNT_STATUS_TONE: ReadonlyMap<string, StatusTone> = new Map([
   ["active", "positive"],

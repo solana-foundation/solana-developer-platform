@@ -11,9 +11,13 @@ import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { RepeatIcon } from "lucide-react";
+import {
+  formatDisplayAmount,
+  formatTimestamp,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import {
   CopyableValue,
   ExplorerValue,

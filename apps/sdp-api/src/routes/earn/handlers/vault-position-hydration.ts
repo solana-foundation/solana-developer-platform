@@ -9,11 +9,11 @@ import { type EarnVaultPositionIntermediate, isEarnVaultHoldingEmpty } from "@sd
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/kit";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import type { AppContext } from "@/routes/earn/context";
+import { earnRuntime } from "@/routes/earn/context";
 import { getLogger } from "@/runtime/logger";
 import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline, type VaultDeadline } from "@/services/earn/vault-deadline";
-import type { AppContext } from "../context";
-import { earnRuntime } from "../context";
 
 const MAX_IN_FLIGHT_VAULT_POSITION_READS = 256;
 

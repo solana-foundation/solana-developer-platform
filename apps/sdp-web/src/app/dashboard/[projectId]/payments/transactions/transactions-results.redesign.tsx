@@ -10,13 +10,22 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/desi
 import { ReceiptTextIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { KeyboardEvent } from "react";
+import {
+  resolveTokenByMint,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import {
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import {
+  PAYMENTS_TABLE_CELL,
+  PAYMENTS_TABLE_HEAD,
+} from "@/app/dashboard/[projectId]/payments/payments-table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { transactionHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { resolveTokenByMint, shortenAddress } from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import { useTransactionFilters } from "./transaction-filters-context.redesign";
 import { kindLabel, useTransactionStatus } from "./transaction-status";
 import type { TransactionsPageResult } from "./transactions-page.data.redesign";

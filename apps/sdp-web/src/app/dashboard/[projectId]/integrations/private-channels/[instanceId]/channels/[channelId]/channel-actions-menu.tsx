@@ -21,17 +21,20 @@ import {
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { useNewDesign } from "@/components/new-design";
-import { useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   PRIVATE_CHANNELS_INTEGRATION_PATH,
   privateChannelsInstancePath,
-} from "../../../private-channels-routes";
-import { deletePrivateChannelAction, disconnectPrivateChannelAction } from "../../../setup/actions";
-import { DeleteConfirmationDialog } from "../../../setup/private-channels-confirmation-dialogs";
-import { PrivateChannelsConnectForm as LegacyPrivateChannelsConnectForm } from "../../../setup/private-channels-connect-form";
-import { PrivateChannelsConnectForm as CurrentPrivateChannelsConnectForm } from "../../../setup/private-channels-connect-form.redesign";
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import {
+  deletePrivateChannelAction,
+  disconnectPrivateChannelAction,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/setup/actions";
+import { DeleteConfirmationDialog } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/private-channels-confirmation-dialogs";
+import { PrivateChannelsConnectForm as LegacyPrivateChannelsConnectForm } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/private-channels-connect-form";
+import { PrivateChannelsConnectForm as CurrentPrivateChannelsConnectForm } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/private-channels-connect-form.redesign";
+import { useNewDesign } from "@/components/new-design";
+import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 
 export function ChannelActionsMenu({
   instance,

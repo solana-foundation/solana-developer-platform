@@ -2,8 +2,8 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { EARN_SWAP_DEFAULT_SLIPPAGE_BPS, earnSwapSourceTokens } from "@sdp/types/earn";
 import { z } from "zod";
 import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import type { AppContext } from "@/routes/earn/context";
 import { earnClusterFor } from "@/services/earn/execution-registry";
-import type { AppContext } from "../context";
 
 /**
  * Request-parsing and list-envelope helpers shared by every earn handler, so

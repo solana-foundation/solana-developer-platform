@@ -39,20 +39,20 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+  formatTimestamp,
+  isHttpUrl,
+  resolveTokenByMint,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import {
-  formatTimestamp,
-  isHttpUrl,
-  resolveTokenByMint,
-  shortenAddress,
-} from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import {

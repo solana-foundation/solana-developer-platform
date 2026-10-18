@@ -7,8 +7,11 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import {
+  toWalletIdentity,
+  WalletIdentityBadge,
+} from "@/app/dashboard/[projectId]/issuance/wallet-identity";
 import { useTranslations } from "@/i18n/provider";
-import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
   getNoneConfirmationCopy,

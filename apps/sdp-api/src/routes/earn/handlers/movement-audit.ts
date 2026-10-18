@@ -1,9 +1,9 @@
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
+import type { AppContext } from "@/routes/earn/context";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, type AuditLogEntry, AuditService } from "@/services/audit.service";
-import type { AppContext } from "../context";
 
 /**
  * Audit-ledger parity for earn money movements (PRO-1866).

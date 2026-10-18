@@ -51,7 +51,20 @@ import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/earn/context";
+import { requireEarnStrategyForCaller } from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
+import {
+  type earnExternalWalletDepositTransactionSchema,
+  earnExternalWalletEarningsQuerySchema,
+  earnExternalWalletMovementParamsSchema,
+  earnExternalWalletMovementsQuerySchema,
+  earnExternalWalletPositionSummaryQuerySchema,
+  earnExternalWalletPositionsQuerySchema,
+  type earnExternalWalletSubmitSchema,
+  type earnExternalWalletWithdrawalPreviewSchema,
+  type earnExternalWalletWithdrawalTransactionSchema,
+} from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
 import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
@@ -66,19 +79,6 @@ import {
 } from "@/services/earn/vault-external-wallet.service";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import type { AppContext } from "../context";
-import { requireEarnStrategyForCaller } from "../context";
-import {
-  type earnExternalWalletDepositTransactionSchema,
-  earnExternalWalletEarningsQuerySchema,
-  earnExternalWalletMovementParamsSchema,
-  earnExternalWalletMovementsQuerySchema,
-  earnExternalWalletPositionSummaryQuerySchema,
-  earnExternalWalletPositionsQuerySchema,
-  type earnExternalWalletSubmitSchema,
-  type earnExternalWalletWithdrawalPreviewSchema,
-  type earnExternalWalletWithdrawalTransactionSchema,
-} from "../schemas";
 import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,

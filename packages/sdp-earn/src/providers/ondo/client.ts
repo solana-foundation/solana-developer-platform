@@ -5,19 +5,19 @@ import {
   ondoDepositMints,
 } from "@sdp/types/ondo-programs";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
-import { internalError, providerNotConfigured } from "../../errors";
+import { internalError, providerNotConfigured } from "#/errors";
+import { StubEarnClient } from "#/providers/stub";
 import {
   assertRpcServesCluster,
   fromBase64,
   resolveCatalogueRpcUrl,
   solanaRpcCall,
-} from "../../solana-rpc";
+} from "#/solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 import { readOndoUsdyRate } from "./usdy-rate";
 
 /**

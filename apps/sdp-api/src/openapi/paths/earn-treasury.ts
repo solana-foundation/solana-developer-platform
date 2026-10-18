@@ -8,6 +8,10 @@ import {
 import { z } from "zod";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import {
+  earnExternalWalletWithdrawalRequestResponse,
+  earnExternalWalletWithdrawalRequestsResponse,
+} from "@/openapi/schemas/earn";
+import {
   earnMovementSchema,
   earnPortfolioDepositSchema,
   earnPortfolioWithdrawalSchema,
@@ -23,10 +27,6 @@ import {
   pageFields,
 } from "@/openapi/schemas/earn-treasury";
 import * as requests from "@/routes/earn/schemas";
-import {
-  earnExternalWalletWithdrawalRequestResponse,
-  earnExternalWalletWithdrawalRequestsResponse,
-} from "../schemas/earn";
 import {
   errorResponses,
   jsonContent,

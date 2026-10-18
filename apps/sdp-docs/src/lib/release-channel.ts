@@ -3,7 +3,7 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import generatedSurface from "../generated/public-surface.json";
+import generatedSurface from "@/generated/public-surface.json";
 
 /**
  * What this docs build may publish: the modules and ramp providers of the

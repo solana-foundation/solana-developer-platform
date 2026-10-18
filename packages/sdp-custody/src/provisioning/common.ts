@@ -1,5 +1,5 @@
 import { redactCredentialString } from "@sdp/redaction/credentials";
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import type { CustodyProvisioningRuntime } from "./runtime";
 
 function hasEmptyResponseBody(response: Response): boolean {

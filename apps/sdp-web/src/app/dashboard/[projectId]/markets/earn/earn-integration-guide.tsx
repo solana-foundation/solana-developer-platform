@@ -11,6 +11,7 @@ import { SegmentedControl } from "@solana/design-system/segmented-control";
 import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { EarnIntegrationGuideSkeleton } from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { CodeBlock } from "@/components/ui/code-block";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -19,7 +20,6 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { EarnIntegrationGuideSkeleton } from "../markets-route-skeletons";
 import {
   type EarnDepositAvailabilityLabels,
   earnDepositAvailabilityLabel,

@@ -11,17 +11,20 @@ import { startOfTomorrow } from "date-fns";
 import { PlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { z } from "zod";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
+import { NewSolanaAddressForm } from "@/app/dashboard/[projectId]/payments/counterparty/new-solana-address-form";
 import {
   formatCurrencyAmount,
   formatTokenAmount,
   shortenAddress,
-} from "../payments-overview.utils";
-import { formatDate } from "../payments-presentation";
-import { ContactCombobox } from "../ramps/components/contact-combobox";
-import { AmountFields, SourceWalletField } from "../ramps/components/payment-form-fields";
-import { RampWizardShell } from "../ramps/components/ramp-wizard-shell.redesign";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDate } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { ContactCombobox } from "@/app/dashboard/[projectId]/payments/ramps/components/contact-combobox";
+import {
+  AmountFields,
+  SourceWalletField,
+} from "@/app/dashboard/[projectId]/payments/ramps/components/payment-form-fields";
+import { RampWizardShell } from "@/app/dashboard/[projectId]/payments/ramps/components/ramp-wizard-shell.redesign";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { accountAddress, parsePeriodHours } from "./recurring-payments-shared.redesign";
 import {
   amountErrorMessage,

@@ -8,11 +8,14 @@ import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { createChannelAction } from "@/app/dashboard/[projectId]/integrations/private-channels/channels/actions";
+import {
+  privateChannelPath,
+  privateChannelsInstancePath,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { createChannelAction } from "../../../channels/actions";
-import { privateChannelPath, privateChannelsInstancePath } from "../../../private-channels-routes";
 
 type InstanceSummary = Pick<PrivateChannelInstance, "gatewayUrl" | "escrowInstanceAddr">;
 

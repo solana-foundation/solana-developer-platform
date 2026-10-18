@@ -1,5 +1,5 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
-import { providerNotConfigured } from "../errors";
+import { providerNotConfigured } from "#/errors";
 import { MoonpayRampClient } from "./providers/moonpay/client";
 import { StripeRampClient } from "./providers/stripe/client";
 import type { RampProvider } from "./types";

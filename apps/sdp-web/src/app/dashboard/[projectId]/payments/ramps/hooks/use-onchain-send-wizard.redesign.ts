@@ -12,7 +12,21 @@ import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import type { CreateTransferInput } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import {
+  cryptoWalletAccountDetailsSchema,
+  ONCHAIN_AMOUNT_PATTERN,
+  type OnchainSendFields,
+  onchainDestinationSchema,
+  onchainDetailsSchema,
+  onchainSendSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import {
+  optionalDetail,
+  summaryAmount,
+} from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
+import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
@@ -21,17 +35,6 @@ import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import {
-  cryptoWalletAccountDetailsSchema,
-  ONCHAIN_AMOUNT_PATTERN,
-  type OnchainSendFields,
-  onchainDestinationSchema,
-  onchainDetailsSchema,
-  onchainSendSchema,
-} from "../schema";
-import { walletBalanceAssetOptions } from "../wallet-options";
-import { optionalDetail, summaryAmount } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard.redesign";
 

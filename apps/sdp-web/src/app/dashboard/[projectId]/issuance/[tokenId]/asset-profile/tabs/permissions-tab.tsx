@@ -13,15 +13,19 @@ import {
   UserCog,
 } from "lucide-react";
 import Link from "next/link";
+import type { AssetProfileForm } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-asset-profile-form";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
+import { TokenDisabledActionTooltip } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-disabled-action-tooltip";
+import type { PermissionRowId } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
+import { getSignerWalletOptionLabel } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import {
+  shortenAddress,
+  toWalletIdentity,
+  WalletIdentityBadge,
+} from "@/app/dashboard/[projectId]/issuance/wallet-identity";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { shortenAddress, toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
-import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
-import type { PermissionRowId } from "../../token-management-workspace.types";
-import { getSignerWalletOptionLabel } from "../../token-management-workspace.utils";
-import type { AssetProfileForm } from "../use-asset-profile-form";
-import type { TokenOperations } from "../use-token-operations";
 
 const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
   "mint-authority": Coins,

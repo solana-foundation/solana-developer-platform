@@ -37,6 +37,57 @@ import {
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { EarnFundingWallet } from "@/app/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets";
+import {
+  compareUnsignedDecimals,
+  isPositiveDecimal,
+  sortByOptionalDecimal,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-decimal";
+import {
+  type EarnDepositAvailabilityLabels,
+  earnProviderLabel,
+  formatProviderAmount,
+  formatTokenValue,
+  formatUsd,
+  positionDisplayName,
+  shortenMarketAddress,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-format";
+import {
+  EarnDepositAvailabilityBadge,
+  earnMintAsset,
+  earnStrategyAsset,
+  earnStrategyReferenceKey,
+  formatProviderApy,
+  sumDecimalStrings,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-market-presentation";
+import {
+  EarnVaultDepositOutcomeTracker,
+  EarnVaultWithdrawalOutcomeTracker,
+  EarnWithdrawalOutcomeTracker,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-trackers";
+import {
+  isEarnVaultDepositInFlight,
+  isEarnVaultWithdrawalInFlight,
+  useEarnPrograms,
+  useEarnProgramWithdrawals,
+  useEarnStrategies,
+  useEarnVaultDeposits,
+  useEarnVaultWithdrawals,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-program-data";
+import {
+  type EarnProviderAccess,
+  type EarnVaultDepositAvailability,
+  earnVaultDepositAvailability,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-surfacing";
+import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
+import type { EarnVaultParRedemptionSource } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-par-redemption-modal";
+import {
+  earnVaultDepositUiState,
+  earnVaultPositionStatusLabels,
+  earnVaultWithdrawalUiState,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-vault-ui-state";
+import { EarnVaultWithdrawalRequestsCard } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import {
@@ -46,57 +97,6 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { EarnFundingWallet } from "../earn/deposit/earn-funding-wallets";
-import {
-  compareUnsignedDecimals,
-  isPositiveDecimal,
-  sortByOptionalDecimal,
-} from "../earn/earn-decimal";
-import {
-  type EarnDepositAvailabilityLabels,
-  earnProviderLabel,
-  formatProviderAmount,
-  formatTokenValue,
-  formatUsd,
-  positionDisplayName,
-  shortenMarketAddress,
-} from "../earn/earn-format";
-import {
-  EarnDepositAvailabilityBadge,
-  earnMintAsset,
-  earnStrategyAsset,
-  earnStrategyReferenceKey,
-  formatProviderApy,
-  sumDecimalStrings,
-} from "../earn/earn-market-presentation";
-import {
-  EarnVaultDepositOutcomeTracker,
-  EarnVaultWithdrawalOutcomeTracker,
-  EarnWithdrawalOutcomeTracker,
-} from "../earn/earn-outcome-trackers";
-import {
-  isEarnVaultDepositInFlight,
-  isEarnVaultWithdrawalInFlight,
-  useEarnPrograms,
-  useEarnProgramWithdrawals,
-  useEarnStrategies,
-  useEarnVaultDeposits,
-  useEarnVaultWithdrawals,
-} from "../earn/earn-program-data";
-import {
-  type EarnProviderAccess,
-  type EarnVaultDepositAvailability,
-  earnVaultDepositAvailability,
-  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
-} from "../earn/earn-surfacing";
-import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
-import type { EarnVaultParRedemptionSource } from "../earn/earn-vault-par-redemption-modal";
-import {
-  earnVaultDepositUiState,
-  earnVaultPositionStatusLabels,
-  earnVaultWithdrawalUiState,
-} from "../earn/earn-vault-ui-state";
-import { EarnVaultWithdrawalRequestsCard } from "../earn/earn-vault-withdrawal-requests-card";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
 import {
@@ -146,15 +146,24 @@ export function EarnTransactionModalLoading() {
 }
 
 const EarnVaultDepositModal = dynamic(
-  () => import("../earn/earn-vault-deposit-modal").then((module) => module.EarnVaultDepositModal),
+  () =>
+    import("@/app/dashboard/[projectId]/markets/earn/earn-vault-deposit-modal").then(
+      (module) => module.EarnVaultDepositModal
+    ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
 const EarnVaultExitModal = dynamic(
-  () => import("../earn/earn-vault-exit-modal").then((module) => module.EarnVaultExitModal),
+  () =>
+    import("@/app/dashboard/[projectId]/markets/earn/earn-vault-exit-modal").then(
+      (module) => module.EarnVaultExitModal
+    ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
 const EarnWithdrawModal = dynamic(
-  () => import("../earn/earn-withdraw-modal").then((module) => module.EarnWithdrawModal),
+  () =>
+    import("@/app/dashboard/[projectId]/markets/earn/earn-withdraw-modal").then(
+      (module) => module.EarnWithdrawModal
+    ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
 

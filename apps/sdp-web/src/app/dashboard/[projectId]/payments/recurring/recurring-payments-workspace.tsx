@@ -17,6 +17,12 @@ import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { z } from "zod";
 import {
+  formatDisplayAmount,
+  resolveTokenByMint,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
@@ -26,12 +32,6 @@ import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import {
-  formatDisplayAmount,
-  resolveTokenByMint,
-  shortenAddress,
-} from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
   type RecurringPaymentsListState,

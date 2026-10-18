@@ -15,8 +15,8 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
-import { shortenAddress } from "../payments-overview.utils";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
 import { updateRecurringPayment } from "./recurring-payments.data.redesign";
 import {

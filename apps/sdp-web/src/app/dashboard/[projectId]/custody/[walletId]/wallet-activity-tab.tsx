@@ -7,10 +7,10 @@ import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
 import { SearchInput } from "@sdp/ui/search-input";
 import Link from "next/link";
 import { use, useMemo, useState } from "react";
+import { toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
+import type { WalletActivityRow } from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { toTitleCase } from "../../activity-format-utils";
-import type { WalletActivityRow } from "../wallet-activity.data";
 import { useWalletActivityWindow } from "./use-wallet-activity-window";
 import { WalletActivityTable } from "./wallet-activity-table";
 import {

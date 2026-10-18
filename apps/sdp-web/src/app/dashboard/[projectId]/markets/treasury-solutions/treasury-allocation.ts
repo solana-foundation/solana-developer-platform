@@ -6,10 +6,13 @@ import {
 } from "@sdp/solana/amount";
 import { type EarnVaultPositionIntermediate, isEarnVaultHoldingEmpty } from "@sdp/types/earn";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { compareUnsignedDecimals } from "../earn/earn-decimal";
-import { isIntlDecimalLiteral } from "../earn/earn-format";
-import { earnStrategyReferenceKey, sumDecimalStrings } from "../earn/earn-market-presentation";
-import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
+import { compareUnsignedDecimals } from "@/app/dashboard/[projectId]/markets/earn/earn-decimal";
+import { isIntlDecimalLiteral } from "@/app/dashboard/[projectId]/markets/earn/earn-format";
+import {
+  earnStrategyReferenceKey,
+  sumDecimalStrings,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-market-presentation";
+import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
 
 /**
  * Portfolio-level allocation for the Treasury overview (PRO-1723): available

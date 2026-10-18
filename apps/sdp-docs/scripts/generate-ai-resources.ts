@@ -3,10 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SdpModule } from "@sdp/types/release-channels";
-import { expandDocsBlocks } from "../src/lib/docs-blocks";
-import { DOCS_MODULES } from "../src/lib/docs-catalog";
-import { isModulePublished, isPageSourcePublished } from "../src/lib/release-channel";
-import { canonicalSite } from "../src/lib/site";
+import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { DOCS_MODULES } from "@/lib/docs-catalog";
+import { isModulePublished, isPageSourcePublished } from "@/lib/release-channel";
+import { canonicalSite } from "@/lib/site";
 
 const {
   aiGuideUrl,

@@ -1,5 +1,5 @@
+import { CounterpartyMenuLoading } from "@/app/dashboard/[projectId]/payments/counterparty-menu-loading";
 import { DesignSwitch } from "@/components/new-design";
-import { CounterpartyMenuLoading } from "../counterparty-menu-loading";
 import { PaymentRequestsLoading as RedesignPaymentRequestsLoading } from "./loading.redesign";
 
 export function PreviousPaymentRequestsLoading() {

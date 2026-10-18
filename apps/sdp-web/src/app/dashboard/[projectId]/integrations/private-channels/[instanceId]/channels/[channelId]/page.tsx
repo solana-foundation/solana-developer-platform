@@ -1,19 +1,19 @@
 import { Badge } from "@sdp/ui/badge";
 import { Card } from "@sdp/ui/card";
 import { notFound } from "next/navigation";
-import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
-import { ChannelTokensPanel } from "../../../channels/channel-tokens-panel";
-import { requirePrivateChannelsAccess } from "../../../private-channels-access";
-import { PrivateChannelsLoadError } from "../../../private-channels-load-error";
+import { ChannelTokensPanel } from "@/app/dashboard/[projectId]/integrations/private-channels/channels/channel-tokens-panel";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
 import {
   loadChannels,
   loadInstance,
   loadTokenEligibility,
   loadWalletVerification,
-} from "../../../private-channels-page.data";
-import { shortenAddress } from "../../../private-channels-view-data";
-import { WalletsTable } from "../../../wallets/wallets-table";
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
+import { shortenAddress } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-view-data";
+import { WalletsTable } from "@/app/dashboard/[projectId]/integrations/private-channels/wallets/wallets-table";
+import { getTranslations } from "@/i18n/server";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { ChannelActionsMenu } from "./channel-actions-menu";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;

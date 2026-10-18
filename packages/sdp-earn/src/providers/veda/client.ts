@@ -9,13 +9,13 @@ import {
   type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types/well-known-tokens";
-import { providerNotConfigured } from "../../errors";
+import { providerNotConfigured } from "#/errors";
+import { StubEarnClient } from "#/providers/stub";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 import { readVedaVaults, VEDA_UNSET_AUTHORITY, type VedaVault } from "./vault-state";
 
 /**

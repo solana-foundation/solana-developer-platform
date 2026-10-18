@@ -1,11 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import {
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchCounterparty } from "../counterparty/counterparty-page.data";
-import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../payments-page.data";
 import { RecurringPaymentsPage as RedesignRecurringPaymentsPage } from "./page.redesign";
 import {
   fetchRecurringPayments,

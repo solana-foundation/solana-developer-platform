@@ -3,9 +3,9 @@ import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recur
 import { createPaymentRecurringPaymentsRepository } from "@/db/repositories/repository-factory";
 import { internalError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
 import { assertRecurringPaymentTokenMint } from "./shared";
 
 /** A create request's Idempotency-Key and the fingerprint of the schedule it creates. */

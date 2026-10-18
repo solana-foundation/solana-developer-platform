@@ -16,11 +16,11 @@ import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveIssuanceWallet } from "@/routes/issuance/handlers/authority-resolution";
+import { toPublicToken } from "@/routes/issuance/handlers/public-response";
+import type { createTokenWithAssetProfileSchema } from "@/routes/issuance/schemas";
 import { AuditService } from "@/services/audit.service";
 import { TokenService } from "@/services/token.service";
-import { resolveIssuanceWallet } from "../issuance/handlers/authority-resolution";
-import { toPublicToken } from "../issuance/handlers/public-response";
-import type { createTokenWithAssetProfileSchema } from "../issuance/schemas";
 import { mapToAssetProfile } from "./handlers";
 
 // POST /v1/issuance/asset-profiles: create token and profile in one transaction.

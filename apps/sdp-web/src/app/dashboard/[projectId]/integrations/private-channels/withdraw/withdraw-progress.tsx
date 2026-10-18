@@ -9,10 +9,10 @@ import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
 import useSWR from "swr";
+import { privateChannelsQueryKeys } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { privateChannelsQueryKeys } from "../private-channels-query-key";
 import { fetchWithdrawalAction } from "./actions";
 
 const RANK: Record<PrivateChannelWithdrawal["status"], number> = {

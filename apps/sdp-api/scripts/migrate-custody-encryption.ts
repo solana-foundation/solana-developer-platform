@@ -1,9 +1,9 @@
-import { closeDatabasePools, getDb } from "../src/db/client";
-import { runWithSystemDatabaseIdentity } from "../src/db/identity";
-import { getProcessEnv } from "../src/lib/runtime-env";
-import { createCustodyCipher } from "../src/services/custody-cipher/cipher-router";
-import { migrateNestedCustodySecrets } from "../src/services/custody-cipher/nested-secret-migration";
-import type { Env } from "../src/types/env";
+import { closeDatabasePools, getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { getProcessEnv } from "@/lib/runtime-env";
+import { createCustodyCipher } from "@/services/custody-cipher/cipher-router";
+import { migrateNestedCustodySecrets } from "@/services/custody-cipher/nested-secret-migration";
+import type { Env } from "@/types/env";
 
 const BATCH_SIZE = 50;
 const LEGACY_VERSION = "sdp-custody-encryption-v1";

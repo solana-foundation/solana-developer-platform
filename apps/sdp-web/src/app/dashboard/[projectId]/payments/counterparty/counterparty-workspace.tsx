@@ -34,6 +34,8 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { CounterpartyPlaygroundLoading } from "@/app/dashboard/[projectId]/payments/counterparty-menu-loading";
+import { syncPlaygroundApiKeysForActiveTab } from "@/app/dashboard/[projectId]/payments/payments-playground-api-key-state";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
@@ -44,8 +46,6 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
-import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyDirectory } from "./use-counterparty-directory";

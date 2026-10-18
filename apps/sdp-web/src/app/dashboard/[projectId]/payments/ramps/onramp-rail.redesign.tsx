@@ -2,11 +2,11 @@
 
 import { Button } from "@sdp/ui/button";
 import Link from "next/link";
+import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { WizardSummaryList } from "../wizard-summary-list";
 import type { ContactControls } from "./components/contact-combobox";
 import { OnrampStepContent } from "./components/onramp-step-content.redesign";
 import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";

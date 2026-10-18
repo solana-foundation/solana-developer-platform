@@ -2,10 +2,10 @@ import { hasPermission } from "@sdp/types/permissions";
 import type { PrivateChannelReferenceWalletScope } from "@/db/repositories/private-channel-reference.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
+import type { AppContext } from "@/routes/private-channels/context";
+import { getPrivateChannelReferenceRepository } from "@/routes/private-channels/context";
+import { resolveEventViewer } from "@/routes/private-channels/event-access";
 import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
-import type { AppContext } from "../context";
-import { getPrivateChannelReferenceRepository } from "../context";
-import { resolveEventViewer } from "../event-access";
 
 function resolveWalletScope(auth: ApiKeyContext): PrivateChannelReferenceWalletScope {
   if (!hasPermission(auth.permissions, "wallets:read")) {

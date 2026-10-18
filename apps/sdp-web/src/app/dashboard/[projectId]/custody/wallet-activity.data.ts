@@ -1,12 +1,18 @@
 import type { PaymentTransferSummary } from "@sdp/types/payments";
 import type { PublicTokenTransaction, TokenTransactionListItem } from "@sdp/types/tokens";
+import {
+  readTransactionParam,
+  toTitleCase,
+} from "@/app/dashboard/[projectId]/activity-format-utils";
+import {
+  type FetchResult,
+  fetchPaymentTransfers,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { readTransactionParam, toTitleCase } from "../activity-format-utils";
-import { type FetchResult, fetchPaymentTransfers } from "../payments/payments-page.data";
 
 export type WalletActivitySourceKind = "payments" | "issuance";
 

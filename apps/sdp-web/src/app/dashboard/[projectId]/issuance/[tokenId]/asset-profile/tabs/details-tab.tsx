@@ -4,12 +4,15 @@ import type { Token } from "@sdp/types/tokens";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Label } from "@sdp/ui/label";
+import type { AssetProfileForm } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-asset-profile-form";
+import { AdvancedSettingsEditor } from "@/app/dashboard/[projectId]/issuance/create/advanced-settings-editor";
+import {
+  ReadOnlyField,
+  TextField,
+} from "@/app/dashboard/[projectId]/issuance/create/form-primitives";
+import type { DraftState } from "@/app/dashboard/[projectId]/issuance/create/issuance-draft-wizard.types";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { AdvancedSettingsEditor } from "../../../create/advanced-settings-editor";
-import { ReadOnlyField, TextField } from "../../../create/form-primitives";
-import type { DraftState } from "../../../create/issuance-draft-wizard.types";
-import type { AssetProfileForm } from "../use-asset-profile-form";
 
 export function DetailsTab({
   token,

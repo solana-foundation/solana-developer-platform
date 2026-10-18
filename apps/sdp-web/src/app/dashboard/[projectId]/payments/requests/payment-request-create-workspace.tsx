@@ -15,7 +15,14 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { NewSolanaAddressForm } from "@/app/dashboard/[projectId]/payments/counterparty/new-solana-address-form";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -27,10 +34,6 @@ import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
-import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
-import { shortenAddress } from "../payments-overview.utils";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
 

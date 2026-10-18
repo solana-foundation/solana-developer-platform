@@ -13,6 +13,11 @@ import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
+import { getTenantTokenService, requireProjectScope } from "@/routes/issuance/helpers";
+import {
+  issuanceTransactionWalletFilterSchema,
+  listTokenTransactionsQuerySchema,
+} from "@/routes/issuance/schemas";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
@@ -20,11 +25,6 @@ import {
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
-import {
-  issuanceTransactionWalletFilterSchema,
-  listTokenTransactionsQuerySchema,
-} from "../schemas";
 import { resolveIssuanceWallet } from "./authority-resolution";
 import { toPublicTokenTransaction, toPublicTokenTransactionListItem } from "./public-response";
 

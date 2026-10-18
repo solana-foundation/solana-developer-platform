@@ -13,19 +13,22 @@ import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useReducer, useTransition } from "react";
 import { toast } from "sonner";
-import { useTranslations } from "@/i18n/provider";
-import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
-import { useProjectHref } from "@/lib/use-dashboard-project";
-import { AmountField } from "../amount-field";
-import { getAmountError } from "../amount-validation";
-import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
+import { AmountField } from "@/app/dashboard/[projectId]/integrations/private-channels/amount-field";
+import { getAmountError } from "@/app/dashboard/[projectId]/integrations/private-channels/amount-validation";
+import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import {
   claimMovementKey,
   movementAnswer,
   privateChannelDepositIdempotencyKeyStore,
   privateChannelDepositRequestFingerprint,
-} from "../value-movement-tracking";
-import { fetchWalletBalancesAction, type WalletBalanceView } from "../wallet-balances";
+} from "@/app/dashboard/[projectId]/integrations/private-channels/value-movement-tracking";
+import {
+  fetchWalletBalancesAction,
+  type WalletBalanceView,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/wallet-balances";
+import { useTranslations } from "@/i18n/provider";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createDepositAction } from "./actions";
 import { DepositProgress } from "./deposit-progress";
 

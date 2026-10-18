@@ -4,7 +4,7 @@ import {
   isoDateTimeSchema,
   withOpenApi,
 } from "@/openapi/schemas/base";
-import { addEntrySchema as addEntrySchemaBase } from "../../routes/allowlist/schemas";
+import { addEntrySchema as addEntrySchemaBase } from "@/routes/allowlist/schemas";
 
 export const allowlistEntrySchema = z
   .object({

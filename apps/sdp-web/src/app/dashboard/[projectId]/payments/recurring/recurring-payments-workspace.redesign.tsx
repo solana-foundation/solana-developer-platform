@@ -19,9 +19,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { z } from "zod";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   formatDisplayAmount,
   resolveTokenByMint,

@@ -5,17 +5,20 @@ import type {
 } from "@sdp/types/counterparties";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import {
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { RecurringPaymentDetailWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace.redesign";
+import {
+  fetchRecurringPaymentById,
+  fetchRecurringPaymentCollectionAttempts,
+} from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data.redesign";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
-import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
-import { RecurringPaymentDetailWorkspace } from "../recurring-payment-detail-workspace.redesign";
-import {
-  fetchRecurringPaymentById,
-  fetchRecurringPaymentCollectionAttempts,
-} from "../recurring-payments.data.redesign";
 
 const COUNTERPARTY_ACCOUNTS_PAGE_SIZE = 100;
 const counterpartyAccountSchema = z.object({

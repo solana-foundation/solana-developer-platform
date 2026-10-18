@@ -23,13 +23,16 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDate } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import {
+  PAYMENTS_TABLE_CELL,
+  PAYMENTS_TABLE_HEAD,
+} from "@/app/dashboard/[projectId]/payments/payments-table";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { shortenAddress } from "../payments-overview.utils";
-import { formatDate } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import {
   type AddressFilter,
   type EntityType,

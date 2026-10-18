@@ -18,10 +18,10 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import type { WalletChannelBalance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { WalletChannelBalance } from "../private-channels-page.data";
 import { deleteVerifiedWalletAction, verifyWalletAction } from "./actions";
 
 interface Props {

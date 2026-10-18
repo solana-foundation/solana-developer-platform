@@ -6,10 +6,10 @@ import { getAuth } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { addMemberSchema, updateMemberSchema } from "@/routes/projects/schemas";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
-import type { addMemberSchema, updateMemberSchema } from "../schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 

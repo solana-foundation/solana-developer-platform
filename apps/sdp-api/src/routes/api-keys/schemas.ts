@@ -2,7 +2,7 @@ import { ALLOWED_OPERATIONS } from "@sdp/types/allowed-operations";
 import { PERMISSIONS } from "@sdp/types/permissions";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
-import { custodyWalletOwnerSchema } from "../custody/schemas";
+import { custodyWalletOwnerSchema } from "@/routes/custody/schemas";
 
 const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",

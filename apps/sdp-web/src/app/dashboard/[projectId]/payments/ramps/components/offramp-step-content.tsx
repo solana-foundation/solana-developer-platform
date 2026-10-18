@@ -3,10 +3,10 @@
 import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
+import type { OfframpWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-offramp-wizard";
+import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import type { OfframpWizard } from "../hooks/use-offramp-wizard";
-import { walletComboboxOptions } from "../wallet-options";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { RampCompleteScreen } from "./ramp-complete-screen";

@@ -1,6 +1,6 @@
 import { getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
-import type { AppContext } from "../counterparties/context";
+import type { AppContext } from "@/routes/counterparties/context";
 
 /**
  * Creates the provider-account repository scoped to the current request tenant.

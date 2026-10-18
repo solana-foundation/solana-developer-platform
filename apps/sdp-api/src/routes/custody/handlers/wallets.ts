@@ -32,11 +32,17 @@ import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getIdempotencyClaim, markIdempotencyRecordMismatch } from "@/middleware/idempotency";
 import type { RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, parseBooleanQueryParam, resolveActor } from "@/routes/custody/context";
 import type {
   createWalletSchema,
   deleteWalletSchema,
   updateWalletSchema,
 } from "@/routes/custody/schemas";
+import {
+  clearWalletBalanceCache,
+  readWalletBalances,
+  type WalletBalanceTarget,
+} from "@/routes/custody/wallet-balances";
 import { withIssuedTokenLabels } from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
@@ -62,12 +68,6 @@ import {
 } from "@/services/helius-das.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
-import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
-import {
-  clearWalletBalanceCache,
-  readWalletBalances,
-  type WalletBalanceTarget,
-} from "../wallet-balances";
 
 export function clearWalletCaches() {
   clearWalletBalanceCache();

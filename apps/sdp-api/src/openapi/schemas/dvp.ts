@@ -24,7 +24,7 @@ import {
   dvpTradeIdParamsSchema as dvpTradeIdParamsSchemaBase,
   fundDvpTradeSchema as fundDvpTradeSchemaBase,
   listDvpTradesQuerySchema as listDvpTradesQuerySchemaBase,
-} from "../../routes/dvp/schemas";
+} from "@/routes/dvp/schemas";
 
 export const dvpTradeIdParamSchema = withOpenApi(dvpTradeIdParamsSchemaBase.shape.tradeId, {
   description: "DvP trade identifier.",

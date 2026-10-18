@@ -1,6 +1,6 @@
 import { PRIVATE_CHANNEL_EVENT_FAMILIES } from "@sdp/types/private-channels";
 import { getLogger } from "@/runtime/logger";
-import type { PrivateChannelEventSink } from "../event.service";
+import type { PrivateChannelEventSink } from "@/services/private-channels/event.service";
 
 /** Console sink for private channel events. */
 export function createLogEventSink(): PrivateChannelEventSink {

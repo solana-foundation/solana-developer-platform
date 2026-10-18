@@ -18,6 +18,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
+import { PaymentsTableHeader } from "@/app/dashboard/[projectId]/payments/payments-table-header";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -28,10 +35,6 @@ import {
   paymentRequestHref,
 } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { shortenAddress } from "../payments-overview.utils";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL } from "../payments-table";
-import { PaymentsTableHeader } from "../payments-table-header";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,

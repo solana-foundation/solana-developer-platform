@@ -1,6 +1,6 @@
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";
 
 /** The wallets an API key can be bound to. */

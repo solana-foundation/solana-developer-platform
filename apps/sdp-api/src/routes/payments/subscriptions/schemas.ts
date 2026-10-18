@@ -8,7 +8,7 @@ import {
   recurringTimestampSchema,
   solanaAddressSchema,
   u64StringSchema,
-} from "../schemas";
+} from "@/routes/payments/schemas";
 
 export const subscriptionIdParamsSchema = z.object({
   subscriptionId: z.string().min(1),

@@ -7,7 +7,7 @@ import type {
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
-import { getRampProviderLabel } from "../ramps";
+import { getRampProviderLabel } from "@/lib/ramps";
 import {
   DEMO_TOKENS,
   type DemoTokenKey,

@@ -1,9 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { loadPaymentsActionPageData } from "@/app/dashboard/[projectId]/payments/ramps/payments-action-page.server";
+import { PaymentsActionPage } from "@/app/dashboard/[projectId]/payments/ramps/ramp-action-page";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { loadPaymentsActionPageData } from "../ramps/payments-action-page.server";
-import { PaymentsActionPage } from "../ramps/ramp-action-page";
 import { PaymentsDepositPage as RedesignPaymentsDepositPage } from "./page.redesign";
 
 async function PaymentsDepositPage() {

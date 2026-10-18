@@ -11,9 +11,9 @@ import {
   formatCurrencyAmount,
   resolveTotalBalance,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { findWalletBalanceForToken } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
 import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
-import { findWalletBalanceForToken } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { useRampSelection } from "./ramp-selection-context";
 

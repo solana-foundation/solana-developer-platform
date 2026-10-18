@@ -17,13 +17,13 @@ import {
   WALLET_ACTIVITY_HEADING_ID,
   WalletActivitySkeleton,
 } from "@/app/dashboard/[projectId]/custody/wallet-activity-skeleton";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
   formatDisplayAmount,
   resolveTransferTokenLabel,
-} from "../payments/payments-overview.utils";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { custodyQueryKeys } from "./custody-query-key";
 
 interface WalletActivitySectionProps {

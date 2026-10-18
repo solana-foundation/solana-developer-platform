@@ -12,9 +12,9 @@ import type {
   PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import type { AppContext } from "@/routes/payments/context";
 import { getSplTokenAccountAddresses } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
-import type { AppContext } from "../context";
 
 export const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
 

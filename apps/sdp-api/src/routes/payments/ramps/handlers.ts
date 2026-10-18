@@ -9,10 +9,10 @@ import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getPaymentsRepository } from "@/routes/payments/context";
+import { mapTransferRow } from "@/routes/payments/mappers";
+import { assertPaymentWalletExactAccess, resolveScope } from "@/routes/payments/wallets";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
-import { getPaymentsRepository } from "../context";
-import { mapTransferRow } from "../mappers";
-import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
 import { admitRamp } from "./admission";
 import type { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
 

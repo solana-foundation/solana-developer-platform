@@ -31,16 +31,16 @@ import { AppError, conflict, redactErrorForCapture, unsupportedRampCorridor } fr
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
-import { rampTransferTokenMint } from "@/services/payment-operation.service";
-import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
-import { type AppContext, getPaymentsRepository, rampRuntime } from "../context";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
 import {
   assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
-} from "../wallets";
+} from "@/routes/payments/wallets";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
+import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
 import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";

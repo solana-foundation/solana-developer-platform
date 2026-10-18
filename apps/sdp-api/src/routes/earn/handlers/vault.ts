@@ -40,7 +40,24 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/earn/context";
+import {
+  earnRuntime,
+  getEarnRepository,
+  requireEarnStrategyForCaller,
+} from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
+import {
+  earnVaultDepositParamsSchema,
+  type earnVaultDepositPreviewSchema,
+  type earnVaultDepositSchema,
+  earnVaultDepositsQuerySchema,
+  earnVaultPositionsQuerySchema,
+  earnVaultWithdrawalParamsSchema,
+  type earnVaultWithdrawalPreviewSchema,
+  type earnVaultWithdrawalSchema,
+  earnVaultWithdrawalsQuerySchema,
+} from "@/routes/earn/schemas";
 import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
@@ -62,19 +79,6 @@ import { checkVaultExposure, vaultExposureBlockingIssue } from "@/services/earn/
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
-import type { AppContext } from "../context";
-import { earnRuntime, getEarnRepository, requireEarnStrategyForCaller } from "../context";
-import {
-  earnVaultDepositParamsSchema,
-  type earnVaultDepositPreviewSchema,
-  type earnVaultDepositSchema,
-  earnVaultDepositsQuerySchema,
-  earnVaultPositionsQuerySchema,
-  earnVaultWithdrawalParamsSchema,
-  type earnVaultWithdrawalPreviewSchema,
-  type earnVaultWithdrawalSchema,
-  earnVaultWithdrawalsQuerySchema,
-} from "../schemas";
 import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,

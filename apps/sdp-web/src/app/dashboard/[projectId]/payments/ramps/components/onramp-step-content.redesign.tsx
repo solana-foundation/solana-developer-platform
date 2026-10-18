@@ -1,9 +1,9 @@
 "use client";
 
+import type { OnrampWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard.redesign";
 import { useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import type { OnrampWizard } from "../hooks/use-onramp-wizard.redesign";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
 import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { MemoStepContent } from "./memo-step-content.redesign";

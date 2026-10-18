@@ -3,8 +3,8 @@
 import { Combobox } from "@sdp/ui/combobox";
 import { UsersIcon } from "lucide-react";
 import { useMemo } from "react";
+import type { CounterpartiesResult } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
-import type { CounterpartiesResult } from "../../payments-workspace.data";
 
 interface CounterpartySelectorProps {
   counterpartiesResult: CounterpartiesResult;

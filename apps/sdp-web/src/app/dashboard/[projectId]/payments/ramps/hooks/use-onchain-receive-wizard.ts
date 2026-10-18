@@ -4,12 +4,12 @@ import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { optionalDetail } from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
+import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import { optionalDetail } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 

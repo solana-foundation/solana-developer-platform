@@ -9,8 +9,7 @@ import { success } from "@/lib/response";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { rampTransferTokenMint } from "@/services/payment-operation.service";
-import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
 import {
   buildProviderDetails,
   type CreateOfframpQuoteBody,
@@ -22,7 +21,8 @@ import {
   rampQuoteTransferStatus,
   resolveRampQuoteRequest,
   uniqueSorted,
-} from "../shared";
+} from "@/routes/payments/ramps/shared";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
 
 import {
   type createOfframpQuoteSchema,

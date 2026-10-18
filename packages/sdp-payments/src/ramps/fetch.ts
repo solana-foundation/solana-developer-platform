@@ -1,7 +1,7 @@
 import { scrubTelemetryString } from "@sdp/redaction/scrub";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
-import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "#/errors";
 
 export interface ProviderRequestInit<TBody> {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

@@ -1,5 +1,5 @@
+import { programProxyQuery } from "@/app/api/dashboard/markets/earn/provider-query";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { programProxyQuery } from "../provider-query";
 
 export async function GET(request: Request) {
   return proxyToSdpApi({

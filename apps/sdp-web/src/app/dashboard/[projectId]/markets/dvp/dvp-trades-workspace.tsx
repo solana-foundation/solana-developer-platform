@@ -34,6 +34,10 @@ import {
 import Link from "next/link";
 import { Fragment, type ReactNode, useState } from "react";
 import {
+  formatTimestamp,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
@@ -43,7 +47,6 @@ import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { type UrlTableQueryAdapter, useUrlTableFilters } from "@/lib/use-url-table-filters";
-import { formatTimestamp, shortenAddress } from "../../payments/payments-overview.utils";
 import { InboundRows } from "./dvp-inbound-rows";
 import { DvpPartyCell } from "./dvp-party-cell";
 import { DvpStatusBadge } from "./dvp-status";

@@ -16,6 +16,16 @@ import {
   type KnownCustodyProvider,
   providerSupportsStoredCredentialSetup,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import {
+  isKnownIntegrationProvider,
+  resolveIntegrationDetail,
+} from "@/app/dashboard/[projectId]/integrations/integration-detail";
+import { isIntegrationProviderEnabled } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
+import {
+  resolveComplianceIntegrations,
+  resolveCustodyIntegrations,
+  resolveRampIntegrations,
+} from "@/app/dashboard/[projectId]/integrations/integrations-status";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
@@ -34,13 +44,6 @@ import {
   requestProjectHref,
   type SdpApiClient,
 } from "@/lib/sdp-api";
-import { isKnownIntegrationProvider, resolveIntegrationDetail } from "../integration-detail";
-import { isIntegrationProviderEnabled } from "../integration-feature-gates";
-import {
-  resolveComplianceIntegrations,
-  resolveCustodyIntegrations,
-  resolveRampIntegrations,
-} from "../integrations-status";
 import { type CustodyConnectionsContext, IntegrationDetailView } from "./integration-detail-view";
 
 async function getConnectedCustodyProviders(

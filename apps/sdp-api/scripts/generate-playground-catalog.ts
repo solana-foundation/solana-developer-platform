@@ -15,9 +15,9 @@ import {
   type SecurityRequirementObject,
 } from "openapi3-ts/oas30";
 
-import { valueGates } from "../src/openapi/release-channel-values";
-import { createPublicOpenApiDocument } from "../src/openapi/spec";
-import { ROUTE_OWNERS, type RouteOwner, routeOwnerOf } from "../src/routes/route-modules";
+import { valueGates } from "@/openapi/release-channel-values";
+import { createPublicOpenApiDocument } from "@/openapi/spec";
+import { ROUTE_OWNERS, type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";

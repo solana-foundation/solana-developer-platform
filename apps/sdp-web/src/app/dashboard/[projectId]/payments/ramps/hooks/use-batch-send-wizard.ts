@@ -23,6 +23,13 @@ import {
   estimateTransferBatch,
   fetchBatchRecipients,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import type { BulkImportRow } from "@/app/dashboard/[projectId]/payments/ramps/bulk-import";
+import {
+  batchSendSchema,
+  MAX_BATCH_RECIPIENTS,
+  ONCHAIN_AMOUNT_PATTERN,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
   sendTransferBatchUnderKey,
@@ -32,9 +39,6 @@ import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { BulkImportRow } from "../bulk-import";
-import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
-import { walletBalanceAssetOptions } from "../wallet-options";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 

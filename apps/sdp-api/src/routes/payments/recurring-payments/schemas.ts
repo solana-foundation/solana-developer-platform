@@ -1,6 +1,10 @@
 import { PAYMENT_RECURRING_PAYMENT_STATUSES } from "@sdp/types/payments";
 import { z } from "zod";
-import { paymentAmountSchema, paymentTokenSchema, recurringTimestampSchema } from "../schemas";
+import {
+  paymentAmountSchema,
+  paymentTokenSchema,
+  recurringTimestampSchema,
+} from "@/routes/payments/schemas";
 
 const futureRecurringTimestampSchema = (fieldName: string) =>
   recurringTimestampSchema.refine((value) => new Date(value).getTime() > Date.now(), {

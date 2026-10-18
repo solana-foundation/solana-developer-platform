@@ -8,7 +8,7 @@ import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import { importPKCS8, SignJWT } from "jose";
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import {
   coinbaseCdpRequest,
   deriveCoinbaseCdpAccountName,

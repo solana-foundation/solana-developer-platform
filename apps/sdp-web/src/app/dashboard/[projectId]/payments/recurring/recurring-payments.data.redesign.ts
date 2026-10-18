@@ -13,12 +13,15 @@ import {
   type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types/payments";
 import { z } from "zod";
+import {
+  getPaymentApiError,
+  parsePaymentApiErrorText,
+} from "@/app/dashboard/[projectId]/payments/payment-api-errors";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IdempotencyOutcomeUnknownError, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 

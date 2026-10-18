@@ -8,7 +8,7 @@ import {
   managedWalletOwnerSchema as managedWalletOwnerSchemaBase,
   signerCheckSchema as signerCheckSchemaBase,
   updateWalletSchema as updateWalletSchemaBase,
-} from "../../routes/custody/schemas";
+} from "@/routes/custody/schemas";
 import {
   isoDateTimeSchema,
   projectIdParamSchema,

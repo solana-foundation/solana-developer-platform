@@ -1,8 +1,8 @@
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { loadPrivateChannelProjectRpcClient } from "@/routes/private-channels/context";
+import type { probeConnectionSchema } from "@/routes/private-channels/schemas";
 import { toProbeResultDto, verifyInstanceConnection } from "@/services/private-channels/service";
-import { loadPrivateChannelProjectRpcClient } from "../context";
-import type { probeConnectionSchema } from "../schemas";
 
 // Same probe the Connect handler runs internally — `probe.ok === true` here
 // means Connect will not fail on the probe step.

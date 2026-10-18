@@ -14,11 +14,11 @@ import { Label } from "@sdp/ui/label";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { HashIcon, UsersIcon, WalletIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { TokenMark } from "@/components/token-mark";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { shortenAddress } from "../../../payments/payments-overview.utils";
-import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
 import { toBaseUnits } from "./dvp-amount";
 import type {
   DvpCreateCounterpartyAccount,

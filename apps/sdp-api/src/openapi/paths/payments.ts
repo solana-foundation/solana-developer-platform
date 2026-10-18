@@ -32,7 +32,7 @@ import {
   updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
 } from "@/openapi/schemas/payments";
-import { walletBalancesQuerySchema } from "../../routes/payments/wallet-balances/schemas";
+import { walletBalancesQuerySchema } from "@/routes/payments/wallet-balances/schemas";
 import {
   errorResponses,
   jsonContent,

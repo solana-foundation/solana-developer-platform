@@ -3,7 +3,7 @@ import { isoDateTimeSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
   complianceIntentSchema as complianceIntentSchemaBase,
   screenAddressSchema as screenAddressSchemaBase,
-} from "../../routes/compliance/schemas";
+} from "@/routes/compliance/schemas";
 
 export const complianceIntentSchema = withOpenApi(complianceIntentSchemaBase, {
   description: "Business intent for address screening.",

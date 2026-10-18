@@ -1,6 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import {
+  fetchActiveApiKeys,
+  resolvePlaygroundApiBaseUrl,
+} from "@/app/dashboard/[projectId]/playground-api-data";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
   dashboardWorkspaceOverviewPanelClassName,
@@ -12,7 +16,6 @@ import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
 import { PaymentsCommandCenter } from "./payments-command-center.redesign";
 import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";

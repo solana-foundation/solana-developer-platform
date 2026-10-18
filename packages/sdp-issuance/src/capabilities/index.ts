@@ -10,7 +10,7 @@ import type {
 } from "@sdp/types/advanced-settings";
 import type { AssetCategory } from "@sdp/types/asset-profiles";
 import { ASSET_TYPES } from "@sdp/types/asset-profiles";
-import { normalizeTemplateId, TEMPLATE_DEFINITIONS } from "../templates/definitions";
+import { normalizeTemplateId, TEMPLATE_DEFINITIONS } from "#/templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import {
   ADVANCED_SETTINGS,

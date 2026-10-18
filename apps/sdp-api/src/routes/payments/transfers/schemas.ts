@@ -1,7 +1,11 @@
 import { PAYMENT_TRANSFER_STATUSES, PAYMENT_TRANSFER_TYPES } from "@sdp/types/payments";
 import { z } from "zod";
-import { rampProviderSchema } from "../ramps/schemas";
-import { paymentAmountSchema, paymentTokenSchema, solanaAddressSchema } from "../schemas";
+import { rampProviderSchema } from "@/routes/payments/ramps/schemas";
+import {
+  paymentAmountSchema,
+  paymentTokenSchema,
+  solanaAddressSchema,
+} from "@/routes/payments/schemas";
 
 export const createTransferSchema = z.strictObject({
   projectId: z.string().min(1).optional(),

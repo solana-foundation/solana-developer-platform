@@ -8,12 +8,15 @@ import { Label } from "@sdp/ui/label";
 import { useState } from "react";
 import { toast } from "sonner";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import {
+  getHighRiskProviders,
+  runComplianceCheck,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
-import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import { SOLANA_ADDRESS } from "./counterparty-create-schemas.redesign";
 
 type Phase = "idle" | "screening" | "flagged" | "adding";

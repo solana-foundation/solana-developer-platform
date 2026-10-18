@@ -12,6 +12,7 @@ import { useThemeScope } from "@sdp/ui/theme-scope";
 import { AnimatePresence, domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
+import { useRampEstimate } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
@@ -29,7 +30,6 @@ import {
   type SelectedRampPair,
   surfacedRampProviderOptions,
 } from "@/lib/ramps";
-import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector.redesign";
 import { ProviderCard, ProviderQuoteCard } from "./provider-card.redesign";
 import {

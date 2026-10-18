@@ -5,9 +5,9 @@
  */
 
 import type { Address } from "@solana/kit";
-import { DFNS_PROVIDER_LABEL } from "../dfns/client";
-import { DfnsSigner } from "../dfns/signer";
-import { SigningError } from "../signing";
+import { DFNS_PROVIDER_LABEL } from "#/dfns/client";
+import { DfnsSigner } from "#/dfns/signer";
+import { SigningError } from "#/signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainDfnsConfig } from "./types";
 

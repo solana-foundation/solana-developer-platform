@@ -5,12 +5,12 @@ import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { PaymentRampEstimate } from "@sdp/types/payments";
 import { Callout } from "@sdp/ui/callout";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { formatRampQuoteTimeRemaining } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import type { OnrampWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard.redesign";
+import { useRampEstimate } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
-import { formatRampQuoteTimeRemaining } from "../../payments-overview.utils";
-import { formatDecimalAmount } from "../../payments-presentation";
-import type { OnrampWizard } from "../hooks/use-onramp-wizard.redesign";
-import { useRampEstimate } from "../hooks/use-ramp-estimate";
 
 function ReviewRow({ label, value, aside }: { label: string; value: ReactNode; aside?: string }) {
   return (

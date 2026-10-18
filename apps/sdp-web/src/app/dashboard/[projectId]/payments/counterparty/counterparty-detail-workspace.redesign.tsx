@@ -14,22 +14,22 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { DashboardPageTitle } from "@/components/dashboard-page-title";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   resolveTransferTokenLabel,
   shortenAddress,
   statusMessageKey,
-} from "../payments-overview.utils";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDate,
   formatDateTime,
   formatDecimalAmount,
   PAYMENT_STATUS_TONE,
-} from "../payments-presentation";
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { DashboardPageTitle } from "@/components/dashboard-page-title";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { SETTLED_PAYOUT_STATUSES } from "./counterparty-detail.data";
 import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts.redesign";

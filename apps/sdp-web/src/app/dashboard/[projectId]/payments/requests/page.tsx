@@ -1,11 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import {
+  fetchActiveApiKeys,
+  resolvePlaygroundApiBaseUrl,
+} from "@/app/dashboard/[projectId]/playground-api-data";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
-import { fetchCounterparties } from "../counterparty/counterparty-page.data";
-import { fetchPaymentsWallets } from "../payments-page.data";
 import { PaymentRequestsPage as RedesignPaymentRequestsPage } from "./page.redesign";
 import { fetchPaymentRequests } from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";

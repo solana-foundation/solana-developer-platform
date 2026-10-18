@@ -18,23 +18,23 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
-import { assertApprovedPrivateChannelDestinations } from "@/services/private-channels/egress";
-import { mapPrivateChannelError } from "@/services/private-channels/errors";
-import { provisionPrincipal } from "@/services/private-channels/members";
-import { toProbeResultDto, verifyInstanceConnection } from "@/services/private-channels/service";
-import type { AppContext } from "../context";
+import type { AppContext } from "@/routes/private-channels/context";
 import {
   getPrivateChannelInstanceRepository,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
   loadPrivateChannelProjectRpcClient,
-} from "../context";
-import { emitLifecycle, emitMember } from "../helpers";
+} from "@/routes/private-channels/context";
+import { emitLifecycle, emitMember } from "@/routes/private-channels/helpers";
 import type {
   connectPrivateChannelInstanceSchema,
   updatePrivateChannelInstanceSchema,
-} from "../schemas";
+} from "@/routes/private-channels/schemas";
+import { getLogger } from "@/runtime/logger";
+import { assertApprovedPrivateChannelDestinations } from "@/services/private-channels/egress";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
+import { provisionPrincipal } from "@/services/private-channels/members";
+import { toProbeResultDto, verifyInstanceConnection } from "@/services/private-channels/service";
 
 export const getPrivateChannelInstance = async (c: AppContext) => {
   const auth = getAuth(c);

@@ -2,7 +2,10 @@
 
 import type { PaymentTransferSummary } from "@sdp/types/payments";
 import { toast } from "sonner";
-import type { CreateTransferInput, Translate } from "../payments-workspace.data";
+import type {
+  CreateTransferInput,
+  Translate,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 
 /** Present the result of funding one existing off-ramp transfer. */
 export async function submitOfframpDeposit(

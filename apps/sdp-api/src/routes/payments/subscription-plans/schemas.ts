@@ -5,7 +5,7 @@ import {
   paymentTokenSchema,
   solanaAddressSchema,
   u64StringSchema,
-} from "../schemas";
+} from "@/routes/payments/schemas";
 
 export const subscriptionPlanIdParamsSchema = z.object({
   planId: z.string().min(1),

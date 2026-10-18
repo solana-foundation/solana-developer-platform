@@ -1,12 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import {
+  fetchIssuedTokensByMint,
+  fetchPaymentsWallets,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { fetchCounterparties } from "../counterparty/counterparty-page.data";
-import { fetchIssuedTokensByMint, fetchPaymentsWallets } from "../payments-page.data";
 import { enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data.redesign";
 import { parseTransactionFilters } from "./transactions-query.redesign";

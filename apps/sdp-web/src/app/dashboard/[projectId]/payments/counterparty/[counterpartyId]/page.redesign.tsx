@@ -1,11 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import {
+  fetchCounterpartyDetail,
+  fetchCounterpartyPayouts,
+} from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail.data";
+import { CounterpartyDetailWorkspace } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace.redesign";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { fetchCounterpartyDetail, fetchCounterpartyPayouts } from "../counterparty-detail.data";
-import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace.redesign";
 
 export async function CounterpartyDetailRoute({
   params,

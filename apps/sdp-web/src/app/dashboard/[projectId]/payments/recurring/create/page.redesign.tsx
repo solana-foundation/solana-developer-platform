@@ -1,10 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import {
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { RecurringPaymentCreateWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-create-workspace.redesign";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchCounterparties } from "../../counterparty/counterparty-page.data";
-import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
-import { RecurringPaymentCreateWorkspace } from "../recurring-payment-create-workspace.redesign";
 
 export async function RecurringPaymentCreatePage() {
   const { userId, orgId } = await auth();

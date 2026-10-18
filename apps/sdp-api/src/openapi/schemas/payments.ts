@@ -20,6 +20,7 @@ import {
   recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
 } from "@/routes/payments/recurring-payments/schemas";
+import { transferIdParamsSchema as transferIdParamsSchemaBase } from "@/routes/payments/schemas";
 import {
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
@@ -56,7 +57,6 @@ import {
   transferTypeSchema as transferTypeSchemaBase,
 } from "@/routes/payments/transfers/schemas";
 import { walletIdParamsSchema as walletIdParamsSchemaBase } from "@/routes/payments/wallet-balances/schemas";
-import { transferIdParamsSchema as transferIdParamsSchemaBase } from "../../routes/payments/schemas";
 import {
   base64Schema,
   isoDateTimeSchema,

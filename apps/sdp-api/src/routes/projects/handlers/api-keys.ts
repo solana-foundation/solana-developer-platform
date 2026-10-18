@@ -10,6 +10,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
+import { assertApiKeyProjectAccess } from "@/routes/projects/project-access";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
@@ -25,7 +26,6 @@ import {
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
-import { assertApiKeyProjectAccess } from "../project-access";
 
 type AppContext = Context<{ Bindings: Env }>;
 

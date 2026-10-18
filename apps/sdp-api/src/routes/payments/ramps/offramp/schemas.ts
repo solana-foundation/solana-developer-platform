@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { paymentAmountSchema } from "../../schemas";
 import {
   offrampCryptoRailSchema,
   rampFiatCurrencySchema,
   rampProviderSchema,
   rampsMemoSchema,
-} from "../schemas";
+} from "@/routes/payments/ramps/schemas";
+import { paymentAmountSchema } from "@/routes/payments/schemas";
 
 export const listOfframpCurrenciesQuerySchema = z.object({
   source: offrampCryptoRailSchema.optional(),

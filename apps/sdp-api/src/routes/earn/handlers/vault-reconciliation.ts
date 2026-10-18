@@ -6,12 +6,12 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import type { AppContext } from "@/routes/earn/context";
+import { getEarnRepository } from "@/routes/earn/context";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
 import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconciliation.service";
-import type { AppContext } from "../context";
-import { getEarnRepository } from "../context";
 import { listReadableEarnVaultWallets } from "./vault";
 
 /**

@@ -5,7 +5,7 @@ import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
-} from "../../routes/api-keys/schemas";
+} from "@/routes/api-keys/schemas";
 import {
   apiKeyIdParamSchema,
   apiKeyPrefixSchema,

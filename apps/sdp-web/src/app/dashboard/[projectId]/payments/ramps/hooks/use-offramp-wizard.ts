@@ -17,21 +17,25 @@ import {
   createTransfer,
   fetchTransferById,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey } from "@/i18n/messages";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import type { TranslationValues } from "@/i18n/translate";
-import { offrampPairs } from "@/lib/ramps";
-import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import { submitOfframpDeposit } from "../offramp-deposit";
-import { getRampTransferState } from "../ramp-transfer-state";
-import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
+import { submitOfframpDeposit } from "@/app/dashboard/[projectId]/payments/ramps/offramp-deposit";
+import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import {
+  sourceWalletSchema,
+  withdrawAmountSchema,
+  withdrawSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import {
   memoSummaryDetails,
   optionalDetail,
   providerSummaryDetail,
   summaryAmount,
-} from "../wizard-summary";
+} from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
+import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
+import { offrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;

@@ -1,8 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { loadPaymentsActionPageData } from "@/app/dashboard/[projectId]/payments/ramps/payments-action-page.server";
+import { PaymentsActionPage } from "@/app/dashboard/[projectId]/payments/ramps/ramp-action-page.redesign";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { loadPaymentsActionPageData } from "../ramps/payments-action-page.server";
-import { PaymentsActionPage } from "../ramps/ramp-action-page.redesign";
 
 export async function PaymentsDepositPage() {
   const { userId, orgId } = await auth();

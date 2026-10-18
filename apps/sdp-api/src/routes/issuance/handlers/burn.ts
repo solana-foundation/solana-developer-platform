@@ -6,6 +6,12 @@ import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  createIssuanceToken2022Service,
+  getTenantTokenService,
+  requireProjectScope,
+} from "@/routes/issuance/helpers";
+import type { burnSchema } from "@/routes/issuance/schemas";
 import { AuditService } from "@/services/audit.service";
 import {
   assertTokenAllowsOperation,
@@ -13,12 +19,6 @@ import {
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import {
-  createIssuanceToken2022Service,
-  getTenantTokenService,
-  requireProjectScope,
-} from "../helpers";
-import type { burnSchema } from "../schemas";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,

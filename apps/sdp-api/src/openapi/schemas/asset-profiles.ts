@@ -6,7 +6,7 @@ import {
   issuanceMetadataSchema as issuanceMetadataSchemaBase,
   listAssetProfilesQuerySchema as listAssetProfilesQuerySchemaBase,
   updateAssetProfileObjectSchema as updateAssetProfileObjectSchemaBase,
-} from "../../routes/asset-profiles/schemas";
+} from "@/routes/asset-profiles/schemas";
 import {
   isoDateTimeSchema,
   orgIdParamSchema,

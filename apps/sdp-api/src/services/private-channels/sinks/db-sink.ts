@@ -2,7 +2,7 @@ import type {
   PrivateChannelEventRepository,
   PrivateChannelEventWriteInput,
 } from "@/db/repositories/private-channel-event.repository";
-import type { PrivateChannelEventSink } from "../event.service";
+import type { PrivateChannelEventSink } from "@/services/private-channels/event.service";
 
 export function createDbEventSink(repo: PrivateChannelEventRepository): PrivateChannelEventSink {
   return {

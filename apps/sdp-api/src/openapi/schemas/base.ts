@@ -7,7 +7,7 @@ import {
 } from "@sdp/types/payment-rails";
 import { TOKEN_TRANSACTION_STATUSES } from "@sdp/types/tokens";
 import { z } from "zod";
-import { IDEMPOTENCY_KEY_PATTERN } from "../../middleware/idempotency-key";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/middleware/idempotency-key";
 
 extendZodWithOpenApi(z);
 

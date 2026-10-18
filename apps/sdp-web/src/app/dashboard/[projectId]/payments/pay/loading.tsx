@@ -1,5 +1,5 @@
+import { PaymentsPayPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import { DesignSwitch } from "@/components/new-design";
-import { PaymentsPayPageSkeleton } from "../payments-route-skeletons";
 import { PayLoading as RedesignPayLoading } from "./loading.redesign";
 
 export function PreviousPayLoading() {

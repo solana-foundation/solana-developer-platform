@@ -27,14 +27,14 @@ import {
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
+import { EmbeddedYieldPortfolioSkeleton } from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
+import { truncateMiddle } from "@/app/dashboard/[projectId]/markets/truncate-middle";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
-import { truncateMiddle } from "../truncate-middle";
 import { isPositiveDecimal } from "./earn-decimal";
 import {
   earnStrategyLiquidityLabel,

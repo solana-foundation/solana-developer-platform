@@ -1,5 +1,6 @@
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { wisdomTreeFundByMint, wisdomTreeFundsForCluster } from "@sdp/types/wisdomtree-programs";
+import { StubEarnClient } from "#/providers/stub";
 import type {
   EarnDeclaredStrategySupport,
   EarnDepositEligibility,
@@ -7,8 +8,7 @@ import type {
   EarnDepositEligibilityProvider,
   EarnRuntimeContext,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 import {
   checkWisdomTreeDepositEligibility,
   listWisdomTreeProducts,

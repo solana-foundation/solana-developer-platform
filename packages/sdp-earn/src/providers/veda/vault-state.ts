@@ -1,6 +1,6 @@
 import type { VedaDeployment } from "@sdp/types/veda-programs";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { internalError } from "../../errors";
+import { internalError } from "#/errors";
 import {
   assertRpcServesCluster,
   bytesEqual,
@@ -12,7 +12,7 @@ import {
   solanaRpcCall,
   toBase58,
   u64ToLeBytes,
-} from "../../solana-rpc";
+} from "#/solana-rpc";
 
 /**
  * Veda's `boring_vault_svm` account layouts, decoded straight off the chain.

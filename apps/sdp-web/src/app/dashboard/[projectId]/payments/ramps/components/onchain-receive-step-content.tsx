@@ -3,9 +3,9 @@
 import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
+import type { OnchainReceiveWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-receive-wizard";
+import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
-import type { OnchainReceiveWizard } from "../hooks/use-onchain-receive-wizard";
-import { walletComboboxOptions } from "../wallet-options";
 import { WalletReceiveCard } from "./wallet-receive-card";
 
 export function OnchainReceiveStepContent({ wizard }: { wizard: OnchainReceiveWizard }) {

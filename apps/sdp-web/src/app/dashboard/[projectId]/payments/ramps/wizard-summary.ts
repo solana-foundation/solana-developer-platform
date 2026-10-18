@@ -1,10 +1,10 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { CreditCardIcon, FileTextIcon, type LucideIcon, UserRoundIcon } from "lucide-react";
 import { formatTokenAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
-import type { WizardSummaryDetail } from "../wizard-summary-list";
 import { isEmptyMemoRow, type MemoRow, memoRowsToRecord } from "./memo";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;

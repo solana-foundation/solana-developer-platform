@@ -8,7 +8,7 @@ import {
   addMemberSchema as addMemberSchemaBase,
   updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
-} from "../../routes/projects/schemas";
+} from "@/routes/projects/schemas";
 import { apiKeyListItemSchema } from "./api-keys";
 import {
   isoDateTimeSchema,

@@ -5,16 +5,20 @@ import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments"
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { addDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
+import { addDecimalAmounts, divideDecimalAmounts } from "#/decimal";
 import {
   badRequest,
   estimateNotAvailable,
   providerNotConfigured,
   providerUnavailable,
-} from "../../../errors";
-import { providerFetchJson } from "../../fetch";
-import { readyCounterparty } from "../../requirements";
-import { basicAuthHeader, UNREPORTED_COUNTRY_SUPPORT, unreportedCurrencyLimit } from "../../shared";
+} from "#/errors";
+import { providerFetchJson } from "#/ramps/fetch";
+import { readyCounterparty } from "#/ramps/requirements";
+import {
+  basicAuthHeader,
+  UNREPORTED_COUNTRY_SUPPORT,
+  unreportedCurrencyLimit,
+} from "#/ramps/shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
@@ -26,7 +30,7 @@ import type {
   RampProvider,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
-} from "../../types";
+} from "#/ramps/types";
 
 const STRIPE_API_BASE_URL = "https://api.stripe.com";
 const STRIPE_API_VERSION = "2026-05-27.dahlia";

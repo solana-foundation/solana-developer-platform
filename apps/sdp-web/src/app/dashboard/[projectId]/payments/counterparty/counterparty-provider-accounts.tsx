@@ -12,11 +12,14 @@ import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { ChevronDownIcon, LoaderCircleIcon, WalletIcon } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
+import { formatRelativeTime, toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
+import {
+  formatDisplayAmount,
+  formatTimestamp,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
-import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
-import { formatDisplayAmount, formatTimestamp } from "../payments-overview.utils";
 import {
   type FundingWalletAccount,
   groupProviderAccounts,

@@ -11,6 +11,10 @@ import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import {
+  getHighRiskProviders,
+  runComplianceCheck,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -18,7 +22,6 @@ import { fetchResultAnswer } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm, type ZodFormApi } from "@/lib/use-zod-form";
-import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import { defaultBasics } from "./counterparty-create-defaults.redesign";
 import {
   type BasicsClean,

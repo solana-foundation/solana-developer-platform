@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { paymentsDemoMode } from "@/flags";
-import { getSdpAuth } from "../sdp-auth";
+import { getSdpAuth } from "@/lib/sdp-auth";
 import { isDemoSessionCookie, PAYMENTS_DEMO_COOKIE_NAME } from "./demo-cookie";
 
 const DEMO_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;

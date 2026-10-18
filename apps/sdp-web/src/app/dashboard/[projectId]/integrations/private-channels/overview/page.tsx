@@ -2,19 +2,22 @@ import { Button } from "@sdp/ui/button";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
-import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
-import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { PrivateChannelsLoadError } from "../private-channels-load-error";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
 import {
   loadChannels,
   loadInstance,
   loadPrincipals,
   loadTokenEligibility,
-} from "../private-channels-page.data";
-import { PRIVATE_CHANNELS_SETUP_PATH } from "../private-channels-routes";
-import { enabledTokenSymbols, shortenAddress } from "../private-channels-view-data";
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
+import { PRIVATE_CHANNELS_SETUP_PATH } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import {
+  enabledTokenSymbols,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-view-data";
+import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
+import { getTranslations } from "@/i18n/server";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { ChannelDirectoryRow } from "./channel-directory-row";
 import { CreateChannelButton } from "./create-channel-button";
 

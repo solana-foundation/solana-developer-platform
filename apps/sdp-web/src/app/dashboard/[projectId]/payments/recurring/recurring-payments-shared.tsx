@@ -14,13 +14,16 @@ import { CopyIcon, ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+  formatTimestamp,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { ONCHAIN_AMOUNT_PATTERN } from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatTimestamp, shortenAddress } from "../payments-overview.utils";
-import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 
 export const STATUS_VARIANTS = {
   pending_activation: "warning",

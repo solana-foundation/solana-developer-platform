@@ -12,6 +12,9 @@ import { Select, SelectItem } from "@sdp/ui/select";
 import { ReceiptTextIcon, SearchIcon, XIcon } from "lucide-react";
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { TransactionsResultsSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -25,9 +28,6 @@ import {
   useDashboardTab,
 } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { paymentsQueryKeys } from "../payments-query-key";
-import { TransactionsResultsSkeleton } from "../payments-route-skeletons";
 import { TransactionContext } from "./transaction-filters-context";
 import { counterpartyHref, walletHref } from "./transaction-module-hrefs";
 import {

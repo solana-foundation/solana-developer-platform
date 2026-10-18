@@ -1,5 +1,5 @@
+import { PaymentsTransactionsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import { DesignSwitch } from "@/components/new-design";
-import { PaymentsTransactionsPageSkeleton } from "../payments-route-skeletons";
 import { TransactionsLoading as RedesignTransactionsLoading } from "./loading.redesign";
 
 export function PreviousTransactionsLoading() {

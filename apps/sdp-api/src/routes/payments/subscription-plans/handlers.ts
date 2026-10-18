@@ -17,6 +17,8 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
+import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
@@ -28,8 +30,6 @@ import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
-import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
   listSubscriptionPlansQuerySchema,

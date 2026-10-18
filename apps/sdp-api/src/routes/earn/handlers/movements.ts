@@ -10,9 +10,9 @@ import { badRequest } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import type { AppContext } from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
-import type { AppContext } from "../context";
-import { earnMovementsQuerySchema } from "../schemas";
+import { earnMovementsQuerySchema } from "@/routes/earn/schemas";
 import { parseQuery } from "./shared";
 import { listReadableEarnVaultWallets } from "./vault";
 

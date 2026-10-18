@@ -1,9 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
+import { loadPrincipals } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadPrincipals } from "../private-channels-page.data";
 import { MembersTable } from "./members-table";
 
 export default async function PrivateChannelsMembersPage() {

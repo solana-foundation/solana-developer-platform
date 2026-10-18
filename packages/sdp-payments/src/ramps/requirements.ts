@@ -10,7 +10,7 @@ import type {
 } from "@sdp/types/ramp-requirements";
 import { offeredCountryCodes, offeredFiatCurrencies } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { SdpPaymentsError } from "../errors";
+import { SdpPaymentsError } from "#/errors";
 
 /**
  * Builds the ready state for a ramp counterparty.

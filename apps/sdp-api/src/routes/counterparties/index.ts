@@ -5,9 +5,9 @@ import { idempotent } from "@/middleware/idempotency";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireModule } from "@/middleware/require-module";
 import { validateBody, validateParams } from "@/middleware/validate";
+import { counterpartyAccounts } from "@/routes/counterparty-accounts";
+import { counterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts";
 import type { Env } from "@/types/env";
-import { counterpartyAccounts } from "../counterparty-accounts";
-import { counterpartyProviderAccounts } from "../counterparty-provider-accounts";
 import { authorizeCounterparty } from "./access";
 import {
   archiveCounterparty,

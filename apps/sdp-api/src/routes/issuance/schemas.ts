@@ -8,7 +8,7 @@ import {
   assetCategorySchema,
   assetTypeSchema,
   issuanceMetadataSchema,
-} from "../asset-profiles/schemas";
+} from "@/routes/asset-profiles/schemas";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Schemas

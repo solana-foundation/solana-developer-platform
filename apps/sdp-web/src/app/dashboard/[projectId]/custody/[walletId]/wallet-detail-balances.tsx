@@ -8,14 +8,14 @@ import {
   BALANCE_REFRESH_INTERVAL_MS,
   fetchWalletBalance,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.data";
-import { TokenMark } from "@/components/token-mark";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
   resolveTotalBalance,
   shortenAddress,
-} from "../../payments/payments-overview.utils";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { TokenMark } from "@/components/token-mark";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 
 export interface WalletTrackedBalancesResult {
   balances: CustodyWalletTokenBalance[];

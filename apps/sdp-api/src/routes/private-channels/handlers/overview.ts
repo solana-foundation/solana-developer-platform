@@ -3,13 +3,13 @@ import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getInstanceOverview } from "@/services/private-channels/service";
-import type { AppContext } from "../context";
+import type { AppContext } from "@/routes/private-channels/context";
 import {
   getPrivateChannelInstanceRepository,
   loadPrivateChannelProjectRpcClient,
-} from "../context";
-import { recordInstanceError } from "../helpers";
+} from "@/routes/private-channels/context";
+import { recordInstanceError } from "@/routes/private-channels/helpers";
+import { getInstanceOverview } from "@/services/private-channels/service";
 
 // GET /instance/overview — active instance snapshot: gateway health + a few
 // cheap Solana reads via the gateway's JSON-RPC passthrough. 404 when no

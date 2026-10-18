@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import {
@@ -10,7 +11,6 @@ import {
   paymentsPlaygroundHref,
 } from "@/lib/payments-routes";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import {
   loadPaymentRequestsList,
   parsePaymentRequestsListParams,

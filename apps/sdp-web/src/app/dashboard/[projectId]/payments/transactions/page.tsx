@@ -1,11 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchIssuedTokensByMint } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchIssuedTokensByMint } from "../payments-page.data";
 import { TransactionsPage as RedesignTransactionsPage } from "./page.redesign";
 import { enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data";

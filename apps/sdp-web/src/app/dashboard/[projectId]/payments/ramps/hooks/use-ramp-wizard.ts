@@ -17,13 +17,20 @@ import {
   cancelRampTransfer,
   fetchAllCounterparties,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import {
+  type MemoRow,
+  memoRowsToRecord,
+  validateMemoRows,
+} from "@/app/dashboard/[projectId]/payments/ramps/memo";
+import {
+  type RampFields,
+  rampSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
-import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import { useRampQuote } from "./use-ramp-quote";

@@ -3,8 +3,11 @@ import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { validateBody, validateParams } from "@/middleware/validate";
+import {
+  authorizeCounterparty,
+  authorizeCounterpartyAccount,
+} from "@/routes/counterparties/access";
 import type { Env } from "@/types/env";
-import { authorizeCounterparty, authorizeCounterpartyAccount } from "../counterparties/access";
 import {
   archiveCounterpartyAccount,
   createCounterpartyAccount,

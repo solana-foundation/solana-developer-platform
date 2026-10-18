@@ -1,8 +1,8 @@
 import type { AssetProfile, IssuanceMetadata } from "@sdp/types/asset-profiles";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token } from "@sdp/types/tokens";
-import { getTokenAccessControlMode } from "../../access-control.utils";
-import { getDefaultPublicFields } from "../../create/draft-mapping";
+import { getTokenAccessControlMode } from "@/app/dashboard/[projectId]/issuance/access-control.utils";
+import { getDefaultPublicFields } from "@/app/dashboard/[projectId]/issuance/create/draft-mapping";
 import {
   type AdvancedSettingsDraft,
   CAPACITY_KEYS,
@@ -10,7 +10,7 @@ import {
   coerceCapacities,
   type DocumentRow,
   type DraftState,
-} from "../../create/issuance-draft-wizard.types";
+} from "@/app/dashboard/[projectId]/issuance/create/issuance-draft-wizard.types";
 
 // The metadata keys the edit form owns per namespace. The clobber-safe merge
 // only overwrites/deletes these; every other key an integration may have

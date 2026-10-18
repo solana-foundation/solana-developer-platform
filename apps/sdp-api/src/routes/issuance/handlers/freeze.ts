@@ -8,15 +8,15 @@ import { getDb } from "@/db/client";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { AuditService } from "@/services/audit.service";
-import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
-} from "../helpers";
-import type { freezeSchema, unfreezeSchema } from "../schemas";
+} from "@/routes/issuance/helpers";
+import type { freezeSchema, unfreezeSchema } from "@/routes/issuance/schemas";
+import { AuditService } from "@/services/audit.service";
+import type { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
 import { getTokenAccessControlMode, type TokenAccessControlMode } from "./access-control";
 import {
   admitIssuanceRuntimeExecution,

@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { Fragment, type ReactNode, useState } from "react";
+import { formatRelativeTime } from "@/app/dashboard/[projectId]/activity-format-utils";
+import { formatTimestamp } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
@@ -34,8 +36,6 @@ import { useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { formatRelativeTime } from "../../activity-format-utils";
-import { formatTimestamp } from "../../payments/payments-overview.utils";
 import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";

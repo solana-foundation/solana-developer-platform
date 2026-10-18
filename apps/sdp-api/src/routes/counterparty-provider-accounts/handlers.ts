@@ -8,9 +8,9 @@ import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterpa
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { AppContext } from "@/routes/counterparties/context";
+import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { loadRampListingAdmission } from "@/routes/payments/ramps/admission";
-import type { AppContext } from "../counterparties/context";
-import { getCounterpartiesRepository } from "../counterparties/context";
 import { getCounterpartyProviderAccountsRepository } from "./context";
 import {
   counterpartyProviderAccountParamsSchema,

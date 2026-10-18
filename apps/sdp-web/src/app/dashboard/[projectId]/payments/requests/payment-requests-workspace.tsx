@@ -47,7 +47,16 @@ import {
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
+import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
+import { CounterpartyPlaygroundLoading } from "@/app/dashboard/[projectId]/payments/counterparty-menu-loading";
+import {
+  formatDisplayAmount,
+  formatTimestamp,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { syncPlaygroundApiKeysForActiveTab } from "@/app/dashboard/[projectId]/payments/payments-playground-api-key-state";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
@@ -64,11 +73,6 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm } from "@/lib/use-zod-form";
-import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
-import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
-import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
-import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import {
   deriveTokenOptions,

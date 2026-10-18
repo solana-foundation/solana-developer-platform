@@ -5,10 +5,10 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import { useMemo } from "react";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { fetchRampEstimates } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import type { SelectedRampPair } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
-import { fetchRampEstimates } from "../../payments-workspace.data";
 
 interface UseRampEstimateArgs {
   direction: RampDirection;

@@ -68,7 +68,18 @@ import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
+import { mapTransferRow } from "@/routes/payments/mappers";
+import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
+import {
+  admitPaymentWalletRuntimeExecution,
+  assertPaymentWalletReadAccess,
+  authorizeCustodyPaymentWallet,
+  type ResolvedScope,
+  resolveScope,
+  resolveWalletByCustodyWalletId,
+} from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -92,17 +103,6 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import { type AppContext, getPaymentsRepository } from "../context";
-import { mapTransferRow } from "../mappers";
-import { transferIdParamsSchema } from "../schemas";
-import {
-  admitPaymentWalletRuntimeExecution,
-  assertPaymentWalletReadAccess,
-  authorizeCustodyPaymentWallet,
-  type ResolvedScope,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "../wallets";
 import {
   buildObservedTransfersForSignatures,
   dedupeSignatureHistory,

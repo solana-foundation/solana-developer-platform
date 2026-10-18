@@ -9,10 +9,10 @@ import {
 } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { ONCHAIN_AMOUNT_PATTERN } from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
-import { shortenAddress } from "../payments-overview.utils";
-import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
 
 export const STATUS_TRANSLATION_KEYS = {
   pending_activation: "DashboardPayments.recurring.pendingActivation",

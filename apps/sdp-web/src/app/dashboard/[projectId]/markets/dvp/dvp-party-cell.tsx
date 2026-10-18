@@ -10,10 +10,10 @@
  */
 
 import { WalletAddressCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { shortenAddress } from "../../payments/payments-overview.utils";
 import type { DvpPartyRef } from "./dvp-trade";
 
 /** A truncated address with the full value one copy-click away. */

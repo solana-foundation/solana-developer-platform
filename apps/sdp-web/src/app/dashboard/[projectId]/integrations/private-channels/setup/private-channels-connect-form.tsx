@@ -13,13 +13,13 @@ import { Label } from "@sdp/ui/label";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
 import { toast } from "sonner";
-import { WizardFrame } from "@/components/wizard-frame";
-import { useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   PRIVATE_CHANNELS_INTEGRATION_PATH,
   privateChannelsInstancePath,
-} from "../private-channels-routes";
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import { WizardFrame } from "@/components/wizard-frame";
+import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   type ConnectPrivateChannelResult,
   connectPrivateChannelAction,

@@ -12,14 +12,14 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "@/i18n/provider";
-import { COMPLIANCE_PROVIDER_LOGOS, type ComplianceProviderResult } from "@/lib/compliance";
 import {
   formatRiskScore,
   type RiskTone,
   resolveRiskTone,
   toProviderLabel,
-} from "../payments-workspace.data";
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { useTranslations } from "@/i18n/provider";
+import { COMPLIANCE_PROVIDER_LOGOS, type ComplianceProviderResult } from "@/lib/compliance";
 
 const ROW_HOLD_MS = 650;
 const ROW_STAGGER_MS = 420;

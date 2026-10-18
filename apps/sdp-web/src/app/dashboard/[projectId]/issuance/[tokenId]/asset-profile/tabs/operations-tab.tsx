@@ -5,10 +5,10 @@ import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { useState } from "react";
+import { AnimatedSection } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/animated-section";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
+import { TokenDisabledActionTooltip } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-disabled-action-tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
-import { AnimatedSection } from "../animated-section";
-import type { TokenOperations } from "../use-token-operations";
 import {
   getOperationGroups,
   getOperationLabels,

@@ -11,15 +11,15 @@ import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { AuditService } from "@/services/audit.service";
-import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
-} from "../helpers";
-import type { updateAuthoritySchema } from "../schemas";
+} from "@/routes/issuance/helpers";
+import type { updateAuthoritySchema } from "@/routes/issuance/schemas";
+import { AuditService } from "@/services/audit.service";
+import type { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
 import {
   type AuthorityRole,
   admitIssuanceRuntimeExecution,

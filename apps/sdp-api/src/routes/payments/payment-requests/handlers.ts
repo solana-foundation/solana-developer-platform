@@ -7,13 +7,13 @@ import { badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/payments/context";
+import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
-import type { AppContext } from "../context";
-import { resolveScope, resolveWallet } from "../wallets";
 import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {

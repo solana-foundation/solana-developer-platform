@@ -6,17 +6,17 @@ import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments"
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@solana/kit";
 import { z } from "zod";
-import { compareDecimalAmounts, sumDecimalAmounts } from "../../../decimal";
-import { providerNotConfigured, SdpPaymentsError } from "../../../errors";
-import { providerFetchJson } from "../../fetch";
-import { readyCounterparty } from "../../requirements";
+import { compareDecimalAmounts, sumDecimalAmounts } from "#/decimal";
+import { providerNotConfigured, SdpPaymentsError } from "#/errors";
+import { providerFetchJson } from "#/ramps/fetch";
+import { readyCounterparty } from "#/ramps/requirements";
 import {
   isActiveIso4217CurrencyCode,
   isIso3166Alpha2CountryCode,
   RAMP_RAIL_DUMPS,
   requireEnv,
   unreportedCurrencyLimit,
-} from "../../shared";
+} from "#/ramps/shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
@@ -28,7 +28,7 @@ import type {
   RampProvider,
   RampRuntimeContext,
   ValidateCounterpartyOptions,
-} from "../../types";
+} from "#/ramps/types";
 
 const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";

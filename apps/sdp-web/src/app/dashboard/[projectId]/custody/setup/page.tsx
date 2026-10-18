@@ -1,6 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types/custody";
 import { redirect } from "next/navigation";
+import { fetchConnectionPickerOptions } from "@/app/dashboard/[projectId]/custody/connections/connections.data";
+import {
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -12,9 +18,6 @@ import {
   requestProjectHref,
   type SdpApiClient,
 } from "@/lib/sdp-api";
-import type { OnboardingStatusResponse } from "../../onboarding-status";
-import { fetchConnectionPickerOptions } from "../connections/connections.data";
-import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
 import { CurrentCustodySetupPage as RedesignCurrentCustodySetupPage } from "./page.redesign";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 

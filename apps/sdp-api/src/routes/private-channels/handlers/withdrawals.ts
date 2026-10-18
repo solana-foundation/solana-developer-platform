@@ -7,6 +7,22 @@ import { badRequest, notFound } from "@/lib/errors";
 import { isAbandonedReservation } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/private-channels/context";
+import {
+  getPrivateChannelWithdrawalRepository,
+  loadPrivateChannelProjectRpcClient,
+} from "@/routes/private-channels/context";
+import { requireIdempotencyKey } from "@/routes/private-channels/helpers";
+import {
+  authorizeMovementReplay,
+  matchesWithdrawalReplay,
+  requireMovementWrite,
+} from "@/routes/private-channels/replay";
+import {
+  type createWithdrawalBodySchema,
+  withdrawalIdParamSchema,
+} from "@/routes/private-channels/schemas";
+import { resolveWithdrawalCreateContext } from "@/routes/private-channels/value-movement-access";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import { mapPrivateChannelError } from "@/services/private-channels/errors";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
@@ -16,15 +32,6 @@ import {
   listChannelWithdrawals,
   resolveAbandonedWithdrawalReservation,
 } from "@/services/private-channels/withdraw";
-import type { AppContext } from "../context";
-import {
-  getPrivateChannelWithdrawalRepository,
-  loadPrivateChannelProjectRpcClient,
-} from "../context";
-import { requireIdempotencyKey } from "../helpers";
-import { authorizeMovementReplay, matchesWithdrawalReplay, requireMovementWrite } from "../replay";
-import { type createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
-import { resolveWithdrawalCreateContext } from "../value-movement-access";
 
 /**
  * POST /withdrawals — burn the custody wallet's channel-chain balance (via the

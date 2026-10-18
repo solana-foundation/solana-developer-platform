@@ -17,14 +17,14 @@ import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
-import type { Env } from "@/types/env";
 import {
   type AppContext,
   getEarnRepository,
   requireEarnStrategyForCaller,
   resolveEarnCatalogueEnvironment,
-} from "../context";
-import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
+} from "@/routes/earn/context";
+import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "@/routes/earn/schemas";
+import type { Env } from "@/types/env";
 import { CURATED_VAULTS, HIDDEN_STRATEGY_TERMS, HIDDEN_VAULTS } from "./curation";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 

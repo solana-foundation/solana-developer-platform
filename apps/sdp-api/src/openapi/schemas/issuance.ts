@@ -4,7 +4,7 @@ import {
   assetCategorySchema as assetCategorySchemaBase,
   assetTypeSchema as assetTypeSchemaBase,
   issuanceMetadataSchema as issuanceMetadataSchemaBase,
-} from "../../routes/asset-profiles/schemas";
+} from "@/routes/asset-profiles/schemas";
 import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
@@ -22,7 +22,7 @@ import {
   unfreezeSchema as unfreezeSchemaBase,
   updateAuthoritySchema as updateAuthoritySchemaBase,
   updateTokenSchema as updateTokenSchemaBase,
-} from "../../routes/issuance/schemas";
+} from "@/routes/issuance/schemas";
 import { assetProfileSchema } from "./asset-profiles";
 import {
   apiKeyIdParamSchema,

@@ -1,15 +1,15 @@
 import { EARN_DEPOSIT_TOKEN_SYMBOLS, type EarnDepositTokenSymbol } from "@sdp/types/earn";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { providerUnavailable } from "../../errors";
-import { providerFetchJson } from "../../fetch";
+import { providerUnavailable } from "#/errors";
+import { providerFetchJson } from "#/fetch";
+import { StubEarnClient } from "#/providers/stub";
 import type {
   EarnDeclaredStrategySupport,
   EarnLiveMetricsProvider,
   EarnRuntimeContext,
   ProviderStrategyMetrics,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 import { listKaminoDevnetVaults } from "./devnet";
 
 /**

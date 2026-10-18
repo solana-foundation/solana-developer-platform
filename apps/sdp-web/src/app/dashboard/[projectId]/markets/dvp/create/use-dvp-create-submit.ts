@@ -12,14 +12,17 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+  DVP_TOAST_POSITION,
+  dvpToastAction,
+} from "@/app/dashboard/[projectId]/markets/dvp/dvp-action-toast";
+import { freshDvpIdempotencyKey } from "@/app/dashboard/[projectId]/markets/dvp/dvp-idempotency-key";
+import { dvpErrorEnvelopeSchema } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { DVP_TOAST_POSITION, dvpToastAction } from "../dvp-action-toast";
-import { freshDvpIdempotencyKey } from "../dvp-idempotency-key";
-import { dvpErrorEnvelopeSchema } from "../dvp-trade";
 import { TOKEN_2022_PROGRAM } from "./dvp-create.data";
 import type { DvpPartyWire } from "./use-dvp-parties";
 

@@ -2,13 +2,13 @@ import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { getRequestLocale, getTranslations } from "@/i18n/server";
 import {
   formatDisplayAmount,
   formatTimestamp,
   shortenAddress,
-} from "../../dashboard/[projectId]/payments/payments-overview.utils";
-import { resolvePlaygroundApiBaseUrl } from "../../dashboard/[projectId]/playground-api-data";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
+import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { PayQrCode } from "./pay-qr-code";
 
 export const dynamic = "force-dynamic";

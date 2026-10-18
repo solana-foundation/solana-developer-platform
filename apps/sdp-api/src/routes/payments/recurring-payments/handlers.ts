@@ -31,6 +31,14 @@ import {
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  type AppContext,
+  getPaymentRecurringPaymentsRepository,
+  getPaymentSubscriptionsRepository,
+  getPaymentsRepository,
+} from "@/routes/payments/context";
+import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
+import { assertPaymentWalletReadAccess } from "@/routes/payments/wallets";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
@@ -45,14 +53,6 @@ import {
 } from "@/services/payments/recurring-payments/lifecycle";
 import { updateRecurringPayment as updateRecurringPaymentRecord } from "@/services/payments/recurring-payments/update";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import {
-  type AppContext,
-  getPaymentRecurringPaymentsRepository,
-  getPaymentSubscriptionsRepository,
-  getPaymentsRepository,
-} from "../context";
-import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
-import { assertPaymentWalletReadAccess } from "../wallets";
 import type {
   AuthorizedRecurringPayment,
   AuthorizedRecurringPaymentCreate,

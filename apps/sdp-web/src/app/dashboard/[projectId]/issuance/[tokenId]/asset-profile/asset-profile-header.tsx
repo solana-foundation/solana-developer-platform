@@ -5,13 +5,19 @@ import type { Token } from "@sdp/types/tokens";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { ArrowUpRightIcon, CopyIcon, PlayIcon, RefreshCw, RocketIcon } from "lucide-react";
+import { TokenDisabledActionTooltip } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-disabled-action-tooltip";
+import {
+  formatDate,
+  isSupplyLockedOnChain,
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import { getCategoryPresentation } from "@/app/dashboard/[projectId]/issuance/create/asset-taxonomy";
+import {
+  formatSupply,
+  tokenStatusPresentation,
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-fields";
+import { shortenAddress } from "@/app/dashboard/[projectId]/issuance/wallet-identity";
 import { TokenLogo } from "@/components/token-logo";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { getCategoryPresentation } from "../../create/asset-taxonomy";
-import { formatSupply, tokenStatusPresentation } from "../../issuance-token-fields";
-import { shortenAddress } from "../../wallet-identity";
-import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
-import { formatDate, isSupplyLockedOnChain } from "../token-management-workspace.utils";
 
 interface AssetProfileHeaderProps {
   token: Token;

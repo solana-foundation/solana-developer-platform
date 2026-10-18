@@ -18,13 +18,16 @@ import {
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
+import {
+  admitPaymentWalletRuntimeExecution,
+  authorizeCustodyPaymentWallet,
+} from "@/routes/payments/wallets";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
-import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,

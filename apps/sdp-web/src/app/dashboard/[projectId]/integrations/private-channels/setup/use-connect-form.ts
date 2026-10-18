@@ -10,9 +10,9 @@ import type {
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
 import { toast } from "sonner";
+import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { privateChannelsInstancePath } from "../private-channels-routes";
 import {
   type ConnectPrivateChannelResult,
   connectPrivateChannelAction,

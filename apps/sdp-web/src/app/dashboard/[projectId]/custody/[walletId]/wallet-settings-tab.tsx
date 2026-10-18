@@ -6,15 +6,18 @@ import { Label } from "@sdp/ui/label";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { updateWalletLabelAction } from "@/app/dashboard/[projectId]/custody/actions";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
+import { useWalletActions } from "@/app/dashboard/[projectId]/custody/use-wallet-actions";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
+import {
+  formatDate,
+  formatDateTime,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
-import { formatDate, formatDateTime } from "../../payments/payments-presentation";
-import { updateWalletLabelAction } from "../actions";
-import { useWalletActions } from "../use-wallet-actions";
 import type { WalletPageView } from "./wallet-detail.shared";
 
 const LABEL_MAX_LENGTH = 100;

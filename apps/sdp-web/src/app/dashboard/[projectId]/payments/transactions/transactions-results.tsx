@@ -9,14 +9,17 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ExternalLinkIcon, ReceiptTextIcon } from "lucide-react";
 import { useState } from "react";
+import {
+  formatTimestamp,
+  resolveTokenByMint,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { EntityLink } from "@/components/entity-link";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatTimestamp, resolveTokenByMint } from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { useTransactionFilters } from "./transaction-filters-context";
 import { counterpartyHref, TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs";
 import type { TransactionsPageResult } from "./transactions-page.data";

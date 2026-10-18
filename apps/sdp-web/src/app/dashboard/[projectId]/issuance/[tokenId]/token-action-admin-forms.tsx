@@ -29,10 +29,13 @@ import {
   useId,
   useState,
 } from "react";
+import {
+  getPageCount,
+  getPageSummary,
+} from "@/app/dashboard/[projectId]/issuance/pagination.utils";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useDebounce } from "@/lib/use-debounce";
-import { getPageCount, getPageSummary } from "../pagination.utils";
 import { fetchTokenAllowlistLabels, fetchTokenAllowlistPage } from "./asset-profile/allowlist.data";
 import { TOKEN_ALLOWLIST_KEY, TOKEN_ALLOWLIST_LABELS_KEY } from "./asset-profile/allowlist-cache";
 import { TokenActionCard } from "./token-action-card";

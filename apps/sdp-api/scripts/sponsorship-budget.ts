@@ -1,18 +1,18 @@
-import { closeDatabasePools, getDb } from "../src/db/client";
-import { runWithSystemDatabaseIdentity } from "../src/db/identity";
+import { closeDatabasePools, getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
-} from "../src/db/repositories/sponsorship-budget.repository";
-import { getProcessEnv } from "../src/lib/runtime-env";
-import { SponsorshipBudgetRedis } from "../src/runtime/sponsorship-budget-redis";
+} from "@/db/repositories/sponsorship-budget.repository";
+import { getProcessEnv } from "@/lib/runtime-env";
+import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import {
   isPolicyControlInSync,
   parseSponsorshipNetwork,
   parseSponsorshipPolicyLimits,
   parseSponsorshipScope,
   toRedisLuaSafePolicyLimits,
-} from "../src/services/sponsorship-budget-operator";
+} from "@/services/sponsorship-budget-operator";
 
 function readArg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);

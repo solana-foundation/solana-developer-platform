@@ -1,7 +1,7 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
+import { dvpErrorEnvelopeSchema } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { dvpErrorEnvelopeSchema } from "../dvp-trade";
 
 /**
  * What the create form needs to offer real choices instead of blank fields.

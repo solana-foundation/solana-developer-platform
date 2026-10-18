@@ -10,7 +10,7 @@ import type {
   TokenExtensionsConfig,
   TokenTemplate,
 } from "@sdp/types/tokens";
-import { resolveTemplateConfig, type TemplateOverrideError } from "../templates/definitions";
+import { resolveTemplateConfig, type TemplateOverrideError } from "#/templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import {
   ADVANCED_SETTINGS,

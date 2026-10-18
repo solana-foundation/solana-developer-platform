@@ -1,5 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { redirect } from "next/navigation";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
+import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { PRIVATE_CHANNELS_SETUP_PATH } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { getTranslations } from "@/i18n/server";
 import {
@@ -10,9 +13,6 @@ import {
   fetchVerifiedWallets,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadInstance } from "../private-channels-page.data";
 import { TransferForm } from "./transfer-form";
 import {
   createTransferScopeKey,

@@ -4,8 +4,8 @@ import { Combobox } from "@sdp/ui/combobox";
 import { InfoHint } from "@sdp/ui/info-hint";
 import { useThemeScope } from "@sdp/ui/theme-scope";
 import { type ReactNode, useMemo } from "react";
+import type { CounterpartiesResult } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
-import type { CounterpartiesResult } from "../../payments-workspace.data";
 
 export interface ContactControls {
   counterpartiesResult: CounterpartiesResult;
