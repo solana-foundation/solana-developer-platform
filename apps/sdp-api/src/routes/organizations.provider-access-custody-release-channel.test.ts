@@ -1,4 +1,4 @@
-import type { CustodyMode, CustodyProvider } from "@sdp/types";
+import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { app } from "@/index";

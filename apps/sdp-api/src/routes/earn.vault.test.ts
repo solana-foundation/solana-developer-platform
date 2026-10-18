@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
-import type { CustodyProvider } from "@sdp/custody";
 import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { CustodyProvider } from "@sdp/types/custody";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/types")>();
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
   return {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>

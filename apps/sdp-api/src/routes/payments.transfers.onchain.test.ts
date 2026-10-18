@@ -1,5 +1,5 @@
-import type * as feePaymentAdapters from "@sdp/fee-payment";
-import { SOL_MINT } from "@sdp/types";
+import type { createFeePaymentAdapter } from "@sdp/fee-payment";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -585,7 +585,7 @@ describe("Payments routes — on-chain transfers", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const res = await postTransfer(
       {
@@ -623,7 +623,7 @@ describe("Payments routes — on-chain transfers", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const res = await postTransfer(
       {

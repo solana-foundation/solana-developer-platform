@@ -8,11 +8,8 @@
  *        pnpm --filter @sdp/api-integration test
  */
 
-import {
-  createChannelGatewayRpc,
-  getChannelTokenBalance,
-  probeGatewayHealth,
-} from "@sdp/private-channels";
+import { createChannelGatewayRpc, getChannelTokenBalance } from "@sdp/private-channels/gateway";
+import { probeGatewayHealth } from "@sdp/private-channels/health";
 import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { env } from "#env-impl";

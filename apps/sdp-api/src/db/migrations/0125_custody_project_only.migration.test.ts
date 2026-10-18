@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types";
+import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types/custody";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";

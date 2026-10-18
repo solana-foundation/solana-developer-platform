@@ -1,4 +1,4 @@
-import type { EarnPortfolioWithdrawal } from "@sdp/types";
+import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";

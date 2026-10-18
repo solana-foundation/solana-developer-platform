@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { ApiKeyRole } from "@sdp/types";
+import type { ApiKeyRole } from "@sdp/types/permissions";
 import type { DatabaseClient } from "@/db/client";
 import type { Env } from "@/types/env";
 

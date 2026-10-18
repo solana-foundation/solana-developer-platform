@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { Permission } from "@sdp/types";
+import type { Permission } from "@sdp/types/permissions";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { app } from "@/index";
 import { earnRoutes } from "@/routes/earn";

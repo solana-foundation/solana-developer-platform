@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { AppError } from "@/lib/errors";

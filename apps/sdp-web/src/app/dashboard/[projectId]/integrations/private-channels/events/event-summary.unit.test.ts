@@ -1,4 +1,7 @@
-import { PRIVATE_CHANNEL_EVENT_FAMILIES, PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types";
+import {
+  PRIVATE_CHANNEL_EVENT_FAMILIES,
+  PRIVATE_CHANNEL_EVENT_TYPES,
+} from "@sdp/types/private-channels";
 import { describe, expect, it } from "vitest";
 import { summarizePrivateChannelEvent } from "./event-summary";
 

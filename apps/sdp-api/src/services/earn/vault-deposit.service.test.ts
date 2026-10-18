@@ -1,5 +1,5 @@
-import { SdpKaminoError } from "@sdp/kamino";
-import { SdpVedaError } from "@sdp/veda";
+import { SdpKaminoError } from "@sdp/kamino/errors";
+import { SdpVedaError } from "@sdp/veda/errors";
 import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
@@ -37,8 +37,8 @@ vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   fetchJupiterSwapLeg,
 }));
 
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("./execution-registry", async (importOriginal) => ({

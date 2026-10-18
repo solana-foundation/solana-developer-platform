@@ -1,4 +1,4 @@
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import type { RampPair, SelectedRampPair } from "@/lib/ramps";

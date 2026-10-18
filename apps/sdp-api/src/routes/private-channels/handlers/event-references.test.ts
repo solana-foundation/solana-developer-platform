@@ -1,4 +1,5 @@
-import type { ApiKeyWalletBinding, PrivateChannelEventReferencesEnvelope } from "@sdp/types";
+import type { ApiKeyWalletBinding } from "@sdp/types/api-keys";
+import type { PrivateChannelEventReferencesEnvelope } from "@sdp/types/private-channels";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { beforeEach, describe, expect, it } from "vitest";

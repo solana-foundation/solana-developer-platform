@@ -8,7 +8,7 @@
  * status-specific cadence.
  */
 
-import type { DvpTradeStatus } from "@sdp/types";
+import type { DvpTradeStatus } from "@sdp/types/dvp";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";

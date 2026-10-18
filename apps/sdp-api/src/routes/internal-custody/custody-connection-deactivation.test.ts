@@ -2,7 +2,7 @@ import type {
   CustodyConnectionCheckStatus,
   CustodyConnectionLifecycle,
   CustodyWalletStatus,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";

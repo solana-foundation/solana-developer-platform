@@ -1,4 +1,4 @@
-import type { SdpModule } from "@sdp/types";
+import type { SdpModule } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";

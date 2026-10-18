@@ -1,11 +1,14 @@
 import { Buffer } from "node:buffer";
-import { denormalizeIbmHavenWalletId, normalizeIbmHavenWalletId } from "@sdp/custody";
 import {
   type DfnsApiClient,
   IBM_HAVEN_PROVIDER_LABEL,
   resolveDfnsNetwork,
-} from "@sdp/custody/dfns";
-import { KeychainIbmHavenAdapter } from "@sdp/custody/keychain";
+} from "@sdp/custody/dfns/client";
+import { KeychainIbmHavenAdapter } from "@sdp/custody/keychain/keychain-ibm-haven.adapter";
+import {
+  denormalizeIbmHavenWalletId,
+  normalizeIbmHavenWalletId,
+} from "@sdp/custody/provider-wallet-ids";
 import { describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";

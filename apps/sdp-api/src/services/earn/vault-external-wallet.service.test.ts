@@ -1,4 +1,4 @@
-import { SdpVedaError } from "@sdp/veda";
+import { SdpVedaError } from "@sdp/veda/errors";
 import type { Blockhash } from "@solana/kit";
 import {
   AccountRole,
@@ -58,8 +58,8 @@ vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   fetchJupiterSwapLeg,
 }));
 
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("./execution-registry", async (importOriginal) => ({

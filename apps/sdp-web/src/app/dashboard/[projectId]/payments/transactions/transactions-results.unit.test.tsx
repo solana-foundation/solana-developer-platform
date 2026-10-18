@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 
-import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransaction } from "@sdp/types";
+import {
+  UNIFIED_TRANSACTION_MODULES,
+  type UnifiedTransaction,
+} from "@sdp/types/unified-transactions";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
-import type { PaymentRampQuote } from "@sdp/types";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails";
+import type { PaymentRampQuote } from "@sdp/types/payments";
 import { addDecimalAmounts, subtractDecimalAmounts } from "../../../decimal";
 import { SdpPaymentsError } from "../../../errors";
 import { RAMP_PROVIDER_CLIENTS } from "../../index";

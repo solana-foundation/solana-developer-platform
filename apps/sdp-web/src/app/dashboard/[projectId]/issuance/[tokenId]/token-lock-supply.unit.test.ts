@@ -1,4 +1,4 @@
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import {

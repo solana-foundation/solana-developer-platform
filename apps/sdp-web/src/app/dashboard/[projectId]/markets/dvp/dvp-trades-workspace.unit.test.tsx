@@ -39,7 +39,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 // The select's popup positioning is integration-tested with the shared UI
 // primitive. This workspace suite needs only its value-change contract.
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@sdp/ui/select", () => ({
   Select: ({
     ariaLabel,
     children,

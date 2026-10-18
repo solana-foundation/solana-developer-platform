@@ -1,12 +1,10 @@
+import { CUSTODY_PROVIDERS, type CustodyMode, type CustodyProvider } from "@sdp/types/custody";
 import {
-  CUSTODY_PROVIDERS,
-  type CustodyMode,
-  type CustodyProvider,
   EARN_PROVIDERS,
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
-  SDP_RAMP_PROVIDER_STAGES,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";

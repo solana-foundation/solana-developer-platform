@@ -3,12 +3,13 @@
  */
 
 import * as FeePaymentAdapters from "@sdp/fee-payment";
-import * as Mosaic from "@sdp/issuance/mosaic";
+import * as MosaicServiceModule from "@sdp/issuance/mosaic/service";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { MintMetadataUpdateError } from "@sdp/issuance/mosaic/types";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
-import type { Address } from "@sdp/solana/address";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { Address } from "@solana/addresses";
 import { address, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as TokenAclSdk from "@solana/token-acl-sdk";
@@ -7568,7 +7569,7 @@ describe("Issuance Routes", () => {
           const createToken = vi.spyOn(MosaicService.prototype, "createToken");
           if (metadataFails)
             createToken.mockRejectedValueOnce(
-              new Mosaic.MintMetadataUpdateError(mockDeployResult as never)
+              new MintMetadataUpdateError(mockDeployResult as never)
             );
           else createToken.mockResolvedValueOnce(mockDeployResult as never);
           const request = {
@@ -8266,7 +8267,7 @@ describe("Issuance Routes", () => {
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockRejectedValueOnce(
-            new Mosaic.MintMetadataUpdateError({
+            new MintMetadataUpdateError({
               mint: TEST_SOLANA_ADDRESSES.mint,
               signature: "5recoverySig",
               slot: 100n,
@@ -8332,7 +8333,7 @@ describe("Issuance Routes", () => {
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockRejectedValueOnce(
-            new Mosaic.MintMetadataUpdateError({
+            new MintMetadataUpdateError({
               mint: TEST_SOLANA_ADDRESSES.mint,
               signature: "5recoverySig",
               slot: 100n,
@@ -9306,7 +9307,7 @@ describe("Issuance Routes", () => {
         // mint). wallet3 is the legitimate derived value; the client tries to
         // inject wallet1, which must be ignored.
         const deriveAblListAddressSpy = vi
-          .spyOn(Mosaic, "deriveAblListAddress")
+          .spyOn(MosaicServiceModule, "deriveAblListAddress")
           .mockResolvedValue(TEST_SOLANA_ADDRESSES.wallet3 as Address);
 
         try {

@@ -1,6 +1,6 @@
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
-import { PrivateChannelError } from "@sdp/private-channels";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import * as authPkg from "@sdp/private-channels/auth";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
 import { address, signatureBytes } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { getDb } from "@/db/client";

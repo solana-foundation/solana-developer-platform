@@ -1,5 +1,5 @@
-import { PrivateChannelError } from "@sdp/private-channels";
-import { isUnauthorizedRpcError } from "@sdp/rpc";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
+import { isUnauthorizedRpcError } from "@sdp/rpc/transient";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import type { Env } from "@/types/env";
@@ -17,8 +17,12 @@ const { createChannelGatewayRpc } = vi.hoisted(() => ({
     })
   ),
 }));
-vi.mock("@sdp/private-channels", () => ({
+vi.mock("@sdp/private-channels/gateway", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/private-channels/gateway")>()),
   createChannelGatewayRpc,
+}));
+vi.mock("@sdp/private-channels/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/private-channels/errors")>()),
   PrivateChannelError: class PrivateChannelError extends Error {
     constructor(
       public readonly code: string,

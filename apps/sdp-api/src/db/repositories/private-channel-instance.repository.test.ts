@@ -1,4 +1,4 @@
-import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

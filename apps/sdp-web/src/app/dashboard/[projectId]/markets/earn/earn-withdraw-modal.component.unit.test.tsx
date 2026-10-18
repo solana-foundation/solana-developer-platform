@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { EarnPortfolioWithdrawal } from "@sdp/types";
+import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
@@ -21,8 +21,8 @@ vi.mock("./earn-program-data", () => ({
 // The shared registry ships every program-style lane closed, so every real
 // provider id fails the form closed and the submit path below is unreachable
 // in a test. Opening one lane here is what lets the lock itself be exercised.
-vi.mock("@sdp/types", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/types")>()),
+vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/types/provider-access")>()),
   earnProgramSolanaPayoutTokens: vi.fn(() => ["usdc"]),
 }));
 

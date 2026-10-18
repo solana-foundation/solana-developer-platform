@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type Signature,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,

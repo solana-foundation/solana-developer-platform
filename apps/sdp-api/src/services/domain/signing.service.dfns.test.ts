@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { KeychainDfnsAdapter } from "@sdp/custody/keychain";
+import { KeychainDfnsAdapter } from "@sdp/custody/keychain/keychain-dfns.adapter";
 import { isFullSigningPort } from "@sdp/custody/signing";
 import { describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";

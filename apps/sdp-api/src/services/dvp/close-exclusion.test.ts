@@ -6,7 +6,7 @@
  * still land.
  */
 
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpCloseClaim } from "@/db/repositories/dvp-trade.repository";

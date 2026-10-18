@@ -1,4 +1,4 @@
-import { RETIRED_RAMP_PROVIDERS } from "@sdp/types";
+import { RETIRED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

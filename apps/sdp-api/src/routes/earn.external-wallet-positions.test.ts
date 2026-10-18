@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, EarnExternalWalletPositionSummaryResponse } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { EarnExternalWalletPositionSummaryResponse } from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {

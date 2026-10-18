@@ -1,9 +1,6 @@
-import type { BuildOperationInput } from "@sdp/helius-rings";
-import {
-  HeliusRingsError,
-  type PrivateOperationInput,
-  RINGS_IDENTITY_MISMATCH,
-} from "@sdp/helius-rings";
+import { HeliusRingsError, RINGS_IDENTITY_MISMATCH } from "@sdp/helius-rings/errors";
+import type { BuildOperationInput } from "@sdp/helius-rings/port";
+import type { PrivateOperationInput } from "@sdp/helius-rings/types";
 import {
   AccountRole,
   type Address,

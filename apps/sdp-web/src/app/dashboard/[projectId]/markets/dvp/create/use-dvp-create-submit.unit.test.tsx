@@ -7,7 +7,7 @@
  * server fingerprint guards the key against reuse with different terms; the
  * client's only job is to hand each logical request exactly one key.
  */
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";

@@ -1,5 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
-import { derivationMessageBase64 } from "@sdp/helius-rings-sdk";
+import { derivationMessageBase64 } from "@sdp/helius-rings-sdk/custody-ka/seed";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import {
   type Address,

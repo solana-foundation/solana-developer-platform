@@ -1,4 +1,4 @@
-import { SdpEarnError } from "@sdp/earn";
+import { SdpEarnError } from "@sdp/earn/errors";
 import type {
   EarnLiveMetricsProvider,
   EarnVaultProvider,

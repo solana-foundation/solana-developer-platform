@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

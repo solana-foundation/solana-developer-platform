@@ -6,7 +6,7 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDeposit,
   EarnVaultWithdrawalResponse,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   generateKeyPair,

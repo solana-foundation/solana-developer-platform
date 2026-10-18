@@ -5,7 +5,7 @@ import type {
   CustodyConnectionCheckStatus,
   CustodyConnectionLifecycle,
   CustodyProvider,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";

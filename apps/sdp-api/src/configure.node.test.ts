@@ -1,4 +1,5 @@
-import { FIELDS, generateEnv } from "@sdp/env-config";
+import { FIELDS } from "@sdp/env-config/fields";
+import { generateEnv } from "@sdp/env-config/generate";
 import { describe, expect, it } from "vitest";
 import { collectFromEnv, getOutPath, resolveMultiSelectTokens } from "../scripts/configure";
 

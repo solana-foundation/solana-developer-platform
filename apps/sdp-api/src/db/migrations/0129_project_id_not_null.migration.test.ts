@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PaymentRequestStatus, ProviderCredentialStatus } from "@sdp/types";
+import type { ProviderCredentialStatus } from "@sdp/types/custody";
+import type { PaymentRequestStatus } from "@sdp/types/payments";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";

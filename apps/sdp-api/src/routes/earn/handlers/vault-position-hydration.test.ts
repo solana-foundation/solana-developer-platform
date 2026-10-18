@@ -1,7 +1,7 @@
 import type { EarnVaultPositionInput, EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { readFloor, withRpcReadContext } from "@sdp/rpc/read-context";
 import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Address, RpcTransport } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createVaultDeadline, VaultDeadline } from "@/services/earn/vault-deadline";

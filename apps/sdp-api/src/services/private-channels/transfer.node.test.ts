@@ -1,6 +1,6 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
-import type { PrivateChannelBalance } from "@sdp/types";
+import type { PrivateChannelBalance } from "@sdp/types/private-channels";
 import {
   type Address,
   address,

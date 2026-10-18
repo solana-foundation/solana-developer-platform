@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types";
+import type { PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types/private-channels";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

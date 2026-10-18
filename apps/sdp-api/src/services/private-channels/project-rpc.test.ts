@@ -1,7 +1,7 @@
-import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

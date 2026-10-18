@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { OrganizationSettings } from "@sdp/types";
+import type { OrganizationSettings } from "@sdp/types/organizations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

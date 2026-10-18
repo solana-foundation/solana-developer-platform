@@ -1,4 +1,4 @@
-import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import { describe, expect, it } from "vitest";
 
 describe("credential redaction", () => {

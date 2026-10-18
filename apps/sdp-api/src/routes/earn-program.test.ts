@@ -1,20 +1,17 @@
 import assert from "node:assert/strict";
-import type { EarnPortfolioWalletProvider } from "@sdp/earn";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import { hashString } from "@sdp/payments/hash";
-import type {
-  CachedApiKey,
-  EarnPortfolioWalletSnapshot,
-  EarnPortfolioWithdrawal,
-} from "@sdp/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { EarnPortfolioWalletSnapshot, EarnPortfolioWithdrawal } from "@sdp/types/earn";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: true }));
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/types")>();
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
   return {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>

@@ -1,5 +1,5 @@
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {

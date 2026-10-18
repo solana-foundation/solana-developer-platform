@@ -1,4 +1,4 @@
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";

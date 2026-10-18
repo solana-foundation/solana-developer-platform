@@ -1,9 +1,6 @@
-import {
-  MOVEMENTS,
-  type MovementId,
-  ORGANIZATION_STATUSES,
-  type ProjectEnvironment,
-} from "@sdp/types";
+import { MOVEMENTS, type MovementId } from "@sdp/types/movements";
+import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
+import type { ProjectEnvironment } from "@sdp/types/projects";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";

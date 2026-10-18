@@ -1,9 +1,5 @@
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  SDP_ENVIRONMENTS,
-  type SdpEnvironment,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

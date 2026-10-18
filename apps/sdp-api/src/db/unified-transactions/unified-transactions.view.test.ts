@@ -1,11 +1,11 @@
+import { EARN_MOVEMENT_STATUSES } from "@sdp/types/earn";
 import {
-  EARN_MOVEMENT_STATUSES,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
   type UnifiedTransactionModuleStatus,
-  wellKnownMint,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";

@@ -25,17 +25,16 @@ vi.mock("../wallets", async (importOriginal) => ({
   resolveScope: vi.fn().mockResolvedValue({ auth: { organizationId: "org_fanout_test" } }),
 }));
 
-import { estimateNotAvailable, SdpPaymentsError } from "@sdp/payments";
+import { estimateNotAvailable, SdpPaymentsError } from "@sdp/payments/errors";
+import { CUSTODY_PROVIDERS, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types/custody";
+import type { PaymentRampEstimate } from "@sdp/types/payments";
 import {
   COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
   EARN_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
-  type PaymentRampEstimate,
   type ProviderAvailabilityEntry,
   RAMP_PROVIDERS,
-  STAGED_PROVIDER_REFUSAL_REASONS,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { AppError, forbidden } from "@/lib/errors";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";

@@ -1,4 +1,5 @@
-import { type PaymentsDashboardWallet, SOL_MINT } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { canProceedOnchainReceive } from "./use-onchain-receive-wizard";
 import {

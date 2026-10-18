@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
-import { type OrganizationProviderOverrides, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import type { OrganizationProviderOverrides } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";

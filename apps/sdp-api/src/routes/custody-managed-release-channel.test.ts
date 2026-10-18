@@ -1,4 +1,5 @@
-import type { CachedApiKey, CustodyProvider } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { CustodyProvider } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

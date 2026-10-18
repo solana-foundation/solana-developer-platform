@@ -1,4 +1,5 @@
-import { type SdpReleaseChannel, wellKnownMint } from "@sdp/types";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";

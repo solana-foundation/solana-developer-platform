@@ -1,4 +1,4 @@
-import type { RampSettlementEvent } from "@sdp/payments/ramps";
+import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";

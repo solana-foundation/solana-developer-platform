@@ -1,12 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { WalletsOnboardingSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import CustodyDetailLoading from "../custody/[walletId]/loading";
 import CustodyLoading from "../custody/loading";
 import CustodySetupLoading from "../custody/setup/loading";
 import WalletDetailLoading from "./[walletId]/loading";
 import WalletsLoading from "./loading";
 import WalletSetupLoading from "./setup/loading";
-import { WalletDetailSkeleton, WalletsOnboardingSkeleton } from "./wallet-route-skeletons.redesign";
+import { WalletDetailSkeleton } from "./wallet-route-skeletons.redesign";
 
 // NEW DESIGN on.
 vi.mock("@/components/new-design", () => ({

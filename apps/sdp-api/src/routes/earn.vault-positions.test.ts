@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { withRpcReadContext } from "@sdp/rpc/read-context";
 import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import type { Address, RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";

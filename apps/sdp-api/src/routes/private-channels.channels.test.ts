@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, PrivateChannelDto } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { PrivateChannelDto } from "@sdp/types/private-channels";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

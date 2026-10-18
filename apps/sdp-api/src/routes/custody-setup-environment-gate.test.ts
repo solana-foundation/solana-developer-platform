@@ -1,10 +1,9 @@
+import type { CachedApiKey, SdpEnvironment } from "@sdp/types/api-keys";
 import {
-  type CachedApiKey,
   CUSTODY_PROVIDERS,
   type CustodyProvider,
   type CustodySetupRefusalReason,
-  type SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

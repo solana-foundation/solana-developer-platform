@@ -1,5 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isCollectableRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
@@ -10,10 +11,9 @@ import {
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
-  type SdpEnvironment,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
-  type TokenStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { TokenStatus } from "@sdp/types/tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
   address,

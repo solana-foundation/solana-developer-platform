@@ -1,5 +1,5 @@
 // biome-ignore-all lint/security/noSecrets: public Solana mint and authority addresses, verified against chain; not secrets.
-import { SOLANA_CLUSTERS, SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SOLANA_CLUSTERS, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 
@@ -21,8 +21,8 @@ vi.mock("@sdp/rpc/solana", () => ({
   })),
 }));
 
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl: mocks.resolveClusterRpcUrl,
 }));
 vi.mock("@/services/earn/execution-registry", () => ({

@@ -2,7 +2,7 @@ import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
   UNIFIED_TRANSACTION_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 import { describe, expect, it } from "vitest";
 import messages from "../../../../../../messages/en/dashboard-payments.json";
 

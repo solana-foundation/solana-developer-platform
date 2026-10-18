@@ -1,4 +1,4 @@
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import type { DvpCreateOption } from "./dvp-create.data";
 import { assetOptionsFor, cashOptionsFor } from "./dvp-leg-options";

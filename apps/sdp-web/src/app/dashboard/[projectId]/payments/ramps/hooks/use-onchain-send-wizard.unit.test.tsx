@@ -1,11 +1,8 @@
 // @vitest-environment jsdom
 
-import type {
-  CounterpartyAccount,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
-} from "@sdp/types";
-import { SOL_MINT } from "@sdp/types";
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";

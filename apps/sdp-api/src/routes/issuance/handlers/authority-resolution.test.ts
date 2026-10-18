@@ -1,4 +1,4 @@
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";

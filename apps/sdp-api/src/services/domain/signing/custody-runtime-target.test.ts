@@ -1,15 +1,15 @@
-import type { CustodyProvider } from "@sdp/custody";
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import type { FullSigningPort } from "@sdp/custody/signing";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { CustodyProvider } from "@sdp/types/custody";
 import {
-  type CachedApiKey,
   CUSTODY_CONNECTION_LIFECYCLES,
   type CustodyConnectionCheckStatus,
   type CustodyConnectionLifecycle,
   type CustodyMode,
-  type MovementId,
   type ProviderCredentialStatus,
-} from "@sdp/types";
+} from "@sdp/types/custody";
+import type { MovementId } from "@sdp/types/movements";
 import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

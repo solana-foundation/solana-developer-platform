@@ -1,4 +1,4 @@
-import * as spc from "@sdp/private-channels";
+import * as spcGateway from "@sdp/private-channels/gateway";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
 import {
@@ -111,7 +111,7 @@ beforeEach(async () => {
       VALUES ('pcvw_execution', ?, ?, 'pcu_recipient', ?, 'wallet_recipient', ?)`)
       .bind(scope.organizationId, scope.projectId, instanceId, recipient),
   ]);
-  vi.spyOn(spc, "getChannelTokenBalance").mockResolvedValue({
+  vi.spyOn(spcGateway, "getChannelTokenBalance").mockResolvedValue({
     tokenAccount: signer.address,
     balance: { amount: "10000000", decimals: 6, uiAmountString: "10" },
   });

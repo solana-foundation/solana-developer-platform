@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
-import type { EarnStrategy, SdpEnvironment, SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnStrategy } from "@sdp/types/earn";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";

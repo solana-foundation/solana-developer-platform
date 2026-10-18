@@ -6,8 +6,8 @@ import {
   EGRESS_READINESS_SERVES_TRAFFIC,
   EGRESS_READINESS_STATES,
   type EgressReadiness,
-  SDP_RAMP_PROVIDER_STAGES,
-} from "@sdp/types";
+} from "@sdp/types/health";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { app } from "@/index";

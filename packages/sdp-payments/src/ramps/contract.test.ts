@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type PaymentRampEstimate,
   type PaymentRampQuote,
   RAMP_DIRECTIONS,
   type RampDirection,
-  SDP_ENVIRONMENTS,
-  type SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { SdpPaymentsError } from "../errors";
 import { RAMP_PROVIDER_CLIENTS } from "./index";

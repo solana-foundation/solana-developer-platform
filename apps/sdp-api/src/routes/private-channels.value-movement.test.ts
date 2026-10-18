@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types/private-channels";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {

@@ -1,5 +1,5 @@
-import type { SdpEnvironment } from "@sdp/types";
-import { SOL_MINT } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

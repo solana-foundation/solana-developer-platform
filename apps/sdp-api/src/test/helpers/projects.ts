@@ -1,4 +1,4 @@
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { expect } from "vitest";
 import type { DatabaseClient } from "@/db/client";
 

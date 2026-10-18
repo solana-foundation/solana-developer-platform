@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, CustodyMode } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { CustodyMode } from "@sdp/types/custody";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";

@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { getSettleDvpInstruction } from "@sdp/dvp";
-import { DVP_CLOSE_REFUSAL } from "@sdp/types";
+import { DVP_CLOSE_REFUSAL } from "@sdp/types/dvp";
 import {
   address,
   getCompiledTransactionMessageDecoder,

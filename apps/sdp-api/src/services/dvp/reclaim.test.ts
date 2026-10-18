@@ -11,7 +11,8 @@
 
 import assert from "node:assert/strict";
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
-import { DVP_LEG_REFUSAL, MEMO_PROGRAM_ADDRESS } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import {
   address,
   getCompiledTransactionMessageDecoder,

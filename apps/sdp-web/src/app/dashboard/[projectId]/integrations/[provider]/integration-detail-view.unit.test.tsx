@@ -1,4 +1,4 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";

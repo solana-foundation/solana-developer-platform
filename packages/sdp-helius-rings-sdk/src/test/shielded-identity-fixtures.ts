@@ -23,11 +23,8 @@ import {
   signBytes,
   type Transaction,
 } from "@solana/kit";
-import {
-  createCustodyMaterialSource,
-  fetchDerivationSeed,
-  type SignMessage,
-} from "../custody-ka/index.js";
+import { createCustodyMaterialSource } from "../custody-ka/derivation.js";
+import { fetchDerivationSeed, type SignMessage } from "../custody-ka/seed.js";
 import {
   canonicalShieldedIdentity,
   createShieldedMaterial,

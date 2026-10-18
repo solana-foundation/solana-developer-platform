@@ -1,4 +1,5 @@
-import type { AssetProfile, IssuanceMetadata, Token } from "@sdp/types";
+import type { AssetProfile, IssuanceMetadata } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { describe, expect, it } from "vitest";
 import { buildIssuanceMetadata } from "../../create/draft-mapping";
 import {

@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Permission } from "@sdp/types";
+import type { Permission } from "@sdp/types/permissions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

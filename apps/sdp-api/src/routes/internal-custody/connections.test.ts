@@ -1,4 +1,4 @@
-import type { CustodyConnectionLifecycle, CustodyProvider } from "@sdp/types";
+import type { CustodyConnectionLifecycle, CustodyProvider } from "@sdp/types/custody";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";

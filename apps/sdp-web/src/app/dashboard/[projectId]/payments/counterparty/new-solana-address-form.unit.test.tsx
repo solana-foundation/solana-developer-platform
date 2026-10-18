@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { CounterpartyAccount } from "@sdp/types";
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";

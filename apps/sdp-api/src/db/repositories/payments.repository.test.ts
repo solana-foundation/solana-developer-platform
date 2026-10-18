@@ -1,4 +1,5 @@
-import { SDP_ENVIRONMENTS, type SdpEnvironment, WALLET_TRANSFER_TYPES } from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";

@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey, SdpEnvironment, SignerCheckRequest } from "@sdp/types";
+import type { CachedApiKey, SdpEnvironment } from "@sdp/types/api-keys";
+import type { SignerCheckRequest } from "@sdp/types/custody";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

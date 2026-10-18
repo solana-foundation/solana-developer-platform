@@ -11,8 +11,8 @@
  * isn't part of the caching feature), simulating success / 401 / non-401.
  */
 
-import { PrivateChannelError } from "@sdp/private-channels";
 import * as spcAuth from "@sdp/private-channels/auth";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPrivateChannelUserRepository } from "@/db/repositories/repository-factory";

@@ -1,7 +1,7 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import {
   AccountRole,
   type Address,

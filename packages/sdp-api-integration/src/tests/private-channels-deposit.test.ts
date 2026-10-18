@@ -14,8 +14,13 @@
  *     pnpm --filter @sdp/api-integration test
  */
 
-import { createChannelGatewayRpc, getChannelTokenBalance } from "@sdp/private-channels";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createChannelGatewayRpc, getChannelTokenBalance } from "@sdp/private-channels/gateway";
+import {
+  confirmTransaction,
+  createRpc,
+  getRecentBlockhash,
+  sendTransaction,
+} from "@sdp/rpc/solana";
 import { getDepositInstructionAsync } from "@sdp/spc-escrow";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -85,11 +90,8 @@ describe.skipIf(!PRIVATE_CHANNEL_DEPOSIT_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       });
 
       // Sign + broadcast + confirm on the instance chain (devnet).
-      const chainRpc = solanaRpc.createRpc(env, { rpcUrl: getChainRpcUrl() });
-      const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-        chainRpc,
-        "confirmed"
-      );
+      const chainRpc = createRpc(env, { rpcUrl: getChainRpcUrl() });
+      const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(chainRpc, "confirmed");
       const message = pipe(
         createTransactionMessage({ version: 0 }),
         (m) => setTransactionMessageFeePayerSigner(signer, m),
@@ -99,8 +101,8 @@ describe.skipIf(!PRIVATE_CHANNEL_DEPOSIT_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       const signed = await signTransactionMessageWithSigners(message);
       const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
 
-      const signature = await solanaRpc.sendTransaction(chainRpc, signedBytes);
-      const confirmation = await solanaRpc.confirmTransaction(chainRpc, signature, {
+      const signature = await sendTransaction(chainRpc, signedBytes);
+      const confirmation = await confirmTransaction(chainRpc, signature, {
         commitment: "confirmed",
       });
       expect(confirmation.err).toBeFalsy();

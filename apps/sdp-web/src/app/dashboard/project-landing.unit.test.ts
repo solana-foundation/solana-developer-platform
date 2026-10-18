@@ -1,4 +1,4 @@
-import type { Project } from "@sdp/types";
+import type { Project } from "@sdp/types/projects";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";

@@ -17,8 +17,8 @@ const logEvent = vi.hoisted(() => vi.fn());
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
 }));
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({

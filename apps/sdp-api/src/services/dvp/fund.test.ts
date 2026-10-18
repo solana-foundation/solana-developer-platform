@@ -12,7 +12,7 @@
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import {
   getSignatureFromTransaction,
   getTransactionDecoder,

@@ -1,4 +1,5 @@
-import * as privateChannels from "@sdp/private-channels";
+import * as privateChannelsAuth from "@sdp/private-channels/auth";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PrivateChannelUserRepository,
@@ -55,13 +56,13 @@ beforeEach(() => {
     completePrincipal: vi.fn().mockResolvedValue(completed),
     deletePrincipalReservation: vi.fn().mockResolvedValue(true),
   };
-  registerSpy = vi.spyOn(privateChannels, "spcRegister").mockResolvedValue({
+  registerSpy = vi.spyOn(privateChannelsAuth, "spcRegister").mockResolvedValue({
     id: "spc_1",
     username: "treasury-abcde",
     role: "user",
     createdAt: "2026-08-31T00:00:00.000Z",
   });
-  loginSpy = vi.spyOn(privateChannels, "spcLogin").mockResolvedValue({ token: "jwt" });
+  loginSpy = vi.spyOn(privateChannelsAuth, "spcLogin").mockResolvedValue({ token: "jwt" });
   vi.spyOn(credentialCrypto, "createSpcCredentialCipher").mockReturnValue({
     encrypt: vi.fn().mockResolvedValue("encrypted"),
     decrypt: vi.fn().mockResolvedValue("password"),
@@ -128,9 +129,7 @@ describe("provisionPrincipal", () => {
       spc_username: "treasury-abcde",
       spc_credential_ciphertext: "encrypted",
     });
-    registerSpy.mockRejectedValue(
-      new privateChannels.PrivateChannelError("CONFLICT", "already exists")
-    );
+    registerSpy.mockRejectedValue(new PrivateChannelError("CONFLICT", "already exists"));
 
     const result = await provisionPrincipal(
       {} as never,

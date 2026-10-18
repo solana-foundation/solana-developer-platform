@@ -1,4 +1,4 @@
-import { DVP_SETTLEMENT_AVAILABILITY } from "@sdp/types";
+import { DVP_SETTLEMENT_AVAILABILITY } from "@sdp/types/dvp";
 import { type Address, address, getBase58Decoder, signature } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";

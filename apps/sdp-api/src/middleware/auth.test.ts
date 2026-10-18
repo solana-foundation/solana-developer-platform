@@ -1,5 +1,5 @@
-import type { CustodyProvider } from "@sdp/custody";
 import { hashString } from "@sdp/payments/hash";
+import type { CustodyProvider } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

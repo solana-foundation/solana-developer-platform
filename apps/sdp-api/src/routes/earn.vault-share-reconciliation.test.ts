@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
@@ -26,8 +26,8 @@ const { assertClusterEndpoint, resolveClusterRpcUrl } = vi.hoisted(() => ({
   assertClusterEndpoint: vi.fn(async () => {}),
   resolveClusterRpcUrl: vi.fn(() => "http://127.0.0.1:8899"),
 }));
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl,
 }));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({

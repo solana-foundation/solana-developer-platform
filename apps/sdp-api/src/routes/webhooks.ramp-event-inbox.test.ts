@@ -1,10 +1,7 @@
 import { createHmac } from "node:crypto";
-import {
-  RETIRED_RAMP_PROVIDERS,
-  SDP_RAMP_PROVIDER_STAGES,
-  type SdpRampProviderStages,
-  wellKnownMint,
-} from "@sdp/types";
+import { RETIRED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types/release-channels";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";

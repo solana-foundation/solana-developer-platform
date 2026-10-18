@@ -1,4 +1,4 @@
-import type { MovementOf } from "@sdp/types";
+import type { MovementOf } from "@sdp/types/movements";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";

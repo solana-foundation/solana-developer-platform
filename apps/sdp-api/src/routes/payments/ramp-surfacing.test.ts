@@ -1,5 +1,4 @@
-import { RETIRED_RAMP_PROVIDERS } from "@sdp/types";
-import { isRampProviderSurfaced } from "@sdp/types/provider-access";
+import { isRampProviderSurfaced, RETIRED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 
 describe("ramp provider surfacing", () => {

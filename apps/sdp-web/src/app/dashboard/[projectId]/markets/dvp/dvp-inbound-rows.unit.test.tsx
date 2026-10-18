@@ -8,10 +8,10 @@
  * pay and take a real transfer with it, so both directions are covered.
  */
 
+import { Table, TableBody } from "@solana/design-system/table";
 import { cleanup, fireEvent, render as mount, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Table, TableBody } from "@/components/ui/table";
 import { EnglishTestI18n } from "../test-i18n";
 import { InboundRows } from "./dvp-inbound-rows";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";

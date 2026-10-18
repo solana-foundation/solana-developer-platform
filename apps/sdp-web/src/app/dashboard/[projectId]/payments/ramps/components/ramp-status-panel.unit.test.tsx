@@ -1,4 +1,4 @@
-import type { PaymentTransferStatus } from "@sdp/types";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";

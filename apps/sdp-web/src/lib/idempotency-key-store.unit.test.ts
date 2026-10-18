@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { MoneyMovementStatus } from "@sdp/types";
+import type { MoneyMovementStatus } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { floorToReplay } from "../app/dashboard/[projectId]/markets/earn/earn-vault-slippage";

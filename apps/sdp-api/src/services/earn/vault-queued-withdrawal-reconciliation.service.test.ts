@@ -25,8 +25,8 @@ vi.mock("@/services/earn/vault-execution.service", () => ({
   broadcastVaultTransaction: broadcast,
 }));
 
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl: () => "http://rpc.invalid",
 }));
 vi.mock("@/services/earn/execution-registry", () => ({

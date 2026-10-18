@@ -6,7 +6,7 @@
  * Successful and failed action outcomes, and what each request carries.
  */
 
-import { DVP_CLOSE_REFUSAL, DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_CLOSE_REFUSAL, DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";

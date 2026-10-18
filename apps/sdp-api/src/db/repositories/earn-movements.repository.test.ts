@@ -6,7 +6,7 @@ import {
   EARN_MOVEMENT_STATUSES,
   EARN_MOVEMENT_TRANSITIONS,
   EARN_TERMINAL_MOVEMENT_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";

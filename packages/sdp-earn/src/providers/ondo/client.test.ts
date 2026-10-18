@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS, ondoDeployment } from "@sdp/types/ondo-programs";
+import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { SdpEarnError } from "../../errors";
 import { isStrategyWithinDeclaredSupport } from "../../support";
 import { ONDO_USDY_DECIMALS, OndoEarnClient } from "./client";

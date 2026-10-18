@@ -1,8 +1,10 @@
 import * as feePaymentAdapters from "@sdp/fee-payment";
+import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
   address,
@@ -110,7 +112,7 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   maxAllowedLamports: 0n,
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
-} satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
+} satisfies SponsorshipProviderConfiguration;
 
 export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
   const cause =

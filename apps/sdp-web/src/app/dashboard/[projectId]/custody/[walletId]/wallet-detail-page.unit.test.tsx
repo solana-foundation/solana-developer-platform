@@ -1,3 +1,4 @@
+import { Callout } from "@sdp/ui/callout";
 import {
   Children,
   type ComponentProps,
@@ -12,7 +13,6 @@ import {
   trackedBalances,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.fixtures";
 import { WalletLabelInlineEditor } from "@/app/dashboard/[projectId]/custody/wallet-label-inline-editor";
-import { Callout } from "@/components/ui/callout";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { getTranslations } from "@/i18n/server";

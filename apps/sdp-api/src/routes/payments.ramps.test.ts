@@ -1,11 +1,7 @@
 import { createHmac } from "node:crypto";
-import {
-  SDP_RAMP_PROVIDER_STAGES,
-  type SdpEnvironment,
-  SOL_MINT,
-  SPL_TOKEN_PROGRAMS,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
@@ -49,9 +45,13 @@ import { required } from "@/test/helpers/required";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedRateLimit } from "@/test/mocks/kv";
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelStages(
+    await importOriginal<typeof import("@sdp/types/release-channels")>(),
+    RAMP_PROVIDERS
+  );
 });
 
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";

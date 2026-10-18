@@ -15,8 +15,8 @@ const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
 const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("./execution-registry", async (importOriginal) => ({
@@ -389,7 +389,7 @@ describe("withdrawFromVault — the exit slippage floor", () => {
   });
 
   it("maps a provider exit refusal into the caller's 400, in the provider's words", async () => {
-    const { SdpVedaError } = await import("@sdp/veda");
+    const { SdpVedaError } = await import("@sdp/veda/errors");
     buildVaultWithdrawal.mockRejectedValue(
       new SdpVedaError("WITHDRAW_REFUSED", "Shares are locked until the unlock timestamp")
     );

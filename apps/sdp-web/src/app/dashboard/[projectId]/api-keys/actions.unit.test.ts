@@ -1,4 +1,4 @@
-import type { AllowedOperation } from "@sdp/types";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";

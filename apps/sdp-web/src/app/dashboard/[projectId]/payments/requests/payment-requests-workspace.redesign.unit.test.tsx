@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PaymentRequest } from "@sdp/types";
+import type { PaymentRequest } from "@sdp/types/payments";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";

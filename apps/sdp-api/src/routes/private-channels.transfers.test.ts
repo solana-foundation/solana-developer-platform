@@ -1,6 +1,7 @@
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, PrivateChannelTransfer } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { PrivateChannelTransfer } from "@sdp/types/private-channels";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";

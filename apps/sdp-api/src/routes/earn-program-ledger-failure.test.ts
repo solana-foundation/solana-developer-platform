@@ -1,6 +1,7 @@
-import type { EarnPortfolioWalletProvider } from "@sdp/earn";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, EarnPortfolioWithdrawal } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { EarnProviderWalletRow } from "@/db/repositories/earn.repository";

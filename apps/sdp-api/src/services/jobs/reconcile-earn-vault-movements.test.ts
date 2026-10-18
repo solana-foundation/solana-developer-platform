@@ -16,8 +16,8 @@ const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const reconcileEarnVaultQueuedWithdrawals = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/kamino", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/kamino")>()),
+vi.mock("@sdp/kamino/deposit-receipt", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/kamino/deposit-receipt")>()),
   readKaminoDepositReceipt,
 }));
 
@@ -29,8 +29,8 @@ vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   getSignatureStatuses,
   getTransaction,
 }));
-vi.mock("@sdp/rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc")>()),
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({

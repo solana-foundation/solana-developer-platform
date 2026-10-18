@@ -1,4 +1,4 @@
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

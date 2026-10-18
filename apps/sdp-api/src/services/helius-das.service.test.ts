@@ -1,10 +1,10 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
-  type SdpEnvironment,
   type SolanaCluster,
   WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {

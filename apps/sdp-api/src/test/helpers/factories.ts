@@ -5,7 +5,8 @@
  * Use these instead of verbose inline object creation in tests.
  */
 
-import type { CachedApiKey, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Counters for unique IDs
