@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#env-impl": "./src/helpers/env.node.ts"
+    "#env-impl": "./src/helpers/env.node.ts",
+    "#/*": "./src/*.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -15,6 +15,7 @@ export default defineConfig({
         __dirname,
         "../../packages/sdp-types/src/generated/ramp.generated.ts"
       ),
+      "@/scripts": path.resolve(__dirname, "./scripts"),
       "@": path.resolve(__dirname, "./src"),
       "@sdp/types": path.resolve(__dirname, "../../packages/sdp-types/src"),
     },

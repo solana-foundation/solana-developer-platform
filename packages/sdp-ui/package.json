@@ -180,6 +180,9 @@
       "default": "./src/wizard-step-progress.tsx"
     }
   },
+  "imports": {
+    "#/i18n": "./src/i18n.tsx"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

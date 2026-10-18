@@ -95,6 +95,9 @@
       "default": "./src/signing.ts"
     }
   },
+  "imports": {
+    "#/*": "./src/*.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/",
