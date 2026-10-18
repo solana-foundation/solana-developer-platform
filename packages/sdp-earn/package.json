@@ -24,7 +24,7 @@
       "import": "./src/providers/hastra/client.ts",
       "default": "./src/providers/hastra/client.ts"
     },
-    "./providers/jupiter-lend/client": {
+    "./providers/jupiter_lend/client": {
       "types": "./src/providers/jupiter-lend/client.ts",
       "import": "./src/providers/jupiter-lend/client.ts",
       "default": "./src/providers/jupiter-lend/client.ts"
@@ -38,6 +38,16 @@
       "types": "./src/providers/ondo/client.ts",
       "import": "./src/providers/ondo/client.ts",
       "default": "./src/providers/ondo/client.ts"
+    },
+    "./providers/perena/client": {
+      "types": "./src/providers/perena/client.ts",
+      "import": "./src/providers/perena/client.ts",
+      "default": "./src/providers/perena/client.ts"
+    },
+    "./providers/upshift/client": {
+      "types": "./src/providers/upshift/client.ts",
+      "import": "./src/providers/upshift/client.ts",
+      "default": "./src/providers/upshift/client.ts"
     },
     "./providers/veda/client": {
       "types": "./src/providers/veda/client.ts",

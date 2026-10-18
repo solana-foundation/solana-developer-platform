@@ -8,7 +8,7 @@ import {
 } from "@jup-ag/lend/earn";
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
-import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter-lend/client";
+import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter_lend/client";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
