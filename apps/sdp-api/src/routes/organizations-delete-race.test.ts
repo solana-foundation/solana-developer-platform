@@ -48,7 +48,7 @@ vi.mock("@/db", async (importOriginal) => {
 });
 
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";

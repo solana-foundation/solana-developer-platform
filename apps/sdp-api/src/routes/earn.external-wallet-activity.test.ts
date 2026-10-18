@@ -8,7 +8,7 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

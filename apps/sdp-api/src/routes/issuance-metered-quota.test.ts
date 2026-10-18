@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { ISSUANCE_PREPARE_QUOTA, ISSUANCE_SUPPLY_QUOTA } from "@/routes/issuance";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {

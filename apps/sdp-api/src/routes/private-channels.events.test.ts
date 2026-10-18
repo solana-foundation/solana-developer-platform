@@ -11,7 +11,7 @@ import {
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import * as pcServices from "@/services/private-channels";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

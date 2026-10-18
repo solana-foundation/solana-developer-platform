@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { ensureTestClerkIssuer, signTestClerkClaims } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";

@@ -60,7 +60,7 @@ import {
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";

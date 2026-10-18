@@ -3,7 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { privyWalletExternalId } from "@/services/domain/signing/provider-wallet-lifecycle";

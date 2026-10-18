@@ -11,7 +11,7 @@ import {
   vi,
 } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";

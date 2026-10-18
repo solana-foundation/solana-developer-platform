@@ -12,7 +12,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import internalCustody from "./index";
+import { internalCustody } from "./index";
 
 const TEST_ORG = {
   id: "org_custody_setup_status",

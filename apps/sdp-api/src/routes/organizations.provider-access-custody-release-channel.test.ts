@@ -1,7 +1,7 @@
 import type { CustodyMode, CustodyProvider } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import app from "@/index";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,

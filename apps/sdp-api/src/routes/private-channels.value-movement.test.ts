@@ -8,7 +8,7 @@ import {
   createPrivateChannelDepositRepository,
   createPrivateChannelWithdrawalRepository,
 } from "@/db/repositories";
-import app from "@/index";
+import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import {
   buildPrivateChannelDepositFingerprint,

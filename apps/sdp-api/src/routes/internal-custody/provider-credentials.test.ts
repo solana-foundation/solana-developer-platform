@@ -19,7 +19,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import internalCustody from "./index";
+import { internalCustody } from "./index";
 
 let clerkToken: string;
 

@@ -26,7 +26,7 @@ import {
   type EarnStrategyRow,
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
-import app from "@/index";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";

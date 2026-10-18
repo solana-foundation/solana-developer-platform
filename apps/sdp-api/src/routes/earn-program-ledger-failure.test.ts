@@ -4,7 +4,7 @@ import type { CachedApiKey, EarnPortfolioWithdrawal } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository, type EarnProviderWalletRow } from "@/db/repositories";
-import app from "@/index";
+import { app } from "@/index";
 import { applyEarnWithdrawalObservationToRow } from "@/services/earn-withdrawal-ledger.service";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

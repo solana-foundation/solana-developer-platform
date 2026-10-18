@@ -90,7 +90,7 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
 });
 
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { ApiKeyService } from "@/services/api-key.service";

@@ -2,7 +2,7 @@ import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@so
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
-import app from "@/index";
+import { app } from "@/index";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { counterpartyResponseSchema } from "@/openapi/schemas/counterparties";
 import {

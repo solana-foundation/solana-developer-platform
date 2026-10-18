@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 import {

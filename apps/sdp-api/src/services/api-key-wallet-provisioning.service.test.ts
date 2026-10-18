@@ -5,7 +5,7 @@ import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";

@@ -3,7 +3,7 @@ import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { resetNetworkCachesForTests } from "@/services/network/network.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";

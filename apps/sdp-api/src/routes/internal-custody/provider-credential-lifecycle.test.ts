@@ -25,7 +25,7 @@ import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projec
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import internalCustody from "./index";
+import { internalCustody } from "./index";
 
 const ORGANIZATION_ID = "org_provider_credential_lifecycle";
 const USER_ID = "usr_provider_credential_lifecycle";

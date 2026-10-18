@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import type { Permission } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import app from "@/index";
-import earnRoutes from "@/routes/earn";
+import { app } from "@/index";
+import { earnRoutes } from "@/routes/earn";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";

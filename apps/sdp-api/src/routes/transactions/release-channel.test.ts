@@ -2,7 +2,7 @@ import { type SdpReleaseChannel, wellKnownMint } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,

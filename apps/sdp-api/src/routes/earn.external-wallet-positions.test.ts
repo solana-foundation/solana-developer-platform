@@ -7,7 +7,7 @@ import {
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import * as auth from "@/lib/auth";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
 import { getLogger } from "@/runtime/logger";

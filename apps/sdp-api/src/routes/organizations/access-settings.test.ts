@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { OrganizationSettings } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

@@ -7,7 +7,7 @@ import {
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getLogger } from "@/runtime/logger";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";

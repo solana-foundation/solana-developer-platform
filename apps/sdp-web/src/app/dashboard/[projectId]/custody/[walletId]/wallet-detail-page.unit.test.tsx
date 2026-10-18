@@ -73,9 +73,10 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (impor
   };
 });
 
-import WalletDetailPage, {
+import {
   WalletBalanceSummary,
   WalletBalancesSection,
+  WalletDetailPage,
 } from "./wallet-detail-page";
 
 function renderPage() {

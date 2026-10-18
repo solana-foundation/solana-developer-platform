@@ -4,7 +4,7 @@ import type { CachedApiKey, PrivateChannelTransfer } from "@sdp/types";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPrivateChannelTransferRepository } from "@/db/repositories";
-import app from "@/index";
+import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";

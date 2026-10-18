@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
-import app from "@/index";
+import { app } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import * as tokenLabels from "@/routes/payments/token-labels";
 import { noopObservability } from "@/runtime/observability";

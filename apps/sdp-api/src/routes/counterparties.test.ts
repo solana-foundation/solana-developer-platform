@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
-import app from "@/index";
+import { app } from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { noopObservability } from "@/runtime/observability";
 import {

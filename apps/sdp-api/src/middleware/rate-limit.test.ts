@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { currentDatabaseIdentity } from "@/db/identity";
-import app from "@/index";
+import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";

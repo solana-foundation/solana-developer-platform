@@ -10,7 +10,7 @@ import {
 } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
-import app from "@/index";
+import { app } from "@/index";
 import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 

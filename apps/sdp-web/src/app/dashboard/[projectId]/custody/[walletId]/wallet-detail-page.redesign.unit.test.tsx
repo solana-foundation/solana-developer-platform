@@ -55,7 +55,7 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (impor
   };
 });
 
-import WalletDetailPage from "./wallet-detail-page.redesign";
+import { WalletDetailPage } from "./wallet-detail-page.redesign";
 import { WalletDetailView } from "./wallet-detail-view";
 
 const solBalance: CustodyWalletTokenBalance = {
