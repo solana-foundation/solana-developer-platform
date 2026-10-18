@@ -1,9 +1,9 @@
 import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { env } from "#env-impl";
 import type { SignerCheckApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
-  env,
   initIntegrationApiSuite,
   requestWithApiKey,
 } from "../helpers/integration";

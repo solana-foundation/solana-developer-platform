@@ -16,10 +16,10 @@ import {
   partiallySignTransaction,
 } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { env } from "#env-impl";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
-  env,
   initIntegrationSuite,
   requestWithApiKey,
   TEST_ORG,

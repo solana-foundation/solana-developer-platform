@@ -1,6 +1,7 @@
 import type { Token } from "@sdp/types/tokens";
 import { describe, expect, it } from "vitest";
-import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
+import { getMessages, type MessageKey } from "@/i18n/messages";
+import { type TranslationValues, translate } from "@/i18n/translate";
 import {
   getLockSupplyDisabledReason,
   getMintValidationErrors,

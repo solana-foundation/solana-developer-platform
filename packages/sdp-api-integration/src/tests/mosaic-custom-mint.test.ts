@@ -1,9 +1,9 @@
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { env } from "#env-impl";
 import {
   cleanupIntegrationSuite,
   createMosaicService,
-  env,
   type IntegrationCustodyWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,

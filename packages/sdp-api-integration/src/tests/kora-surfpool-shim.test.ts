@@ -11,7 +11,8 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { env, RUN_INTEGRATION_TESTS } from "../helpers/integration";
+import { env } from "#env-impl";
+import { RUN_INTEGRATION_TESTS } from "../helpers/integration";
 import { requireKoraEndpoint } from "../helpers/kora";
 
 const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraAdapter, KoraClient } = apiTestSupport;

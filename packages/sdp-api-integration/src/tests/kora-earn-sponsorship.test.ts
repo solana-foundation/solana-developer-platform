@@ -43,7 +43,8 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { beforeAll, describe, expect, it } from "vitest";
-import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
+import { env } from "#env-impl";
+import { KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
 import { requireKoraEndpoint } from "../helpers/kora";
 
 const {

@@ -6,10 +6,10 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { env } from "#env-impl";
 import type { TokenApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
-  env,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   requestWithApiKey,

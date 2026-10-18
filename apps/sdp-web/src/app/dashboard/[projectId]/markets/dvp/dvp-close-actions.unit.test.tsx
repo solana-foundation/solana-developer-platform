@@ -6,12 +6,13 @@
  * trade is already over.
  */
 
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
 import { testLeg, testTrade } from "./dvp.fixtures";
 import { DvpCloseActions } from "./dvp-close-actions";
-import type { DvpSettlementAvailability, DvpTrade, DvpTradeStatus } from "./dvp-trade";
+import type { DvpTrade } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
 
 /**

@@ -2,7 +2,8 @@ import type { PaymentTransferSummary } from "@sdp/types/payments";
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it, vi } from "vitest";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import {
   buildHomeActivityRows,
   fetchOrgIssuanceActivity,

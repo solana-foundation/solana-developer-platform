@@ -3,11 +3,11 @@
  * honours inside the window, so the API's availability refines it.
  */
 
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
 import { DvpStatusBadge } from "./dvp-status";
-import type { DvpSettlementAvailability, DvpTradeStatus } from "./dvp-trade";
 
 function badge(status: DvpTradeStatus, availability: DvpSettlementAvailability | null): string {
   return renderToStaticMarkup(

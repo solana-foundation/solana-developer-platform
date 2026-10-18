@@ -58,7 +58,8 @@ vi.mock("@sdp/ui/select", () => ({
 }));
 
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { englishSourceMessages, getMessages, loadMessages, type Messages } from "@/i18n/messages";
+import { englishSourceMessages } from "@/i18n/locales/en";
+import { getMessages, loadMessages, type Messages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { EventsList } from "./events-list";
 

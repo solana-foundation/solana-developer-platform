@@ -7,11 +7,11 @@
 import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { env } from "#env-impl";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
   createMosaicService,
-  env,
   fundAddressToLamports,
   INTEGRATION_CUSTODY_PROVIDER,
   type IntegrationCustodyWallet,
