@@ -1,8 +1,8 @@
 # 0010. Module boundaries
 
 Date: 2026-10-18
-Status: Accepted in principle (HOO-2136, PRs #2402–#2404, #2406). Numbers from a one-off knip
-6.41.0 audit run outside the tree.
+Status: Accepted (HOO-2136, PRs #2402–#2404, #2406–#2408). Numbers from a one-off knip 6.41.0
+audit run outside the tree.
 
 ## Context
 
@@ -46,11 +46,28 @@ files import bare `@sdp/types` through its 38-line `src/index.ts`.
    (`next.config`, `vitest.config`, `playwright.config`, `postcss.config`).
 3. **Enforcement is Biome**, already in CI. Each rule turns on in the PR whose sweep makes it pass:
    `style/noDefaultExport` (#2403, with an `overrides` block for the exceptions above);
-   `performance/noBarrelFile`, `performance/noReExportAll` and `style/noExportedImports` (#2404).
-   No new tool.
+   `performance/noBarrelFile`, `performance/noReExportAll` and `style/noExportedImports` (#2404);
+   `correctness/noUndeclaredDependencies`, `correctness/noPrivateImports` and
+   `suspicious/noImportCycles` (#2407); the `../` pattern of decision 5 (#2408). No new tool.
 4. **No dead-code tool in the repo.** knip was a one-off audit (`pnpm dlx knip`, config kept
    outside the tree). Without barrels, an unused export is a plain grep, and Biome's
    `noUnusedImports` / `noUnusedVariables` already cover the file-local half.
+5. **No parent-relative imports.** An import that leaves its own folder uses an alias, never
+   `../`: `@/…` in an app (its `@/*` path covers both `src/` and the app root, so root files such as
+   `messages/`, `scripts/` and the Sentry configs have an alias too; api and web try `src/` first,
+   docs the root first, and no name exists in both), `#/…` inside a
+   package, and `@sdp/<pkg>/<subpath>` across workspaces. Same-folder `./x` imports stay: they
+   resolve without walking paths, and a module then has at most two spellings, both a plain
+   search. A package declares its self-alias in `package.json` `imports` as
+   `"#/*": "./src/*.ts"`: Node's subpath imports are private to the package (unlike a self
+   import through `exports`, which would make internal files public) and every runtime resolves
+   them without a bundler. The target carries `.ts` because tsc and esbuild do not probe
+   extensions on `imports` targets. `#/` keys need Node 24.14.0 or later (the floor in
+   `engines`) and TypeScript 6.0. Enforced by Biome `style/noRestrictedImports` with the
+   pattern `../**` (`../package.json` allowed) at the root and in every override that configures
+   the rule, plus a CI check for `vi.mock`-family strings and `typeof import()` type queries,
+   which Biome does not inspect. `apps/sdp-web/playwright` (a harness outside the module graph),
+   generated clients, root `scripts/`, and `examples/` are exempt.
 
 ## Module boundaries
 
@@ -99,3 +116,8 @@ as each module is narrowed.
 - `docs/contributing/code-standards.md` gains one TypeScript rule, "Imports name the defining
   file"; Greptile inherits it through `.greptile/rules.md`, which flags code-standards violations.
 - Zero users, so no transition period.
+- Parent-import sweep: 961 production and about 184 test specifiers rewritten by a
+  TypeScript-resolved codemod; the resolved import graph of every file is identical before and
+  after.
+- Namespace imports (`import * as x`) stay allowed: they do not change the specifier, and tests
+  need them for `vi.spyOn`.

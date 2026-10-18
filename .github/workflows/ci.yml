@@ -151,6 +151,13 @@ jobs:
       - name: Lint declared dependencies
         run: pnpm exec biome lint --only=correctness/noUndeclaredDependencies --diagnostic-level=error apps packages
 
+      # Biome's noRestrictedImports does not read vi.mock-family strings or typeof import() type
+      # queries, and its options are replaced per override, so every copy must carry the ../ group.
+      - name: Check parent-relative imports
+        run: |
+          if git grep -nE "(vi\.(mock|doMock|unmock|importActual|importMock)|import)\(['\"]\.\./" -- ':(glob)apps/*/src/**' ':(glob)apps/*/scripts/**' ':(glob)packages/*/src/**' ':(exclude,glob)**/generated/**'; then exit 1; fi
+          jq -e '[.. | objects | .noRestrictedImports? | objects] | length == 5 and all(.options.patterns | any(.group | index("../**")))' biome.json
+
       - name: Check pinned dependencies
         run: pnpm check:pinned-dependencies
 
