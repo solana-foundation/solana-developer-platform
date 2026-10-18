@@ -1,3 +1,6 @@
+// NOTE: Server-only by construction: this module imports next/headers, which Next.js refuses to
+// bundle into a Client Component module, so any client import of it fails the build. Server
+// loaders that call it need no `import "server-only"`.
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse, Project } from "@sdp/types/projects";
 import { headers } from "next/headers";
