@@ -3,10 +3,10 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import type { AssetProfileForm } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-asset-profile-form";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import type { AssetProfileForm } from "../use-asset-profile-form";
-import type { TokenOperations } from "../use-token-operations";
 import { PermissionsTab } from "./permissions-tab";
 
 afterEach(cleanup);

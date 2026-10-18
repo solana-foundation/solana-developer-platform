@@ -19,7 +19,7 @@ import {
   earnDepositSlippagePolicy,
 } from "@sdp/types/provider-access";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
-import { isStrategyWithinDeclaredSupport } from "../../support";
+import { isStrategyWithinDeclaredSupport } from "#/support";
 import { HastraEarnClient } from "./client";
 
 const client = new HastraEarnClient();

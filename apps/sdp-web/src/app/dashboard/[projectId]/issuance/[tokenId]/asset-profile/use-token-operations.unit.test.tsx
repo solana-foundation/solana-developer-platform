@@ -20,7 +20,7 @@ const destination = "5wLf85zhVpJ7xBjDCE1KK8yTXyCrbbzoCUuv3Dwsd5PQ";
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
 }));
-vi.mock("../use-token-action-runner", () => ({
+vi.mock("@/app/dashboard/[projectId]/issuance/[tokenId]/use-token-action-runner", () => ({
   useTokenActionRunner: () => ({
     runAction: mocks.runAction,
     runActionImmediately: mocks.runAction,

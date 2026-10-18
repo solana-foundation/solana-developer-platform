@@ -7,9 +7,9 @@ import {
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { TransactionDetailWorkspace } from "./transaction-detail-workspace";
 import type { TransactionsPageResult } from "./transactions-page.data.redesign";
 import type { TransactionFilters } from "./transactions-query.redesign";

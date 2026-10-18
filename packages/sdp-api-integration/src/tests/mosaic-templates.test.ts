@@ -6,8 +6,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { env } from "#env-impl";
-import type { TokenApiResponse } from "../helpers/api-types";
+import type { TokenApiResponse } from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -15,7 +14,8 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const koraSurfpoolShim = (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_SHIM === "true";
 

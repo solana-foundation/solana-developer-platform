@@ -20,8 +20,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ChangeEvent, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
-import { EnglishTestI18n } from "../test-i18n";
 import {
   OTHER_ADDRESS,
   OWN_WALLET_ID,

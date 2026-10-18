@@ -9,9 +9,9 @@ import {
   vedaDepositMints,
 } from "@sdp/types/veda-programs";
 import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types/well-known-tokens";
-import { toBase58 } from "../../solana-rpc";
-import { isStrategyWithinDeclaredSupport } from "../../support";
-import type { ProviderStrategySnapshot } from "../../types";
+import { toBase58 } from "#/solana-rpc";
+import { isStrategyWithinDeclaredSupport } from "#/support";
+import type { ProviderStrategySnapshot } from "#/types";
 import { VedaEarnClient } from "./client";
 import {
   decodeAssetData,

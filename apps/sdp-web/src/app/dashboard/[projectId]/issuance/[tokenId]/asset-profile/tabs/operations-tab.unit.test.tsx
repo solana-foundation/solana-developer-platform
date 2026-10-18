@@ -2,10 +2,10 @@ import type { AssetProfile } from "@sdp/types/asset-profiles";
 import type { Token } from "@sdp/types/tokens";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { AssetProfileHeader } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/asset-profile-header";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { AssetProfileHeader } from "../asset-profile-header";
-import type { TokenOperations } from "../use-token-operations";
 import { OperationsTab } from "./operations-tab";
 
 const token: Token = {

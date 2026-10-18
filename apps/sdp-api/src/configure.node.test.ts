@@ -1,7 +1,7 @@
 import { FIELDS } from "@sdp/env-config/fields";
 import { generateEnv } from "@sdp/env-config/generate";
 import { describe, expect, it } from "vitest";
-import { collectFromEnv, getOutPath, resolveMultiSelectTokens } from "../scripts/configure";
+import { collectFromEnv, getOutPath, resolveMultiSelectTokens } from "@/scripts/configure";
 
 const HEX_64 = /^[0-9a-f]{64}$/;
 

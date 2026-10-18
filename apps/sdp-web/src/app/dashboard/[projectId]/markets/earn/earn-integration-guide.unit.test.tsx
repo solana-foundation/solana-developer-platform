@@ -7,7 +7,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { EarnIntegrationGuide } from "./earn-integration-guide";
 import {
   buildEarnIntegrationSections,

@@ -12,7 +12,7 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   logEvent: vi.fn(),
 }));
-vi.mock("../context", async (importOriginal) => ({
+vi.mock("@/routes/payments/context", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   rampRuntime: () => ({}),
 }));
@@ -20,7 +20,7 @@ vi.mock("@/lib/sdp-environment", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-environment")>()),
   resolveSdpEnvironment: () => "sandbox",
 }));
-vi.mock("../wallets", async (importOriginal) => ({
+vi.mock("@/routes/payments/wallets", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveScope: vi.fn().mockResolvedValue({ auth: { organizationId: "org_fanout_test" } }),
 }));
@@ -36,13 +36,13 @@ import {
   RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
 import { AppError, forbidden } from "@/lib/errors";
+import type { AppContext } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import {
   loadProjectProviderVerdict,
   type ProjectProviderRefusal,
 } from "@/services/provider-availability.service";
-import type { AppContext } from "../context";
 import { estimateAcrossProviders } from "./shared";
 
 function buildContext(options?: { sentryDsn?: string; observability?: Observability }) {

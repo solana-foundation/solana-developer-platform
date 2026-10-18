@@ -23,8 +23,8 @@ import {
   signBytes,
   type Transaction,
 } from "@solana/kit";
-import { createCustodyMaterialSource } from "../custody-ka/derivation.js";
-import { fetchDerivationSeed, type SignMessage } from "../custody-ka/seed.js";
+import { createCustodyMaterialSource } from "#/custody-ka/derivation";
+import { fetchDerivationSeed, type SignMessage } from "#/custody-ka/seed";
 import {
   canonicalShieldedIdentity,
   createShieldedMaterial,
@@ -32,7 +32,7 @@ import {
   publishedHalves,
   type ShieldedMaterial,
   type ShieldedMaterialSource,
-} from "../material.js";
+} from "#/material";
 
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
 

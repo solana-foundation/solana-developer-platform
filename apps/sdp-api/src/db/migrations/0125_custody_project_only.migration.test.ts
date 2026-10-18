@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types/custody";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { runPostgresMigrations } from "@/scripts/lib/run-postgres-migrations.mjs";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
 import {
   CHECK_VIOLATION,
@@ -13,7 +14,6 @@ import {
   UNIQUE_VIOLATION,
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
 import {
   CUSTODY_DEFAULTS_DROP_MIGRATION,
   restorePreCustodyDefaultsDropSchema,

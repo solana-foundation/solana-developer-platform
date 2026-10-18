@@ -24,11 +24,11 @@ vi.mock("next/headers", () => ({
     },
   }),
 }));
-vi.mock("../sdp-auth", () => ({ getSdpAuth: async () => state.auth }));
+vi.mock("@/lib/sdp-auth", () => ({ getSdpAuth: async () => state.auth }));
 vi.mock("@/flags", () => ({ paymentsDemoMode: async () => state.demoFlag }));
 
 const { setPaymentsDemoAction } = await import("./demo-mode-action");
-const { PROJECT_COOKIE_NAME } = await import("../project-cookie");
+const { PROJECT_COOKIE_NAME } = await import("@/lib/project-cookie");
 
 beforeEach(() => {
   state.jar.clear();

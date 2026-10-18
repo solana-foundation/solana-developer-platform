@@ -9,6 +9,7 @@ import type {
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
+import { runPostgresMigrations } from "@/scripts/lib/run-postgres-migrations.mjs";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
 import {
@@ -20,7 +21,6 @@ import {
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
 import {
   CUSTODY_DEFAULTS_DROP_MIGRATION,
   restorePreCustodyDefaultsDropSchema,

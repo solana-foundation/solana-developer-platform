@@ -4,8 +4,8 @@ import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Address, RpcTransport } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AppContext } from "@/routes/earn/context";
 import { createVaultDeadline, VaultDeadline } from "@/services/earn/vault-deadline";
-import type { AppContext } from "../context";
 import {
   closeEmptyHydratedPositions,
   describeHydrationFailure,

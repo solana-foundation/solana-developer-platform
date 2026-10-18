@@ -35,7 +35,6 @@ import {
   signTransactionMessageWithSigners,
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { env } from "#env-impl";
 import {
   getChainRpcUrl,
   getDepositAmountBaseUnits,
@@ -43,7 +42,8 @@ import {
   getGatewayUrl,
   PRIVATE_CHANNEL_DEPOSIT_CONFIGURED,
   RUN_INTEGRATION_TESTS,
-} from "../helpers/private-channels";
+} from "#/helpers/private-channels";
+import { env } from "#env-impl";
 
 // Sandbox instance + devnet USDC (classic Token program).
 const INSTANCE = address("7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz");

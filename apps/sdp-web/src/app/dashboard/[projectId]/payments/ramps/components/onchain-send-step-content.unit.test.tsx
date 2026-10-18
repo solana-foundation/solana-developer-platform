@@ -5,11 +5,11 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { OnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { OnchainSendStepContent } from "./onchain-send-step-content";
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));

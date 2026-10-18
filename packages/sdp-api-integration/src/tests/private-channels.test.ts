@@ -12,13 +12,13 @@ import { createChannelGatewayRpc, getChannelTokenBalance } from "@sdp/private-ch
 import { probeGatewayHealth } from "@sdp/private-channels/health";
 import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { env } from "#env-impl";
 import {
   getGatewayUrl,
   PRIVATE_CHANNEL_CONFIGURED,
   privateChannelProbeTransport,
   RUN_INTEGRATION_TESTS,
-} from "../helpers/private-channels";
+} from "#/helpers/private-channels";
+import { env } from "#env-impl";
 
 // Devnet USDC (classic Token program) + a real devnet account to derive an ATA for.
 const DEVNET_USDC = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");

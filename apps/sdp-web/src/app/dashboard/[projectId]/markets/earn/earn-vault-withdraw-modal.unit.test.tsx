@@ -4,8 +4,8 @@ import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { EnglishTestI18n } from "../test-i18n";
 import { VAULT_QUOTE_DEBOUNCE_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 

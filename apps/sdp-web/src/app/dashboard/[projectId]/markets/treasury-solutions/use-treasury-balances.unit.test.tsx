@@ -2,7 +2,7 @@
 import type { EarnVaultPosition } from "@sdp/types/earn";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EarnVaultPositionsRead } from "../earn/earn-program-data";
+import type { EarnVaultPositionsRead } from "@/app/dashboard/[projectId]/markets/earn/earn-program-data";
 import type { VaultActivity } from "./treasury-vault-balance";
 import { treasuryRefreshRetryDelay, useTreasuryBalances } from "./use-treasury-balances";
 
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   refreshWallets: vi.fn(),
   error: undefined as Error | undefined,
 }));
-vi.mock("../earn/earn-program-data", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-program-data", () => ({
   useEarnVaultPositions: () => ({
     reads: mocks.reads,
     positions: mocks.positions,
@@ -22,7 +22,7 @@ vi.mock("../earn/earn-program-data", () => ({
     isLoading: false,
   }),
 }));
-vi.mock("../earn/deposit/earn-funding-wallets", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets", () => ({
   useEarnFundingWallets: () => ({
     wallets: [],
     refreshBalances: mocks.refreshWallets,
@@ -344,8 +344,8 @@ it("retains an unpaired holding after its movement leaves visible activity", asy
 it("recovers more than 100 outstanding pairs through bounded HTTP reads", async () => {
   vi.useFakeTimers();
   const { readEarnVaultPositions } = await vi.importActual<
-    typeof import("../earn/earn-program-data")
-  >("../earn/earn-program-data");
+    typeof import("@/app/dashboard/[projectId]/markets/earn/earn-program-data")
+  >("@/app/dashboard/[projectId]/markets/earn/earn-program-data");
   const batchSizes: number[] = [];
   vi.stubGlobal(
     "fetch",

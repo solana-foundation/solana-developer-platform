@@ -13,7 +13,9 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   createSdpApiClient: async () => ({ request: mocks.request }),
 }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("../../payments/payments-page.data", () => ({ fetchPaymentsWallets: mocks.wallets }));
+vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
+  fetchPaymentsWallets: mocks.wallets,
+}));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
 vi.mock("@/flags", () => ({ assetProfiles: mocks.enabled }));
 vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));

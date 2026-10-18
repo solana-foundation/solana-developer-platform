@@ -48,12 +48,12 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 }));
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
-const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
+const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("@/cron/run-event");
 const {
   reconcileEarnVaultMovementReadThrough,
   repairUnvaluedWithdrawalPayouts,
   repairUnvaluedKaminoDeposits,
-} = await import("../earn/vault-movement-reconciliation.service");
+} = await import("@/services/earn/vault-movement-reconciliation.service");
 
 const ORG = "org_vault_reconcile";
 const PROJECT = "prj_vault_reconcile";

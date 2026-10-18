@@ -12,15 +12,15 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  privateChannelTransferIdempotencyKeyStore,
+  privateChannelTransferRequestFingerprint,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/value-movement-tracking";
+import {
   MOVEMENT_POLL_INTERVAL_MS,
   MOVEMENT_READ_PATHS,
   resetMovementWatchesForTests,
 } from "@/lib/dashboard-fetch";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import {
-  privateChannelTransferIdempotencyKeyStore,
-  privateChannelTransferRequestFingerprint,
-} from "../value-movement-tracking";
 
 const mocks = vi.hoisted(() => ({
   createTransferAction: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock("./actions", () => ({
   createTransferAction: mocks.createTransferAction,
   fetchTransferRecipientsAction: mocks.fetchTransferRecipientsAction,
 }));
-vi.mock("../wallet-balances", () => ({
+vi.mock("@/app/dashboard/[projectId]/integrations/private-channels/wallet-balances", () => ({
   fetchWalletBalancesAction: mocks.fetchWalletBalancesAction,
 }));
 vi.mock("sonner", () => ({

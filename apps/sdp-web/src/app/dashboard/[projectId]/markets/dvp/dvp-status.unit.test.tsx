@@ -6,7 +6,7 @@
 import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { DvpStatusBadge } from "./dvp-status";
 
 function badge(status: DvpTradeStatus, availability: DvpSettlementAvailability | null): string {

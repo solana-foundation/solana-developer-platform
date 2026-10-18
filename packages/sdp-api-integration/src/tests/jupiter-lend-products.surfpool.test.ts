@@ -16,7 +16,6 @@ import {
   partiallySignTransaction,
 } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { env } from "#env-impl";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
@@ -25,7 +24,8 @@ import {
   TEST_ORG,
   TEST_PROJECT,
   TEST_PROJECT_CACHED_KEY,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const {
   createKVStoreSet,

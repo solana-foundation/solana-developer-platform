@@ -12,7 +12,7 @@ import { Table, TableBody } from "@solana/design-system/table";
 import { cleanup, fireEvent, render as mount, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { InboundRows } from "./dvp-inbound-rows";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 

@@ -11,8 +11,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { dashboardRouter } from "@/test/dashboard-navigation";
-import { EnglishTestI18n } from "../test-i18n";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
 // The hook confirms each outcome in words, so it needs the catalog those words

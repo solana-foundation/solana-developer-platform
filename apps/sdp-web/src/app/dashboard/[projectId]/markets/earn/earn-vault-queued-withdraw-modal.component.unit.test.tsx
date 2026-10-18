@@ -8,8 +8,8 @@ import type {
 } from "@sdp/types/earn";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { EnglishTestI18n } from "../test-i18n";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),

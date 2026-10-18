@@ -2,10 +2,10 @@ import type { AssetProfile } from "@sdp/types/asset-profiles";
 import type { Token } from "@sdp/types/tokens";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { formatDate } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import { shortenAddress } from "@/app/dashboard/[projectId]/issuance/wallet-identity";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { shortenAddress } from "../../wallet-identity";
-import { formatDate } from "../token-management-workspace.utils";
 import { AssetProfileHeader } from "./asset-profile-header";
 
 const token = {

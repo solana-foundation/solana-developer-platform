@@ -7,7 +7,6 @@
 import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { env } from "#env-impl";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
@@ -21,7 +20,8 @@ import {
   SOLANA_CONFIGURED,
   TEST_ORG,
   TEST_PROJECT,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const { createOrgSignerForCustodyWallet, createSigningService, CustodyConfigStore, getDb } =
   apiTestSupport;

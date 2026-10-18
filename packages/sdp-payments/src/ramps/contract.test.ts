@@ -8,7 +8,7 @@ import {
   type RampDirection,
 } from "@sdp/types/payments";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import { SdpPaymentsError } from "../errors";
+import { SdpPaymentsError } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "./index";
 import { MOONPAY_TEST_KIT } from "./providers/moonpay/test-kit";
 import { STRIPE_TEST_KIT } from "./providers/stripe/test-kit";

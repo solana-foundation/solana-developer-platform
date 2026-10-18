@@ -1,7 +1,7 @@
 import type { AssetProfile, IssuanceMetadata } from "@sdp/types/asset-profiles";
 import type { Token } from "@sdp/types/tokens";
 import { describe, expect, it } from "vitest";
-import { buildIssuanceMetadata } from "../../create/draft-mapping";
+import { buildIssuanceMetadata } from "@/app/dashboard/[projectId]/issuance/create/draft-mapping";
 import {
   areDraftsEquivalent,
   mergeIssuanceMetadataForUpdate,

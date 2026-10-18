@@ -12,8 +12,8 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { dashboardRouter } from "@/test/dashboard-navigation";
-import { EnglishTestI18n } from "../../test-i18n";
 import type { DvpCreateRequest } from "./use-dvp-create-submit";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 

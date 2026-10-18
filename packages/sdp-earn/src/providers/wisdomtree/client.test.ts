@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { WISDOMTREE_FUNDS } from "@sdp/types/wisdomtree-programs";
-import { supportsDepositEligibility, supportsPortfolioWallets } from "../../capabilities";
-import { SdpEarnError, type SdpEarnErrorCode } from "../../errors";
-import type { EarnRuntimeContext } from "../../types";
+import { supportsDepositEligibility, supportsPortfolioWallets } from "#/capabilities";
+import { SdpEarnError, type SdpEarnErrorCode } from "#/errors";
+import type { EarnRuntimeContext } from "#/types";
 import { WisdomTreeEarnClient } from "./client";
 import { resetWisdomTreeTokenCache } from "./connect";
 

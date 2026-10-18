@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./actions", () => ({
   createWithdrawalAction: mocks.createWithdrawalAction,
 }));
-vi.mock("../wallet-balances", () => ({
+vi.mock("@/app/dashboard/[projectId]/integrations/private-channels/wallet-balances", () => ({
   fetchWalletBalancesAction: mocks.fetchWalletBalancesAction,
 }));
 vi.mock("sonner", () => ({

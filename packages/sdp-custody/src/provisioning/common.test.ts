@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createDfnsApiClient } from "../dfns/client";
-import { SigningError } from "../signing";
+import { createDfnsApiClient } from "#/dfns/client";
+import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl } from "./common";
 
 const DFNS_TEST_PRIVATE_KEY = [

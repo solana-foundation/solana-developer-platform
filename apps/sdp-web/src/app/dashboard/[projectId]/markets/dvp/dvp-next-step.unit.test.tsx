@@ -14,7 +14,7 @@
 import type { DvpTradeStatus } from "@sdp/types/dvp";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { OTHER_ADDRESS, ownParty, testLeg, testTrade } from "./dvp.fixtures";
 import { DvpNextStep } from "./dvp-next-step";
 

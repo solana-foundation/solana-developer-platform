@@ -3,7 +3,7 @@
 import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({

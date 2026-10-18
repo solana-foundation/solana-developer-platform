@@ -2,7 +2,6 @@ import { apiTestSupport } from "@sdp/api/test-support";
 import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
 import { type Commitment, generateKeyPairSigner, type Signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { env } from "#env-impl";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
@@ -11,7 +10,8 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const { trackPendingTransfers } = apiTestSupport;
 

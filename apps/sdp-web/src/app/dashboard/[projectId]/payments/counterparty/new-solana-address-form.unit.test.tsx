@@ -4,17 +4,19 @@ import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ComplianceSnapshot } from "@/app/dashboard/[projectId]/payments/payments-workspace.types";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import type { ComplianceSnapshot } from "../payments-workspace.types";
 import { NewSolanaAddressForm } from "./new-solana-address-form";
 
 const screening = vi.hoisted(() => ({ next: null as ComplianceSnapshot | null }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("../payments-workspace.data", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../payments-workspace.data")>()),
+vi.mock("@/app/dashboard/[projectId]/payments/payments-workspace.data", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/app/dashboard/[projectId]/payments/payments-workspace.data")
+  >()),
   runComplianceCheck: vi.fn(async () => screening.next),
 }));
 

@@ -13,7 +13,7 @@ import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 

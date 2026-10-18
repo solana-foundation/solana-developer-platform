@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import CustodyDetailLoading from "@/app/dashboard/[projectId]/custody/[walletId]/loading";
+import CustodyLoading from "@/app/dashboard/[projectId]/custody/loading";
+import CustodySetupLoading from "@/app/dashboard/[projectId]/custody/setup/loading";
 import { WalletsOnboardingSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
-import CustodyDetailLoading from "../custody/[walletId]/loading";
-import CustodyLoading from "../custody/loading";
-import CustodySetupLoading from "../custody/setup/loading";
 import WalletDetailLoading from "./[walletId]/loading";
 import WalletsLoading from "./loading";
 import WalletSetupLoading from "./setup/loading";

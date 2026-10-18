@@ -8,7 +8,7 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 
 const { TEST_PROJECT } = apiTestSupport;
 

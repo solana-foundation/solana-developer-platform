@@ -12,7 +12,7 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { DvpCreateWorkspace } from "./dvp-create-workspace";
 
