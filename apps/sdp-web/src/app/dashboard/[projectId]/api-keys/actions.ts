@@ -5,12 +5,12 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createSdpApiClient, requestProjectHref, requestProjectId } from "@/lib/sdp-api";
 import {
   type ApiKeyAuthoringDraft,
   type ApiKeyAuthoringMode,
   buildEndpointWalletPayload,
-  parseAllowedIps,
 } from "./api-key-authoring";
 import {
   API_KEY_FLASH_COOKIE,
