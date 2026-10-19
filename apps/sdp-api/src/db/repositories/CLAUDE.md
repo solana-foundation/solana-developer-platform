@@ -199,11 +199,13 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   After a provider has carried real-money transfers, merge its removal only
   once an operator count shows none open in stage and prod: a merge to main
   deploys to prod in the same run.
-- **A refresh that drops rows needs a second live read.** The weekday
-  `ramp-rails-refresh.yml` run can catch a transient provider answer: on
-  2026-10-14 it got no PYUSD from MoonPay, which still offered it. Re-pull
-  one provider with `DOPPLER_PROJECT=solana-developer-platform
-  DOPPLER_CONFIG=dev pnpm --filter @sdp/api currencies:discover <provider>`,
-  then `ramp-support:generate`. Never build on `automation/ramp-support-refresh`:
+- **Discovery refuses a shrink.** `currencies:discover` fails without writing
+  when a provider's fresh snapshot drops a committed crypto or over a tenth of
+  a direction's corridors; a live read retries once first. MoonPay lists a
+  crypto only while `supportsTestMode` is true, and turned it off for
+  `pyusd_sol` on 2026-10-15 (live mode kept it). Accept a confirmed drop with
+  `DOPPLER_PROJECT=solana-developer-platform DOPPLER_CONFIG=dev pnpm --filter
+  @sdp/api currencies:discover <provider> --allow-shrink`, then
+  `ramp-support:generate`. Never build on `automation/ramp-support-refresh`:
   the job force-pushes it, and opens its PR only if the repo lets Actions
   create PRs.

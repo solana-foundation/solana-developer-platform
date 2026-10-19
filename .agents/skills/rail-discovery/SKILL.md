@@ -117,8 +117,10 @@ Fetching raw dumps hits live sandbox APIs, so it runs under Doppler. Regeneratin
 pnpm --filter @sdp/api currencies:discover
 # just your provider
 pnpm --filter @sdp/api currencies:discover -- <id>
+# a snapshot dropping a committed crypto or over 10% of a direction's corridors is refused; accept a confirmed drop
+pnpm --filter @sdp/api currencies:discover -- <id> --allow-shrink
 # re-distill existing dumps, or generate a static-provider snapshot whose distiller ignores dumps
-pnpm --filter @sdp/api exec tsx scripts/ramp-support.ts discover <id> --offline
+pnpm --filter @sdp/api exec tsx scripts/ramp-support.ts discover-currencies <id> --offline
 
 # regenerate ramp.generated.ts from the committed snapshots + declared consts
 pnpm --filter @sdp/api ramp-support:generate
