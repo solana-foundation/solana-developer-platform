@@ -1,21 +1,22 @@
-import { withMinimumRpcSlot, withRpcReadContext } from "@sdp/rpc/read-context";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { badRequestQuery, providerUnavailable } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import type { AppContext } from "@/routes/payments/context";
+import { getSplTokenBalances } from "@/routes/payments/token-accounts";
+import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
+import { resolveWalletFromParams } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import type { AppContext } from "../context";
-import * as tokenAccounts from "../token-accounts";
-import { resolveIssuedTokenLabelsByMint } from "../token-labels";
-import { resolveWalletFromParams } from "../wallets";
 import { walletBalancesQuerySchema } from "./schemas";
+
+const BALANCE_READ_TIMEOUT_MS = 3_000;
 
 export async function getWalletBalances(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
@@ -23,23 +24,25 @@ export async function getWalletBalances(c: AppContext) {
   const parsed = walletBalancesQuerySchema.safeParse(c.req.query());
   if (!parsed.success) throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
   const { minimumSlot } = parsed.data;
-  const rpc =
-    minimumSlot === undefined
-      ? solanaRpc.createRpc(c.env, { requestTimeoutMs: 3_000, wrapTransport: withRpcReadContext })
-      : solanaRpc.createClusterRpc(
-          c.env,
-          resolveSdpEnvironment(c) === "sandbox" ? "devnet" : "mainnet-beta",
-          { requestTimeoutMs: 3_000, wrapTransport: withRpcReadContext }
-        );
+  const rpc = createClusterRpc();
+  const minContextSlot = minimumSlot === undefined ? undefined : BigInt(minimumSlot);
   const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
+  const abortSignal = AbortSignal.timeout(BALANCE_READ_TIMEOUT_MS);
 
-  const read = <T>(fn: () => Promise<T>) =>
-    minimumSlot === undefined ? fn() : withMinimumRpcSlot(minimumSlot, fn);
   const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
-    read(() => solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address)),
-    read(() =>
-      tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, { tokenLabelsByMint })
-    ),
+    rpc
+      .getAccountInfo(wallet.publicKey as Address, {
+        encoding: "base64",
+        commitment: "confirmed",
+        minContextSlot,
+      })
+      .send({ abortSignal })
+      .then((response) => response.value),
+    getSplTokenBalances(rpc, wallet.publicKey as Address, {
+      tokenLabelsByMint,
+      minContextSlot,
+      abortSignal,
+    }),
   ]);
 
   if (solBalanceResult.status === "rejected") {
@@ -77,10 +80,10 @@ export async function getWalletBalances(c: AppContext) {
   }
   const lamports = solBalanceResult.value?.lamports ?? 0n;
   const splBalances = splBalancesResult.value;
-  const labeledBalances = await attachTokenSymbolsToBalances(c.env, [
+  const labeledBalances = await attachTokenSymbolsToBalances([
     {
       token: "SOL",
-      mint: tokenAccounts.SOL_MINT,
+      mint: SOL_MINT,
       amount: lamports.toString(),
       uiAmount: formatDecimalAmount(lamports, 9),
       decimals: 9,

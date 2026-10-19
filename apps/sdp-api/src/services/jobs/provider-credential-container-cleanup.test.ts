@@ -1,6 +1,6 @@
 // Real PostgreSQL and the external GCP secret-store seam.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { rootLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStore,

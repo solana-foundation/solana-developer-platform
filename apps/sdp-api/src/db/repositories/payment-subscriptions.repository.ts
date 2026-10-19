@@ -3,8 +3,8 @@ import type {
   PaymentSubscriptionCollectionAttemptStatus,
   PaymentSubscriptionPlanStatus,
   PaymentSubscriptionStatus,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/types/payments";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface PaymentSubscriptionPlanRow {
   id: string;

@@ -3,8 +3,8 @@ import type {
   CounterpartyAccountKind,
   CounterpartyAccountProviderData,
   CounterpartyAccountStatus,
-} from "@sdp/types";
-import type { AppDb } from "@/db";
+} from "@sdp/types/counterparties";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import type {
   ArchiveCounterpartyAccountInput,
   CounterpartyAccountRow,

@@ -11,7 +11,7 @@
  * answered yet reads as null and loading rather than as the last answer.
  */
 
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePastedMint } from "./use-pasted-mint";

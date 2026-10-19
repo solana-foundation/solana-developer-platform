@@ -1,4 +1,4 @@
-import { EarnIntegrationGuidePage } from "../integration-guide-page";
+import { EarnIntegrationGuidePage } from "@/app/dashboard/[projectId]/markets/embedded-yield/integration-guide-page";
 
 /** Provider access is organization-scoped and must be resolved per request. */
 export const dynamic = "force-dynamic";

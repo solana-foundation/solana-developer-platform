@@ -1,7 +1,10 @@
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PrivateChannelDepositRepository, PrivateChannelDepositRow } from "@/db/repositories";
+import type {
+  PrivateChannelDepositRepository,
+  PrivateChannelDepositRow,
+} from "@/db/repositories/private-channel-deposit.repository";
 
 // Mock the RPC transport so we can simulate confirm outcomes + transport errors.
 const { createRpc, confirmTransaction } = vi.hoisted(() => ({

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { prettyJSON } from "hono/pretty-json";
 import { describe, expect, it } from "vitest";
-import openapi from "@/routes/openapi";
+import { openapi } from "@/routes/openapi";
 import type { Env } from "@/types/env";
 import { createNodeHttpApp } from "./http-node";
 

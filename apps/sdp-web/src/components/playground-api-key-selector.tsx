@@ -1,6 +1,9 @@
 "use client";
 
-import { SOLANA_CLUSTER_LABELS } from "@sdp/types";
+import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { useThemeScope, useThemeScopeAttributes } from "@sdp/ui/theme-scope";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Popover } from "radix-ui";
@@ -10,9 +13,6 @@ import {
   PendingApiKeyContext,
   type PendingApiKeyOutcome,
 } from "@/components/playground-pending-api-key";
-import { useThemeScope, useThemeScopeAttributes } from "@/components/theme-scope";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";

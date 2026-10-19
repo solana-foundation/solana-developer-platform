@@ -5,16 +5,19 @@
 
 import {
   ADVANCED_SETTINGS_VERSION,
-  AUTHORITY_VALUED_SETTINGS,
-  expandLegacySettingKeys,
   type ParamValidationError,
-  resolveSettingsToExtensions,
   type SettingValidationError,
-  type TemplateOverrideError,
   validateSelectedSettings,
   validateSettingParams,
 } from "@sdp/issuance/capabilities";
-import type { AssetCategory, IssuanceMetadata, SelectedSetting } from "@sdp/types";
+import {
+  AUTHORITY_VALUED_SETTINGS,
+  resolveSettingsToExtensions,
+} from "@sdp/issuance/capabilities/resolver";
+import { expandLegacySettingKeys } from "@sdp/issuance/capabilities/settings";
+import type { TemplateOverrideError } from "@sdp/issuance/templates/definitions";
+import type { SelectedSetting } from "@sdp/types/advanced-settings";
+import type { AssetCategory, IssuanceMetadata } from "@sdp/types/asset-profiles";
 
 type Metadata = IssuanceMetadata;
 

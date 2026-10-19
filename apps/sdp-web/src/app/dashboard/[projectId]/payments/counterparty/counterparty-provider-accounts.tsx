@@ -1,32 +1,25 @@
 "use client";
 
-import {
-  BVNK_FUNDING_WALLET_STATUSES,
-  type BvnkFundingWalletStatus,
-  type CounterpartyProviderAccount,
-  type CounterpartyProviderCustomerLink,
-  type CounterpartyProviderCustomerLinkAgreement,
-  type PersistedRampProviderId,
-} from "@sdp/types";
+import type {
+  CounterpartyProviderAccount,
+  CounterpartyProviderCustomerLink,
+} from "@sdp/types/counterparties";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
-import {
-  CheckCircle2Icon,
-  ChevronDownIcon,
-  ClockIcon,
-  LoaderCircleIcon,
-  WalletIcon,
-} from "lucide-react";
+import type { PersistedRampProviderId } from "@sdp/types/provider-access";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ChevronDownIcon, LoaderCircleIcon, WalletIcon } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
+import { formatRelativeTime, toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
+import {
+  formatDisplayAmount,
+  formatTimestamp,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
-import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
-import { cn } from "@/lib/utils";
-import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
-import { formatDisplayAmount, formatTimestamp } from "../payments-overview.utils";
 import {
   type FundingWalletAccount,
   groupProviderAccounts,
@@ -42,15 +35,6 @@ const PROVIDER_ACCOUNT_STATUS_VARIANT: ReadonlyMap<string, BadgeVariant> = new M
   ["rejected", "danger"],
   ["provisioned_funding_wallet", "success"],
 ]);
-
-const FUNDING_WALLET_STATUS_LABEL_KEY = {
-  provisioning_funding_wallet: "DashboardPayments.counterparty.providerAccountWalletProvisioning",
-  provisioned_funding_wallet: "DashboardPayments.counterparty.providerAccountWalletActive",
-} as const satisfies Record<BvnkFundingWalletStatus, string>;
-
-function isBvnkFundingWalletStatus(value: string): value is BvnkFundingWalletStatus {
-  return BVNK_FUNDING_WALLET_STATUSES.some((status) => status === value);
-}
 
 /**
  * Renders a provider-side status string as a badge. Provider statuses are an
@@ -83,54 +67,6 @@ function providerAccountStatus(
   return account.providerStatus === null ? account.status : account.providerStatus;
 }
 
-function CustomerLinkAgreements({
-  agreements,
-}: {
-  agreements: CounterpartyProviderCustomerLinkAgreement[];
-}) {
-  const t = useTranslations();
-  return (
-    <>
-      {agreements.map((agreement) => (
-        <div
-          key={agreement.name}
-          className="flex min-w-0 items-center gap-2 border-t border-border-default px-4 py-2 text-sm"
-        >
-          {agreement.signedAt !== null ? (
-            <span
-              className="flex shrink-0 items-center gap-1 text-success"
-              title={formatTimestamp(agreement.signedAt, t)}
-            >
-              <CheckCircle2Icon className="size-4" />
-              {t("DashboardPayments.counterparty.agreementSigned")}
-            </span>
-          ) : (
-            <span className="flex shrink-0 items-center gap-1 text-tertiary">
-              <ClockIcon className="size-4" />
-              {t("DashboardPayments.counterparty.agreementAwaitingSignature")}
-            </span>
-          )}
-          <span className="truncate text-primary">{agreement.displayName}</span>
-          <button
-            type="button"
-            className="underline underline-offset-2 text-tertiary hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.url)}
-          >
-            {t("DashboardPayments.counterparty.viewAgreement")}
-          </button>
-          <button
-            type="button"
-            className="underline underline-offset-2 text-tertiary hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.privacyPolicyUrl)}
-          >
-            {t("DashboardPayments.counterparty.viewPrivacyPolicy")}
-          </button>
-        </div>
-      ))}
-    </>
-  );
-}
-
 function ProviderCustomerHeader({
   provider,
   customerLink,
@@ -152,15 +88,6 @@ function ProviderCustomerHeader({
             {t("DashboardPayments.counterparty.providerAccountCustomer")}
           </span>
           <ProviderAccountStatusBadge status={providerAccountStatus(customerLink)} />
-          {customerLink.provider === "bvnk" ? (
-            <span
-              className="text-xs text-tertiary"
-              title={t("DashboardPayments.counterparty.taxResidence")}
-            >
-              <span aria-hidden="true">{regionFlagEmoji(customerLink.residenceCountryCode)}</span>{" "}
-              {customerLink.residenceCountryCode}
-            </span>
-          ) : null}
         </>
       ) : null}
     </>
@@ -246,14 +173,7 @@ function FundingWalletsList({ accounts }: { accounts: FundingWalletAccount[] }) 
             <span className="ml-auto">
               <ProviderWalletBalanceCell balance={account.balance} />
             </span>
-            <ProviderAccountStatusBadge
-              status={walletStatus}
-              label={
-                isBvnkFundingWalletStatus(walletStatus)
-                  ? t(FUNDING_WALLET_STATUS_LABEL_KEY[walletStatus])
-                  : undefined
-              }
-            />
+            <ProviderAccountStatusBadge status={walletStatus} />
           </li>
         );
       })}
@@ -316,10 +236,7 @@ function PayoutAccountsTable({ accounts }: { accounts: CounterpartyProviderAccou
 function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
   const [open, setOpen] = useState(false);
   const { provider, customerLink, payoutAccounts, fundingWallets } = group;
-  const expandable =
-    payoutAccounts.length > 0 ||
-    fundingWallets.length > 0 ||
-    (customerLink !== undefined && customerLink.provider === "bvnk");
+  const expandable = payoutAccounts.length > 0 || fundingWallets.length > 0;
 
   return (
     <div className="rounded-lg border border-border-default bg-surface-raised">
@@ -350,9 +267,6 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
         <>
           {fundingWallets.length > 0 ? <FundingWalletsList accounts={fundingWallets} /> : null}
           {payoutAccounts.length > 0 ? <PayoutAccountsTable accounts={payoutAccounts} /> : null}
-          {customerLink !== undefined && customerLink.provider === "bvnk" ? (
-            <CustomerLinkAgreements agreements={customerLink.agreements} />
-          ) : null}
         </>
       ) : null}
     </div>

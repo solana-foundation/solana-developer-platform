@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTransfer, type Translate } from "../payments-workspace.data";
+import {
+  createTransfer,
+  type Translate,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { submitOfframpDeposit } from "./offramp-deposit";
 
 const feedback = vi.hoisted(() => ({

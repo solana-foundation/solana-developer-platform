@@ -1,10 +1,8 @@
 "use client";
 
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type PaymentsDashboardWallet,
-  type RampProviderId,
-} from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { useMemo } from "react";
 import {
   type ApiPlaygroundEndpointConfig,

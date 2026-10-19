@@ -90,12 +90,12 @@ describe("instrumentVendorPort", () => {
 
   it("rethrows rejections unchanged and emits exactly one failed event", async () => {
     const boom = new Error("async boom");
-    const port = instrumentVendorPort("bvnk", { send: async () => Promise.reject(boom) });
+    const port = instrumentVendorPort("moonpay", { send: async () => Promise.reject(boom) });
     await expect(port.send()).rejects.toBe(boom);
     const emitted = failureEvents();
     expect(emitted).toHaveLength(1);
     expect(emitted[0][1]).toMatchObject({
-      vendor: "bvnk",
+      vendor: "moonpay",
       operation: "send",
       outcome: "failed",
     });

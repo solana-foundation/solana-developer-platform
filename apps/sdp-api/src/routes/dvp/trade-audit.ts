@@ -40,7 +40,7 @@
  */
 
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, type AuditLogEntry, AuditService } from "@/services/audit.service";

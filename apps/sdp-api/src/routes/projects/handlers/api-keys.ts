@@ -1,7 +1,8 @@
 import { SigningError } from "@sdp/custody/signing";
-import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
+import type { CreateApiKeyResponse } from "@sdp/types/api-keys";
+import type { ApiKeyRole } from "@sdp/types/permissions";
 import type { Context } from "hono";
-import { asTransactionalClient, getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -9,6 +10,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
+import { assertApiKeyProjectAccess } from "@/routes/projects/project-access";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
@@ -24,7 +26,6 @@ import {
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
-import { assertApiKeyProjectAccess } from "../project-access";
 
 type AppContext = Context<{ Bindings: Env }>;
 

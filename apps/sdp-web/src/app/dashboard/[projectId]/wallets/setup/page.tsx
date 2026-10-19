@@ -1,1 +1,1 @@
-export { default } from "../../custody/setup/page";
+export { default } from "@/app/dashboard/[projectId]/custody/setup/page";

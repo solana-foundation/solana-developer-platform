@@ -1,7 +1,7 @@
 // SDP project-member lookup: `users` joined with `project_members` to answer
 // "is user X a member of project Y, and what's their SDP role?".
 
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /** SDP user projected with their project-role. */
 export interface ProjectUserRow {

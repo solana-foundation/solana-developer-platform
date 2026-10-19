@@ -1,5 +1,5 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { isRampProviderSurfaced, RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
@@ -118,7 +118,7 @@ describe("ramp currency provider details", () => {
 
   it("narrows off-ramp providerDetails when the provider query filter is present", async () => {
     const response = await buildApp().request(
-      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD&provider=bvnk",
+      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD&provider=moonpay",
       {},
       env
     );
@@ -126,8 +126,8 @@ describe("ramp currency provider details", () => {
     expect(response.status).toBe(200);
     const data = await responseData(response);
 
-    expect(data.pairs).toEqual([{ source: "usdc.solana", dest: "USD", providers: ["bvnk"] }]);
-    expect(Object.keys(data.providerDetails).sort()).toEqual(["bvnk"]);
+    expect(data.pairs).toEqual([{ source: "usdc.solana", dest: "USD", providers: ["moonpay"] }]);
+    expect(Object.keys(data.providerDetails).sort()).toEqual(["moonpay"]);
   });
 
   it("omits un-surfaced providers from listings even when the support matrix includes them", async () => {

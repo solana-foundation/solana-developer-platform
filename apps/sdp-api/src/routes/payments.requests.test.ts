@@ -1,15 +1,15 @@
-import { PAYMENT_REQUEST_STATUSES } from "@sdp/types";
-import { createSolanaRpcFromTransport, type RpcTransport } from "@solana/kit";
+import { PAYMENT_REQUEST_STATUSES } from "@sdp/types/payments";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
-import { errorResponseSchema, successResponseSchema, z } from "@/openapi/schemas/base";
+import { z } from "zod";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
-  createRpcMock,
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
   seedCachedKey,
@@ -119,14 +119,10 @@ async function seedConnectionWallet(projectId = TEST_PROJECT.id) {
 
 describe("Payments routes — Payment Requests exact recipient", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
 
   beforeEach(() => {
-    const transport: RpcTransport = async <TResponse>({ payload }: Parameters<RpcTransport>[0]) => {
-      expect(payload).toMatchObject({ method: "getSignaturesForAddress" });
-      // SAFETY: This transport only returns the JSON-RPC envelope Kit decodes for an empty signature list.
-      return { jsonrpc: "2.0", id: 1, result: [] } as TResponse;
-    };
-    createRpcMock.mockReturnValue(createSolanaRpcFromTransport(transport));
+    rpc.answer("getSignaturesForAddress", []);
   });
 
   it("creates and lists the exact recipient without exposing its provider reference", async () => {
@@ -293,7 +289,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
       },
     });
-    expect(createRpcMock).not.toHaveBeenCalled();
+    expect(rpc.calls).toHaveLength(0);
     expect(createFeePaymentAdapterMock).not.toHaveBeenCalled();
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });

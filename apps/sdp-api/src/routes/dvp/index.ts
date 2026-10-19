@@ -20,7 +20,7 @@ import {
 } from "./handlers";
 import { createDvpTradeSchema, fundDvpTradeSchema } from "./schemas";
 
-const dvp = new Hono<{ Bindings: Env }>();
+export const dvp = new Hono<{ Bindings: Env }>();
 
 /**
  * Gates every DvP route behind the Markets module flag.
@@ -108,5 +108,3 @@ dvp.post(
   meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   cancelTrade
 );
-
-export default dvp;

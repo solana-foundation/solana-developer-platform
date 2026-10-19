@@ -103,9 +103,11 @@ export async function bootstrapWalletIdentityFixtures(browser: Browser) {
   };
   try {
     await db.query("BEGIN");
-    for (const [ownerProject, label] of [
-      [projectId, "Wallet Identity B"],
-      [otherProjectId, "Wallet Identity Other Project"],
+    for (const [ownerProject, label, providerWalletId] of [
+      [projectId, "Wallet Identity B", walletA.walletId],
+      [otherProjectId, "Wallet Identity Other Project", walletA.walletId],
+      // Bookmark balance reads stay on the existing CI devnet lane.
+      [projectId, "Wallet Identity Bookmark", crypto.randomUUID()],
     ]) {
       const suffix = crypto.randomUUID();
       const credentialId = `pcred_identity_${suffix}`;
@@ -129,7 +131,7 @@ export async function bootstrapWalletIdentityFixtures(browser: Browser) {
         `INSERT INTO custody_wallets
           (id, custody_connection_id, wallet_id, public_key, label, purpose, status)
          VALUES ($1, $2, $3, $4, $5, 'transfer', 'active')`,
-        [walletId, connectionId, walletA.walletId, walletA.publicKey, label]
+        [walletId, connectionId, providerWalletId, walletA.publicKey, label]
       );
       await db.query(
         `UPDATE custody_connections
@@ -150,25 +152,32 @@ export async function bootstrapWalletIdentityFixtures(browser: Browser) {
     await db.end();
   }
   try {
-    const [walletBRecord, otherWalletRecord] = records;
-    if (!walletBRecord || !otherWalletRecord) {
+    const [walletBRecord, otherWalletRecord, bookmarkWalletRecord] = records;
+    if (!walletBRecord || !otherWalletRecord || !bookmarkWalletRecord) {
       throw new Error("Project-owned alias fixtures were not created");
     }
     const [wallets, otherWallets] = await Promise.all([
       api.get("/v1/wallets"),
       otherApi.get("/v1/wallets"),
     ]);
-    const walletB = paymentsWalletsResponseSchema.shape.data
-      .parse(wallets)
-      .wallets.find((wallet) => wallet.id === walletBRecord.walletId);
+    const sandboxWallets = paymentsWalletsResponseSchema.shape.data.parse(wallets).wallets;
+    const walletB = sandboxWallets.find((wallet) => wallet.id === walletBRecord.walletId);
+    const bookmarkWallet = sandboxWallets.find(
+      (wallet) => wallet.id === bookmarkWalletRecord.walletId
+    );
     const otherWallet = paymentsWalletsResponseSchema.shape.data
       .parse(otherWallets)
       .wallets.find((wallet) => wallet.id === otherWalletRecord.walletId);
-    if (!walletB || !otherWallet) throw new Error("Project-owned alias fixtures were not listed");
+    if (!walletB || !otherWallet || !bookmarkWallet) {
+      throw new Error("Project-owned wallet identity fixtures were not listed");
+    }
     expect(walletB.isRuntimeExecutionAllowed).toBe(true);
     expect(otherWallet.isRuntimeExecutionAllowed).toBe(true);
     expect(walletB.walletId).toBe(walletA.walletId);
     expect(walletB.publicKey).toBe(walletA.publicKey);
+    expect(bookmarkWallet.isRuntimeExecutionAllowed).toBe(true);
+    expect(bookmarkWallet.walletId).not.toBe(walletA.walletId);
+    expect(bookmarkWallet.publicKey).toBe(walletA.publicKey);
     return {
       admin,
       api,
@@ -178,6 +187,7 @@ export async function bootstrapWalletIdentityFixtures(browser: Browser) {
       walletA,
       walletB,
       otherWallet,
+      bookmarkWallet,
       cleanup,
     };
   } catch (error) {

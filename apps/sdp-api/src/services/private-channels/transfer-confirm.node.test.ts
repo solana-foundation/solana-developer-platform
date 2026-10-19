@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PrivateChannelTransferRepository,
   PrivateChannelTransferRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-transfer.repository";
 import type { Env } from "@/types/env";
 
 // Mock the RPC transport so we can simulate confirm outcomes + transport errors.

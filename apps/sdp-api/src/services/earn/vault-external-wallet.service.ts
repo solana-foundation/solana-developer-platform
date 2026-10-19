@@ -1,6 +1,7 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
   address,
@@ -11,7 +12,7 @@ import {
   type SignatureBytes,
   verifySignature,
 } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnExternalWalletTransactionsRepository,
   type EarnExternalWalletTransactionRow,
@@ -38,7 +39,6 @@ import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
 import {
   earnClusterFor,
-  resolveClusterRpcUrl,
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
 } from "./execution-registry";

@@ -1,10 +1,10 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { CheckIcon } from "lucide-react";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 const stepTransition = { duration: 0.18, ease: "easeOut" } as const;
 const checkTransition = { duration: 0.22, ease: [0.22, 1, 0.36, 1] } as const;

@@ -1,5 +1,5 @@
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   PaymentsActivitySkeleton,
   PaymentsBalanceSkeleton,

@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useSWRConfig } from "swr";
@@ -10,7 +11,6 @@ import {
   isPaymentsDemoOn,
   type PaymentsDemoState,
 } from "@/lib/payments-demo/payments-demo-context";
-import { cn } from "@/lib/utils";
 
 /**
  * The Payments header's demo mode switch, on every Payments screen. It can be turned on on a

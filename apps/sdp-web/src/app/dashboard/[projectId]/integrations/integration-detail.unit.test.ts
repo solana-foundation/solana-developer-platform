@@ -1,9 +1,9 @@
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
   type ProjectProviderAvailability,
   RAMP_PROVIDERS,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import {
   availableComplianceProviders,
@@ -62,7 +62,7 @@ describe("integration detail", () => {
   });
 
   it("resolves no detail for a provider the project cannot use", () => {
-    for (const provider of ["fireblocks", "bvnk", "trm"]) {
+    for (const provider of ["fireblocks", "coinbase", "trm"]) {
       expect(resolveIntegrationDetail({ provider, ...INPUTS })).toBeNull();
     }
   });

@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { isIdempotencyErrorCode } from "@sdp/types";
+import { isIdempotencyErrorCode } from "@sdp/types/idempotency";
 import {
   commitmentComparator,
   decimalFixedPointToNumber,

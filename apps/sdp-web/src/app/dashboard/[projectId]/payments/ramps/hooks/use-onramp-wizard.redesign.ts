@@ -1,11 +1,11 @@
 "use client";
 
-import {
-  getCryptoRailAssetLabel,
-  type PaymentOnrampQuoteRequest,
-  type PaymentRampQuote,
-  type PaymentTransferSummary,
-} from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type {
+  PaymentOnrampQuoteRequest,
+  PaymentRampQuote,
+  PaymentTransferSummary,
+} from "@sdp/types/payments";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -15,21 +15,25 @@ import {
   fetchTransferById,
   simulateSandboxTransfer,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
-import { onrampPairs } from "@/lib/ramps";
-import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import { getRampTransferState } from "../ramp-transfer-state";
-import { depositDetailsSchema, depositSelectionSchema } from "../schema";
+import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import {
+  depositDetailsSchema,
+  depositSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import {
   memoSummaryDetails,
   optionalDetail,
   providerSummaryDetail,
   summaryAmount,
-} from "../wizard-summary";
+} from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
+import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
+import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
+import { onrampPairs } from "@/lib/ramps";
 import {
   type RampWizardStep,
   type UseRampWizardProps,
@@ -74,22 +78,6 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   };
 }
 
-/** Whether the provider's sandbox can simulate this quote's pay-in: BVNK's once its funding account is ready. */
-function canSimulateQuote(quote: PaymentRampQuote): boolean {
-  switch (quote.provider) {
-    case "bvnk":
-      return (
-        quote.deliveryMode === "manual_instructions" &&
-        quote.paymentInstructions.some(
-          (instruction) =>
-            instruction.kind === "fiat_funding" && instruction.onboardingStatus === "ready"
-        )
-      );
-    default:
-      return false;
-  }
-}
-
 interface SimulationContext {
   quote: PaymentRampQuote | null;
   transferId: string | null;
@@ -113,7 +101,7 @@ function simulationOffered(context: SimulationContext): context is SimulationCon
   if (quote === null || transferId === null || transferStatus === undefined) return false;
   if (getRampTransferState(transferStatus.status).terminal) return false;
   if (transferStatus.status !== "awaiting_payment" && !context.succeeded) return false;
-  return context.demo || (context.sandbox && canSimulateQuote(quote));
+  return context.demo;
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
@@ -195,14 +183,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     }
   );
 
-  const bvnkSettlementReached =
-    transferStatus !== undefined &&
-    transferStatus.status === "settling" &&
-    transferStatus.settlement !== undefined &&
-    transferStatus.settlement.provider === "bvnk";
-  const showCompleteScreen =
-    bvnkSettlementReached ||
-    (transferStatus !== undefined && transferStatus.status === "completed");
+  const showCompleteScreen = transferStatus?.status === "completed";
 
   const simulation = {
     quote: wizard.quote,

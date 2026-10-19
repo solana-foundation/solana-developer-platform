@@ -1,4 +1,5 @@
-import type { RampProviderId, SdpModule } from "@sdp/types";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { SdpModule } from "@sdp/types/release-channels";
 import {
   ArrowLeftRightIcon,
   ArrowRightIcon,
@@ -114,7 +115,6 @@ const PARTNER_ROWS: {
     module: "ramps",
     partners: [
       { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg", rampProvider: "moonpay" },
-      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg", rampProvider: "bvnk" },
       { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg", rampProvider: "stripe" },
     ],
   },
@@ -328,6 +328,7 @@ export function DocsHome() {
                       isGatePublished({ rampProvider: p.rampProvider })
                   )
                   .map((p) => (
+                    // biome-ignore lint/performance/noImgElement: partner wordmarks have per-logo heights and no intrinsic width, which next/image requires
                     <img
                       key={p.name}
                       src={p.src}

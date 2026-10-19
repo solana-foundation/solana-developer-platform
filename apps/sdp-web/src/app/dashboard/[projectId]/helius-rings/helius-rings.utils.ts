@@ -4,7 +4,10 @@
  * render and its hydration agree.
  */
 
-import { type HeliusRingsLiveOperationStatus, isLiveHeliusRingsOperationStatus } from "@sdp/types";
+import {
+  type HeliusRingsLiveOperationStatus,
+  isLiveHeliusRingsOperationStatus,
+} from "@sdp/types/helius-rings";
 import {
   type ProjectRing,
   RINGS_ALLOWLISTED_ASSETS,

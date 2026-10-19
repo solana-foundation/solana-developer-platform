@@ -10,10 +10,10 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { badRequest } from "@/lib/errors";
 import { AuditService } from "@/services/audit.service";
 import { env } from "@/test/helpers/env";

@@ -1,9 +1,9 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import type { MonitorOptions, Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
-import openapi, { createWeakEtag } from "./openapi";
+import { createWeakEtag, openapi } from "./openapi";
 
 const observability: Observability = {
   captureException: () => {},

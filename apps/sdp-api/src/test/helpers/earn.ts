@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, Permission } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { Permission } from "@sdp/types/permissions";
 import { getDb } from "@/db/client";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedDefaultProjects } from "@/test/helpers/projects";

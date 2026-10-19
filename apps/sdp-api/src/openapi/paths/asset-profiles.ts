@@ -3,12 +3,11 @@ import { z } from "zod";
 
 import {
   assetProfileIdParamSchema,
-  createTokenWithAssetProfileRequestSchema,
-  errorResponseSchema,
   listAssetProfilesQuerySchema,
-  tokenIdParamSchema,
   updateAssetProfileRequestSchema,
-} from "../schemas";
+} from "@/openapi/schemas/asset-profiles";
+import { errorResponseSchema, tokenIdParamSchema } from "@/openapi/schemas/base";
+import { createTokenWithAssetProfileRequestSchema } from "@/openapi/schemas/issuance";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   assetProfileFieldOptionsResponse,

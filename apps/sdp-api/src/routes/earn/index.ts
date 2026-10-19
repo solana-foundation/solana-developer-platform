@@ -107,7 +107,7 @@ import {
   earnVaultWithdrawalSchema,
 } from "./schemas";
 
-const earnRoutes = new Hono<{ Bindings: Env }>();
+export const earnRoutes = new Hono<{ Bindings: Env }>();
 const optionalAuthEarn = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
 
@@ -674,5 +674,3 @@ earn.get(
 
 earnRoutes.route("/", optionalAuthEarn);
 earnRoutes.route("/", earn);
-
-export default earnRoutes;

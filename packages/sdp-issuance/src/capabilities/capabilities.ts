@@ -2,7 +2,7 @@
 // Regulated types use guarded templates (fixed extension sets), generics use custom.
 // See docs/decisions/0002-asset-advanced-settings.md.
 
-import type { AssetCapability, SettingAvailability } from "@sdp/types";
+import type { AssetCapability, SettingAvailability } from "@sdp/types/advanced-settings";
 import { SETTING_KEYS, type SettingKey } from "./settings";
 
 // Build availability map from partial override; unlisted default to "available".

@@ -1,21 +1,21 @@
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type SolanaCluster,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
-import {
   isVedaDepositMint,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
   type VedaDeployment,
   vedaDeployment,
 } from "@sdp/types/veda-programs";
-import { providerNotConfigured } from "../../errors";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types/well-known-tokens";
+import { providerNotConfigured } from "#/errors";
+import { StubEarnClient } from "#/providers/stub";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 import { readVedaVaults, VEDA_UNSET_AUTHORITY, type VedaVault } from "./vault-state";
 
 /**

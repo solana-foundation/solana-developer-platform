@@ -1,13 +1,14 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, ListChecks, MinusIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DashboardQuickStart as LegacyDashboardQuickStart } from "@/components/dashboard-quick-start";
 import { useNewDesign } from "@/components/new-design";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
@@ -26,7 +27,6 @@ import {
   skipQuickStartStep,
 } from "@/lib/dashboard-quick-start.redesign";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { useQuickStart } from "./use-quick-start";
 
 type Translate = ReturnType<typeof useTranslations>;

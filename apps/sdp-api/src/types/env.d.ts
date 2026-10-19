@@ -1,16 +1,14 @@
 /** Environment variables consumed by the Node API runtime. */
 
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  EgressReadiness,
-  OrganizationEntitlements,
-  OrganizationRpcProvider,
-  Permission,
-  SdpRampProviderStages,
-} from "@sdp/types";
-import type { ManagedRpcEnv } from "@sdp/rpc";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
+import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
+import type { EgressReadiness } from "@sdp/types/health";
+import type { OrganizationEntitlements } from "@sdp/types/organization-entitlements";
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
+import type { Permission } from "@sdp/types/permissions";
+import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { ManagedRpcEnv } from "@sdp/rpc/types";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
@@ -286,15 +284,6 @@ export interface Env extends ManagedRpcEnv {
   MOONPAY_SANDBOX_SECRET_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
-  // BVNK ramps configuration
-  BVNK_HAWK_AUTH_ID?: string;
-  BVNK_HAWK_SECRET_KEY?: string;
-  BVNK_WALLET_ID?: string;
-  BVNK_WEBHOOK_SECRET?: string;
-  BVNK_SANDBOX_HAWK_AUTH_ID?: string;
-  BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
-  BVNK_SANDBOX_WALLET_ID?: string;
-  BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
   // Stripe sandbox only: production projects bring their own Stripe account.
   STRIPE_SANDBOX_SECRET_KEY?: string;
@@ -352,6 +341,8 @@ declare module "hono" {
     authorized?: { loaded: unknown };
     // Set by idempotent() when this request holds its key: the request's fingerprint
     idempotencyFingerprint?: string;
+    // Set by idempotent(): the fingerprint under the route's previous canonical form
+    idempotencyPreviousFingerprint?: string;
     // Set by idempotent() with the fingerprint: the key this request claimed
     idempotencyClaimedKey?: string;
     // Set by markIdempotencyCommitted() once the handler wrote its domain row
@@ -407,5 +398,5 @@ declare module "hono" {
 }
 
 declare global {
-  type DatabaseClient = import("@/db").DatabaseClient;
+  type DatabaseClient = import("@/db/client").DatabaseClient;
 }

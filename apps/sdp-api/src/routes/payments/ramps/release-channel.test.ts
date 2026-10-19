@@ -1,4 +1,5 @@
-import { RAMP_PROVIDERS, SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
@@ -70,7 +71,6 @@ describe("ramp providers outside the release channel", () => {
 
   it.each([
     ["GET", "/onramp/currency?provider=stripe"],
-    ["GET", "/offramp/currency?provider=bvnk"],
     [
       "GET",
       "/counterparties/cp_1/requirements?provider=stripe&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cw_1",

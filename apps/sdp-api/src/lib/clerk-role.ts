@@ -1,4 +1,4 @@
-import type { OrganizationRole } from "@sdp/types";
+import type { OrganizationRole } from "@sdp/types/permissions";
 
 export function mapClerkRoleToOrgRole(role: string | null | undefined): OrganizationRole {
   if (role === "org:admin") {

@@ -1,4 +1,4 @@
-import type { ApiKeyStatus } from "@sdp/types";
+import type { ApiKeyStatus } from "@sdp/types/api-keys";
 
 export function isRotationDeadlineReached(
   rotationDeadline: string | null | undefined,

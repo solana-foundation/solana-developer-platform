@@ -1,4 +1,3 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 /**
  * Pending-transfers reconciliation entrypoint.
  *
@@ -11,7 +10,6 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import type { Observability } from "@/runtime/observability";
-import { reconcileBvnkOnrampPayouts } from "@/services/jobs/reconcile-bvnk-onramp-payouts";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import type { Env } from "@/types/env";
@@ -30,7 +28,6 @@ export function runPendingTransfersReconciliation(deps: PendingTransfersReconcil
     await Promise.all([
       runInEachClusterScope(() => trackPendingTransfers(deps.env)),
       reconcileSponsorshipBudgets(deps.env),
-      reconcileBvnkOnrampPayouts(deps.env, SDP_RAMP_PROVIDER_STAGES),
     ]);
   };
 

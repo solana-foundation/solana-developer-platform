@@ -1,4 +1,4 @@
-import type { ReadIdentityResult } from "@sdp/helius-rings";
+import type { ReadIdentityResult } from "@sdp/helius-rings/port";
 import { getBase58Decoder } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {

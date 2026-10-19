@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import { lendingPda } from "@jup-ag/lend";
 import {
   currentMinimumRpcSlot,
-  fetchWithReadSocketRetry,
   readFloor,
   readStamp,
   withRpcReadContextFetch,
 } from "@sdp/rpc/read-context";
+import { fetchWithReadSocketRetry } from "@sdp/rpc/socket-retry";
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   type Commitment,

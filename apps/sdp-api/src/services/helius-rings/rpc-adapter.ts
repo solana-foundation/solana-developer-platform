@@ -1,4 +1,4 @@
-import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk";
+import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk/error-bridge";
 import {
   createRpc,
   createRpcFromTransport,

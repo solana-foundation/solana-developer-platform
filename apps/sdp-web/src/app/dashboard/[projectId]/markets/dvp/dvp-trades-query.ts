@@ -12,7 +12,7 @@
  * reaches the trades query string.
  */
 
-import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import type { DvpTradesFilters } from "./dvp-trades.data";
 
 /**

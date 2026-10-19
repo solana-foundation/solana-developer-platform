@@ -1,10 +1,7 @@
 "use client";
 
-import {
-  getCryptoRailAssetLabel,
-  type PaymentOnrampQuoteRequest,
-  type PaymentTransferSummary,
-} from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type { PaymentOnrampQuoteRequest, PaymentTransferSummary } from "@sdp/types/payments";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -14,19 +11,23 @@ import {
   fetchTransferById,
   simulateSandboxTransfer,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { onrampPairs } from "@/lib/ramps";
-import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import { getRampTransferState } from "../ramp-transfer-state";
-import { depositAmountSchema, depositSelectionSchema } from "../schema";
+import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import {
+  depositAmountSchema,
+  depositSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import {
   memoSummaryDetails,
   optionalDetail,
   providerSummaryDetail,
   summaryAmount,
-} from "../wizard-summary";
+} from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
+import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
+import { onrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -138,20 +139,9 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     }
   );
 
-  const bvnkSettlementReached =
-    transferStatus !== undefined &&
-    transferStatus.status === "settling" &&
-    transferStatus.settlement !== undefined &&
-    transferStatus.settlement.provider === "bvnk";
-  const showCompleteScreen =
-    bvnkSettlementReached ||
-    (transferStatus !== undefined && transferStatus.status === "completed");
+  const showCompleteScreen = transferStatus?.status === "completed";
 
   const simulateCurrentQuote = async () => {
-    const quote = wizard.quote;
-    if (quote?.provider !== "bvnk") {
-      return;
-    }
     if (!wizard.selectedWallet || wizard.quoteTransferId === null) {
       return;
     }

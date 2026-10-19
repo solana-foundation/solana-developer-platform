@@ -6,7 +6,8 @@ import {
   type IdempotencyKeyHeaders,
 } from "@/lib/idempotency";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
+import { getSdpAuth } from "@/lib/sdp-auth";
 
 const PUBLIC_API_PATH_PREFIX = "/v1/";
 const INVALID_PATH_MESSAGE = "Path must start with '/v1/'";

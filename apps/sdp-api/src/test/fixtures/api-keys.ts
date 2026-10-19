@@ -2,7 +2,7 @@
  * API Key test fixtures
  */
 
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { TEST_ORG } from "./organizations";
 import { TEST_PROJECT } from "./tokens";
 

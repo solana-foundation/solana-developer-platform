@@ -1,5 +1,5 @@
+import { EmbeddedYieldDashboard } from "@/app/dashboard/[projectId]/markets/earn/embedded-yield-dashboard";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { EmbeddedYieldDashboard } from "../earn/embedded-yield-dashboard";
 
 export default function EmbeddedYieldPage() {
   return (

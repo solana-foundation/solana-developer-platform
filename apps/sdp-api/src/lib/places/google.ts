@@ -1,5 +1,5 @@
 import { requireEnv } from "@sdp/payments/ramps/shared";
-import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
+import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types/places";
 import { z } from "zod";
 import { providerUnavailable } from "@/lib/errors";
 import { fetchProviderJson, type ProviderJsonRequest } from "@/lib/provider-json";

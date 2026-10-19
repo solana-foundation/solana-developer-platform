@@ -1,5 +1,6 @@
-import type { CustodyMode, CustodyProvider, SdpReleaseChannel } from "@sdp/types";
+import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
 import type * as ReleaseChannels from "@sdp/types/release-channels";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 
 type ReleaseChannelsModule = typeof ReleaseChannels;
 

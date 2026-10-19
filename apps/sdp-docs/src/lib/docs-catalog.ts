@@ -9,7 +9,9 @@
  * source.config.ts loads it.
  */
 
-import type { OperationFamily, RampProviderId, SdpModule } from "@sdp/types";
+import type { OperationFamily } from "@sdp/types/allowed-operations";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { SdpModule } from "@sdp/types/release-channels";
 
 /** One product module as the introduction and the AI guide describe it. */
 export type ModuleEntry = {
@@ -88,17 +90,6 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
     deliveryMode: "hosted",
     bestFor: "Fast sandbox iteration; broad payment-method coverage (corridor-dependent).",
     notes: "Separate sandbox and production credentials, chosen per request.",
-  },
-  {
-    provider: "bvnk",
-    name: "BVNK",
-    onramp: "✓",
-    offramp: "✓",
-    sandbox: "✓",
-    deliveryMode: "manual_instructions",
-    bestFor: "Fast sandbox iteration; travel-rule and compliance party metadata.",
-    notes:
-      "Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request.",
   },
   {
     provider: "stripe",

@@ -1,4 +1,4 @@
-import { SOL_MINT, type WellKnownTokenSymbol, wellKnownMint } from "@sdp/types";
+import { SOL_MINT, type WellKnownTokenSymbol, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import {
   estimatedTreasuryApy,

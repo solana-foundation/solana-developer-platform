@@ -1,8 +1,9 @@
 import { hashString } from "@sdp/payments/hash";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS } from "@sdp/types";
+import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
   AccountRole,
@@ -25,11 +26,11 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, rateLimited } from "@/lib/errors";
-import { buildSplTransferInstructions, SOL_MINT } from "@/routes/payments/token-accounts";
+import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import {
   createSponsorshipFeePayment,
@@ -62,7 +63,8 @@ export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransac
  * because a signed transaction is a bearer instrument until its blockhash expires, and two live
  * ones would double the sponsor's exposure.
  *
- * @param c - The request context, for the bindings and the sponsor-signature audit entry.
+ * @param c - The request context, under the payment request's cluster scope (it builds and reads
+ *   on that cluster), for the bindings and the sponsor-signature audit entry.
  * @param params - The payable request and the parties to the transfer.
  * @param params.request - The reconciled, payable payment request; its Project sponsors.
  * @param params.payer - The account that pays and signs client-side.
@@ -84,7 +86,7 @@ export async function issuePaymentRequestTransaction(
 ): Promise<SponsoredPaymentTransaction> {
   const { request, payer } = params;
   const repository = createSystemPaymentRequestsRepository(c.env);
-  const rpc = solanaRpc.createRpc(c.env);
+  const rpc = createClusterRpc();
   const currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
 
   const serveLiveClaim = async (): Promise<SponsoredPaymentTransaction | null> => {
@@ -171,7 +173,7 @@ export async function issuePaymentRequestTransaction(
   const feePayment = await getFeePayment();
   const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
     feePayment.getFeePayer(),
-    solanaRpc.getRecentBlockhash(rpc, "confirmed"),
+    getRecentBlockhash(rpc, "confirmed"),
   ]);
   const unsignedBase64 = await buildPaymentTransaction(rpc, {
     ...params,
@@ -215,7 +217,7 @@ export async function issuePaymentRequestTransaction(
  * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
  */
 async function buildPaymentTransaction(
-  rpc: solanaRpc.SolanaRpc,
+  rpc: SolanaRpc,
   params: {
     request: PaymentRequestRow;
     payer: Address;

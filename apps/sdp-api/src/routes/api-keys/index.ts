@@ -22,7 +22,7 @@ import {
   apiKeyUpdateSchema,
 } from "./schemas";
 
-const apiKeys = new Hono<{ Bindings: Env }>();
+export const apiKeys = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 apiKeys.use("*", unifiedAuthMiddleware());
@@ -54,5 +54,3 @@ apiKeys.delete(
   validateBody(apiKeyRevokeSchema),
   revokeApiKey
 );
-
-export default apiKeys;

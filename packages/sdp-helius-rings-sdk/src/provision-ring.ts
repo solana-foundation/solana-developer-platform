@@ -15,12 +15,8 @@ import {
   ringAuthAddress,
   ringProgramDataAddress,
 } from "@heliuslabs/zolana/ring";
-import {
-  HeliusRingsError,
-  type HeliusRingsErrorCode,
-  type ProvisionRingInput,
-  type ProvisionRingResult,
-} from "@sdp/helius-rings";
+import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings/errors";
+import type { ProvisionRingInput, ProvisionRingResult } from "@sdp/helius-rings/port";
 import {
   type Address,
   address,
@@ -48,8 +44,8 @@ import {
   getCreateLookupTableInstructionDataDecoder,
   getExtendLookupTableInstructionDataDecoder,
 } from "@solana-program/address-lookup-table";
+import { landTransaction } from "./land-transaction.js";
 import { expectedRingTable } from "./outer-tx-policy.js";
-import { landTransaction } from "./provision.js";
 
 /**
  * Completes bring-up of a pre-deployed ring program, signing only through

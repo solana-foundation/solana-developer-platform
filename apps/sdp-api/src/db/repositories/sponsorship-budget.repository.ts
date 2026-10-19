@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { SponsorshipReservationStatus } from "@sdp/types";
-import type { AppDb, DatabaseExecutor } from "@/db";
+import type { SponsorshipReservationStatus } from "@sdp/types/sponsorship";
+import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 
 export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
 

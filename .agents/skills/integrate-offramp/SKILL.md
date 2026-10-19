@@ -22,7 +22,7 @@ Output `PaymentRampQuote` is closed by `provider` and `deliveryMode`; add the pr
 
 1. **Source wallet.** The shared request-gate extraction resolves `sourceWallet` to an SDP wallet/address, and the route declares its operation with `requireAllowedOperation`. Do not accept a provider account id in place of the SDP source wallet.
 
-2. **Payout destination.** The fiat lands in a resource the requirements advance flow provisioned before the quote, stored as a `counterparty_provider_accounts` row (BVNK pays out through the customer's `funding_wallet`). The handler reads that row parent-scoped; a missing or not-yet-provisioned row throws `counterpartyNotProvisioned`. The quote request carries no account id, and **raw bank details are sent to the provider and never stored**.
+2. **Payout destination.** A provider that requires a provisioned payout resource reads its `counterparty_provider_accounts` row parent-scoped before quoting; a missing or not-yet-provisioned row throws `counterpartyNotProvisioned`. The quote request carries no provider account id, and **raw bank details are sent to the provider and never stored**.
 
 ## Handler wiring (the DB side)
 

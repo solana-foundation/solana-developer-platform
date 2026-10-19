@@ -1,4 +1,4 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { z } from "zod";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import {

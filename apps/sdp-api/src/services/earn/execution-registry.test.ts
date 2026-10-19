@@ -1,17 +1,18 @@
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { EARN_PROVIDERS, GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { EARN_PROVIDERS } from "@sdp/types/provider-access";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "@/types/env";
 import {
   assertClusterEndpoint,
   CLUSTER_ENDPOINT_PROOF_TTL_MS,
   resetClusterEndpointProofs,
-  resolveClusterRpcUrl,
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
   resolveVaultParRedemptionClient,
   resolveVaultWithdrawClient,
-} from "./execution-registry";
+} from "@/services/earn/execution-registry";
+import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
 
 const env = {} as Env;
@@ -305,7 +306,9 @@ describe("resolveVaultDirectClient", () => {
     // so one loop over the registry pins the invariant for every provider.
     mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
     const { supportsVaultProviderOrderWithdraw } = await import("@sdp/earn/capabilities");
-    const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import("@sdp/types");
+    const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import(
+      "@sdp/types/provider-access"
+    );
 
     for (const provider of EARN_PROVIDERS) {
       const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
@@ -319,7 +322,9 @@ describe("resolveVaultDirectClient", () => {
 
   it("keeps every provider's withdrawal capability and settlement table in agreement", async () => {
     const { supportsVaultProviderOrderWithdraw } = await import("@sdp/earn/capabilities");
-    const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import("@sdp/types");
+    const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import(
+      "@sdp/types/provider-access"
+    );
 
     for (const provider of EARN_PROVIDERS) {
       const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());

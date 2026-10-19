@@ -4,10 +4,10 @@ import type {
   EarnExternalWalletPosition,
   EarnExternalWalletPositionSummary,
   EarnStrategy,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { EmbeddedYieldDashboard } from "./embedded-yield-dashboard";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";

@@ -9,13 +9,13 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./tokens.css": {
-      "style": "./src/tokens.css",
-      "default": "./src/tokens.css"
-    },
     "./theme.css": {
       "style": "./src/theme.css",
       "default": "./src/theme.css"
+    },
+    "./tokens.css": {
+      "style": "./src/tokens.css",
+      "default": "./src/tokens.css"
     }
   },
   "scripts": {

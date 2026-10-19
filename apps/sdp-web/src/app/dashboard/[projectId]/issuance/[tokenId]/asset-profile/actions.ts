@@ -1,6 +1,6 @@
 "use server";
 
-import type { AssetProfile } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";

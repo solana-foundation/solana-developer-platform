@@ -1,5 +1,8 @@
+import {
+  earnMovementsProxyQuery,
+  proxyQueryErrorResponse,
+} from "@/app/api/dashboard/markets/earn/provider-query";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { earnMovementsProxyQuery, proxyQueryErrorResponse } from "../provider-query";
 
 export async function GET(request: Request) {
   const validated = earnMovementsProxyQuery(request);

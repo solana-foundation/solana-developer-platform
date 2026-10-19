@@ -2,13 +2,14 @@
  * Health Check Route
  */
 
-import { EGRESS_READINESS_SERVES_TRAFFIC, resolveSdpReleaseChannel } from "@sdp/types";
+import { EGRESS_READINESS_SERVES_TRAFFIC } from "@sdp/types/health";
+import { resolveSdpReleaseChannel } from "@sdp/types/release-channels";
 import { Hono } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { pingRedis } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
-const health = new Hono<{ Bindings: Env }>();
+export const health = new Hono<{ Bindings: Env }>();
 
 health.get("/", async (c) => {
   const timestamp = new Date().toISOString();
@@ -46,10 +47,10 @@ health.get("/ready", async (c) => {
         : ("not_ready" as const),
     timestamp: new Date().toISOString(),
     revision: c.env.K_REVISION ?? "local",
+    // The prod deploy orders breaking migrations against the commit prod serves.
+    commit: c.env.SDP_BUILD_SHA?.trim() || "local",
     checks,
   };
 
   return body.status === "ready" ? c.json(body) : c.json(body, 503);
 });
-
-export default health;

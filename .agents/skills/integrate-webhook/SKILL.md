@@ -26,18 +26,16 @@ The shared verifier currently supports HMAC-SHA256, and it requires a provider-s
 
 This is one of the few places `unknown` is allowed — it's a genuine trust boundary, narrowed immediately by `parse`.
 
-Signature variety across the four registered webhook providers:
+Signature variety across the registered webhook providers:
 
 | Provider | Header | Algorithm | Env keys |
 |---|---|---|---|
 | MoonPay | `moonpay-signature-v2` | HMAC-SHA256 (hex, `t=…,s=…`) | `MOONPAY_SANDBOX_WEBHOOK_KEY` (sandbox only) |
-| BVNK | `x-signature` | HMAC-SHA256 (base64) | `BVNK_WEBHOOK_SECRET` / `BVNK_SANDBOX_WEBHOOK_SECRET` |
-| Coinbase | `x-hook0-signature` | HMAC-SHA256 (hex, `t=…,v0=…`) | `COINBASE_CDP_RAMPS_WEBHOOK_SECRET` |
 | Stripe | `stripe-signature` | HMAC-SHA256 (hex, `t=…,v1=…`) | `STRIPE_SANDBOX_WEBHOOK_SECRET` (sandbox only; events must carry `livemode: false`) |
 
 ## parse
 
-`(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. `safeParse` the payload with a zod `z.discriminatedUnion` per event type (`bvnk.schema.ts` is the pattern); an event type the schema doesn't know is an `ignore` event, not a parse failure. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
+`(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. Validate the provider envelope and event types (see the MoonPay and Stripe processors); an event type the schema doesn't know is an `ignore` event, not a parse failure. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
 
 `parse` runs synchronously **before** the 2xx ack, so it must be total over every payload the provider can legitimately sign: unknown event types and transactions the platform didn't create (sandbox tests, manual payments on the same account) must map to an `ignore` event or an absent reference — never a throw, which turns into a non-2xx and a provider retry loop. Reserve throws for payloads that violate the provider's own guaranteed envelope (e.g. a missing event type), where a loud deterministic failure is the point. Example: references not minted by SDP return `undefined` from the processor's reference reader and get logged-and-skipped in `process`.
 

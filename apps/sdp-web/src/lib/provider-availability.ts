@@ -1,13 +1,12 @@
+import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
 import type {
   ComplianceProviderId,
-  CustodyMode,
-  CustodyProvider,
   OrganizationProviderAvailabilityResponse,
   ProjectProviderAvailability,
   ProjectProviderAvailabilityEntry,
   ProviderAvailabilityEntry,
   RampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface DashboardProviderAvailability extends OrganizationProviderAvailabilityResponse {

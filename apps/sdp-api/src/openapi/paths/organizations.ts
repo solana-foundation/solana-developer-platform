@@ -1,7 +1,8 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import { z } from "zod";
-import { errorResponseSchema, orgIdParamSchema, updateOrganizationRequestSchema } from "../schemas";
+import { errorResponseSchema, orgIdParamSchema } from "@/openapi/schemas/base";
+import { updateOrganizationRequestSchema } from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent } from "./helpers";
 import { organizationResponse } from "./responses";
 

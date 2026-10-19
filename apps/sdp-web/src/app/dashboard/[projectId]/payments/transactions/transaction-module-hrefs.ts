@@ -1,4 +1,4 @@
-import type { UnifiedTransactionModule } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
 
 export const TRANSACTION_MODULE_HREFS = {
   payments: (id) => `/dashboard/payments/transactions?transaction=${encodeURIComponent(id)}`,

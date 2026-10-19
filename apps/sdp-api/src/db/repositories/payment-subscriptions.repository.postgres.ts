@@ -4,9 +4,9 @@ import {
   PAYMENT_SUBSCRIPTION_PLAN_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES,
   paymentSubscriptionCollectionAttemptMetadataSchema,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { z } from "zod";
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,

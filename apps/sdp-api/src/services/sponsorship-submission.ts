@@ -1,5 +1,5 @@
-import { isTransientRpcError, withTransientRpcRetry } from "@sdp/rpc";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
+import { isTransientRpcError, withTransientRpcRetry } from "@sdp/rpc/transient";
 import {
   getBase64Decoder,
   isSolanaError,
@@ -75,7 +75,7 @@ export function mapPreflightError(error: unknown): AppError | null {
  */
 export async function submitSponsoredTransaction(input: {
   feePayment: SponsorshipFeePayment;
-  rpc: solanaRpc.SolanaRpc;
+  rpc: SolanaRpc;
   transaction: Uint8Array;
   lastValidBlockHeight: bigint;
   store: SignedSubmissionStore;
@@ -94,7 +94,7 @@ export async function submitSponsoredTransaction(input: {
   let sawTransientFailure = false;
   const submittedSignature = await withTransientRpcRetry(async () => {
     try {
-      return await solanaRpc.sendTransaction(input.rpc, submission.signedTransaction);
+      return await sendTransaction(input.rpc, submission.signedTransaction);
     } catch (error) {
       const preflightError = sawTransientFailure ? null : mapPreflightError(error);
       if (preflightError) {

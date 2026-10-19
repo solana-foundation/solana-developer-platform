@@ -1,6 +1,6 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
-import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "@sdp/types/jupiter-lend-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { SdpJupiterLendError } from "./errors";
 
 // biome-ignore lint/security/noSecrets: public Solana program address

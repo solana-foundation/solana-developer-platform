@@ -1,4 +1,4 @@
-import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types";
+import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types/earn";
 import { describe, expect, it } from "vitest";
 import {
   earnExternalWalletQueuedWithdrawalPreviewSchema,

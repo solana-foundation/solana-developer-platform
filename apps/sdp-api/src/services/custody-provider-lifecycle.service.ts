@@ -1,10 +1,10 @@
 import {
-  type CustodyProvider,
   canProviderCreateWallet,
   canProviderDeleteWallet,
   canProviderSign,
-} from "@sdp/custody";
+} from "@sdp/custody/providers";
 import { SigningError } from "@sdp/custody/signing";
+import type { CustodyProvider } from "@sdp/types/custody";
 
 export function custodyProviderCanSign(provider: CustodyProvider): boolean {
   return canProviderSign(provider);

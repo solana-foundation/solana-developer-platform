@@ -1,17 +1,18 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import { BanIcon, CheckIcon, CopyIcon, EraserIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { type NetworkDebugEntry, useNetworkDebug } from "@/contexts/network-debug-context";
+import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import type { NetworkDebugEntry } from "@/lib/network-debug";
 import {
   formatNetworkDebugPayloadValue,
   getNetworkDebugStatusClassName,
 } from "@/lib/network-debug";
 import { useCopy } from "@/lib/use-copy";
-import { cn } from "@/lib/utils";
-import { Button } from "./ui/button";
 
 const PANEL_TRANSITION = { type: "spring", duration: 0.38, bounce: 0 } as const;
 const CONTENT_FADE_PROPS = {

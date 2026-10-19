@@ -1,5 +1,6 @@
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
-import { type PaymentsDashboardWallet, SOL_MINT } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { Client } from "pg";
 import { z } from "zod";
 import {
@@ -174,12 +175,26 @@ test.describe
       }
     });
 
+    async function usesNewRequestDesign(page: Page): Promise<boolean> {
+      const newRequest = page
+        .locator(`a[href="${projectHref(projectId, `${REQUESTS_PATH}/new`)}"]:visible`)
+        .first();
+      await expect(
+        newRequest.or(page.getByRole("button", { name: "Create", exact: true })).first()
+      ).toBeVisible();
+      return newRequest.isVisible();
+    }
+
     async function createRequest(page: Page, wallet: LabeledWallet, amount: string) {
-      const redesigned = process.env.SDP_FLAG_NEW_DESIGN_ACTIVITY !== "0";
-      const createPath = redesigned ? `${REQUESTS_PATH}/new` : REQUESTS_PATH;
-      await gotoProjectPage(page, projectId, createPath);
-      await expect(page).toHaveURL(projectHref(projectId, createPath));
+      await gotoProjectPage(page, projectId, REQUESTS_PATH);
+      await expect(page).toHaveURL(projectHref(projectId, REQUESTS_PATH));
+      const redesigned = await usesNewRequestDesign(page);
       if (redesigned) {
+        await page
+          .locator(`a[href="${projectHref(projectId, `${REQUESTS_PATH}/new`)}"]:visible`)
+          .first()
+          .click();
+        await expect(page).toHaveURL(projectHref(projectId, `${REQUESTS_PATH}/new`));
         await page.getByRole("textbox", { name: "Amount", exact: true }).fill(amount);
         await page.getByRole("button", { name: "Destination wallet", exact: true }).click();
         await page.getByRole("button", { name: new RegExp(`^${wallet.label}`) }).click();
@@ -309,7 +324,7 @@ test.describe
         ).toBeVisible();
       }
       const playground = page.getByRole("tab", { name: "API Playground", exact: true });
-      if (process.env.SDP_FLAG_NEW_DESIGN_ACTIVITY === "0") await expect(playground).toBeVisible();
+      if (!(await usesNewRequestDesign(page))) await expect(playground).toBeVisible();
       if ((await playground.count()) > 0) {
         await playground.click();
         await page
@@ -401,7 +416,8 @@ test.describe
         retained.paymentRequests.find(({ id }) => id === requests[0].id)?.custodyWalletId
       ).toBeNull();
       for (const request of requests) {
-        const redesigned = process.env.SDP_FLAG_NEW_DESIGN_ACTIVITY !== "0";
+        await gotoProjectPage(page, projectId, REQUESTS_PATH);
+        const redesigned = await usesNewRequestDesign(page);
         const detailPath = redesigned ? `${REQUESTS_PATH}/${request.id}` : REQUESTS_PATH;
         await gotoProjectPage(page, projectId, detailPath);
         await expect(page).toHaveURL(projectHref(projectId, detailPath));

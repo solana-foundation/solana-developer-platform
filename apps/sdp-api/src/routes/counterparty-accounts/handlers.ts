@@ -2,9 +2,9 @@ import type {
   CounterpartyAccount,
   CounterpartyAccountResponse,
   ListCounterpartyAccountsResponse,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {

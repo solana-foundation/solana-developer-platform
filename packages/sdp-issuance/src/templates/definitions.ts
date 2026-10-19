@@ -5,7 +5,7 @@ import type {
   TokenTemplate,
   TokenTemplateDefinition,
   TokenTemplateOverrides,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
 
 const CUSTOM_AVAILABLE_EXTENSIONS: TokenExtensionName[] = [
   "transferFee",

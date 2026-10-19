@@ -1,14 +1,14 @@
 import {
   PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { z } from "zod";
 import {
   i64StringSchema,
   recurringTimestampSchema,
   solanaAddressSchema,
   u64StringSchema,
-} from "../schemas";
+} from "@/routes/payments/schemas";
 
 export const subscriptionIdParamsSchema = z.object({
   subscriptionId: z.string().min(1),

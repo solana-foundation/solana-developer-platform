@@ -1,13 +1,10 @@
 "use client";
 
-import type {
-  Counterparty,
-  CryptoRailId,
-  PaymentRampQuote,
-  PaymentsDashboardWallet,
-  RampProviderId,
-} from "@sdp/types";
-import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { PaymentRampQuote, PaymentsDashboardWallet, RampDirection } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { isCollectStageStatus } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -20,14 +17,20 @@ import {
   cancelRampTransfer,
   fetchAllCounterparties,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import {
+  type MemoRow,
+  memoRowsToRecord,
+  validateMemoRows,
+} from "@/app/dashboard/[projectId]/payments/ramps/memo";
+import {
+  type RampFields,
+  rampSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import { hasOnboardingLifecycle } from "../components/providers";
-import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
-import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import { useRampQuote } from "./use-ramp-quote";
@@ -274,14 +277,11 @@ export function useRampWizard<TId extends string>(
       position: "bottom-right",
     });
     try {
-      const result = await requirements.submitRequirements(
-        {
-          assetRail: selectedRampPair.assetRail,
-          destinationCustodyWalletId: selectedWallet.id,
-          fiatCurrency: selectedRampPair.fiatCurrency,
-        },
-        requirements.pendingAgreements !== null ? "consent" : "collected"
-      );
+      const result = await requirements.submitRequirements({
+        assetRail: selectedRampPair.assetRail,
+        destinationCustodyWalletId: selectedWallet.id,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+      });
       setHostedQuoteLoading(false);
       if (result.status === "unsupported") {
         toast.error(result.reason, { id: toastId, position: "bottom-right" });
@@ -290,10 +290,6 @@ export function useRampWizard<TId extends string>(
       if (isCollectStageStatus(result.status)) {
         // Progressive collection: the provider accepted this step and returned
         // the next field set, which the step re-renders in place.
-        toast.dismiss(toastId);
-        return;
-      }
-      if (hasOnboardingLifecycle(result.provider) && result.status !== "ready") {
         toast.dismiss(toastId);
         return;
       }
@@ -441,9 +437,6 @@ export function useRampWizard<TId extends string>(
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
     retryOnboarding: requirements.retryOnboarding,
-    pendingAgreements: requirements.pendingAgreements,
-    acceptedAgreements: requirements.acceptedAgreements,
-    toggleAgreement: requirements.toggleAgreement,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

@@ -10,7 +10,7 @@
  * whether the form can be submitted at all.
  */
 
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useMemo } from "react";
 import { z } from "zod";
 import { useZodForm } from "@/lib/use-zod-form";

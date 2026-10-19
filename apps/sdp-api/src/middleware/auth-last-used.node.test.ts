@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 import { rootLogger } from "@/runtime/logger";
 import { scheduleApiKeyLastUsedUpdate } from "./auth";
 

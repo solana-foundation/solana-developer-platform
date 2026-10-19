@@ -12,7 +12,7 @@ vi.mock("@/i18n/server", () => ({
   getTranslations: async () => (key: string) => key,
   getRequestLocale: async () => "en",
 }));
-vi.mock("../../dashboard/[projectId]/playground-api-data", () => ({
+vi.mock("@/app/dashboard/[projectId]/playground-api-data", () => ({
   resolvePlaygroundApiBaseUrl: () => "https://api.example.test",
 }));
 

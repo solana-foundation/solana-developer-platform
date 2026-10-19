@@ -1,9 +1,9 @@
-import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types";
+import { ORGANIZATION_RPC_PROVIDERS } from "@sdp/types/organizations";
+import { z } from "zod";
 import {
   RPC_RELAY_MAX_BATCH,
   rpcRelayPayloadSchema as relayPayloadSchemaBase,
-} from "../../routes/rpc/schemas";
-import { z } from "./base";
+} from "@/routes/rpc/schemas";
 
 const managedRpcProviderIdSchema = z.enum(ORGANIZATION_RPC_PROVIDERS).openapi({
   description: "Managed RPC provider identifier.",

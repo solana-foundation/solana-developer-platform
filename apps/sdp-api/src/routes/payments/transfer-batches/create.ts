@@ -1,5 +1,5 @@
-import * as solanaRpc from "@sdp/rpc/solana";
-import { getDb } from "@/db";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentTransferBatchRow,
@@ -12,18 +12,22 @@ import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
+  idempotencyFingerprintMatches,
   markIdempotencyCommitted,
   markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import * as solanaServices from "@/services/solana";
+import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
+import {
+  admitPaymentWalletRuntimeExecution,
+  authorizeCustodyPaymentWallet,
+} from "@/routes/payments/wallets";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
-import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
@@ -96,7 +100,7 @@ export async function findTransferBatchRecordReplay(
     idempotencyKey: recordKey,
   });
   if (row === null || row.idempotency_fingerprint === null) return null;
-  if (row.idempotency_fingerprint !== getIdempotencyFingerprint(c)) {
+  if (!idempotencyFingerprintMatches(c, row.idempotency_fingerprint)) {
     // Another request's row: the step refuses it (422) without touching it.
     return { fingerprint: row.idempotency_fingerprint, respond: () => success(c, {}) };
   }
@@ -151,7 +155,7 @@ export async function createTransferBatch(
     "payments.transfer_batch"
   );
   const [signer, feePayer, lifetime] = await Promise.all([
-    solanaServices.createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet(
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,
@@ -159,7 +163,7 @@ export async function createTransferBatch(
       "payments.transfer_batch"
     ),
     feePayment.getFeePayer(),
-    solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
+    getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
@@ -230,7 +234,10 @@ export async function createTransferBatch(
         idempotencyKey,
       });
       if (replay) {
-        if (replay.idempotency_fingerprint !== idempotencyFingerprint) {
+        if (
+          replay.idempotency_fingerprint === null ||
+          !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
+        ) {
           // Another request's row: refused unstored, so that request's own retry
           // is still answered from it.
           markIdempotencyRecordMismatch(c);

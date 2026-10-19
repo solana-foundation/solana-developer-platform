@@ -13,7 +13,7 @@ import {
 } from "./handlers";
 import { createOnrampQuoteSchema, estimateOnrampSchema } from "./schemas";
 
-const onramp = new Hono<{ Bindings: Env }>();
+export const onramp = new Hono<{ Bindings: Env }>();
 
 onramp.get("/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 onramp.post(
@@ -32,5 +32,3 @@ onramp.post(
   requestGate({ extract: extractOnrampQuoteRequest }),
   createOnrampQuote
 );
-
-export default onramp;

@@ -3,7 +3,7 @@
  * whether the trade has closed, and where the closing transaction falls.
  */
 
-import type { DvpLegTransferKind, DvpTradeStatus } from "@sdp/types";
+import type { DvpLegTransferKind, DvpTradeStatus } from "@sdp/types/dvp";
 import { getBase58Decoder, type Signature, signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { deriveDvpLegTransferKinds } from "./leg-transfer-kind";

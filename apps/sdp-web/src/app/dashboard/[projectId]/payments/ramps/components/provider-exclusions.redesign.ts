@@ -1,12 +1,13 @@
-import type { Counterparty, CounterpartyEntityType, RampProviderId } from "@sdp/types";
+import type { Counterparty, CounterpartyEntityType } from "@sdp/types/counterparties";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { ProviderAvailabilityEntry } from "@sdp/types/provider-access";
+import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
 import type { AppLocale } from "@/i18n/config";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import type { RampDirection, RampPair, RampProviderOption, SelectedRampPair } from "@/lib/ramps";
 

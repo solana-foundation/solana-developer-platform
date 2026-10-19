@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { z } from "zod";
-import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "#/errors";
 import {
   classifyProviderFailure,
   isDefinitiveProviderRejection,
@@ -120,7 +120,7 @@ describe("providerFetch abort signal", () => {
       });
     };
 
-    const result = await providerFetch("bvnk", "https://api.example.test/ping", {
+    const result = await providerFetch("moonpay", "https://api.example.test/ping", {
       method: "GET",
       signal: controller.signal,
     });

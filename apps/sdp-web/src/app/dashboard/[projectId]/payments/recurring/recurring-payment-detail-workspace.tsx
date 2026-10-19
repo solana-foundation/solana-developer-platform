@@ -1,7 +1,7 @@
 "use client";
 
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import {
-  type CounterpartyAccount,
   doesRecurringPaymentStatusRequireReactivation,
   isPendingActivationRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
@@ -9,7 +9,19 @@ import {
   type PaymentRecurringPaymentStatus,
   type PaymentSubscriptionCollectionAttempt,
   type UpdatePaymentRecurringPaymentRequest,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Combobox } from "@sdp/ui/combobox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import {
   AlertCircleIcon,
   BanIcon,
@@ -27,32 +39,20 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { EntityLink } from "@/components/entity-link";
-import { TokenMark } from "@/components/token-mark";
-import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   formatTimestamp,
   isHttpUrl,
   resolveTokenByMint,
   shortenAddress,
-} from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { EntityLink } from "@/components/entity-link";
+import { TokenMark } from "@/components/token-mark";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import {

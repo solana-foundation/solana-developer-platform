@@ -1,6 +1,6 @@
-import { PAYMENT_REQUEST_STATUSES } from "@sdp/types";
+import { PAYMENT_REQUEST_STATUSES } from "@sdp/types/payments";
 import { z } from "zod";
-import { paymentAmountSchema, solanaAddressSchema } from "../schemas";
+import { paymentAmountSchema, solanaAddressSchema } from "@/routes/payments/schemas";
 
 export const createPaymentRequestSchema = z.strictObject({
   custodyWalletId: z.string().min(1).regex(/^\S+$/, "Wallet ID must not contain whitespace"),

@@ -13,8 +13,7 @@
 
 import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
 import { assertIsSignature } from "@solana/kit";
-import { getDb } from "@/db";
-import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
+import { getDb } from "@/db/client";
 import {
   createPostgresDvpLegFundingClaimRepository,
   type DvpLegFundingClaim,
@@ -23,6 +22,8 @@ import {
   createPostgresDvpLegTransferRepository,
   type DvpLegTransferRepository,
 } from "@/db/repositories/dvp-leg-transfer.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";

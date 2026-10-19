@@ -47,6 +47,7 @@ A change that triggers one of these must handle it.
 - Never a plain `string` where an `@sdp/types` constant set exists. Scripts import canonical types from `@sdp/types`. ISO codes are uppercase.
 - Three or more branches use a `switch` with an exhaustive `never` default, not nested ternaries.
 - No conditional empty-object spreads (`...(cond ? { x } : {})`), no parameters typed as bare `object`, and no "shape" in symbol names.
+- **Imports name the defining file** (`docs/decisions/0010-module-boundaries.md`). No barrels or re-exports (`export … from`, or importing a symbol only to export it again); a package's public surface is its `package.json` `exports` list. No default exports outside framework-read files. No `../` imports: `@/` in an app, `#/` inside a package, `@sdp/<pkg>/<subpath>` across workspaces; same-folder `./` is fine.
 - Token mints and labels come only from `@sdp/types/well-known-tokens` (`WELL_KNOWN_TOKENS`, `WELL_KNOWN_TOKEN_BY_MINT`, `SOL_MINT`, `wellKnownMint`, `CLUSTER_BY_SDP_ENVIRONMENT`). Never hardcode a mint address or a symbol mapping elsewhere.
 
 ## Tests
@@ -69,7 +70,11 @@ A change that triggers one of these must handle it.
 ### Ramp providers
 
 - One directory per provider at `packages/sdp-payments/src/ramps/providers/<id>/`: `client.ts` (HTTP only: auth, signing, parsing; no database or `AppContext`), optional `counterparty.ts` (present only when requirements are non-trivial), optional `provider-data.ts` (JSON codecs).
-- No webhook code in the package. Payload schemas, parsers, and the `WebhookProcessor` live in `apps/sdp-api/src/routes/webhooks/ramps/<id>.ts`, registered in `routes/webhooks/handlers.ts`, and map to `RampSettlementEvent`. Parsers `safeParse` a zod `z.discriminatedUnion` per event type; an event type the schema doesn't know maps to an `ignore` event, never a throw.
+- The package defines the optional provider webhook contract but contains no
+  webhook handlers. Payload schemas, parsers, and processors live in
+  `apps/sdp-api/src/services/ramps/webhooks/<id>.ts`, with ingress in
+  `routes/webhooks/handlers.ts`. Parsers `safeParse` a zod
+  `z.discriminatedUnion` per event type; unknown event types map to `ignore`.
 - Provider instances come only from `RAMP_PROVIDER_CLIENTS`. A second instance breaks the webhook tests' `vi.spyOn` mocks.
 - Provider clients never access the database. Route handlers and background jobs access it through repositories.
 

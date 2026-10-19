@@ -9,13 +9,13 @@ import {
   signBytes,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
-import { createHeliusRingsService } from "@/services/helius-rings";
+import { createHeliusRingsService } from "@/services/helius-rings/service";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import {

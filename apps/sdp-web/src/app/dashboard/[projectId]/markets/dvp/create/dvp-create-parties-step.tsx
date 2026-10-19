@@ -1,10 +1,10 @@
 "use client";
 
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { ToggleSwitch } from "@sdp/ui/toggle-switch";
 import { ArrowLeftRightIcon } from "lucide-react";
 import { useState } from "react";
 import { TokenMark } from "@/components/token-mark";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { AmountField, MintField, PartySlotPicker, PayoutAddressPicker } from "./dvp-create-fields";

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
@@ -15,10 +15,13 @@ const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
 const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultWithdrawClient,
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 
 vi.mock("./vault-execution.service", async (importOriginal) => ({
@@ -28,8 +31,8 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   simulateVaultPlan,
 }));
 
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
+vi.mock("@/services/solana/signer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet,
 }));
 
@@ -386,7 +389,7 @@ describe("withdrawFromVault — the exit slippage floor", () => {
   });
 
   it("maps a provider exit refusal into the caller's 400, in the provider's words", async () => {
-    const { SdpVedaError } = await import("@sdp/veda");
+    const { SdpVedaError } = await import("@sdp/veda/errors");
     buildVaultWithdrawal.mockRejectedValue(
       new SdpVedaError("WITHDRAW_REFUSED", "Shares are locked until the unlock timestamp")
     );

@@ -1,17 +1,28 @@
 "use client";
 
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnProgram, EarnVaultDepositRecord } from "@sdp/types/earn";
 import {
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
   type EarnVaultPosition,
   type EarnVaultWithdrawal,
-  earnProgramSolanaPayoutTokens,
   isEarnVaultHoldingEmpty,
+} from "@sdp/types/earn";
+import {
+  earnProgramSolanaPayoutTokens,
   isVaultDirectDepositEnabled,
-  type SdpEnvironment,
-  SOLANA_CLUSTER_LABELS,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
+import { SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Modal } from "@sdp/ui/modal";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   ArrowDownIcon,
   ArrowDownLeftIcon,
@@ -26,36 +37,12 @@ import {
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { TokenMark } from "@/components/token-mark";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Modal } from "@/components/ui/modal";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  useDashboardWorkspace,
-  useOptionalDashboardWorkspace,
-} from "@/contexts/dashboard-workspace-context";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { EarnFundingWallet } from "../earn/deposit/earn-funding-wallets";
+import type { EarnFundingWallet } from "@/app/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets";
 import {
   compareUnsignedDecimals,
   isPositiveDecimal,
   sortByOptionalDecimal,
-} from "../earn/earn-decimal";
+} from "@/app/dashboard/[projectId]/markets/earn/earn-decimal";
 import {
   type EarnDepositAvailabilityLabels,
   earnProviderLabel,
@@ -64,7 +51,7 @@ import {
   formatUsd,
   positionDisplayName,
   shortenMarketAddress,
-} from "../earn/earn-format";
+} from "@/app/dashboard/[projectId]/markets/earn/earn-format";
 import {
   EarnDepositAvailabilityBadge,
   earnMintAsset,
@@ -72,15 +59,13 @@ import {
   earnStrategyReferenceKey,
   formatProviderApy,
   sumDecimalStrings,
-} from "../earn/earn-market-presentation";
+} from "@/app/dashboard/[projectId]/markets/earn/earn-market-presentation";
 import {
   EarnVaultDepositOutcomeTracker,
   EarnVaultWithdrawalOutcomeTracker,
   EarnWithdrawalOutcomeTracker,
-} from "../earn/earn-outcome-trackers";
+} from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-trackers";
 import {
-  type EarnProgram,
-  type EarnVaultDepositRecord,
   isEarnVaultDepositInFlight,
   isEarnVaultWithdrawalInFlight,
   useEarnPrograms,
@@ -88,21 +73,30 @@ import {
   useEarnStrategies,
   useEarnVaultDeposits,
   useEarnVaultWithdrawals,
-} from "../earn/earn-program-data";
+} from "@/app/dashboard/[projectId]/markets/earn/earn-program-data";
 import {
   type EarnProviderAccess,
   type EarnVaultDepositAvailability,
   earnVaultDepositAvailability,
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
-} from "../earn/earn-surfacing";
-import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
-import type { EarnVaultParRedemptionSource } from "../earn/earn-vault-par-redemption-modal";
+} from "@/app/dashboard/[projectId]/markets/earn/earn-surfacing";
+import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
+import type { EarnVaultParRedemptionSource } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-par-redemption-modal";
 import {
   earnVaultDepositUiState,
   earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
-} from "../earn/earn-vault-ui-state";
-import { EarnVaultWithdrawalRequestsCard } from "../earn/earn-vault-withdrawal-requests-card";
+} from "@/app/dashboard/[projectId]/markets/earn/earn-vault-ui-state";
+import { EarnVaultWithdrawalRequestsCard } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { TokenMark } from "@/components/token-mark";
+import {
+  useDashboardWorkspace,
+  useOptionalDashboardWorkspace,
+} from "@/contexts/dashboard-workspace-context";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
 import {
@@ -152,15 +146,24 @@ export function EarnTransactionModalLoading() {
 }
 
 const EarnVaultDepositModal = dynamic(
-  () => import("../earn/earn-vault-deposit-modal").then((module) => module.EarnVaultDepositModal),
+  () =>
+    import("@/app/dashboard/[projectId]/markets/earn/earn-vault-deposit-modal").then(
+      (module) => module.EarnVaultDepositModal
+    ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
 const EarnVaultExitModal = dynamic(
-  () => import("../earn/earn-vault-exit-modal").then((module) => module.EarnVaultExitModal),
+  () =>
+    import("@/app/dashboard/[projectId]/markets/earn/earn-vault-exit-modal").then(
+      (module) => module.EarnVaultExitModal
+    ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
 const EarnWithdrawModal = dynamic(
-  () => import("../earn/earn-withdraw-modal").then((module) => module.EarnWithdrawModal),
+  () =>
+    import("@/app/dashboard/[projectId]/markets/earn/earn-withdraw-modal").then(
+      (module) => module.EarnWithdrawModal
+    ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
 

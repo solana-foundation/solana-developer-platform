@@ -1,16 +1,17 @@
-import { ALLOWED_OPERATIONS, PERMISSIONS } from "@sdp/types";
+import { ALLOWED_OPERATIONS } from "@sdp/types/allowed-operations";
+import { PERMISSIONS } from "@sdp/types/permissions";
+import { z } from "zod";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
-} from "../../routes/api-keys/schemas";
+} from "@/routes/api-keys/schemas";
 import {
   apiKeyIdParamSchema,
   apiKeyPrefixSchema,
   isoDateTimeSchema,
   projectIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 import { custodyWalletOwnerRequestSchema } from "./custody";
 

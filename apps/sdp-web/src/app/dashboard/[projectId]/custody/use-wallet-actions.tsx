@@ -1,6 +1,6 @@
 "use client";
 
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";

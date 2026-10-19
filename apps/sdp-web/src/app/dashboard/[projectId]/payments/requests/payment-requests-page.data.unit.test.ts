@@ -1,4 +1,4 @@
-import type { PaymentRequest } from "@sdp/types";
+import type { PaymentRequest } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 import {
   fetchPaymentRequestDetail,

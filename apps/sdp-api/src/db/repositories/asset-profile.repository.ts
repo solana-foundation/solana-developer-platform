@@ -3,8 +3,8 @@ import type {
   AssetProfileStatus,
   IssuanceMetadata,
   PublicTokenMetadata,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/types/asset-profiles";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateAssetProfileId(): string {
   return `asset_profile_${crypto.randomUUID()}`;

@@ -1,10 +1,6 @@
-import {
-  DEFAULT_RING_NAME,
-  type PrivateOperationInput,
-  RING_NAME_PATTERN,
-  ZONE_KINDS,
-} from "@sdp/helius-rings";
-import { SDP_NATIVE_MINT, SDP_USDC_MINT } from "@sdp/helius-rings-sdk";
+import { DEFAULT_RING_NAME, RING_NAME_PATTERN, ZONE_KINDS } from "@sdp/helius-rings/constants";
+import type { PrivateOperationInput } from "@sdp/helius-rings/types";
+import { SDP_NATIVE_MINT, SDP_USDC_MINT } from "@sdp/helius-rings-sdk/flows/mint";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
 

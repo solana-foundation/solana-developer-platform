@@ -77,7 +77,7 @@ const openNavigationSelector = 'button[aria-label="Shared.dashboardShell.openNav
 
 describe("dashboard shell sidebar on a route no area has redesigned", () => {
   it("puts the sidebar in the refresh scope on NEW DESIGN while the page keeps the base one", () => {
-    const root = renderShell(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, true);
+    const root = renderShell(`/dashboard/${SANDBOX_PROJECT.id}/api-keys`, true);
     const main = root.querySelector("main");
     const sidebar = root.querySelector("aside");
     const page = root.querySelector("section");
@@ -85,13 +85,13 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
     expect(main?.hasAttribute("data-sdp-new-design")).toBe(true);
     expect(main?.hasAttribute("data-sdp-theme")).toBe(false);
     expect(sidebar?.getAttribute("data-sdp-theme")).toBe("refresh");
-    expect(sidebar?.getAttribute("style")).toContain("width:272px");
+    expect(sidebar?.getAttribute("style")).toContain("width:280px");
     expect(sidebar?.className).toContain("border-r");
     expect(page?.className).not.toContain("rounded-2xl");
   });
 
   it("keeps the previous design's sidebar and page card with NEW DESIGN off", () => {
-    const root = renderShell(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, false);
+    const root = renderShell(`/dashboard/${SANDBOX_PROJECT.id}/api-keys`, false);
     const main = root.querySelector("main");
     const sidebar = root.querySelector("aside");
     const page = root.querySelector("section");
@@ -111,7 +111,7 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
     }));
-    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/api-keys`, {});
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -142,7 +142,7 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
   });
 
   it("keeps the phone's bottom bar, no header menu button and Project links with NEW DESIGN off", () => {
-    const root = renderShell(`/dashboard/${PRODUCTION_PROJECT.id}/issuance`, false);
+    const root = renderShell(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`, false);
     expect(root.querySelector("[data-dashboard-bottom-nav]")).not.toBeNull();
     expect(
       root.querySelector(`aside a[href="/dashboard/${PRODUCTION_PROJECT.id}/payments"]`)
