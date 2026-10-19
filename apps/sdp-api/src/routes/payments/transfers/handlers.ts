@@ -1054,7 +1054,12 @@ export async function listTransfers(c: AppContext) {
     requestedTypes,
     requestedTypes ?? categoryTypes ?? PAYMENT_TRANSFER_TYPES
   );
-  const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
+  // Nothing readable is an empty page, never an absent filter: the
+  // repository reads an empty type list as no condition at all.
+  if (transferTypes.length === 0) {
+    return paginated(c, [], { total: 0, page, pageSize });
+  }
+  const transferTypeSet = new Set<TransferType>(transferTypes);
   // Rows store mints, so a symbol or native-SOL filter must be normalized to
   // the same canonical mint before either the in-memory or SQL comparison.
   const tokenFilter = token ? normalizePaymentToken(token) : undefined;
