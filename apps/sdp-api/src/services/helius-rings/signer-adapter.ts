@@ -111,6 +111,11 @@ export interface SignRingsOuterTransactionInput {
    * the owner's key (HOO-2099).
    */
   custodyWalletId?: string | null;
+  /**
+   * The Rings wallet the signing flow runs for, when the gateway knows it:
+   * the record it links to is preferred, as `custodyWalletId` is (HOO-2099).
+   */
+  ringsWalletId?: string | null;
   unsignedTxBase64: string;
   /**
    * The movement the transaction serves; the custody signer refuses a start
@@ -204,7 +209,7 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
 /** The test-seam signer, or the owner's custody signer with failures mapped once. */
 type OwnerSignerInput = Pick<
   SignRingsOuterTransactionInput,
-  "env" | "organizationId" | "projectId" | "owner" | "custodyWalletId"
+  "env" | "organizationId" | "projectId" | "owner" | "custodyWalletId" | "ringsWalletId"
 > & { movement: MovementId };
 
 /** The derivation message is an exit; every other message is bring-up. */
@@ -270,6 +275,8 @@ export interface SignRingsMessageInput {
   projectId: string;
   /** Base58 address of the key the message requires a signature from. */
   owner: string;
+  /** The Rings wallet the flow runs for; see {@link SignRingsOuterTransactionInput}. */
+  ringsWalletId?: string | null;
   messageBase64: string;
   /** Test seam; production resolves the owner's custody signer. */
   signer?: TransactionSigner;
@@ -326,12 +333,10 @@ async function resolveOwnerSigner(input: OwnerSignerInput): Promise<TransactionS
   const wallet = await new CustodyConfigStore(
     getDb(input.env),
     input.env
-  ).findActiveWalletByPublicKey(
-    input.organizationId,
-    input.projectId,
-    input.owner,
-    input.custodyWalletId ?? null
-  );
+  ).findActiveWalletByPublicKey(input.organizationId, input.projectId, input.owner, {
+    custodyWalletId: input.custodyWalletId ?? null,
+    ringsWalletId: input.ringsWalletId ?? null,
+  });
   if (!wallet) {
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
   }

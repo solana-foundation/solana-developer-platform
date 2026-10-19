@@ -1655,6 +1655,82 @@ describe("Payments routes — recurring", () => {
     expect(attempt).toEqual({ status: "confirmed" });
   });
 
+  // HOO-2099: start admission runs only before a fresh update's claim. A
+  // recovered update whose saved signature landed only confirms it, so a key
+  // that has since lost the wallet still finishes it rather than leaving the
+  // mandate paused in `updating`.
+  it("confirms a landed stale metadata update after the key loses the wallet", async () => {
+    const updatePlanSignature = signature(
+      "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
+    );
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const signaturesBefore = signAndSendMock.mock.calls.length;
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const metadataUri = "https://example.com/recurring/landed.json";
+    const before = {
+      sourceCustodyWalletId: activated.sourceCustodyWalletId,
+      counterpartyId: activated.counterpartyId,
+      counterpartyAccountId: activated.counterpartyAccountId,
+      token: activated.token,
+      amount: activated.amount,
+      periodHours: activated.periodHours,
+      firstCollectionAt: activated.firstCollectionAt,
+      nextCollectionDueAt: activated.nextCollectionDueAt,
+      metadataUri: activated.metadataUri,
+    };
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_update_attempts (
+           id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+           old_plan_id, old_subscription_id, plan_update_signature, changed_fields,
+           before_values, after_values, created_at, updated_at
+         ) VALUES (
+           'prpu_stale_landed_metadata', ?, ?, ?, 'metadata_schedule', 'processing',
+           'update_plan', ?, ?, ?, ARRAY['metadataUri']::text[], ?::jsonb, ?::jsonb, ?, ?
+         )`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        activated.planId,
+        activated.subscriptionId,
+        updatePlanSignature,
+        JSON.stringify(before),
+        JSON.stringify({ ...before, metadataUri }),
+        staleAt,
+        staleAt
+      )
+      .run();
+    // The saved plan update landed: the plan holds the new URI.
+    vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue(planAccount(metadataUri));
+    await seedUnboundWallet();
+    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ metadataUri }) },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    expect((await parseRecurringResponse(updateRes)).data.recurringPayment).toMatchObject({
+      status: "active",
+      metadataUri,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(signaturesBefore);
+  });
+
   it("clamps stale metadata update retries after the subscription period advances", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
