@@ -631,7 +631,7 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("REVOKED_API_KEY");
     });
 
-    // A key from before grants (0143) is refused by name, and is usable again
+    // A key from before grants (0142) is refused by name, and is usable again
     // as soon as a person gives it grants.
     it("refuses a key that predates grants until it is given some", async () => {
       await getDb(env)
