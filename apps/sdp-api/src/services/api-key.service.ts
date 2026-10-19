@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
 import {
   type AllowedOperation,
