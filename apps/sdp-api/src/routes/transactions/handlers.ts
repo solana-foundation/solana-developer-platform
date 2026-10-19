@@ -1,4 +1,4 @@
-import { type Action, actionOwnerOf } from "@sdp/types/actions";
+import { type Action, isActionInReleaseChannel } from "@sdp/types/actions";
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
   PAYMENT_TRANSACTION_KINDS,
@@ -76,8 +76,7 @@ export async function listUnifiedTransactions(
 }
 
 function isActionInChannel(c: Context<{ Bindings: Env }>, action: Action): boolean {
-  const owner = actionOwnerOf(action);
-  return owner === "core" || isModuleInChannel(c, owner);
+  return isActionInReleaseChannel(action, (module) => isModuleInChannel(c, module));
 }
 
 const paymentTransactionKindSchema = z.enum(PAYMENT_TRANSACTION_KINDS);

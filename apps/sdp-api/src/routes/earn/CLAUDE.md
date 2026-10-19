@@ -679,7 +679,8 @@ transaction signed by the organization custody wallet or external owner.
     An anonymous build has no SDP submit or durable movement row, so it receives
     only the admission decision and is outside the ledgered exposure figure.
   - The route takes `earn.execute`; whether the key may sign with the wallet
-    is the custody signer's decision against its wallet scope (HOO-2099).
+    is the custody signer's decision against its wallet scope (HOO-2099),
+    refused early by `assertCallerWalletInScope` before any work.
     `custodyWalletId` is the exact `custody_wallets.id` (`cwlt_…`) returned by
     the wallet surface, never the provider-local `walletId` or public key. The
     latter can repeat across configurations.

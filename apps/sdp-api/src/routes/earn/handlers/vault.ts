@@ -28,6 +28,7 @@ import {
   buildEarnVaultWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
@@ -382,12 +383,15 @@ export async function extractEarnVaultDeposit(
   // custody-shaped work.
   const swap = resolveDepositSwapRequest(body, environment, tokenMint);
 
-  // The wallet must be one SDP can sign for; whether this caller may sign with
-  // it is the custody signer's decision (HOO-2099).
-  // Resolve only the exposed custody row id. Provider wallet ids are unique
-  // only within one custody configuration, and public keys may also repeat, so
-  // neither is a safe identifier for this money-in route.
+  // The wallet must be one SDP can sign for. Resolve only the exposed custody
+  // row id: provider wallet ids are unique only within one custody
+  // configuration, and public keys may also repeat, so neither is a safe
+  // identifier for this money-in route.
   const wallet = resolveEarnVaultCustodyWallet(wallets, body.custodyWalletId);
+  // The custody signer decides every signature; this is its refusal made
+  // before the audit intent, eligibility, sponsorship, build and simulation
+  // (ADR 0007 addendum).
+  assertCallerWalletInScope(auth.walletAccess, wallet.id);
 
   const resolved: EarnVaultDepositResolved = {
     strategy,

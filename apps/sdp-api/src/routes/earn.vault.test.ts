@@ -460,6 +460,31 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     expect(audit).not.toHaveBeenCalled();
   });
 
+  it("refuses a wallet outside the key's scope before opening an audit intent or deposit", async () => {
+    await seedAuth();
+    await seedConnectionWallet();
+    const strategy = await seedStrategy({});
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+    const audit = vi.spyOn(AuditService.prototype, "beginCritical");
+
+    const response = await postVaultDeposit(
+      { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
+      "out-of-scope-deposit",
+      TEST_API_KEY.raw
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
   it("returns an ordinary recorded deposit while the BYOK pair is out of channel", async () => {
     await seedAuth();
     await seedConnectionWallet();

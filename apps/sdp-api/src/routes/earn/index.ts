@@ -497,7 +497,7 @@ earn.get(
 // asset in the same owner wallet.
 earn.post(
   "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
-  requireAction("earn.manage"),
+  requireAction("earn.execute"),
   validateBody(earnVaultWithdrawalRequestCancelSchema),
   cancelEarnVaultWithdrawalRequest
 );
@@ -550,7 +550,7 @@ earn.post(
 );
 earn.post(
   "/external-wallet/withdrawal-request-cancellations",
-  requireAction("earn.manage"),
+  requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
 );

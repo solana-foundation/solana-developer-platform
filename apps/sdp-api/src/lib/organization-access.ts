@@ -1,5 +1,9 @@
-import { type Action, expandStoredGrants } from "@sdp/types/actions";
-import type { ApiKeyEnvironment, RateLimitTier } from "@sdp/types/api-keys";
+import type { Action } from "@sdp/types/actions";
+import {
+  API_KEY_WALLET_SCOPES,
+  type ApiKeyEnvironment,
+  type RateLimitTier,
+} from "@sdp/types/api-keys";
 import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
 import { projectStatusMayAuthenticate } from "@sdp/types/projects";
 import type { Context } from "hono";
@@ -12,6 +16,7 @@ import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
+import { parseGrantsColumn } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -104,13 +109,10 @@ export async function enforceOrganizationAccess(
   return settings;
 }
 
-/** `api_keys.grants`, a `text[]` the driver returns as an array. */
-const storedGrantsSchema = z.array(z.string());
-
 /** The key's active `api_key_signing_wallets`, aggregated to a `text[]`. */
 const signingWalletIdsSchema = z.array(z.string());
 
-const walletScopeSchema = z.enum(["all", "selected"]);
+const walletScopeSchema = z.enum(API_KEY_WALLET_SCOPES);
 
 /** The `api_keys` row and its joins, as the authoritative read returns them. */
 type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
@@ -224,7 +226,7 @@ export async function authorizeApiKey(
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    grants: expandStoredGrants(storedGrantsSchema.parse(row.grants)),
+    grants: parseGrantsColumn(row.grants),
     environment: row.environment,
     rateLimitTier: row.rate_limit_tier,
     settings: row.settings,

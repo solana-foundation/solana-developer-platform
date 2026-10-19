@@ -1,10 +1,5 @@
-import {
-  type Action,
-  apiKeyMayPerform,
-  expandStoredGrants,
-  organizationRoleMayPerform,
-} from "@sdp/types/actions";
-import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
+import { type Action, apiKeyMayPerform, organizationRoleMayPerform } from "@sdp/types/actions";
+import { API_KEY_WALLET_SCOPES, type ApiKeyWalletScope } from "@sdp/types/api-keys";
 import {
   MANDATE_MOVEMENT_STATUSES,
   MOVEMENTS,
@@ -31,6 +26,7 @@ import {
 } from "@/lib/money-principal";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
+import { parseGrantsColumn } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -58,9 +54,12 @@ import type { Env } from "@/types/env";
  * must be in a status that admits the movement and sign only with its source
  * wallet; a `/pay` link signs only its open payment request.
  *
- * Exits (taking money already committed back out) are never refused (ADR 0002)
- * and never ask. The read is uncached on purpose: deletion and revocation take
- * effect on the next movement.
+ * Exits (taking money already committed back out) are never refused by the
+ * organization (ADR 0002): an exit with no principal reads nothing and is
+ * admitted. An exit with a principal is read, and the credential can refuse
+ * it: one that is no longer live, or a key whose scope lacks the wallet (ADR
+ * 0007 addendum). The read is uncached on purpose: deletion and revocation
+ * take effect on the next movement.
  */
 
 export type MoneyAdmissionRefusal =
@@ -375,10 +374,7 @@ function logMoneyRefused(reason: MoneyAdmissionRefusal, context: MovementRefusal
   });
 }
 
-/** `api_keys.grants`, a `text[]` the driver returns as an array. */
-const storedGrantsSchema = z.array(z.string());
-
-const walletScopeSchema = z.enum(["all", "selected"]);
+const walletScopeSchema = z.enum(API_KEY_WALLET_SCOPES);
 
 interface MoneyAdmissionRow {
   environment: ProjectEnvironment;
@@ -436,7 +432,7 @@ function principalFacts(
                 status: row.key_status,
                 expires_at: row.key_expires_at,
                 rotation_deadline: row.key_rotation_deadline,
-                grants: expandStoredGrants(storedGrantsSchema.parse(row.key_grants)),
+                grants: parseGrantsColumn(row.key_grants),
                 walletScope: walletScopeSchema.parse(row.key_wallet_scope),
                 walletListed: row.key_wallet_listed,
               },
