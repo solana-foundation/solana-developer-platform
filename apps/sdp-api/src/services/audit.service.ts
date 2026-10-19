@@ -12,6 +12,7 @@ import {
   type DatabaseIdentity,
   databaseIdentityConfigStatements,
   runWithSystemDatabaseIdentity,
+  runWithTenantDatabaseIdentity,
 } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
@@ -592,6 +593,13 @@ export class AuditService {
         cause: new Error("Audited work requires a database identity to run under"),
       });
     }
+    // Requests run as a tenant or a registered system workload; the operator
+    // identity belongs to the break-glass path alone and is never audited here.
+    if (requestIdentity.kind === "operator") {
+      throw new AuditPersistenceError({
+        cause: new Error("Audited work cannot run under the operator identity"),
+      });
+    }
     return this.persist(
       async (tx) => {
         // The ledger reads span every organization, so its transaction opens
@@ -600,7 +608,13 @@ export class AuditService {
         // The work runs while the global ledger lock is held: a row-lock wait
         // inside it must fail rather than stall every audit write.
         await tx.execute(`SET LOCAL lock_timeout = '${AUDITED_WORK_LOCK_TIMEOUT}'`);
-        const done = await work(asTransactionalClient(tx));
+        // Inside the work the ambient identity is the request's too, so a
+        // query that reaches past `tx` (a stray `getDb()`) still runs under
+        // row-level security rather than the ledger's system grant.
+        const runWork = () => work(asTransactionalClient(tx));
+        const done = await (requestIdentity.kind === "tenant"
+          ? runWithTenantDatabaseIdentity(requestIdentity, runWork)
+          : runWithSystemDatabaseIdentity(requestIdentity.component, runWork));
         await tx.execute("SET LOCAL lock_timeout TO DEFAULT");
         await stampTransactionIdentity(tx, AUDIT_LEDGER_DATABASE_IDENTITY);
         return done;
