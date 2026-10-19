@@ -509,7 +509,10 @@ async function bindApiKeyToWallet(custodyWalletId: string): Promise<void> {
  * it: the request was admitted with a live key, and its claim reads it after
  * the revocation commits.
  */
-async function revokeKeyWhileClaiming(path: string): Promise<Response> {
+async function revokeKeyWhileClaiming(
+  path: string,
+  init: { method: string; body: unknown } = { method: "POST", body: {} }
+): Promise<Response> {
   let revoke: () => void = () => {};
   const revoked = new Promise<void>((resolve) => {
     revoke = resolve;
@@ -527,7 +530,7 @@ async function revokeKeyWhileClaiming(path: string): Promise<Response> {
   await holding;
   const request = app.request(
     path,
-    { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+    { method: init.method, headers: RECURRING_HEADERS, body: JSON.stringify(init.body) },
     env
   );
   await untilWaitingOnKeyLock();
@@ -4734,6 +4737,32 @@ describe("Payments routes — recurring", () => {
     expect(await recurringExecutionSnapshot(activated.id)).toEqual(before);
   });
 
+  it("refuses an amount change whose key is revoked between admission and claim", async () => {
+    recurringExecution
+      .signAndSendMock()
+      .mockResolvedValue(
+        signature(
+          "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+        )
+      );
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const before = await recurringExecutionSnapshot(activated.id);
+
+    const response = await revokeKeyWhileClaiming(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", body: { amount: "30.00" } }
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(activated.id)).toEqual(before);
+  });
+
   it.each([
     {
       route: "collect",
@@ -4866,6 +4895,63 @@ describe("Payments routes — recurring", () => {
         expect(await statusOf(activated.id)).toBe(inFlight);
       }
     );
+
+    const activatorOf = async (id: string) =>
+      (
+        await getDb(env)
+          .prepare("SELECT activated_by_api_key_id FROM payment_recurring_payments WHERE id = ?")
+          .bind(id)
+          .first<{ activated_by_api_key_id: string | null }>()
+      )?.activated_by_api_key_id;
+    const activatedByAnotherKey = async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      await seedKeyRow("key_recurring_original_activator", null);
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET activated_by_api_key_id = ? WHERE id = ?")
+        .bind("key_recurring_original_activator", activated.id)
+        .run();
+      return activated;
+    };
+
+    // A change to where or how much money moves re-authorizes the mandate, so
+    // the key that made it is the one whose revocation cancels it.
+    it("hands the payment to the key that changes its amount", async () => {
+      const activated = await activatedByAnotherKey();
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.00" }) },
+        env
+      );
+
+      expect(update.status).toBe(200);
+      expect(await activatorOf(activated.id)).toBe(TEST_API_KEY.id);
+      expect(await cancelFor("key_recurring_original_activator")).toEqual({
+        canceled: [],
+        failed: [],
+      });
+      expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [activated.id], failed: [] });
+    });
+
+    it("leaves the activator in place on a metadata-only update", async () => {
+      const activated = await activatedByAnotherKey();
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ metadataUri: "https://example.com/recurring/renamed.json" }),
+        },
+        env
+      );
+
+      expect(update.status).toBe(200);
+      expect(await activatorOf(activated.id)).toBe("key_recurring_original_activator");
+    });
 
     it("cancels nothing for an unrelated key", async () => {
       const activated = await activateRecurringPaymentFixture({

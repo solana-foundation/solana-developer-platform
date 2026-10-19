@@ -36,6 +36,7 @@ import type {
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptRow,
+  RecurringPaymentActivator,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type {
@@ -58,6 +59,7 @@ import {
   transactionFailed,
 } from "@/lib/errors";
 import { normalizeDecimalString } from "@/lib/idempotency";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -80,6 +82,7 @@ import {
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   isSubscriptionDelegationCanceled,
+  lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
@@ -1814,6 +1817,7 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
   sourceWallet: CustodyWallet;
   updatedAt: string;
   staleBefore: string;
+  activatedBy: RecurringPaymentActivator | null;
 }): Promise<PaymentRecurringPaymentRow | null> {
   const locked = await input.db
     .prepare(
@@ -1865,6 +1869,7 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
     projectId: input.projectId,
     updatedAt: input.updatedAt,
     staleBefore: input.staleBefore,
+    activatedBy: input.activatedBy,
   });
 }
 
@@ -1990,7 +1995,21 @@ export async function updateRecurringPayment(input: {
 
   const claimUpdatedAt = new Date().toISOString();
   const staleBefore = getRecurringPaymentOperationStaleBefore(nowIso);
+  // An update that changes where or how much money moves re-authorizes the
+  // mandate, so its caller becomes the one it answers to: revoking that key
+  // cancels the mandate, as revoking its activator does (HOO-2099). A
+  // metadata or schedule change leaves the activator alone, and so does a
+  // recovered stale update, whose own claim already recorded its caller.
+  const activatedBy =
+    mode === "replacement" && !recoveringStaleUpdate ? currentMandateActivator() : null;
   const claimResult = await getDb(input.env).transaction(async (tx) => {
+    await lockLiveActivatingKey(tx, {
+      activator: activatedBy,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      movement: "recurring.update",
+      recurringPaymentId: settled.recurringPayment.id,
+    });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = sourceChanged
       ? await claimSourceChangingRecurringPaymentUpdate({
@@ -2001,6 +2020,7 @@ export async function updateRecurringPayment(input: {
           sourceWallet: input.sourceWallet,
           updatedAt: claimUpdatedAt,
           staleBefore,
+          activatedBy,
         })
       : await transactionRepo.claimRecurringPaymentUpdate({
           recurringPaymentId: settled.recurringPayment.id,
@@ -2008,6 +2028,7 @@ export async function updateRecurringPayment(input: {
           projectId: input.projectId,
           updatedAt: claimUpdatedAt,
           staleBefore,
+          activatedBy,
         });
     if (!claimed) return null;
     const attempt = await getOrCreateRecurringPaymentUpdateAttempt({

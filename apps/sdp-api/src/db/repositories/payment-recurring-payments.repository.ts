@@ -248,6 +248,11 @@ export interface ClaimPaymentRecurringPaymentUpdateInput {
   projectId: string;
   updatedAt: string;
   staleBefore?: string;
+  /**
+   * Who the mandate answers to after an update that changes where or how much
+   * money moves; null keeps the stored activator (HOO-2099).
+   */
+  activatedBy: RecurringPaymentActivator | null;
 }
 
 export interface UpdatePaymentRecurringPaymentLifecycleInput {

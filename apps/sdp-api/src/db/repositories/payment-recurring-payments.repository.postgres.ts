@@ -793,7 +793,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `UPDATE payment_recurring_payments
               SET status = 'updating',
-                  updated_at = ?
+                  updated_at = ?,
+                  ${ACTIVATED_BY_ASSIGNMENTS}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
@@ -805,6 +806,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .bind(
           input.updatedAt,
+          ...activatedByBindings(input.activatedBy),
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,

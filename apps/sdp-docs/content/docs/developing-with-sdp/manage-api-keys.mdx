@@ -114,4 +114,4 @@ Rotation replaces the secret without an availability gap: the new key is a fresh
 
 Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working on its next request and cannot be restored. Deleting a rotated key during its grace period ends the overlap early: the replacement keeps working.
 
-If the key may be compromised, also cancel the recurring payments it activated: send `"cancelRecurringPayments": true` with the revocation. The response lists the recurring payments it canceled and any it could not, which you can cancel one by one.
+If the key may be compromised, also cancel the recurring payments it activated: send `"cancelRecurringPayments": true` with the revocation. A recurring payment answers to the key that activated or last resumed it, or that last changed its source wallet, recipient, token, amount or period: that change re-authorizes where its money goes. Changing only its metadata or next collection date does not. The response lists the recurring payments it canceled and any it could not, which you can cancel one by one.
