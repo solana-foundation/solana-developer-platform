@@ -279,18 +279,11 @@ refresh is update-only.
   capability (`supportsLiveMetrics`), pulls the whole shelf's current figures in
   one or two calls and rewrites `current_apy` plus volatile `risk_metadata`
   (TVL, holders) on rows the catalogue already holds.
-- **When it runs:** every 5 minutes (`EARN_METRICS_REFRESH_CRON`), on both
-  schedulers behind the same `isEarnEnabled` gate. Unslotted on the managed job
-  — that job's own five-minute schedule IS the cadence — and entered through
-  `runEarnMetricsRefreshTick` so it reports to its own Sentry cron monitor.
-  That monitor is the point: "the refresh silently stopped running" is this
-  pass's worst failure (rates quietly go stale) and is invisible from the
-  catalogue sync's monitor.
-- **Ordered BEFORE the catalogue sync in the managed job**, which also protects
-  the sync: `runEarnCatalogueSyncIfDue` claims its hourly Redis slot before any
-  provider call, and a stall after that claim would hold the slot for its full
-  TTL (~59 min). Running the unslotted half first means a provider stall happens
-  before any slot exists to burn.
+- **When it runs:** every 5 minutes as the `refresh-earn-metrics` Cron
+  Definition behind `isEarnEnabled`, unslotted: duplicates only rewrite the
+  same figures. It logs its own `sdp_cron_run`, and that is the point: "the
+  refresh silently stopped running" is this pass's worst failure (rates quietly
+  go stale) and is invisible from the catalogue sync's run events.
 - **What it cannot do**, and this is the whole safety argument:
   - **Insert.** The normal path uses one `updateStrategyMetricsBatch` per
     provider/environment and falls back to `updateStrategyMetrics` per row only
@@ -325,19 +318,20 @@ refresh is update-only.
   reference both sources list stays on the own (fundable) shelf: the mirror
   under-reports it, warned hourly (ADR 0002, PRO-1742 addendum: this caps a
   fully-faithful mirror to cluster-distinct, address-keyed references).
-- **When it runs:** hourly (`EARN_CATALOGUE_SYNC_CRON = "0 * * * *"`), on two
-  schedulers behind the same flag gate (`isEarnEnabled`): in-process node-cron
-  (`cron/runner.ts` — self-hosted and explicitly opted-in services) and the
-  managed Cloud Run Job (`apps/sdp-api/src/job.ts`), where each five-minute
-  tick claims an hourly Redis slot first (`runEarnCatalogueSyncIfDue`) so the
-  effective cadence stays hourly. Completely inert in a flag-off environment
-  either way.
+- **When it runs:** once per hourly Redis slot (scheduled `*/5 * * * *`, so a
+  slot that a Worker boot claimed mid-hour is retaken five minutes after it
+  expires) and once when the Worker starts, as
+  the `sync-earn-catalogue` Cron Definition behind `isEarnEnabled`
+  (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`, ADR 0011). Every run claims
+  an hourly Redis slot first (`runEarnCatalogueSyncIfDue`), so a boot run and
+  the scheduled run never both sync in one window. Completely inert in a
+  flag-off environment.
 - **Failure behaviour:** per-provider isolation. `NOT_IMPLEMENTED` and
   `PROVIDER_NOT_CONFIGURED` are info-level skips (that is the normal state for
   the stub providers); any other error is logged for that provider and never
   sinks the others.
 - **Adding a provider needs no cron change** — it is registry-driven.
-- **To change cadence:** edit `EARN_CATALOGUE_SYNC_CRON`.
+- **To change cadence:** edit the definition's `schedule`.
 - **An operator stop outranks the sync.** The upsert never overwrites a
   `paused`/`deprecated` status, so an emergency pause holds until someone writes
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
@@ -353,16 +347,14 @@ refresh is update-only.
   with the same call as the build-time baseline. A rise of at least the swap's
   floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
   it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
-- **When it runs:** on both schedulers, unconditionally (no earn flag gate: an
-  advisory written before an incident flag flip must keep being watched), under
-  the system database identity like every sweep. In-process the crontab is every
-  minute (`EARN_SPLIT_SWAPS_CRON`); the managed Cloud Run Job invokes it at the
-  deployment-provided Managed Reconciliation Cadence (three minutes in
-  production), which is what bounds alert latency there.
+- **When it runs:** every minute as the `detect-orphaned-earn-split-swaps` Cron
+  Definition, always enabled (no earn flag gate: an advisory written before an
+  incident flag flip must keep being watched), under the system database
+  identity like every sweep.
 - **Failure behaviour:** a chain read failure emits its own error event, marks
   the `sdp_api_earn_split_swap_detection_tick` error-level and throws, so the
   cron run reads error; the job's own query failing emits no tick at all.
-- **Cadence:** `EARN_SPLIT_SWAPS_CRON` in `cron/earn-split-swaps.ts`.
+- **Cadence:** the definition's `schedule` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
   rows absent from that provider's live catalogue become deprecated metadata
   tombstones, scoped to the cluster sub-shelf the responding lane is the truth

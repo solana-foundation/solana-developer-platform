@@ -1,6 +1,11 @@
 # ADR 0003: Managed reconciliation cadence and monitor identity
 
-- **Status:** Accepted
+> **Note (2026-10-19):** Superseded by [ADR 0011](./0011-cron-definitions.md). The
+> always-on worker replaced the managed Cloud Run Job, which is deleted along
+> with `job.ts`, the `sdp-api-managed-*` monitor namespace, and the Sentry
+> check-in lifecycle described below. Kept for history.
+
+- **Status:** Superseded by ADR 0011
 - **Date:** 2026-08-22
 - **Deciders:** SDP API and Infrastructure teams
 - **Related:** `apps/sdp-api/src/job.ts`; `apps/sdp-api/src/cron/`; sdp-infra `sdp_api_cron_schedule`; Sentry issues SDP-API-5, SDP-API-H, SDP-API-J, SDP-API-P, and SDP-API-X
@@ -85,7 +90,7 @@ deployment.
    during deployment. Do not invoke the reconciliation job merely to test wiring.
 4. Observe successful check-ins for at least two managed cadences, then archive
    or mute the superseded production monitors by following
-   [`docs/ops/managed-reconciliation-monitor-migration.md`](../ops/managed-reconciliation-monitor-migration.md).
+   `docs/ops/managed-reconciliation-monitor-migration.md` (deleted with ADR 0011).
 
 Tests will provide the cadence as input and assert propagation and validation;
 they will not assert a fixed minute count.

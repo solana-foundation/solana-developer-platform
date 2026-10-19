@@ -10,7 +10,6 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import * as tokenLabels from "@/routes/payments/token-labels";
-import { noopObservability } from "@/runtime/observability";
 import * as jupiterPriceService from "@/services/jupiter-price.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -134,7 +133,6 @@ async function seedActiveConnectionWallet(params: {
 // Today every ramp provider is `experimental`; these stages put only MoonPay in
 // `beta`, so a `beta` deployment runs Ramps with MoonPay alone.
 const moonpayOnlyBetaApp = createApp({
-  observability: noopObservability,
   rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
 });
 const betaEnv = () => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });

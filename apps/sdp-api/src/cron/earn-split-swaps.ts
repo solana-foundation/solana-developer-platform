@@ -1,28 +1,20 @@
-import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
-import type { Env } from "@/types/env";
+import { alwaysEnabled, defineCron } from "./define-cron";
 
-export const EARN_SPLIT_SWAPS_MONITOR = "sdp-api-detect-orphaned-earn-split-swaps";
-export const EARN_SPLIT_SWAPS_CRON = "* * * * *";
-
+// NOTE: `global` for now, on purpose. This sweep reads every Environment's rows and picks each
+// row's cluster from the row itself (`row.environment`), which is correct, but it is not yet
+// split into one registration per Environment like the other chain-touching crons. Moving it
+// to `scope: "cluster"` is tracked in HOO-2148. New chain-touching crons use `scope: "cluster"`.
 /**
- * Orphaned split-swap detection (PRO-1864, threat model EARN-026): the
- * advisory sweep over swaps SDP handed to a partner but never saw deposited.
- * Same wrapping as every other sweep: a Sentry cron monitor when observability
- * is supplied, and the promise handed to the BackgroundRunner so it outlives
- * the tick and drains on shutdown.
+ * Orphaned split-swap detection (PRO-1864, threat model EARN-026): the advisory sweep over swaps
+ * SDP handed to a partner but never saw deposited. Always on: an advisory written before an
+ * incident flag flip must keep being watched.
  */
-export function runEarnSplitSwapDetection(deps: {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}): void {
-  const work = () => detectOrphanedEarnSplitSwaps(deps.env);
-  const promise = deps.observability
-    ? deps.observability.withMonitor(EARN_SPLIT_SWAPS_MONITOR, work, {
-        schedule: { type: "crontab", value: EARN_SPLIT_SWAPS_CRON },
-      })
-    : Promise.resolve().then(work);
-  deps.bg.run(promise);
-}
+export const earnSplitSwapsCron = defineCron({
+  name: "detect-orphaned-earn-split-swaps",
+  schedule: "* * * * *",
+  scope: "global",
+  effect: "observes",
+  enabled: alwaysEnabled,
+  run: detectOrphanedEarnSplitSwaps,
+});

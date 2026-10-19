@@ -83,7 +83,7 @@ describe("decideMoneyStart", () => {
   });
 });
 
-// Jobs and `/pay` read under the system identity (cron/runner.ts, job.ts,
+// Jobs and `/pay` read under the system identity (cron/runner.ts,
 // middleware/database-identity.ts); the reads here do too.
 const asSystem = <T>(read: () => Promise<T>) =>
   runWithSystemDatabaseIdentity("test:money-admission", read);

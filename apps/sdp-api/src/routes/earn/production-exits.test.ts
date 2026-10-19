@@ -2,7 +2,6 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
-import { noopObservability } from "@/runtime/observability";
 import { isEarnExitOrRead } from "./exits";
 
 /**
@@ -27,7 +26,6 @@ const EARN_ENTRY_ROUTES = [
 
 function earnRoutes(): Array<{ method: string; path: string }> {
   const app = createApp({
-    observability: noopObservability,
     rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
   });
   const routes = new Map<string, { method: string; path: string }>();

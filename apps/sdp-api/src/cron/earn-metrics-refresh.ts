@@ -6,9 +6,8 @@
  * slow. An APY on a comparison table is a number a customer compares vaults by
  * and then moves money on, and an hour-old one is not that number. So the
  * volatile figures get their own frequent pass, while identity, mints,
- * liquidity terms and admission to the catalogue stay hourly. Self-hosted
- * scheduling uses five minutes; managed scheduling follows the deployment's
- * Managed Reconciliation Cadence.
+ * liquidity terms and admission to the catalogue stay hourly. It runs every
+ * five minutes as a Cron Definition (ADR 0011).
  *
  * Two properties keep the two passes from fighting:
  *
@@ -25,11 +24,10 @@
  * live read, and which providers should not implement it, see
  * `EarnLiveMetricsProvider` in @sdp/earn/types.
  *
- * **Every provider read is bounded** (`EARN_PROVIDER_METRICS_DEADLINE_MS`).
- * `src/job.ts` runs this pass first and awaits it before the catalogue sync
- * inside a 120s Cloud Run task, so an unbounded read here would not just cost
- * this pass its rates — it would spend the execution and take the catalogue
- * sync down with it, every tick, for as long as the provider stayed slow.
+ * **Every provider read is bounded** (`EARN_PROVIDER_METRICS_DEADLINE_MS`), so
+ * one slow provider costs only its own figures: the pass moves on to the next
+ * provider instead of inheriting the stall, and the Worker's overlap guard
+ * skips slots for as long as a pass is still running.
  */
 
 import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
@@ -43,19 +41,17 @@ import type {
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnRepository } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";
-import type { BackgroundRunner } from "@/runtime/background";
+import { isEarnEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
-import type { Observability } from "@/runtime/observability";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { reportFigureAnomalies } from "@/services/earn/catalogue-anomaly";
 import { guardDepositMints } from "@/services/earn/deposit-mint-guard";
 import { earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
-
-export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
+import { defineCron } from "./define-cron";
 
 /**
- * Five minutes for the in-process path: the shortest cadence that is
+ * Five minutes: the shortest cadence that is
  * unambiguously polite to a public API (Kamino's whole shelf is two requests,
  * so this is 24 requests an hour per environment) while putting a hard ceiling
  * on how stale a quoted rate can be.
@@ -63,7 +59,7 @@ export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
  * hours, not over minutes — so five minutes is comfortably inside the noise and
  * there is nothing to gain from going lower.
  */
-export const EARN_METRICS_REFRESH_CRON = "*/5 * * * *";
+const EARN_METRICS_REFRESH_CRON = "*/5 * * * *";
 
 // Matches the catalogue sync: rows are environment-scoped, so each provider
 // refreshes once per environment, reading that environment's OWN shelf.
@@ -94,15 +90,13 @@ const SKIPPABLE_REFRESH_ERROR_CODES: ReadonlySet<string> = new Set([
  * that makes many requests — a server echoing a pagination token forever is
  * twenty prompt responses, not one slow one. This is the bound on the pass.
  *
- * Sized against the job, not the provider. `src/job.ts` runs this pass FIRST
- * and AWAITS it, then runs `runEarnCatalogueSyncIfDue`, inside a Cloud Run task
- * whose timeout is 120s (`sdp_api_cron_timeout`, both environments). With two
- * environments and one live-metrics provider today, 20s each caps the refresh
- * at 40s and leaves the catalogue sync the larger half. Measured, a real pass
- * is ~1.4s — this is a backstop, not a budget anything runs near.
+ * Sized against the cadence, not the provider. With two environments and one
+ * live-metrics provider today, 20s each caps the refresh at 40s, inside its
+ * five-minute slot. Measured, a real pass is ~1.4s — this is a backstop, not a
+ * budget anything runs near.
  *
  * Raising the provider count means re-checking that
- * `providers × environments × this` still clears the job timeout.
+ * `providers × environments × this` still clears the five-minute cadence.
  */
 export const EARN_PROVIDER_METRICS_DEADLINE_MS = 20_000;
 
@@ -113,8 +107,8 @@ export const EARN_PROVIDER_METRICS_DEADLINE_MS = 20_000;
  * The loser is deliberately not cancelled: `listStrategyMetrics` takes no
  * signal (the provider contract has no cancellation seam, and adding one for a
  * backstop would put it in every client). The abandoned request is already
- * capped by the client's own per-request timeout and the process is a
- * short-lived job, so it expires on its own — but its rejection is swallowed
+ * capped by the client's own per-request timeout, so it expires on its own —
+ * but its rejection is swallowed
  * here, or an orphan would surface as an unhandled rejection well after the
  * pass that started it has been logged and moved past.
  */
@@ -289,44 +283,12 @@ async function refreshProviderMetrics(
   );
 }
 
-export interface EarnMetricsRefreshDeps {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}
-
-export function runEarnMetricsRefresh(deps: EarnMetricsRefreshDeps): void {
-  // Reuses the managed tick verbatim, which the catalogue sync deliberately
-  // cannot: ITS tick claims a Redis slot the in-process scheduler must not
-  // touch, so the two paths there differ. This pass is unslotted (see the
-  // tick's docstring), leaving nothing for the two to disagree about.
-  //
-  // `runEarnMetricsRefreshTick` is async, so a throw before its first await is
-  // already a rejected promise the BackgroundRunner can track rather than one
-  // propagating into the runtime entrypoint — the invariant the hand-rolled
-  // `Promise.resolve().then(work)` used to buy.
-  deps.bg.run(runEarnMetricsRefreshTick(deps.env, deps.observability));
-}
-
-/**
- * One tick of the managed Cloud Run Job (`src/job.ts`).
- *
- * Deliberately UNSLOTTED, unlike the catalogue sync. The job's deployment-owned
- * schedule is this pass's managed cadence, so there is no second window to
- * claim. Two overlapping executions would at worst write the same figures
- * twice, which is harmless here in a way a duplicated catalogue pass (with its
- * delist half) is not.
- *
- * Callers gate on isEarnEnabled first, mirroring the catalogue sync.
- */
-export async function runEarnMetricsRefreshTick(
-  env: Env,
-  observability?: Observability
-): Promise<void> {
-  const work = () => refreshEarnStrategyMetrics(env);
-  await (observability
-    ? observability.withMonitor(EARN_METRICS_REFRESH_MONITOR, work, {
-        schedule: { type: "crontab", value: EARN_METRICS_REFRESH_CRON },
-      })
-    : work());
-}
+/** Volatile Earn figures (APY, TVL, risk metadata) for strategies the catalogue already admitted. */
+export const earnMetricsRefreshCron = defineCron({
+  name: "refresh-earn-metrics",
+  schedule: EARN_METRICS_REFRESH_CRON,
+  scope: "global",
+  effect: "observes",
+  enabled: isEarnEnabled,
+  run: refreshEarnStrategyMetrics,
+});
