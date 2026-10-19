@@ -4,9 +4,9 @@ import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import type { TokenOperations } from "../asset-profile/use-token-operations";
 import { AuthorityForm } from "./authority-form";
 
 const messages = getMessages("en");
