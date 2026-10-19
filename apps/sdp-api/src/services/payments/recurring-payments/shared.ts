@@ -468,8 +468,9 @@ export function recurringPaymentErrorMessage(error: Error): string {
  * two are ordered: a narrowing that lands first makes this refuse and the
  * claim roll back, and a claim that commits first is what revocation lists.
  * The job later signs as the mandate without the key, so this is the last
- * point the key's authority is read. A member or no activator (the job
- * itself) is not decided here and reads nothing.
+ * point the key's authority is read. A member activator is decided the same
+ * way from their membership row, which removal and role changes write; no
+ * activator (the job itself) reads nothing.
  *
  * @throws MoneyMovementRefusedError with the waist's refusal (403).
  */
@@ -485,6 +486,31 @@ export async function lockLiveActivatingKey(
     custodyWalletIds: readonly string[];
   }
 ): Promise<void> {
+  const context = {
+    surface: "http",
+    movement: input.movement,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subjectId: input.recurringPaymentId,
+  } as const;
+  const userId = input.activator?.userId;
+  if (userId) {
+    const member = await tx.queryOne<{ status: string; role: string }>(
+      `SELECT status, role FROM organization_members
+        WHERE user_id = ? AND organization_id = ?
+        FOR SHARE`,
+      [userId, input.organizationId]
+    );
+    assertMovementAdmitted(
+      decidePrincipal(
+        input.movement,
+        { readAt: Date.now(), principal: { kind: "member", member } },
+        { custodyWalletId: null }
+      ),
+      context
+    );
+    return;
+  }
   const apiKeyId = input.activator?.apiKeyId;
   if (!apiKeyId) {
     return;
@@ -505,13 +531,6 @@ export async function lockLiveActivatingKey(
         [apiKeyId, [...input.custodyWalletIds]]
       )
     : [];
-  const context = {
-    surface: "http",
-    movement: input.movement,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    subjectId: input.recurringPaymentId,
-  } as const;
   const readAt = Date.now();
   for (const custodyWalletId of input.custodyWalletIds) {
     const decision = decidePrincipal(

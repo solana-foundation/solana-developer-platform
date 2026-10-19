@@ -49,6 +49,7 @@ import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recur
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -514,34 +515,61 @@ async function revokeKeyWhileClaiming(
   init: { method: string; body: unknown } = { method: "POST", body: {} },
   narrowing = "UPDATE api_keys SET status = 'deactivated' WHERE id = ?"
 ): Promise<Response> {
-  let revoke: () => void = () => {};
-  const revoked = new Promise<void>((resolve) => {
-    revoke = resolve;
+  return narrowWhileClaiming({
+    path,
+    init,
+    headers: RECURRING_HEADERS,
+    table: "api_keys",
+    rowId: TEST_API_KEY.id,
+    narrowing,
+  });
+}
+
+/**
+ * Holds the activator's row lock, sends the request, waits until its claim
+ * blocks on that row, then applies `narrowing` and commits, so the narrowing
+ * lands after admission and before the claim reads the row.
+ */
+async function narrowWhileClaiming(input: {
+  path: string;
+  init: { method: string; body: unknown };
+  headers: Record<string, string>;
+  table: "api_keys" | "organization_members";
+  rowId: string;
+  narrowing: string;
+}): Promise<Response> {
+  let narrow: () => void = () => {};
+  const narrowed = new Promise<void>((resolve) => {
+    narrow = resolve;
   });
   let locked: () => void = () => {};
   const holding = new Promise<void>((resolve) => {
     locked = resolve;
   });
-  const revocation = getDb(env).transaction(async (tx) => {
-    await tx.execute("SELECT id FROM api_keys WHERE id = ? FOR UPDATE", [TEST_API_KEY.id]);
+  const lockRow =
+    input.table === "api_keys"
+      ? "SELECT id FROM api_keys WHERE id = ? FOR UPDATE"
+      : "SELECT id FROM organization_members WHERE user_id = ? FOR UPDATE";
+  const narrowing = getDb(env).transaction(async (tx) => {
+    await tx.execute(lockRow, [input.rowId]);
     locked();
-    await revoked;
-    await tx.execute(narrowing, [TEST_API_KEY.id]);
+    await narrowed;
+    await tx.execute(input.narrowing, [input.rowId]);
   });
   await holding;
   const request = app.request(
-    path,
-    { method: init.method, headers: RECURRING_HEADERS, body: JSON.stringify(init.body) },
+    input.path,
+    { method: input.init.method, headers: input.headers, body: JSON.stringify(input.init.body) },
     env
   );
-  await untilWaitingOnKeyLock();
-  revoke();
-  await revocation;
+  await untilWaitingOnRowLock(input.table);
+  narrow();
+  await narrowing;
   return request;
 }
 
-/** Waits until a claim's share lock on an API key row is blocked behind another transaction. */
-async function untilWaitingOnKeyLock(): Promise<void> {
+/** Waits until a claim's share lock on a row of `table` is blocked behind another transaction. */
+async function untilWaitingOnRowLock(table: "api_keys" | "organization_members"): Promise<void> {
   for (let attempt = 0; attempt < 250; attempt++) {
     const waiting = await getDb(env).queryOne<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM pg_stat_activity
@@ -549,13 +577,14 @@ async function untilWaitingOnKeyLock(): Promise<void> {
           AND datname = current_database()
           AND pid <> pg_backend_pid()
           AND position('FOR SHARE' in query) > 0
-          AND position('api_keys' in query) > 0`
+          AND position($1 in query) > 0`,
+      [table]
     );
     if (!waiting) throw new Error("COUNT(*) returned no row");
     if (waiting.count > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error("No claim started waiting on the API key row lock");
+  throw new Error(`No claim started waiting on the ${table} row lock`);
 }
 
 async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPayment> {
@@ -4737,6 +4766,37 @@ describe("Payments routes — recurring", () => {
       expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
     }
   );
+
+  // A member is decided the same way: removal writes the membership row the
+  // claim share-locks.
+  it("refuses an activation whose member is removed between admission and claim", async () => {
+    const payment = await seedPendingRecurringPayment();
+    const before = await recurringExecutionSnapshot(payment.id);
+    const { headers } = await authenticateTestClerkUser(env, getDb(env), {
+      userId: TEST_USER.id,
+      email: TEST_USER.email,
+      clerkUserId: `clerk_${TEST_USER.id}`,
+      organizationId: TEST_ORG.id,
+      clerkOrgId: "clerk_org_recurring_member",
+      orgSlug: TEST_ORG.slug,
+      role: "admin",
+    });
+
+    const response = await narrowWhileClaiming({
+      path: `/v1/payments/recurring-payments/${payment.id}/activate`,
+      init: { method: "POST", body: {} },
+      headers: { ...headers(TEST_PROJECT.id), "Content-Type": "application/json" },
+      table: "organization_members",
+      rowId: TEST_USER.id,
+      narrowing: "UPDATE organization_members SET status = 'removed' WHERE user_id = ?",
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+  });
 
   it("refuses a resume whose key is revoked between admission and claim", async () => {
     recurringExecution
