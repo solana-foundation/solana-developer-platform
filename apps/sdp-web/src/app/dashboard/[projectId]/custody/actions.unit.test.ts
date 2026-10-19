@@ -249,7 +249,7 @@ describe("requestDevnetSolanaFaucetAction", () => {
       lamports: "1000000000",
     });
 
-    const result = await requestDevnetSolanaFaucetAction("wallet_one", "faucet-key-1");
+    const result = await requestDevnetSolanaFaucetAction("wallet_one");
 
     expect(result).toEqual({
       status: "success",
@@ -259,7 +259,6 @@ describe("requestDevnetSolanaFaucetAction", () => {
     });
     expect(client.fetch).toHaveBeenCalledWith("/internal/dashboard/wallets/wallet_one/faucet", {
       method: "POST",
-      headers: { "Idempotency-Key": "faucet-key-1" },
     });
     expect(mocks.revalidatePath.mock.calls).toEqual([
       [`/dashboard/${PRODUCTION_PROJECT.id}/custody`],
@@ -276,7 +275,7 @@ describe("requestDevnetSolanaFaucetAction", () => {
       lamports: "1000000000",
     });
 
-    const result = await requestDevnetSolanaFaucetAction("wallet_one", "faucet-key-1");
+    const result = await requestDevnetSolanaFaucetAction("wallet_one");
 
     expect(result).toEqual({
       status: "error",

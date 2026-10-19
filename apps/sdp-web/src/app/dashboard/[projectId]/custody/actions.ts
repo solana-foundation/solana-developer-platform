@@ -354,15 +354,9 @@ export async function checkWalletSignerMemoAction(
   }
 }
 
-/**
- * Airdrops devnet SOL to the wallet.
- *
- * @param walletId - The wallet to fund.
- * @param idempotencyKey - Minted by the browser per press, so a retried action replays it.
- */
+/** Airdrops devnet SOL to the wallet. */
 export async function requestDevnetSolanaFaucetAction(
-  walletId: string,
-  idempotencyKey: string
+  walletId: string
 ): Promise<WalletFaucetActionResult> {
   const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
@@ -380,7 +374,7 @@ export async function requestDevnetSolanaFaucetAction(
     // The API waits (bounded) for the airdrop to confirm, so revalidating next reads the funded balance.
     const airdrop = await client.fetch<WalletFaucetResponse>(
       `/internal/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}/faucet`,
-      { method: "POST", headers: actionIdempotencyHeaders(idempotencyKey) }
+      { method: "POST" }
     );
     if (airdrop.status === "failed") {
       return { status: "error", message: t("DashboardCustody.devnetFaucetTransactionFailed") };

@@ -5,7 +5,6 @@
 import { Hono } from "hono";
 import { requireClerkSession, requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
-import { idempotent } from "@/middleware/idempotency";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody, validateParams } from "@/middleware/validate";
 import { requestWalletFaucet } from "@/routes/custody/handlers/faucet";
@@ -25,6 +24,5 @@ internalWallets.post(
   validateParams(walletIdParamsSchema),
   validateBody(walletFaucetSchema),
   authorize(authorizeWalletFaucet),
-  idempotent({ key: "accepted", serverErrors: "store" }),
   requestWalletFaucet
 );

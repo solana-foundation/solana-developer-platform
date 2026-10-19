@@ -95,13 +95,11 @@ export function useWalletActions({
 
     startTransition(() => {
       void (async () => {
-        const result = await requestDevnetSolanaFaucetAction(walletId, crypto.randomUUID()).catch(
-          (error) => ({
-            status: "error" as const,
-            message:
-              error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
-          })
-        );
+        const result = await requestDevnetSolanaFaucetAction(walletId).catch((error) => ({
+          status: "error" as const,
+          message:
+            error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
+        }));
 
         if (result.status === "success") {
           const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
