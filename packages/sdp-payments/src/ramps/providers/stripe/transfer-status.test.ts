@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { SdpPaymentsError } from "#/errors";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
 import { CONTRACT_DELIVERY_SIGNATURE, CONTRACT_WALLET, replayExchanges } from "#/ramps/test-kit";
 import type { RampTransferLookup } from "#/ramps/types";
@@ -57,7 +57,7 @@ async function eventsFor(status: string, details: Record<string, unknown>) {
 
 function failsWith(
   result: Awaited<ReturnType<typeof lookUp>>,
-  code: string,
+  code: SdpPaymentsErrorCode,
   requests: number,
   message?: string
 ) {

@@ -452,9 +452,8 @@ async function lookUpMoonpayTransactions<TTransaction extends MoonpayLookupTrans
       { provider: "moonpay", outcome: "unknown" }
     );
   }
-  // `updatedAt` is normalized to UTC ISO text, so text order is time order.
-  return [...transactions].sort((left, right) =>
-    left.updatedAt < right.updatedAt ? -1 : left.updatedAt > right.updatedAt ? 1 : 0
+  return [...transactions].sort(
+    (left, right) => Date.parse(left.updatedAt) - Date.parse(right.updatedAt)
   );
 }
 

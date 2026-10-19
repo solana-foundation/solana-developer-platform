@@ -110,24 +110,20 @@ export function stripeSessionSettlementEvent(
       { issues: providerResponseIssues(proof.error) }
     );
   }
-  const {
-    destination_amount: receivedAmount,
-    transaction_id: signature,
-    wallet_address: walletAddress,
-  } = proof.data;
-  return {
+  const event: Extract<RampSettlementEvent, { kind: "settled" }> = {
     provider: "stripe",
     kind,
     reference,
     deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
-    ...(receivedAmount ? { receivedAmount } : {}),
-    ...(signature
-      ? {
-          onchain: {
-            signature,
-            ...(walletAddress ? { destinationAddress: walletAddress } : {}),
-          },
-        }
-      : {}),
   };
+  if (proof.data.destination_amount) {
+    event.receivedAmount = proof.data.destination_amount;
+  }
+  if (proof.data.transaction_id) {
+    event.onchain = { signature: proof.data.transaction_id };
+    if (proof.data.wallet_address) {
+      event.onchain.destinationAddress = proof.data.wallet_address;
+    }
+  }
+  return event;
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { RampTransferType } from "@sdp/types/payments";
-import { SdpPaymentsError } from "#/errors";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
 import {
   CONTRACT_DELIVERY_SIGNATURE,
@@ -50,7 +50,11 @@ async function lookUpEvents(rampType: RampTransferType, body: RecordedExchange["
   return settled.events;
 }
 
-function failsWith(settled: Awaited<ReturnType<typeof lookUp>>, code: string, message?: string) {
+function failsWith(
+  settled: Awaited<ReturnType<typeof lookUp>>,
+  code: SdpPaymentsErrorCode,
+  message?: string
+) {
   assert.ok(!settled.ok, "the lookup fails");
   assert.ok(settled.cause instanceof SdpPaymentsError);
   assert.equal(settled.cause.code, code);
