@@ -86,7 +86,7 @@ Keep the CI service account scoped to read-only `dev_ci` access. There is no lon
 
 ## Cloud Run Boundary
 
-The Cloud Run deploy workflows authenticate to Google Cloud using `DEPLOY_WIF_PROVIDER` and `DEPLOY_SA`. Push-triggered deployments build an image, push it to Artifact Registry, execute the migration job, update the API service, and update the cron job image. A manual production deployment instead resolves an existing SHA-tagged image to its immutable digest and never runs migrations.
+The Cloud Run deploy workflows authenticate to Google Cloud using `DEPLOY_WIF_PROVIDER` and `DEPLOY_SA`. Push-triggered deployments build an image, push it to Artifact Registry, execute the migration job, update the API service, and update the Worker service image. A manual production deployment instead resolves an existing SHA-tagged image to its immutable digest and never runs migrations.
 
 They do **not** fetch Doppler or write runtime secrets. Before deploying a feature that adds an environment variable:
 
@@ -112,4 +112,4 @@ When removing a secret, first remove all code and deployment references, then re
 
 ## Rollback
 
-Rolling back a Cloud Run image does not roll back runtime configuration or database schema. Keep configuration backward-compatible across the rollback window and follow [Release Operations](./release-operations.md) for the service and cron rollback procedure.
+Rolling back a Cloud Run image does not roll back runtime configuration or database schema. Keep configuration backward-compatible across the rollback window and follow [Release Operations](./release-operations.md) for the service and worker rollback procedure.

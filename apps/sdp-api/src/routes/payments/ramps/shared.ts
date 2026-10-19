@@ -27,7 +27,7 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
-import { AppError, conflict, redactErrorForCapture, unsupportedRampCorridor } from "@/lib/errors";
+import { AppError, conflict, unsupportedRampCorridor } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -331,18 +331,6 @@ export async function estimateAcrossProviders(
           error_diagnostics: paymentsErrorDiagnostics(error),
           ...describeError(error),
         });
-        const observability = c.get("observability");
-        if (observability) {
-          try {
-            observability.withScope((sentryScope) => {
-              sentryScope.setTag("provider", provider);
-              sentryScope.setTag("organization_id", scope.auth.organizationId);
-              observability.captureException(redactErrorForCapture(cause));
-            });
-          } catch {
-            // never let telemetry change the per-provider error contract
-          }
-        }
         return {
           provider,
           status: "error",

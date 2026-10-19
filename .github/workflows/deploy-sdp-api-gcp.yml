@@ -22,7 +22,6 @@ jobs:
       REGION: us-central1
       REPO: sdp-dev
       SERVICE: sdp-dev-api-public
-      JOB: sdp-dev-api-public-cron
       WORKER_SERVICE: sdp-dev-worker
       MIGRATE_JOB: sdp-dev-api-public-migrate
     steps:
@@ -62,13 +61,6 @@ jobs:
       - name: Deploy service
         run: |
           gcloud run services update "${SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-
-      - name: Update cron job image
-        run: |
-          node .github/scripts/verify-managed-reconciliation-cadence.mjs \
-            "${JOB}" "${REGION}" "${PROJECT_ID}"
-          gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
       - name: Update worker image

@@ -3,7 +3,6 @@ import { inspectRoutes } from "hono/dev";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
-import { noopObservability } from "@/runtime/observability";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { authenticateTestClerkUser, ensureTestClerkIssuer } from "@/test/helpers/clerk";
 import { env as baseEnv } from "@/test/helpers/env";
@@ -56,7 +55,6 @@ function exemption(method: string, path: string): string | undefined {
 
 describe("production entitlement covers every project route (APE-351)", () => {
   const app = createApp({
-    observability: noopObservability,
     rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
   });
   const routes = new Map<string, { method: string; path: string }>();

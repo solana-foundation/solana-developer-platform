@@ -1,27 +1,14 @@
-import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
-import type { Env } from "@/types/env";
+import { alwaysEnabled, defineCron } from "./define-cron";
 
-export const PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR =
-  "sdp-api-cleanup-provider-credential-secrets";
-export const PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON = "*/5 * * * *";
-
-export interface ProviderCredentialSecretCleanupDeps {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}
-
-export function runProviderCredentialSecretCleanup(
-  deps: ProviderCredentialSecretCleanupDeps
-): void {
-  const work = () => cleanupRetiredProviderCredentialSecrets(deps.env);
-  const promise = deps.observability
-    ? deps.observability.withMonitor(PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR, work, {
-        schedule: { type: "crontab", value: PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON },
-      })
-    : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
-}
+/** Retired provider-credential secrets. Behind no flag: retired credentials outlive any feature. */
+export const providerCredentialSecretCleanupCron = defineCron({
+  name: "cleanup-provider-credential-secrets",
+  schedule: "*/5 * * * *",
+  scope: "global",
+  effect: "observes",
+  enabled: alwaysEnabled,
+  run: async (env) => {
+    await cleanupRetiredProviderCredentialSecrets(env);
+  },
+});

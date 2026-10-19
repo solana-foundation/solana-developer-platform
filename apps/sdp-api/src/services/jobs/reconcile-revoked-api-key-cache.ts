@@ -21,8 +21,8 @@
  * durable path that makes the old key's cached entry pick up its rotation
  * deadline (authentication already reads the deadline live).
  *
- * The sweep runs from the reconciliation cron (every minute in process, and
- * at most five minutes apart in the managed job) and needs no request
+ * The sweep runs every minute as the `reconcile-revoked-api-key-cache` Cron
+ * Definition and needs no request
  * credentials: it lists keys revoked within the last two hours (cache TTL is
  * one hour; the extra hour absorbs clock skew between writers) and keys whose
  * rotation deadline is still ahead or passed within that same window, reads

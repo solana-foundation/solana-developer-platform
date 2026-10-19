@@ -22,7 +22,6 @@ jobs:
       REGION: us-central1
       REPO: sdp-stage
       SERVICE: sdp-stage-api-public
-      JOB: sdp-stage-api-public-cron
       WORKER_SERVICE: sdp-stage-worker
       MIGRATE_JOB: sdp-stage-api-public-migrate
     steps:
@@ -81,13 +80,6 @@ jobs:
           done
           echo "revision ${REVISION} never became ready" >&2
           exit 1
-
-      - name: Update cron job image
-        run: |
-          node .github/scripts/verify-managed-reconciliation-cadence.mjs \
-            "${JOB}" "${REGION}" "${PROJECT_ID}"
-          gcloud run jobs update "${JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
       - name: Update worker image
         run: |

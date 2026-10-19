@@ -5,18 +5,15 @@ import type {
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
-  EARN_CATALOGUE_SYNC_CRON,
   EARN_CATALOGUE_SYNC_DEADLINE_SECONDS,
-  EARN_CATALOGUE_SYNC_MONITOR,
   EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS,
+  earnCatalogueSyncCron,
   runEarnCatalogueSyncIfDue,
 } from "./earn-catalogue-sync";
 
 const SLOT_KEY = "cron:earn-catalogue-sync:slot";
-const MONITOR_SLOT_KEY = "cron:earn-catalogue-sync:disabled-monitor-slot";
 
 // Mutable registry the module reads through the mocked @sdp/earn binding —
 // tests install providers per case, proving the sync is registry-driven and
@@ -101,14 +98,6 @@ function makeProvider(
   } as unknown as EarnVaultProvider;
 }
 
-function makeObservability(): Observability {
-  return {
-    captureException: vi.fn(),
-    withScope: vi.fn(),
-    withMonitor: vi.fn((_slug, fn) => fn()),
-  };
-}
-
 function installProviders(providers: Record<string, EarnVaultProvider>): void {
   for (const key of Object.keys(mocks.providerClients)) {
     delete mocks.providerClients[key];
@@ -169,21 +158,16 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
-  it("skips without syncing or checking in while a live claim holds the slot", async () => {
+  it("skips without syncing while a live claim holds the slot", async () => {
     const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
     installProviders({ upshift: makeProvider("upshift", listStrategies) });
     mocks.get.mockResolvedValue(`${Date.now() + 60_000}:11111111-2222-3333-4444-555555555555`);
-    const observability = makeObservability();
 
-    const outcome = await runEarnCatalogueSyncIfDue(env, observability);
+    const outcome = await runEarnCatalogueSyncIfDue(env);
 
     expect(outcome).toBe("skipped");
     expect(listStrategies).not.toHaveBeenCalled();
-    // A held slot is respected without a write attempt, and skipped ticks
-    // make no monitor check-in — Sentry must see hourly check-ins, not one
-    // per five-minute job tick.
     expect(mocks.compareAndSet).not.toHaveBeenCalled();
-    expect(observability.withMonitor).not.toHaveBeenCalled();
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
@@ -238,48 +222,6 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(outcome).toBe("skipped");
     expect(listStrategies).not.toHaveBeenCalled();
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
-  });
-
-  it("runs under its own monitor with the hourly crontab schedule", async () => {
-    installProviders({
-      upshift: makeProvider(
-        "upshift",
-        vi.fn(async () => [])
-      ),
-    });
-    const observability = makeObservability();
-
-    await runEarnCatalogueSyncIfDue(env, observability);
-
-    expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
-      EARN_CATALOGUE_SYNC_MONITOR,
-      expect.any(Function),
-      { schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON } }
-    );
-  });
-
-  it("keeps the hourly monitor healthy without running providers while Earn is disabled", async () => {
-    const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
-    installProviders({ upshift: makeProvider("upshift", listStrategies) });
-    const observability = makeObservability();
-
-    const outcome = await runEarnCatalogueSyncIfDue(env, observability, {
-      workEnabled: false,
-    });
-
-    expect(outcome).toBe("disabled");
-    expect(listStrategies).not.toHaveBeenCalled();
-    expect(createEarnRepository).not.toHaveBeenCalled();
-    expect(mocks.compareAndSet).toHaveBeenCalledExactlyOnceWith(
-      MONITOR_SLOT_KEY,
-      null,
-      expect.stringMatching(TOKEN_PATTERN)
-    );
-    expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
-      EARN_CATALOGUE_SYNC_MONITOR,
-      expect.any(Function),
-      { schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON } }
-    );
   });
 
   it("releases only its own claim token when the sync fails, and rethrows", async () => {
@@ -346,6 +288,19 @@ describe("runEarnCatalogueSyncIfDue", () => {
     mocks.compareAndDelete.mockRejectedValue(new Error("redis gone too"));
 
     await expect(runEarnCatalogueSyncIfDue(env)).rejects.toThrow("database unreachable");
+  });
+
+  it("logs whether the definition's run synced or skipped", async () => {
+    installProviders({});
+
+    await earnCatalogueSyncCron.run(env);
+    mocks.get.mockResolvedValue(`${Date.now() + 60_000}:11111111-2222-3333-4444-555555555555`);
+    await earnCatalogueSyncCron.run(env);
+
+    expect(mocks.logEvent.mock.calls).toEqual([
+      ["info", { event: "sdp_earn_catalogue_sync", outcome: "synced" }],
+      ["info", { event: "sdp_earn_catalogue_sync", outcome: "skipped" }],
+    ]);
   });
 
   it("degrades per provider: one failing provider never sinks the others' pass", async () => {

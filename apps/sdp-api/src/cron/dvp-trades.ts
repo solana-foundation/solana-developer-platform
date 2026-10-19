@@ -1,21 +1,16 @@
-import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
-import type { Env } from "@/types/env";
+import { alwaysEnabled, defineCron } from "./define-cron";
 
-export const DVP_TRADES_MONITOR = "sdp-api-reconcile-dvp-trades";
-export const DVP_TRADES_CRON = "* * * * *";
-
-export function runDvpTradeReconciliation(deps: {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}): void {
-  const work = () => reconcileDvpTrades(deps.env);
-  const promise = deps.observability
-    ? deps.observability.withMonitor(DVP_TRADES_MONITOR, work, {
-        schedule: { type: "crontab", value: DVP_TRADES_CRON },
-      })
-    : Promise.resolve().then(work);
-  deps.bg.run(promise);
-}
+/**
+ * Open DvP trades against the chain. Always on: an open trade holds a counterparty's money in
+ * escrow, so it keeps being settled whatever the Markets flag says. Outside the release channel
+ * it simply finds no trades.
+ */
+export const dvpTradesCron = defineCron({
+  name: "reconcile-dvp-trades",
+  schedule: "* * * * *",
+  scope: "cluster",
+  effect: "finishes",
+  enabled: alwaysEnabled,
+  run: reconcileDvpTrades,
+});

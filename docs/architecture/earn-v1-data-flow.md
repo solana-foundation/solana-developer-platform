@@ -191,7 +191,7 @@ per-provider movement endpoints or status polling types from git history.
 | Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer; vault positions use direct RPC reads | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
-| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts` scheduled handler, `job.ts` | Catalogue sync, metrics refresh, movement reconciliation, queued-withdrawal reconciliation, and orphaned split-swap detection | ✅ wired and gated by the owning jobs |
+| Cron infra (Worker) | `cron/runner.ts` (`CRON_DEFINITIONS`), one `defineCron` file per job under `cron/` | Catalogue sync (hourly + once on Worker start), metrics refresh, movement reconciliation, queued-withdrawal reconciliation, and orphaned split-swap detection | ✅ wired and gated by each definition's `enabled` |
 | Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_movements` request uniques + queued request/action client-request uniques + `earn_provider_wallets` provider-wallet unique | Movement and queued-action retries return the recorded intent instead of moving shares or assets twice. Program creation remains key-required and the provider-wallet unique is its replay anchor. External-wallet build rows are consumable once. | ✅ wired |
 | Compliance providers | `services/compliance/`, compliance family; provider-native eligibility capability | WisdomTree uses its Connect wallet/product checks before money-in. A generic SDP compliance-provider hook for other RWA strategies remains an open decision. | ✅ WisdomTree · ⏸ generic hook |
 | Allowed operations | `requireAllowedOperation` (API key Allowed Operations, ADR 0006) | Treasury vault deposits and withdrawals are `program` operations (`earn_vault_deposit`, `earn_vault_withdrawal`) checked once on arrival; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
@@ -213,7 +213,7 @@ moved uniqueness onto the provider wallet itself), the unified movement ledger
 (`earn_movements`) and holdings table (`earn_positions`), the separate queued
 withdrawal request/action/build tables introduced by migration 0113 and
 generalized for operator redemption by migration 0116, and the catalogue and
-reconciliation jobs.
+reconciliation Cron Definitions.
 
 ## The custodial portfolio-wallet flow (retired)
 

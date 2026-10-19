@@ -5,8 +5,7 @@ import type { SdpRampProviderStages } from "@sdp/types/release-channels";
  *
  * `createApp(deps)` builds the Hono instance with all middleware, routes, and
  * error handling wired up, while transport and process lifecycle concerns stay
- * in `server.ts`. Observability remains injected so tests can use a lightweight
- * implementation without initializing the production SDK.
+ * in `server.ts`.
  */
 
 import { SigningError } from "@sdp/custody/signing";
@@ -14,9 +13,9 @@ import { SdpEarnError } from "@sdp/earn/errors";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
-import { scrubError, scrubTelemetry } from "@sdp/redaction/scrub";
+import { scrubTelemetry } from "@sdp/redaction/scrub";
 import { SdpRpcError } from "@sdp/rpc/errors";
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
@@ -63,7 +62,6 @@ import { transactions } from "@/routes/transactions";
 import { webhooks } from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
-import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {
@@ -72,7 +70,6 @@ export interface SdpPlugin {
 }
 
 export interface AppDeps {
-  observability: Observability;
   plugins?: SdpPlugin[];
   /**
    * Ramp provider stages to run the release channel against. Production passes
@@ -238,49 +235,6 @@ function getFireblocksBlockedError(err: Error): {
   };
 }
 
-function captureUnexpectedError(
-  observability: Observability,
-  err: Error,
-  c: Context<{ Bindings: Env }>
-): void {
-  const requestId = c.get("requestId");
-  const traceId = c.get("traceId");
-  const requestSource = c.get("requestSource");
-  const path = new URL(c.req.url).pathname;
-
-  observability.withScope((scope) => {
-    scope.setTag("request_id", requestId);
-    scope.setTag("trace_id", traceId);
-    scope.setTag("request_source", requestSource);
-    scope.setTag("http_method", c.req.method);
-    scope.setTag("http_path", path);
-
-    const apiKey = c.get("apiKey");
-    const clerk = c.get("clerk");
-
-    if (apiKey) {
-      scope.setTag("auth_type", "api_key");
-      scope.setTag("organization_id", apiKey.organizationId);
-      if (apiKey.projectId) {
-        scope.setTag("project_id", apiKey.projectId);
-      }
-      scope.setUser({ id: `api_key:${apiKey.id}` });
-    } else if (clerk) {
-      scope.setTag("auth_type", "clerk");
-      scope.setTag("organization_id", clerk.organizationId);
-      if (clerk.orgSlug) {
-        scope.setTag("organization_slug", clerk.orgSlug);
-      }
-      scope.setUser({ id: clerk.userId });
-    }
-
-    // Scrubbed here as well as in Sentry's `beforeSend`: the hook is the
-    // backstop for payloads the SDK builds itself, this is the payload we hand
-    // it deliberately, and neither should depend on the other being present.
-    observability.captureException(scrubError(err));
-  });
-}
-
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
 
@@ -289,7 +243,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   app.use("*", async (c, next) => {
-    c.set("observability", deps.observability);
     c.set("rampProviderStages", deps.rampProviderStages);
     c.set("egressReadiness", deps.egressReadiness);
     await next();
@@ -578,7 +531,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       }),
       "Unexpected error"
     );
-    captureUnexpectedError(deps.observability, err, c);
 
     c.header("X-SDP-Trace-ID", traceId);
     return c.json(

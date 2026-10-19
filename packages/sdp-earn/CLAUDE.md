@@ -118,10 +118,10 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 ### 4. Get catalogue data — live provider sync
 
 With sandbox provider credentials set and both flags on, the catalogue-sync
-cron populates `earn_strategies` from live provider sources. It runs once at
-API boot (through the slotted `runEarnCatalogueSyncIfDue`, so restarts inside
-the hour skip) and then on the hour, so a freshly started API lists strategies
-within seconds of coming up. The sync is the only admitting writer and every
+cron populates `earn_strategies` from live provider sources. It runs once when
+the cron Worker starts (`pnpm dev`'s `dev:worker`; through the slotted
+`runEarnCatalogueSyncIfDue`, so restarts inside the hour skip) and then on the
+hour, so a freshly started stack lists strategies within seconds of coming up. The sync is the only admitting writer and every
 row must pass the provider's declared-support checks.
 
 See README.md → "Catalogue data" for cadence and failure behaviour. A database

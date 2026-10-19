@@ -8,7 +8,6 @@ import {
 } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
-import { noopObservability } from "@/runtime/observability";
 import { env as baseEnv } from "@/test/helpers/env";
 
 // One request per module, into a route that module owns. A module joins a
@@ -64,7 +63,6 @@ function nextClientHeaders() {
 async function probe(releaseChannel: SdpReleaseChannel, module: SdpModule) {
   const app = createApp({
     rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-    observability: noopObservability,
   });
   const env = {
     ...baseEnv,
@@ -93,7 +91,6 @@ describe("release channels at the API", () => {
 
   it("stable: serves wallet balances", async () => {
     const app = createApp({
-      observability: noopObservability,
       rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
     });
     const response = await app.request(

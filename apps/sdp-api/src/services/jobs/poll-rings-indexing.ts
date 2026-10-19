@@ -13,13 +13,12 @@
  *  4. In-flight rows, advanced by `executeOperation`, with `indexing` past the
  *     budget failed so nothing sits in limbo.
  *
- * Ships dormant: early-returns unless the feature flag is on.
+ * Ships dormant: its Cron Definition is enabled only when the Helius Rings flag is on.
  */
 
 import { getDb } from "@/db/client";
 import type { HeliusRingsOperationRow } from "@/db/repositories/helius-rings-operation.repository";
 import { createHeliusRingsOperationRepository } from "@/db/repositories/repository-factory";
-import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import {
   type RingsSignatureOutcome,
@@ -98,18 +97,10 @@ export interface PollRingsIndexingDependencies {
   readSignatureStatus?: SignatureStatusReader;
 }
 
-export function isRingsIndexingPollEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): boolean {
-  return isHeliusRingsEnabled(env);
-}
-
 export async function pollRingsIndexing(
   env: Env,
   dependencies: PollRingsIndexingDependencies = {}
 ): Promise<void> {
-  if (!isRingsIndexingPollEnabled(env)) {
-    return;
-  }
-
   const createService: ServiceFor =
     dependencies.createService ?? ((tenant) => createHeliusRingsService(env, tenant));
   const serviceFor = (operation: HeliusRingsOperationRow) =>

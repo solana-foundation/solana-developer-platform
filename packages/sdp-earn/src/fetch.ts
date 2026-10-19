@@ -30,14 +30,15 @@ export interface ProviderRequestInit<TBody> {
    * as `PROVIDER_UNAVAILABLE` like any other unreachable provider.
    *
    * OPT-IN, because the right bound is a property of the CALLER's deadline, not
-   * of HTTP: a request inside a 120s Cloud Run job and a request inside a
+   * of HTTP: a request inside a scheduled cron slot and a request inside a
    * customer's API call cannot share one number. Undici's default is 300s on
    * headers alone and unbounded on the body, which is another way of saying
    * "however long the caller had".
    *
-   * Any call made from a scheduled job should set this. The job awaits its
+   * Any call made from a scheduled cron should set this. A cron awaits its
    * steps in sequence, so an unbounded read there does not merely fail slowly —
-   * it consumes the whole execution and the later steps never run at all.
+   * it holds the slot, the Worker skips every later slot as an overlap, and the
+   * later steps never run at all.
    */
   timeoutMs?: number;
 }

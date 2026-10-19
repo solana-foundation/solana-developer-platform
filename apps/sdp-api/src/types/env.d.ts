@@ -11,25 +11,16 @@ import type { SdpRampProviderStages } from "@sdp/types/release-channels";
 import type { ManagedRpcEnv } from "@sdp/rpc/types";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
-import type { Observability } from "@/runtime/observability";
 
 export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
 
-  // Cloud Run services disable embedded cron by default so the dedicated job
-  // is the sole scheduler. Set to "false" or "0" to opt in explicitly; other
-  // Node runtimes remain enabled by default and may opt out with "true"/"1".
+  // Cloud Run services disable embedded cron by default so only the Worker
+  // service (which sets "false") schedules Cron Definitions. Other Node
+  // runtimes remain enabled by default and may opt out with "true"/"1".
   DISABLE_CRON?: string;
-
-  // Deployment-owned Cloud Scheduler cadence for the dedicated managed
-  // reconciliation job. The job requires a five-field crontab and uses the
-  // exact value for its managed Sentry monitor configuration.
-  SDP_MANAGED_RECONCILIATION_CRON?: string;
-  // Cloud Run job timeout, projected from the same infrastructure resource.
-  // Sentry's minute-based maxRuntime is the ceiling of this value.
-  SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS?: string;
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
@@ -324,8 +315,6 @@ export interface Env extends ManagedRpcEnv {
 // Extend Hono's context with our bindings
 declare module "hono" {
   interface ContextVariableMap {
-    // Injected by createApp so handlers use the same implementation as tests
-    observability?: Observability;
     // Set by createApp on every request; see AppDeps.rampProviderStages
     rampProviderStages: SdpRampProviderStages;
     // Set by createApp on every request; see AppDeps.egressReadiness

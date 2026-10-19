@@ -8,7 +8,6 @@ import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { app } from "@/index";
-import { noopObservability } from "@/runtime/observability";
 import * as replayJobs from "@/services/jobs/replay-ramp-webhook-events";
 import {
   applyStoredRampWebhookEvent,
@@ -788,7 +787,6 @@ describe("Ramp webhook event inbox", () => {
     const MOONPAY_ONLY: SdpRampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
     const betaEnv = (): Env => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
     const betaApp = createApp({
-      observability: noopObservability,
       rampProviderStages: MOONPAY_ONLY,
     });
 

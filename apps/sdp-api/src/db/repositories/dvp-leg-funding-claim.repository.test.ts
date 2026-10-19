@@ -129,7 +129,7 @@ function claimInput(org: string, side: "a" | "b", signature: string) {
 }
 
 /** A second trade, for rows that need a (trade, side) slot beyond TRADE_ID's two. */
-async function insertTrade(id: string): Promise<void> {
+async function insertTrade(id: string, projectId: string): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO dvp_trades (
@@ -138,7 +138,7 @@ async function insertTrade(id: string): Promise<void> {
          decimals_a, decimals_b, amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
          escrow_a, escrow_b, status
-       ) VALUES (?, 'org_claim_agent', 'prj_org_claim_agent', 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
+       ) VALUES (?, 'org_claim_agent', ?, 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY', ?, ?,
          'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
          'AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE', '42',
@@ -148,7 +148,7 @@ async function insertTrade(id: string): Promise<void> {
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created')
        ON CONFLICT (id) DO NOTHING`
     )
-    .bind(id, ADDRESS_A, ADDRESS_B, ADDRESS_A, ADDRESS_B)
+    .bind(id, projectId, ADDRESS_A, ADDRESS_B, ADDRESS_A, ADDRESS_B)
     .run();
 }
 
@@ -318,7 +318,7 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_dead"), expiryHeight: "500" })
       );
 
-      const released = await repo.releaseExpired(900n);
+      const released = await repo.releaseExpired({ environment: "sandbox", blockHeight: 900n });
       expect(released).toBe(1);
 
       const retried = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
@@ -334,7 +334,7 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_live"), expiryHeight: "5000" })
       );
 
-      expect(await repo.releaseExpired(900n)).toBe(0);
+      expect(await repo.releaseExpired({ environment: "sandbox", blockHeight: 900n })).toBe(0);
     });
 
     // A broadcast claim is a receipt. Sweeping it would invite a second
@@ -345,7 +345,27 @@ describe("DvpLegFundingClaimRepository", () => {
         await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
       });
 
-      expect(await repo.releaseExpired(900n)).toBe(0);
+      expect(await repo.releaseExpired({ environment: "sandbox", blockHeight: 900n })).toBe(0);
+    });
+
+    it("releases only the requested environment's expired claims", async () => {
+      await insertTrade("dvp_claim_trade_production", `prj_${AGENT_ORG}_production`);
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_sandbox"), expiryHeight: "500" });
+        await repo.claim({
+          ...claimInput(PARTY_A_ORG, "a", "sig_production"),
+          tradeId: "dvp_claim_trade_production",
+          projectId: `prj_${PARTY_A_ORG}_production`,
+          expiryHeight: "500",
+        });
+      });
+
+      expect(await repo.releaseExpired({ environment: "sandbox", blockHeight: 900n })).toBe(1);
+
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        expect(await repo.hasClaim(TRADE_ID, "a", "sig_sandbox")).toBe(false);
+        expect(await repo.hasClaim("dvp_claim_trade_production", "a", "sig_production")).toBe(true);
+      });
     });
   });
 
@@ -357,7 +377,7 @@ describe("DvpLegFundingClaimRepository", () => {
    */
   describe("resolving expired broadcast claims", () => {
     it("lists only broadcast claims past their last-valid height", async () => {
-      await insertTrade("dvp_claim_trade_b");
+      await insertTrade("dvp_claim_trade_b", `prj_${AGENT_ORG}`);
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_brd_dead"), expiryHeight: "500" });
         await repo.recordFundingTx(TRADE_ID, "a", "sig_brd_dead");
@@ -375,9 +395,28 @@ describe("DvpLegFundingClaimRepository", () => {
         });
       });
 
-      const listed = await repo.listExpiredBroadcast(900n);
+      const listed = await repo.listExpiredBroadcast({ environment: "sandbox", blockHeight: 900n });
 
       expect(listed.map((claim) => claim.signature)).toEqual(["sig_brd_dead"]);
+    });
+
+    it("lists only the requested environment's expired broadcast claims", async () => {
+      await insertTrade("dvp_claim_trade_production", `prj_${AGENT_ORG}_production`);
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_sandbox"), expiryHeight: "500" });
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sandbox");
+        await repo.claim({
+          ...claimInput(PARTY_A_ORG, "a", "sig_production"),
+          tradeId: "dvp_claim_trade_production",
+          projectId: `prj_${PARTY_A_ORG}_production`,
+          expiryHeight: "500",
+        });
+        await repo.recordFundingTx("dvp_claim_trade_production", "a", "sig_production");
+      });
+
+      const listed = await repo.listExpiredBroadcast({ environment: "sandbox", blockHeight: 900n });
+
+      expect(listed.map((claim) => claim.signature)).toEqual(["sig_sandbox"]);
     });
 
     // An expired trade's escrows still exist, so a receipt that never landed
@@ -395,19 +434,23 @@ describe("DvpLegFundingClaimRepository", () => {
         .prepare("UPDATE dvp_trades SET status = 'expired' WHERE id = ?")
         .bind(TRADE_ID)
         .run();
-      expect((await repo.listExpiredBroadcast(900n)).map((claim) => claim.signature)).toEqual([
-        "sig_on_expired",
-      ]);
+      expect(
+        (await repo.listExpiredBroadcast({ environment: "sandbox", blockHeight: 900n })).map(
+          (claim) => claim.signature
+        )
+      ).toEqual(["sig_on_expired"]);
 
       await getDb(env)
         .prepare("UPDATE dvp_trades SET status = 'settled' WHERE id = ?")
         .bind(TRADE_ID)
         .run();
-      expect(await repo.listExpiredBroadcast(900n)).toEqual([]);
+      expect(
+        await repo.listExpiredBroadcast({ environment: "sandbox", blockHeight: 900n })
+      ).toEqual([]);
     });
 
     it("deletes the matching broadcast claim and never an unbroadcast lock", async () => {
-      await insertTrade("dvp_claim_trade_b");
+      await insertTrade("dvp_claim_trade_b", `prj_${AGENT_ORG}`);
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_target"), expiryHeight: "500" });
         await repo.recordFundingTx(TRADE_ID, "a", "sig_target");
@@ -545,7 +588,7 @@ describe("DvpLegFundingClaimRepository", () => {
    */
   describe("listing a page's claims in one query", () => {
     it("groups claims by trade and answers an empty list for a trade with none", async () => {
-      await insertTrade("dvp_claim_trade_b");
+      await insertTrade("dvp_claim_trade_b", `prj_${AGENT_ORG}`);
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
         repo.claim(claimInput(PARTY_A_ORG, "a", "sig_a"))
       );
