@@ -1,5 +1,5 @@
 import { BoundedLruMap } from "@/lib/bounded-lru";
-import { AppError } from "@/lib/errors";
+import { AppError, rateLimited } from "@/lib/errors";
 
 /**
  * Terminal API-key refusals remembered in this instance's memory, so a
@@ -58,7 +58,45 @@ export function refuseTerminally(
   return refusalError(code);
 }
 
+/**
+ * Keys over their own rate-limit tier, by hash, until the moment the limiter
+ * would next admit them. A key in a retry loop past its tier otherwise costs a
+ * Redis call and a full authorization read on every refused attempt, because
+ * its tier is only known after that read.
+ *
+ * It holds a refusal, never an authorization: an entry only ever refuses, and
+ * only until the limiter's own next admission time, so the key still gets its
+ * tier's worth through. Per instance; another instance pays for its own first
+ * refusal. A tier raised mid-window waits out the remainder of that window.
+ */
+const throttled = new BoundedLruMap<string, number>(TERMINAL_REFUSAL_MAX_TRACKED);
+
+/** Throws RATE_LIMITED for a hash refused by its tier until a later instant. */
+export function assertNotThrottled(
+  keyHash: string,
+  setRetryAfter: (seconds: number) => void,
+  now = Date.now()
+): void {
+  const until = throttled.get(keyHash);
+  if (until === undefined) {
+    return;
+  }
+  if (until <= now) {
+    throttled.delete(keyHash);
+    return;
+  }
+  const retryAfter = Math.max(1, Math.ceil((until - now) / 1000));
+  setRetryAfter(retryAfter);
+  throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
+}
+
+/** Remembers that the key's tier refuses it until `admitAtMs`. */
+export function rememberThrottled(keyHash: string, admitAtMs: number): void {
+  throttled.set(keyHash, admitAtMs);
+}
+
 /** Forget every refusal, so a test starts from a cold instance. */
 export function resetTerminalRefusalsForTesting(): void {
   refusals.clear();
+  throttled.clear();
 }
