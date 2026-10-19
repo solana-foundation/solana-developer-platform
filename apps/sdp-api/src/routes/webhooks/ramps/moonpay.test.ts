@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import * as events from "@/runtime/money-path-events";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { env } from "@/test/helpers/env";
@@ -11,6 +12,30 @@ const PROJECT_ID = "prj_moonpay_webhook_test";
 const USER_ID = "usr_moonpay_webhook_test";
 const TRANSFER_ID = "xfr_157805c4-5d9f-404c-b206-1b59b13b492e";
 const MOONPAY_TRANSACTION_ID = "772f7a7f-142e-43cf-824f-8d861aefe8bd";
+const OBSERVED_AT = "2026-08-31T11:00:00.000Z";
+const SECOND_TRANSFER_ID = "xfr_second_moonpay_buy";
+
+async function seedTwoBuyTransfers() {
+  await getDb(env)
+    .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+    .bind(TRANSFER_ID)
+    .run();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO payment_transfers (
+         id, organization_id, project_id, wallet_id, source_address, destination_address,
+         token, amount, memo, type, direction, status, provider, provider_reference,
+         delivery_mode, fiat_currency, fiat_amount, provider_data, serialized_tx, signature,
+         slot, created_at, updated_at
+       ) SELECT ?, organization_id, project_id, wallet_id, source_address,
+                destination_address, token, amount, memo, type, direction, status,
+                provider, provider_reference, delivery_mode, fiat_currency, fiat_amount,
+                provider_data, serialized_tx, signature, slot, created_at, updated_at
+         FROM payment_transfers WHERE id = ?`
+    )
+    .bind(SECOND_TRANSFER_ID, TRANSFER_ID)
+    .run();
+}
 
 describe("moonpayWebhook.process", () => {
   const processor = moonpayWebhook;
@@ -84,25 +109,593 @@ describe("moonpayWebhook.process", () => {
     const event = {
       provider: "moonpay",
       kind: "awaiting_payment",
+      rampType: "offramp",
       reference: MOONPAY_TRANSACTION_ID,
       transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
     } as const;
 
-    await processor.process(env, "sandbox", event);
-    await processor.process(env, "sandbox", event);
-    await processor.process(env, "sandbox", {
-      ...event,
-      reference: "different-moonpay-transaction",
-    });
+    expect(await processor.process(env, "sandbox", event)).toMatchObject({ outcome: "applied" });
+    expect(await processor.process(env, "sandbox", event)).toEqual({ outcome: "ignored" });
+    expect(
+      await processor.process(env, "sandbox", {
+        ...event,
+        reference: "different-moonpay-transaction",
+      })
+    ).toEqual({ outcome: "refused", reason: "provider_reference_conflict" });
 
+    const row = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        provider_observed_at: string | null;
+      }>();
+    expect(row).toEqual({
+      status: "awaiting_payment",
+      provider_reference: MOONPAY_TRANSACTION_ID,
+      provider_observed_at: OBSERVED_AT,
+    });
+  });
+
+  it("lets only one of two concurrent MoonPay ids claim a transfer", async () => {
+    const event = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "offramp",
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+    } as const;
+    const results = await Promise.all([
+      processor.process(env, "sandbox", { ...event, reference: "moonpay-first" }),
+      processor.process(env, "sandbox", { ...event, reference: "moonpay-second" }),
+    ]);
+    expect(results.map((result) => result.outcome).sort()).toEqual(["applied", "refused"]);
+    expect(results.find((result) => result.outcome === "refused")).toEqual({
+      outcome: "refused",
+      reason: "provider_reference_conflict",
+    });
+    const row = await getDb(env)
+      .prepare(
+        "SELECT provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{ provider_reference: string; provider_observed_at: string }>();
+    expect(["moonpay-first", "moonpay-second"]).toContain(row?.provider_reference);
+    expect(row?.provider_observed_at).toBe(OBSERVED_AT);
+  });
+
+  it("refuses a failed buy whose transaction id belongs to another transfer", async () => {
+    await seedTwoBuyTransfers();
+    const event = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+    } as const;
+    expect(await processor.process(env, "sandbox", event)).toMatchObject({ outcome: "applied" });
+
+    expect(
+      await processor.process(env, "sandbox", {
+        ...event,
+        kind: "failed",
+        transferId: SECOND_TRANSFER_ID,
+        providerObservedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "provider_reference_conflict" });
+    expect(
+      await getDb(env)
+        .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+        .bind(SECOND_TRANSFER_ID)
+        .first()
+    ).toEqual({ status: "pending", provider_reference: null });
+    expect(
+      await getDb(env)
+        .prepare("SELECT transaction_id FROM moonpay_failed_transactions WHERE transaction_id = ?")
+        .bind(MOONPAY_TRANSACTION_ID)
+        .first()
+    ).toBeNull();
+    expect(
+      await processor.process(env, "sandbox", {
+        ...event,
+        kind: "settled",
+        providerObservedAt: "2026-08-31T11:02:00.000Z",
+      })
+    ).toMatchObject({ outcome: "applied" });
+  });
+
+  it("lets one transfer own a transaction id when a claim races a failed buy", async () => {
+    await seedTwoBuyTransfers();
+    const event = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+    } as const;
+    const [claim, failure] = await Promise.all([
+      processor.process(env, "sandbox", event),
+      processor.process(env, "sandbox", {
+        ...event,
+        kind: "failed",
+        transferId: SECOND_TRANSFER_ID,
+      }),
+    ]);
+    expect([claim.outcome, failure.outcome].sort()).toEqual(["applied", "refused"]);
+    expect(claim.outcome === "applied" ? failure.reason : claim.reason).toBe(
+      "provider_reference_conflict"
+    );
+    const owner = await getDb(env)
+      .prepare("SELECT transfer_id FROM moonpay_failed_transactions WHERE transaction_id = ?")
+      .bind(MOONPAY_TRANSACTION_ID)
+      .first<{ transfer_id: string }>();
+    const bound = await getDb(env)
+      .prepare("SELECT id FROM payment_transfers WHERE provider_reference = ?")
+      .bind(MOONPAY_TRANSACTION_ID)
+      .first<{ id: string }>();
+    expect(owner?.transfer_id ?? bound?.id).toBe(
+      claim.outcome === "applied" ? TRANSFER_ID : SECOND_TRANSFER_ID
+    );
+    expect(owner === null || bound === null).toBe(true);
+  });
+
+  it("keeps a first failed buy id reserved after releasing its transfer", async () => {
+    await seedTwoBuyTransfers();
+    const event = {
+      provider: "moonpay",
+      kind: "failed",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: SECOND_TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+    } as const;
+    expect(await processor.process(env, "sandbox", event)).toEqual({ outcome: "applied" });
+    expect(
+      await processor.process(env, "sandbox", {
+        ...event,
+        kind: "awaiting_payment",
+        transferId: TRANSFER_ID,
+        providerObservedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "provider_reference_conflict" });
+    expect(
+      await getDb(env)
+        .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+        .bind(TRANSFER_ID)
+        .first()
+    ).toEqual({ status: "pending", provider_reference: null });
+  });
+
+  it("keeps the newest deposit instruction for one sale", async () => {
+    const event = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "offramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: "2026-08-31T11:02:00.000Z",
+      cryptoDeposit: { destinationAddress: "new-wallet", amount: "0.2" },
+    } as const;
+    expect(await processor.process(env, "sandbox", event)).toMatchObject({ outcome: "applied" });
+    expect(
+      await processor.process(env, "sandbox", {
+        ...event,
+        providerObservedAt: OBSERVED_AT,
+        cryptoDeposit: { destinationAddress: "stale-wallet", amount: "0.2" },
+      })
+    ).toEqual({ outcome: "ignored" });
+    const row = await getDb(env)
+      .prepare("SELECT provider_observed_at, provider_data FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ provider_observed_at: string; provider_data: Record<string, unknown> }>();
+    expect(row).toMatchObject({
+      provider_observed_at: event.providerObservedAt,
+      provider_data: { cryptoDeposit: event.cryptoDeposit },
+    });
+  });
+
+  it("withdraws a failed sale's deposit instruction without losing its reference", async () => {
+    const waiting = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "offramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+      cryptoDeposit: { destinationAddress: "moonpay-deposit-wallet", amount: "0.2" },
+    } as const;
+    expect(await processor.process(env, "sandbox", waiting)).toMatchObject({ outcome: "applied" });
+
+    const failed = {
+      ...waiting,
+      kind: "failed",
+      providerObservedAt: "2026-08-31T11:01:00.000Z",
+      error: "sale_failed",
+    } as const;
+    expect(await processor.process(env, "sandbox", failed)).toEqual({
+      outcome: "refused",
+      reason: "moonpay_sell_failed",
+    });
+    const row = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, provider_observed_at, provider_data FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        provider_observed_at: string | null;
+        provider_data: Record<string, unknown>;
+      }>();
+    expect(row).toMatchObject({
+      status: "failed",
+      provider_reference: MOONPAY_TRANSACTION_ID,
+      provider_observed_at: failed.providerObservedAt,
+      provider_data: { cryptoDeposit: null },
+    });
+    expect(await processor.process(env, "sandbox", waiting)).toEqual({ outcome: "ignored" });
+    expect(
+      await processor.process(env, "sandbox", {
+        ...waiting,
+        providerObservedAt: "2026-08-31T11:02:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_terminal_conflict" });
+  });
+
+  it("keeps a claimed sale open for reconciliation after MoonPay reports failure", async () => {
+    const waiting = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "offramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+      cryptoDeposit: { destinationAddress: "moonpay-deposit-wallet", amount: "0.2" },
+    } as const;
+    expect(await processor.process(env, "sandbox", waiting)).toMatchObject({ outcome: "applied" });
+    const claimed = await repositoryFactory
+      .createSystemPaymentsRepository(env)
+      .transitionRampTransfer({
+        transferId: TRANSFER_ID,
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        transition: "offramp_deposit_claimed",
+        updatedAt: "2026-08-31T11:01:00.000Z",
+      });
+    expect(claimed?.status).toBe("processing");
+
+    expect(
+      await processor.process(env, "sandbox", {
+        ...waiting,
+        kind: "failed",
+        providerObservedAt: "2026-08-31T11:02:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
     const row = await getDb(env)
       .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
       .bind(TRANSFER_ID)
       .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "processing", provider_reference: MOONPAY_TRANSACTION_ID });
+  });
+
+  it("keeps a failed sale with a reported deposit open for reconciliation", async () => {
+    const waiting = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "offramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+      cryptoDeposit: { destinationAddress: "moonpay-deposit-wallet", amount: "0.2" },
+    } as const;
+    expect(await processor.process(env, "sandbox", waiting)).toMatchObject({ outcome: "applied" });
+
+    expect(
+      await processor.process(env, "sandbox", {
+        ...waiting,
+        kind: "failed",
+        providerObservedAt: "2026-08-31T11:01:00.000Z",
+        onchain: { signature: "moonpay-deposit-hash" },
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
+    const row = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, signature, provider_data FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        signature: string | null;
+        provider_data: Record<string, unknown>;
+      }>();
+    expect(row).toMatchObject({
+      status: "settling",
+      provider_reference: MOONPAY_TRANSACTION_ID,
+      signature: "moonpay-deposit-hash",
+      provider_data: { cryptoDeposit: null },
+    });
+  });
+
+  it("holds a deposit reported by the first failed sale observation", async () => {
+    expect(
+      await processor.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "offramp",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
+        onchain: { signature: "moonpay-first-deposit-hash" },
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
+    const row = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, signature, provider_data FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        signature: string | null;
+        provider_data: Record<string, unknown>;
+      }>();
+    expect(row).toMatchObject({
+      status: "settling",
+      provider_reference: MOONPAY_TRANSACTION_ID,
+      signature: "moonpay-first-deposit-hash",
+      provider_data: { cryptoDeposit: null },
+    });
+  });
+
+  it("retires a failed buy id and lets a new buy id claim the transfer", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    const failed = {
+      provider: "moonpay",
+      kind: "failed",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+      error: "card_declined",
+    } as const;
+    expect(
+      await processor.process(env, "sandbox", {
+        ...failed,
+        kind: "awaiting_payment",
+        providerObservedAt: "2026-08-31T10:59:00.000Z",
+      })
+    ).toMatchObject({ outcome: "applied" });
+    expect(await processor.process(env, "sandbox", failed)).toEqual({ outcome: "applied" });
+    const released = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        provider_observed_at: string | null;
+      }>();
+    expect(released).toEqual({
+      status: "awaiting_payment",
+      provider_reference: null,
+      provider_observed_at: null,
+    });
+    expect(await processor.process(env, "sandbox", failed)).toEqual({ outcome: "ignored" });
+    await getDb(env)
+      .prepare(
+        "UPDATE moonpay_failed_transactions SET status = 'archived' WHERE transaction_id = ?"
+      )
+      .bind(MOONPAY_TRANSACTION_ID)
+      .run();
+    expect(
+      await processor.process(env, "sandbox", {
+        ...failed,
+        kind: "settled",
+        providerObservedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_attempt_revived" });
+    expect(
+      await processor.process(env, "sandbox", {
+        ...failed,
+        kind: "awaiting_payment",
+        reference: "new-moonpay-buy-id",
+        providerObservedAt: "2026-08-31T11:02:00.000Z",
+      })
+    ).toMatchObject({ outcome: "applied" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "awaiting_payment", provider_reference: "new-moonpay-buy-id" });
+  });
+
+  it("refuses a first failed-buy observation that already reports crypto delivery", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    expect(
+      await processor.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "onramp",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
+        onchain: { signature: "funded-buy-signature" },
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_failure_after_funding" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "pending", provider_reference: null });
+  });
+
+  it("refuses a first failed-buy observation with a provider crypto transaction id", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    expect(
+      await processor.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "onramp",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
+        settlement: {
+          provider: "moonpay",
+          status: "failed",
+          transactionId: MOONPAY_TRANSACTION_ID,
+          baseCurrencyCode: "USD",
+          baseCurrencyAmount: 25,
+          quoteCurrencyCode: "SOL",
+          quoteCurrencyAmount: 0.2,
+          feeAmount: 1,
+          extraFeeAmount: 0,
+          networkFeeAmount: 0,
+          areFeesIncluded: true,
+          usdRate: 125,
+          cryptoTransactionId: "provider-crypto-id",
+        },
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_failure_after_funding" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "pending", provider_reference: null });
+  });
+
+  it("rolls back a failed buy when recording its retired id fails", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    const event = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: "2026-08-31T10:59:00.000Z",
+    } as const;
+    expect(await processor.process(env, "sandbox", event)).toMatchObject({ outcome: "applied" });
+
+    const original = repositoryFactory.createSystemTransactionalPaymentsRepository;
+    vi.spyOn(repositoryFactory, "createSystemTransactionalPaymentsRepository").mockImplementation(
+      (db) => ({
+        ...original(db),
+        recordFailedMoonpayTransaction: async () => {
+          throw new Error("forced retired-id write failure");
+        },
+      })
+    );
+    await expect(
+      processor.process(env, "sandbox", {
+        ...event,
+        kind: "failed",
+        providerObservedAt: OBSERVED_AT,
+      })
+    ).rejects.toThrow("forced retired-id write failure");
+
+    const row = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        provider_observed_at: string | null;
+      }>();
     expect(row).toEqual({
       status: "awaiting_payment",
       provider_reference: MOONPAY_TRANSACTION_ID,
+      provider_observed_at: event.providerObservedAt,
     });
+    const retired = await getDb(env)
+      .prepare("SELECT transaction_id FROM moonpay_failed_transactions WHERE transaction_id = ?")
+      .bind(MOONPAY_TRANSACTION_ID)
+      .first();
+    expect(retired).toBeNull();
+  });
+
+  it("holds a sale failure for review while its deposit may still arrive", async () => {
+    expect(
+      await processor.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "offramp",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "failed", provider_reference: MOONPAY_TRANSACTION_ID });
+  });
+
+  it("refuses a buy webhook aimed at a sale transfer", async () => {
+    expect(
+      await processor.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        rampType: "onramp",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
+      })
+    ).toEqual({ outcome: "refused", reason: "transfer_type_mismatch" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "pending", provider_reference: null });
+  });
+
+  it("holds a buy failure after the provider reported payment activity", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    const event = {
+      provider: "moonpay",
+      kind: "settling",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+    } as const;
+    expect(await processor.process(env, "sandbox", event)).toMatchObject({ outcome: "applied" });
+    expect(
+      await processor.process(env, "sandbox", {
+        ...event,
+        kind: "failed",
+        providerObservedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_failure_after_funding" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "settling", provider_reference: MOONPAY_TRANSACTION_ID });
   });
 
   it.each([
@@ -122,8 +715,10 @@ describe("moonpayWebhook.process", () => {
       const result = await processor.process(env, eventEnvironment, {
         provider: "moonpay",
         kind: "awaiting_payment",
+        rampType: "offramp",
         reference: MOONPAY_TRANSACTION_ID,
         transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
       });
 
       expect(result).toEqual({ outcome: "refused", reason: "environment_mismatch" });

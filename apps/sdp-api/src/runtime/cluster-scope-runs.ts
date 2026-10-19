@@ -1,21 +1,34 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+
+/**
+ * Run one chain-touching job for one environment, inside that environment's cluster scope
+ * (ADR 0007, Jobs). The Worker opens one per registration of a `cluster` Cron Definition, so
+ * the work selects only that environment's rows and reads the chain through
+ * `createClusterRpc()`.
+ *
+ * @param environment - The environment whose cluster the work runs on.
+ * @param work - The job work, reading the open scope through `currentClusterScope()`.
+ * @returns Resolves once the work has; a scope conflict rejects instead of throwing.
+ */
+export async function runInEnvironmentClusterScope(
+  environment: SdpEnvironment,
+  work: () => Promise<void>
+): Promise<void> {
+  await runInClusterScope({ projectId: null, environment }, work);
+}
 
 /**
  * Run one chain-touching job once per environment, each run inside that environment's cluster
- * scope (ADR 0007, Jobs). The work selects only its environment's rows and reads the chain through
- * `createClusterRpc()`, so a Production row is never read on devnet, and one cluster's failure
- * leaves the other cluster's run intact. Every run settles before failures are rethrown, a scope
- * conflict included: one propagates unchanged, several collapse into an AggregateError.
+ * scope. Every run settles before failures are rethrown, a scope conflict included: one
+ * propagates unchanged, several collapse into an AggregateError.
  *
  * @param work - The job work, reading the open scope through `currentClusterScope()`.
  * @returns Resolves once every environment's run has succeeded.
  */
 export async function runInEachClusterScope(work: () => Promise<void>): Promise<void> {
   const outcomes = await Promise.allSettled(
-    SDP_ENVIRONMENTS.map(async (environment) =>
-      runInClusterScope({ projectId: null, environment }, work)
-    )
+    SDP_ENVIRONMENTS.map((environment) => runInEnvironmentClusterScope(environment, work))
   );
   const reasons = outcomes
     .filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected")

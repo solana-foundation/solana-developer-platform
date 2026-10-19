@@ -7,7 +7,6 @@ import { getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { app } from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { noopObservability } from "@/runtime/observability";
 import { TEST_API_KEY, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -595,7 +594,6 @@ describe("Counterparties Routes", () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
       // Today every provider is `experimental`; these stages put only MoonPay in `beta`.
       const betaApp = createApp({
-        observability: noopObservability,
         rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
       });
 

@@ -8,9 +8,7 @@
 
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { createApp } from "@/app";
-import { noopObservability } from "@/runtime/observability";
 
 export const app = createApp({
-  observability: noopObservability,
   rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
 });

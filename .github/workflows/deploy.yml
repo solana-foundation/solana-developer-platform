@@ -62,7 +62,7 @@ jobs:
               ;;
           esac
           echo "api=$api" >> "$GITHUB_OUTPUT"
-          echo "Services to deploy: api=$api (api carries the worker, cron, and migrate jobs — one image)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Services to deploy: api=$api (api carries the worker and the migrate job — one image)" >> "$GITHUB_STEP_SUMMARY"
 
           prod=false
           if [ "$api" = true ] && [ "$EVENT_NAME" = push ] && [ "$CONTINUOUS_PROD_DEPLOY" = true ]; then

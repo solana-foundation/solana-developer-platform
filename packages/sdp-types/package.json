@@ -109,6 +109,11 @@
       "import": "./src/kyc.ts",
       "default": "./src/kyc.ts"
     },
+    "./cron-runs": {
+      "types": "./src/cron-runs.ts",
+      "import": "./src/cron-runs.ts",
+      "default": "./src/cron-runs.ts"
+    },
     "./movements": {
       "types": "./src/movements.ts",
       "import": "./src/movements.ts",
