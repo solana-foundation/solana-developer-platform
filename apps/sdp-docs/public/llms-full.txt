@@ -3498,7 +3498,7 @@ The quote also creates the underlying **Payment Transfer** record for the ramp; 
 
 Each provider's delivery mode is in the [capability matrix](/docs/payments/ramps-providers#capability-matrix).
 
-There is no further SDP endpoint to call after this — the provider owns settlement from here. Watch for the resulting on-chain transfer on the destination wallet via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing), or watch the provider's own side (dashboard or their webhook) for offramp payout confirmation.
+There is no further SDP endpoint to call after this. The provider handles execution, while SDP tracks its settlement report and verifies the on-chain transfer. Watch for the resulting on-chain transfer on the destination wallet via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing), or watch the provider's own side (dashboard or their webhook) for offramp payout confirmation.
 
 ## Canceling a quote
 
@@ -3524,13 +3524,13 @@ Each quote creates a **Payment Transfer** with its own lifecycle, separate from 
 | --- | --- |
 | `pending` | The quote was created; no funding has been detected yet. No `signature`. |
 | `awaiting_payment` | The quote's delivery mode is `manual_instructions` — SDP is waiting for the payer to fund the account described in the quote. |
-| `settling` | The provider has detected or started processing the payment. |
-| `completed` | The provider reports the ramp settled. |
+| `settling` | The provider is processing the ramp, or has reported settlement while SDP verifies the on-chain transfer. |
+| `completed` | On-ramp delivery reached the quoted wallet and asset on chain; for off-ramps, SDP's crypto deposit finalized and the provider reported fiat settlement. |
 | `canceled` | Canceled via `POST /v1/payments/ramps/transfers/cancel` before funding. |
 | `expired` | The funding window elapsed without payment. |
 | `failed` | The provider rejected or reversed the ramp. The `error` field describes why, when set. |
 
-Any state can transition to `failed`; `failed`, `completed`, `canceled`, and `expired` are terminal. Ramp transfers can start at `pending` while provider-side steps are still underway.
+Open states can transition to `failed`; `failed`, `completed`, and `canceled` are terminal. A provider event can revive an `expired` transfer if the customer completed an earlier checkout. Ramp transfers can start at `pending` while provider-side steps are still underway. A provider settlement report alone does not complete the transfer; missing or mismatched chain evidence keeps it `settling` for review.
 
 ## Status field
 
