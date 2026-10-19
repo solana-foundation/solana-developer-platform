@@ -4987,6 +4987,42 @@ describe("Payments routes — recurring", () => {
       });
     });
 
+    it("reports a payment whose update by another key is in flight to its previous activator", async () => {
+      const activated = await activatedByAnotherKey();
+      // Key B has claimed an update: the payment names B, and the attempt
+      // keeps the activator it would restore if the update failed.
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'updating', activated_by_api_key_id = ? WHERE id = ?"
+        )
+        .bind(TEST_API_KEY.id, activated.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_recurring_payment_update_attempts (
+             id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+             changed_fields, before_values, after_values, previous_activator, created_at, updated_at
+           ) VALUES (
+             'prpu_in_flight_handover', ?, ?, ?, 'replacement', 'processing', 'claim',
+             ARRAY['amount']::text[], '{}'::jsonb, '{}'::jsonb, ?::jsonb, ?, ?
+           )`
+        )
+        .bind(
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activated.id,
+          JSON.stringify({ apiKeyId: "key_recurring_original_activator", userId: null }),
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+
+      expect(await cancelFor("key_recurring_original_activator")).toEqual({
+        canceled: [],
+        failed: [activated.id],
+      });
+    });
+
     it("leaves the activator in place on a metadata-only update", async () => {
       const activated = await activatedByAnotherKey();
 
