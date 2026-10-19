@@ -17,6 +17,7 @@ import {
   InProcessRateLimiter,
   KEYED_IP_BACKSTOP_MAX_REQUESTS,
   keyedIpBackstopFallback,
+  nextAdmissionAt,
   RATE_LIMIT_WINDOW_MS,
   skipRateLimitPaths,
 } from "@/middleware/rate-limit";
@@ -167,8 +168,24 @@ describe("Rate limiting", () => {
 
       expect(statuses).toEqual([200, 429, 429]);
       expect(await readRateLimitCount(env, tierCounter)).toBe(100);
-      // Every attempt still counts against the flood guard.
-      expect(await readRateLimitCount(env, floodCounter())).toBe(3);
+      // The first refusal is remembered, so the third attempt is refused from
+      // memory before the flood guard counts it.
+      expect(await readRateLimitCount(env, floodCounter())).toBe(2);
+    });
+
+    it("refuses a key its tier refused from memory, with no row read", async () => {
+      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
+      await seedRateLimit(env, tierCounter, 100);
+      expect((await keyedRequest()).status).toBe(429);
+      const read = vi.spyOn(organizationAccess, "authorizeApiKey");
+
+      const res = await keyedRequest();
+
+      expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).not.toBeNull();
+      expect(read).not.toHaveBeenCalled();
+      expect(await readRateLimitCount(env, floodCounter())).toBe(1);
+      read.mockRestore();
     });
 
     it("refuses a flooding key at the highest tier before reading its row", async () => {
@@ -614,5 +631,32 @@ describe("Rate limiting", () => {
       expect((await request("sk_test_spray_three")).status).toBe(429);
       expect(read).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("nextAdmissionAt", () => {
+  const window = { windowStart: 60_000, windowMs: 60_000, cost: 1, maxRequests: 100 };
+
+  it("waits for the window to end when the current window alone is full", () => {
+    expect(nextAdmissionAt({ ...window, admission: { current: 100, previous: 0 } })).toBe(120_000);
+  });
+
+  it("admits once the previous window's weighted share leaves room", () => {
+    // Room for one: admitted once 100 * weight < 1, i.e. after 99% of the window.
+    expect(nextAdmissionAt({ ...window, admission: { current: 99, previous: 100 } })).toBe(
+      60_000 + 59_401
+    );
+  });
+
+  it("admits halfway through when half the previous window must decay", () => {
+    expect(nextAdmissionAt({ ...window, admission: { current: 0, previous: 200 } })).toBe(
+      60_000 + 30_001
+    );
+  });
+
+  it("never answers past the window's end", () => {
+    expect(nextAdmissionAt({ ...window, cost: 50, admission: { current: 60, previous: 10 } })).toBe(
+      120_000
+    );
   });
 });
