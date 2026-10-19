@@ -1,6 +1,6 @@
-import type { PrivateChannelTokenEligibility } from "@sdp/types";
+import type { PrivateChannelTokenEligibility } from "@sdp/types/private-channels";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { TokenMark } from "@/components/token-mark";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 
 function shorten(value: string): string {

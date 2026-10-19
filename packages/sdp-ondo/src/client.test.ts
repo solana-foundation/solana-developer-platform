@@ -1,6 +1,6 @@
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ONDO_SWAP_COMPUTE_UNIT_LIMIT, OndoVaultDirectClient } from "./client";
 import { SdpOndoError } from "./errors";

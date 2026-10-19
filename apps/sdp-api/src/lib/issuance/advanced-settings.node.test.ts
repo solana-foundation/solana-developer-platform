@@ -1,5 +1,5 @@
 import { ADVANCED_SETTINGS_VERSION } from "@sdp/issuance/capabilities";
-import type { IssuanceMetadata } from "@sdp/types";
+import type { IssuanceMetadata } from "@sdp/types/asset-profiles";
 import { describe, expect, it } from "vitest";
 import {
   getSelectedSettings,

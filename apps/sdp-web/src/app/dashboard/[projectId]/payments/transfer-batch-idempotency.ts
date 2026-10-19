@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentTransferBatchRequest } from "@sdp/types";
+import type { PaymentTransferBatchRequest } from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {

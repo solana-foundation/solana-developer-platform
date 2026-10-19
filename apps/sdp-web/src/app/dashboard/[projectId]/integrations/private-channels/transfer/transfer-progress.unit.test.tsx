@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PrivateChannelTransfer } from "@sdp/types";
+import type { PrivateChannelTransfer } from "@sdp/types/private-channels";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";

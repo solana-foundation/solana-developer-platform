@@ -1,23 +1,23 @@
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import {
   ONDO_DEPOSIT_TOKEN_SYMBOLS,
   type OndoDeployment,
   ondoDeployment,
   ondoDepositMints,
 } from "@sdp/types/ondo-programs";
-import { internalError, providerNotConfigured } from "../../errors";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
+import { internalError, providerNotConfigured } from "#/errors";
+import { StubEarnClient } from "#/providers/stub";
 import {
   assertRpcServesCluster,
   fromBase64,
   resolveCatalogueRpcUrl,
   solanaRpcCall,
-} from "../../solana-rpc";
+} from "#/solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 import { readOndoUsdyRate } from "./usdy-rate";
 
 /**

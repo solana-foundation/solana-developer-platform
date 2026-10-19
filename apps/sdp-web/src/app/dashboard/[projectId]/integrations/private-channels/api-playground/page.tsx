@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
+import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
 
 // The playground merged into the Overview route as its `?tab=` pane so tab
 // switches stay shallow. This segment survives only so saved deep links keep

@@ -1,6 +1,6 @@
 "use client";
 
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 /**

@@ -1,6 +1,6 @@
+import { Button } from "@sdp/ui/button";
 import Image from "next/image";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 
 export default async function NotFound() {

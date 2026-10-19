@@ -1,9 +1,8 @@
+import type { PaymentTransferEnvelope, PaymentTransferSummary } from "@sdp/types/payments";
 import type {
-  PaymentTransferEnvelope,
-  PaymentTransferSummary,
   UnifiedTransaction,
   UnifiedTransactionsListResponse,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
 

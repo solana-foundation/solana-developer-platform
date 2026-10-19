@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { SdpEarnError } from "../../errors";
-import type { EarnRuntimeContext } from "../../types";
+import { SdpEarnError } from "#/errors";
+import type { EarnRuntimeContext } from "#/types";
 import { JUPITER_LEND_USDT_MINT, JupiterLendEarnClient, jupiterRateFromBps } from "./client";
 
 const ctx: EarnRuntimeContext = { environment: "production", env: {} };

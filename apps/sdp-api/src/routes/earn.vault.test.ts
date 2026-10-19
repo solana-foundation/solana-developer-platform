@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import type { CustodyProvider } from "@sdp/custody";
 import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
+import type { CustodyProvider } from "@sdp/types/custody";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/types")>();
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
   return {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>
@@ -19,14 +19,11 @@ vi.mock("@sdp/types", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { badRequest, serviceUnavailable } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";

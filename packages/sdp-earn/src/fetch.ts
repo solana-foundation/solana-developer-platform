@@ -1,4 +1,4 @@
-import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction";
+import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction/scrub";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { SdpEarnError, type SdpEarnErrorCode } from "./errors";
 

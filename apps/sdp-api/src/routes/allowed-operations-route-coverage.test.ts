@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { declaredAllowedOperation } from "@/middleware/allowed-operations";
-import dvpRoutes from "@/routes/dvp";
-import earnRoutes from "@/routes/earn";
-import issuanceRoutes from "@/routes/issuance";
-import paymentsRoutes from "@/routes/payments";
+import { dvp as dvpRoutes } from "@/routes/dvp";
+import { earnRoutes } from "@/routes/earn";
+import { issuance as issuanceRoutes } from "@/routes/issuance";
+import { payments as paymentsRoutes } from "@/routes/payments";
 
 /**
  * Every value-moving route declares the operation it performs so the calling

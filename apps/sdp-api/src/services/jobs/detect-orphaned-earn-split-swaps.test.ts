@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {
@@ -17,10 +17,13 @@ const logEvent = vi.hoisted(() => vi.fn());
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
 }));
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   assertClusterEndpoint: vi.fn(async () => {}),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("@/services/earn/owner-token-balance", () => ({ readOwnerMintBalance }));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({

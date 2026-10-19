@@ -1,10 +1,10 @@
 "use client";
 
-import { useTranslations } from "@/i18n/provider";
 import {
   isTrustedRampDestination,
   MOONPAY_HOSTED_APPROVED_HOSTS,
-} from "@/lib/trusted-ramp-destinations";
+} from "@sdp/types/ramp-destinations";
+import { useTranslations } from "@/i18n/provider";
 
 const FRAME_ALLOW =
   "accelerometer; autoplay; camera; encrypted-media; fullscreen; geolocation; gyroscope; payment";

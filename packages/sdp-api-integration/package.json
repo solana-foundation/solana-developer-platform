@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#env-impl": "./src/helpers/env.node.ts"
+    "#env-impl": "./src/helpers/env.node.ts",
+    "#/*": "./src/*.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -18,8 +19,6 @@
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana/codecs": "catalog:",
-    "@solana/keychain-cdp": "1.4.0",
-    "@solana/keychain-para": "1.4.0",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {

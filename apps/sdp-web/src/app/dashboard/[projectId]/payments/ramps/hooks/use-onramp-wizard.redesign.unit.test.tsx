@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import type { RenderHookResult } from "@testing-library/react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";

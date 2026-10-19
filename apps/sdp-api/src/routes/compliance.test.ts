@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import * as providerAvailability from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -11,9 +11,13 @@ import { providerStages } from "@/test/helpers/provider-stages";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, type SeededApiKey, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelStages(
+    await importOriginal<typeof import("@sdp/types/release-channels")>(),
+    RAMP_PROVIDERS
+  );
 });
 
 const TEST_ORG = {

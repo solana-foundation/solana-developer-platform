@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { PaymentTransferBatchRequest } from "@sdp/types";
+import type { PaymentTransferBatchRequest } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import type { Translate } from "./payments-workspace.data";

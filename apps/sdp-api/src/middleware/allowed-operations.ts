@@ -1,4 +1,8 @@
-import { isOperationAllowed, type OperationType, operationFamilyOf } from "@sdp/types";
+import {
+  isOperationAllowed,
+  type OperationType,
+  operationFamilyOf,
+} from "@sdp/types/allowed-operations";
 import type { Context, MiddlewareHandler } from "hono";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";

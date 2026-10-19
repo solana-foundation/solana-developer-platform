@@ -1,5 +1,6 @@
-import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import { type VedaDeployment, vedaDeployment } from "@sdp/types/veda-programs";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { type Address, address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 import { deploymentNotConfigured, SdpVedaError } from "./errors";
 

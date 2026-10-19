@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { runPostgresMigrations } from "@/scripts/lib/run-postgres-migrations.mjs";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
 import {
   FK_VIOLATION,
@@ -10,7 +11,6 @@ import {
   seedOrgProject,
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
 import {
   COUNTERPARTY_PROVIDER_ACCOUNTS_SCOPE_FK_MIGRATION,
   restorePreCounterpartyProviderAccountsScopeSchema,

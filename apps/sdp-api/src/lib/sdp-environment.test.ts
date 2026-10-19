@@ -1,7 +1,6 @@
-import type { Context } from "hono";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
@@ -14,7 +13,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, type SeededApiKey } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 function buildApp(setup: (c: Context<{ Bindings: Env }>) => void) {
   const app = new Hono<{ Bindings: Env }>();

@@ -1,6 +1,6 @@
+import { PaymentRequestCreateSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
+import { PreviousPaymentRequestsLoading as LegacyListLoading } from "@/app/dashboard/[projectId]/payments/requests/loading";
 import { DesignSwitch } from "@/components/new-design";
-import { PaymentRequestCreateSkeleton } from "../../payments-route-skeletons.redesign";
-import { PreviousPaymentRequestsLoading as LegacyListLoading } from "../loading";
 
 function CurrentPaymentRequestCreateLoading() {
   return <PaymentRequestCreateSkeleton />;

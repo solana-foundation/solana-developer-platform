@@ -1,4 +1,4 @@
-import { DEFAULT_SDP_API_URL, DEFAULT_SDP_DOCS_URL, SDP_GITHUB_REPO_URL } from "@sdp/types";
+import { DEFAULT_SDP_API_URL, DEFAULT_SDP_DOCS_URL, SDP_GITHUB_REPO_URL } from "@sdp/types/site";
 
 export function normalizeDocsPageSlug(pageSlug: string): string {
   return pageSlug.replace(/\/index$/, "");

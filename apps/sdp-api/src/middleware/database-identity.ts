@@ -18,7 +18,7 @@
  */
 
 import type { Context, Next } from "hono";
-import { runWithoutDatabaseIdentity, runWithSystemDatabaseIdentity } from "@/db";
+import { runWithoutDatabaseIdentity, runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { Env } from "@/types/env";
 
 export const PUBLIC_SYSTEM_PATH_PREFIXES: ReadonlyArray<{

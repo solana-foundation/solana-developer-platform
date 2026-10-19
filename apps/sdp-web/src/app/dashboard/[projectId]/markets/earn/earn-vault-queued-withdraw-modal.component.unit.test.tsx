@@ -5,11 +5,11 @@ import type {
   EarnVaultQueuedWithdrawalPreview,
   EarnVaultQueuedWithdrawalTerms,
   EarnVaultWithdrawalRequestRecord,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { EnglishTestI18n } from "../test-i18n";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -25,9 +25,15 @@ vi.mock("./earn-program-data", () => ({
   useEarnVaultWithdrawalRequestOutcome: mocks.useRequestOutcome,
 }));
 
-vi.mock("./earn-flow-motion", () => ({
+vi.mock("./earn-flow-stepper", () => ({
   EarnFlowStepper: () => null,
+}));
+
+vi.mock("./earn-flow-transition", () => ({
   EarnFlowTransition: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("./earn-outcome-mark", () => ({
   EarnOutcomeMark: () => null,
 }));
 

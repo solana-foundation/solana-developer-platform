@@ -1,4 +1,5 @@
-import type { ComplianceProviderId, CustodyProvider, RampProviderId } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { z } from "zod";
 import { isProviderConfigured } from "@/services/provider-availability.service";

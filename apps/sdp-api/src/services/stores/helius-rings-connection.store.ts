@@ -1,4 +1,4 @@
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 
 export type HeliusRingsConnectionStatus = "active" | "failed" | "deactivated";

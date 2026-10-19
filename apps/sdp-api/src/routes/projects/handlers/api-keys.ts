@@ -1,7 +1,8 @@
 import { SigningError } from "@sdp/custody/signing";
-import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
+import type { CreateApiKeyResponse } from "@sdp/types/api-keys";
+import type { ApiKeyRole } from "@sdp/types/permissions";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -20,7 +21,7 @@ import {
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 type AppContext = Context<{ Bindings: Env }>;
 

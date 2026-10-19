@@ -1,6 +1,20 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { ToggleSwitch } from "@sdp/ui/toggle-switch";
 import * as Sentry from "@sentry/nextjs";
 import {
   BugIcon,
@@ -22,19 +36,6 @@ import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
 import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
 import { useNewDesign } from "@/components/new-design";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/theme-context";
 import { supportedLocales } from "@/i18n/config";
@@ -43,7 +44,6 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
 // opens the account menu — feedback, API docs, settings, the API debug-log

@@ -1,10 +1,10 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import { StarIcon } from "lucide-react";
 import { useWalletFavoriteToggle } from "@/app/dashboard/[projectId]/custody/use-wallet-favorite-toggle";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import type { WalletFavorite } from "@/lib/wallet-favorites";
 
 /** The star that pins a wallet to the sidebar, pressed while it is pinned. */

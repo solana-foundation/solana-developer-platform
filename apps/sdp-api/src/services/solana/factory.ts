@@ -6,7 +6,7 @@
  */
 
 import { Token2022Service } from "@sdp/solana/token-2022";
-import type { MovementId } from "@sdp/types";
+import type { MovementId } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import {
   createSponsorshipFeePayment,

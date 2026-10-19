@@ -6,11 +6,9 @@
 // derives a different SwapDvp address than the one a counterparty was told to
 // fund. Callers convert to bigint at the edge, never number.
 
-import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import type { Address, Signature } from "@solana/kit";
-import type { RepositoryDbClient } from "./base";
-
-export type { DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface DvpTradeRow {
   id: string;

@@ -13,7 +13,7 @@
 
 import { type Signature, signature } from "@solana/kit";
 import { z } from "zod";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /** Acting on one leg names a side; closing the trade does not. */
 export type DvpActionRequestKind = "fund" | "reclaim" | "settle" | "cancel";

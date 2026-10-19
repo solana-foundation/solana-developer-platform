@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet, TokenAllowlistEntry } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { TokenAllowlistEntry } from "@sdp/types/tokens";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { SWRConfig } from "swr";

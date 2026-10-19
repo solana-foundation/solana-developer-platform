@@ -1,7 +1,8 @@
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
-import { getDb } from "@/db";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {
@@ -9,11 +10,7 @@ import {
   type EarnSplitSwapAdvisoryRow,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
+import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 

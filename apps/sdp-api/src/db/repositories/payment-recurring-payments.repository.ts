@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   PaymentRecurringPaymentActivationAttemptStage,
   PaymentRecurringPaymentAttemptStatus,
@@ -7,17 +8,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptStage,
   RecurringPaymentStatusWithRecoverableCollection,
-  SdpEnvironment,
-} from "@sdp/types";
-
-export type {
-  PaymentRecurringPaymentActivationAttemptStage,
-  PaymentRecurringPaymentAttemptStatus,
-  PaymentRecurringPaymentLifecycleAttemptStage,
-  PaymentRecurringPaymentLifecycleOperation,
-  PaymentRecurringPaymentUpdateAttemptMode,
-  PaymentRecurringPaymentUpdateAttemptStage,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 
 export interface PaymentRecurringPaymentRow {
   id: string;

@@ -7,13 +7,13 @@
  * server fingerprint guards the key against reuse with different terms; the
  * client's only job is to hand each logical request exactly one key.
  */
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { dashboardRouter } from "@/test/dashboard-navigation";
-import { EnglishTestI18n } from "../../test-i18n";
 import type { DvpCreateRequest } from "./use-dvp-create-submit";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 

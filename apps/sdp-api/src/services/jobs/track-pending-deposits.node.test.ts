@@ -18,7 +18,8 @@ const { depositRepo, instanceRepo, createDepositRepo, createInstanceRepo } = vi.
     createInstanceRepo: vi.fn(() => instanceRepo),
   };
 });
-vi.mock("@/db/repositories", () => ({
+vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createPrivateChannelDepositRepository: createDepositRepo,
   createPrivateChannelInstanceRepository: createInstanceRepo,
 }));

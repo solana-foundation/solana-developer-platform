@@ -1,28 +1,30 @@
-import { isClusterFundableInEnvironment } from "@sdp/earn";
+import { isClusterFundableInEnvironment } from "@sdp/earn/support";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type {
+  EarnStrategy,
+  EarnStrategyResponse,
+  ListEarnStrategiesResponse,
+} from "@sdp/types/earn";
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProviderId,
-  type EarnStrategy,
-  type EarnStrategyResponse,
   earnDepositSlippagePolicy,
   earnWithdrawSlippageFloor,
   isEarnProviderSurfaced,
-  type ListEarnStrategiesResponse,
-  type SdpEnvironment,
   SURFACED_EARN_PROVIDERS,
-} from "@sdp/types";
-import type { EarnStrategyRow } from "@/db/repositories";
+} from "@sdp/types/provider-access";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
-import type { Env } from "@/types/env";
 import {
   type AppContext,
   getEarnRepository,
   requireEarnStrategyForCaller,
   resolveEarnCatalogueEnvironment,
-} from "../context";
-import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "../schemas";
+} from "@/routes/earn/context";
+import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "@/routes/earn/schemas";
+import type { Env } from "@/types/env";
 import { CURATED_VAULTS, HIDDEN_STRATEGY_TERMS, HIDDEN_VAULTS } from "./curation";
 import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
 

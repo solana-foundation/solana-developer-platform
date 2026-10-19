@@ -6,7 +6,7 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
-import type { MovementId } from "@sdp/types";
+import type { MovementId } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
 import {

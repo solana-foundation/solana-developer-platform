@@ -1,6 +1,6 @@
 "use client";
 
-import type { TokenTransaction } from "@sdp/types";
+import type { TokenTransaction } from "@sdp/types/tokens";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 
 export interface TokenTransactionsPage {

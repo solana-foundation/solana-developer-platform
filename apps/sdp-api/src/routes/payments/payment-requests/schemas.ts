@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { paymentAmountSchema, solanaAddressSchema } from "../schemas";
+import { paymentAmountSchema, solanaAddressSchema } from "@/routes/payments/schemas";
 
 export const createPaymentRequestSchema = z.object({
   walletId: z.string().min(1),

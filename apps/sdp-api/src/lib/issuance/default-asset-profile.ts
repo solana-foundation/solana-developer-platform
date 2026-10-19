@@ -1,11 +1,11 @@
 import { ADVANCED_SETTINGS_VERSION } from "@sdp/issuance/capabilities";
+import type { SelectedSetting } from "@sdp/types/advanced-settings";
 import {
   type AssetCategory,
   getAssetTypeRegistryEntry,
   type IssuanceMetadata,
-  type SelectedSetting,
-  type Token,
-} from "@sdp/types";
+} from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { projectPublicMetadata } from "./public-metadata";
 
 type ProfileSourceToken = Pick<

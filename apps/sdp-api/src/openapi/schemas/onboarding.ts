@@ -1,4 +1,4 @@
-import { z } from "./base";
+import { z } from "zod";
 import { orgCustodyProviderSchema } from "./custody";
 import { organizationSchema } from "./organizations";
 

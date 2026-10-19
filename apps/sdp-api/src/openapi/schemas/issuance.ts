@@ -1,10 +1,10 @@
-import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
-
+import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types/tokens";
+import { z } from "zod";
 import {
   assetCategorySchema as assetCategorySchemaBase,
   assetTypeSchema as assetTypeSchemaBase,
   issuanceMetadataSchema as issuanceMetadataSchemaBase,
-} from "../../routes/asset-profiles/schemas";
+} from "@/routes/asset-profiles/schemas";
 import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
@@ -22,7 +22,7 @@ import {
   unfreezeSchema as unfreezeSchemaBase,
   updateAuthoritySchema as updateAuthoritySchemaBase,
   updateTokenSchema as updateTokenSchemaBase,
-} from "../../routes/issuance/schemas";
+} from "@/routes/issuance/schemas";
 import { assetProfileSchema } from "./asset-profiles";
 import {
   apiKeyIdParamSchema,
@@ -37,7 +37,6 @@ import {
   tokenIdParamSchema,
   tokenTransactionIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const ISSUANCE_TOKEN_AMOUNT_DESCRIPTION =

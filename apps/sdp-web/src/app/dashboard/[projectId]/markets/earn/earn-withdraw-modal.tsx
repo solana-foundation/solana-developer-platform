@@ -6,25 +6,23 @@ import {
   type EarnPortfolioToken,
   type EarnPortfolioWithdrawal,
   type EarnPortfolioWithdrawalPreview,
-  earnProgramSolanaPayoutTokens,
-} from "@sdp/types";
+} from "@sdp/types/earn";
+import { earnProgramSolanaPayoutTokens } from "@sdp/types/provider-access";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
-import { Select, SelectItem } from "@/components/ui/select";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useModalFocus } from "@/lib/use-modal-focus";
-import { BASE58_ADDRESS_PATTERN } from "../base58-address";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
-
-export { EarnWithdrawalOutcomeTracker } from "./earn-outcome-trackers";
 
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });

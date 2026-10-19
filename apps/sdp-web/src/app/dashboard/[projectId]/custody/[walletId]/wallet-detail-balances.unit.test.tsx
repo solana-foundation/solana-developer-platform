@@ -12,7 +12,7 @@ import {
   solBalance,
   trackedBalances,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.fixtures";
-import { formatDisplayAmount } from "../../payments/payments-overview.utils";
+import { formatDisplayAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { WalletBalanceRows, WalletBalanceTotal } from "./wallet-detail-balances";
 
 afterEach(() => {

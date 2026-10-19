@@ -1,17 +1,11 @@
+import { Card, CardAction, CardContent, CardHeader } from "@sdp/ui/card";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
-import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY } from "./recurring/recurring-payments-table-layout";
 
 const TABLE_ROW_IDS = [

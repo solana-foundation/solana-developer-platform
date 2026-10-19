@@ -1,4 +1,4 @@
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
 
 export type AddressFilter = "with" | "without";
 export type EntityType = Counterparty["entityType"];

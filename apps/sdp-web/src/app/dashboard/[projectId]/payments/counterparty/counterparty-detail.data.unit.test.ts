@@ -1,4 +1,4 @@
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
 import { describe, expect, it, vi } from "vitest";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterpartyDetail, fetchCounterpartyPayouts } from "./counterparty-detail.data";

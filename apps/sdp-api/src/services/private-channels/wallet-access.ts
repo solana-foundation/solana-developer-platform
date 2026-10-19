@@ -1,5 +1,6 @@
-import { type ApiKeyRole, hasAllPermissions, type MovementId } from "@sdp/types";
-import { getDb } from "@/db";
+import type { MovementId } from "@sdp/types/movements";
+import { type ApiKeyRole, hasAllPermissions } from "@sdp/types/permissions";
+import { getDb } from "@/db/client";
 import { parseStoredApiKeyPermissions } from "@/lib/api-key-permissions";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -7,9 +8,9 @@ import { AppError, conflict, forbidden, providerUnavailable, walletNotFound } fr
 import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * Refresh the key's role and permissions before authorizing a specific

@@ -1,8 +1,8 @@
 "use client";
 
+import type { OnrampWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
-import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { RampCompleteScreen } from "./ramp-complete-screen";

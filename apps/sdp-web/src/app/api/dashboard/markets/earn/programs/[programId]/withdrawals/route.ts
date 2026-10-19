@@ -1,5 +1,5 @@
+import { programProxyQuery } from "@/app/api/dashboard/markets/earn/provider-query";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { programProxyQuery } from "../../../provider-query";
 
 /**
  * The withdrawal LEDGER list (SDP's DB, never the provider). Treasury reads the

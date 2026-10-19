@@ -12,9 +12,10 @@ import type {
   PrivateChannelInstance,
   PrivateChannelToken,
   PrivateChannelTokenEligibility,
-  SolanaCluster,
-} from "@sdp/types";
-import { privateChannelTokens, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
+} from "@sdp/types/private-channels";
+import { privateChannelTokens } from "@sdp/types/private-channels";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { badRequest, serviceUnavailable } from "@/lib/errors";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";

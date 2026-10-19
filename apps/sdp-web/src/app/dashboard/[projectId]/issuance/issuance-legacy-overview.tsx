@@ -1,12 +1,12 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
+import { Input } from "@sdp/ui/input";
 import { Search } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Input } from "@/components/ui/input";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import {
   deploymentStatusBadge,
   formatDate,

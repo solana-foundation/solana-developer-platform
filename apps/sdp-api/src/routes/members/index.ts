@@ -3,12 +3,12 @@
  */
 
 import { Hono } from "hono";
-import { runWithSystemDatabaseIdentity } from "@/db";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   acceptInvitation,
   inviteMember,
@@ -18,7 +18,7 @@ import {
 } from "./handlers";
 import { acceptSchema, inviteSchema } from "./schemas";
 
-const members = new Hono<{ Bindings: Env }>();
+export const members = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication by a signed-in person: an API key cannot
 // list, invite, accept for, or remove members (HOO-2099).
@@ -41,5 +41,3 @@ members.post("/accept", validateBody(acceptSchema), (c) =>
 // Declared before /:memberId so "invitations" is not read as a member id.
 members.delete("/invitations/:invitationId", requirePermissions("org:write"), revokeInvitation);
 members.delete("/:memberId", requirePermissions("org:admin"), removeMember);
-
-export default members;

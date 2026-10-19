@@ -1,20 +1,11 @@
-import { normalizeAllowedOperations, upgradeStoredAllowedOperations } from "@sdp/types";
-/**
- * API Key Service
- *
- * Shared data access for API key operations.
- */
-
-// biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  ApiKeyStatus,
-  ApiKeyWalletScope,
-  Permission,
-} from "@sdp/types";
+import {
+  type AllowedOperation,
+  normalizeAllowedOperations,
+  upgradeStoredAllowedOperations,
+} from "@sdp/types/allowed-operations";
+import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { ApiKeyRole, Permission } from "@sdp/types/permissions";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";

@@ -1,28 +1,22 @@
 "use client";
 
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
 import type {
-  AllowedOperation,
   ApiKeyEnvironment,
-  ApiKeyRole,
   ApiKeyStatus,
   ApiKeyWalletBinding,
   ApiKeyWalletScope,
-  PaymentsDashboardWallet,
-} from "@sdp/types";
+} from "@sdp/types/api-keys";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { ApiKeyRole } from "@sdp/types/permissions";
+import { Button } from "@sdp/ui/button";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { KeyRoundIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";

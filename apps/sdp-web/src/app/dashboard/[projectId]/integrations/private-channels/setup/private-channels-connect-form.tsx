@@ -1,24 +1,25 @@
 "use client";
 
-import { privateChannelInstanceInputSchema, SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
+import { privateChannelInstanceInputSchema } from "@sdp/private-channels/schema";
 import type {
   PrivateChannelInstance,
   PrivateChannelInstanceInput,
   PrivateChannelProbeResult,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { WizardFrame } from "@/components/wizard-frame";
-import { useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   PRIVATE_CHANNELS_INTEGRATION_PATH,
   privateChannelsInstancePath,
-} from "../private-channels-routes";
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import { WizardFrame } from "@/components/wizard-frame";
+import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   type ConnectPrivateChannelResult,
   connectPrivateChannelAction,

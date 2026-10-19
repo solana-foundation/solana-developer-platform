@@ -3,9 +3,9 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { Env } from "@/types/env";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "../fixtures/api-keys";
-import { seedApiKeyRow } from "../mocks/kv";
+import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { seedApiKeyRow } from "@/test/mocks/kv";
+import type { Env } from "@/types/env.d";
 
 /**
  * Sets up authentication for a test request

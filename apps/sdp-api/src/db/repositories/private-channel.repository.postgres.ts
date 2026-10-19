@@ -2,7 +2,7 @@ import {
   DEFAULT_PRIVATE_CHANNEL_NAME,
   type PrivateChannelRow,
 } from "@sdp/private-channels/channels";
-import type { AppDb } from "@/db";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   generatePrivateChannelId,
   type PrivateChannelRepository,

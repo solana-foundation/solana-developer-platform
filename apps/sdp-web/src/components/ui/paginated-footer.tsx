@@ -1,11 +1,11 @@
 "use client";
 
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { cn } from "@sdp/ui/cn";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { type ReactNode, useCallback } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { replaceDashboardSearchParams, useDashboardSearchParam } from "@/lib/dashboard-url-state";
-import { cn } from "@/lib/utils";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 

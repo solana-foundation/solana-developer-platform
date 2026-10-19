@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { buildDvpTradeRow } from "@/test/fixtures/dvp";
 import { deriveDvpLegOutcome } from "./leg-outcome";
 

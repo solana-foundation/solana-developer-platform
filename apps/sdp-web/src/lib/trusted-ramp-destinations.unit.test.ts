@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isTrustedRampDestination,
   MOONPAY_HOSTED_APPROVED_HOSTS,
-  openExternalRampUrl,
-} from "./trusted-ramp-destinations";
+} from "@sdp/types/ramp-destinations";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { openExternalRampUrl } from "./trusted-ramp-destinations";
 
 describe("isTrustedRampDestination", () => {
   it("accepts HTTPS URLs on approved provider hosts only", () => {

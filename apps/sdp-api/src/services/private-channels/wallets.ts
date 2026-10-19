@@ -17,18 +17,18 @@
  * This module is the single writer of `private_channel_verified_wallets`.
  */
 
-import { PrivateChannelError } from "@sdp/private-channels";
 import { createAuthClient, type SpcAuthClient } from "@sdp/private-channels/auth";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
 import { getBase58Codec } from "@solana/codecs";
 import { createSignableMessage, isMessagePartialSigner } from "@solana/signers";
+import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
+import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories/private-channel-verified-wallet.repository";
 import {
   createPrivateChannelInstanceRepository,
   createPrivateChannelUserRepository,
   createPrivateChannelVerifiedWalletRepository,
-  type PrivateChannelInstanceRow,
-  type PrivateChannelUserRow,
-  type PrivateChannelVerifiedWalletRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";

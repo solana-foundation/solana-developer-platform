@@ -13,8 +13,8 @@
 
 import { address, signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import type { DvpTradeRow } from "@/db/repositories";
 import type { DvpTradeLegTransfers } from "@/db/repositories/dvp-leg-transfer.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { dvpInboundTradeSchema } from "@/openapi/schemas/dvp";
 import type { DvpCallerWallet, DvpInboundTrade } from "@/services/dvp/inbound";
 import { toDvpInboundResponse, toDvpLegTransfersResponse } from "./inbound-response";

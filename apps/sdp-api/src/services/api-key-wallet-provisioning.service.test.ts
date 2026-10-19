@@ -3,8 +3,8 @@ import { hashString } from "@sdp/payments/hash";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
@@ -22,7 +22,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { provisionApiKeyWallet } from "./api-key-wallet-provisioning.service";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {

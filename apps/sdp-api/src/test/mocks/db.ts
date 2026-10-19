@@ -5,7 +5,7 @@
  * during the cutover branch.
  */
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import {
   AUDIT_LEDGER_CHECKPOINT_KEY,

@@ -2,9 +2,9 @@ import {
   CUSTODY_CONFIG_STATUSES,
   type CustodyConfigStatus,
   isUnarchivedCustodyConfigStatus,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createSigningService } from "@/services/domain/signing.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

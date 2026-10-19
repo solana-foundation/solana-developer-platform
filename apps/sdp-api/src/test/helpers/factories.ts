@@ -5,7 +5,7 @@
  * Use these instead of verbose inline object creation in tests.
  */
 
-import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
 import type { SeededApiKey } from "@/test/mocks/kv";
 
 // ═══════════════════════════════════════════════════════════════════════════

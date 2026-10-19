@@ -1,6 +1,17 @@
 "use client";
 
-import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types";
+import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { CableIcon, MoreHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -8,26 +19,9 @@ import { formatCustodyProviderName } from "@/app/dashboard/[projectId]/custody/p
 import { WalletAddressCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { formatWalletMeta } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { ConnectionStatusCell } from "./connection-status";
 import {
   buildConnectionsSearchParams,

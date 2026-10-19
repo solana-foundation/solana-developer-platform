@@ -1,5 +1,5 @@
-import type { EarnVaultWithdrawalRequestStatus } from "@sdp/types";
-import type { BadgeVariant } from "@/components/ui/badge";
+import type { EarnVaultWithdrawalRequestStatus } from "@sdp/types/earn";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import type { MessageKey } from "@/i18n/messages";
 
 export interface EarnVaultQueuedWithdrawalStatusPresentation {

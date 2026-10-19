@@ -1,14 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { PaymentRequestDetailWorkspace } from "@/app/dashboard/[projectId]/payments/requests/payment-request-detail-workspace";
+import { fetchPaymentRequestDetail } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
-import { fetchPaymentsWallets } from "../../payments-page.data";
-import { PaymentRequestDetailWorkspace } from "../payment-request-detail-workspace";
-import { fetchPaymentRequestDetail } from "../payment-requests-page.data";
 
 export const dynamic = "force-dynamic";
 

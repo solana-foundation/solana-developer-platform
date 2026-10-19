@@ -1,4 +1,4 @@
-import type { SdpModule } from "@sdp/types";
+import type { SdpModule } from "@sdp/types/release-channels";
 
 export type RouteOwner = SdpModule | "core";
 

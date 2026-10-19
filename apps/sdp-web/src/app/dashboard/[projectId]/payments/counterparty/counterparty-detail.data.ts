@@ -3,9 +3,8 @@ import type {
   CounterpartyAccount,
   CounterpartyResponse,
   ListCounterpartyAccountsResponse,
-  PaymentTransferStatus,
-  PaymentTransferSummary,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
+import type { PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types/payments";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 const COUNTERPARTY_TRANSFERS_PAGE_SIZE = 50;

@@ -1,14 +1,14 @@
 "use client";
 
-import type { CustodyProvider } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { createConnectionWalletAction } from "./connection-actions";

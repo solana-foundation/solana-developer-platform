@@ -1,11 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { SdpEnvironment, SignerCheckRequest } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { SignerCheckRequest } from "@sdp/types/custody";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
@@ -45,8 +46,8 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
+vi.mock("@/services/solana/signer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet: signerCheckMocks.createExactSigner,
 }));
 

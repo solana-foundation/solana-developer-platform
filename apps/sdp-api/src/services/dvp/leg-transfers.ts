@@ -22,8 +22,8 @@
  *   it and leaves the read position where it was.
  */
 
-import { withTransientRpcRetry } from "@sdp/rpc";
 import { getSignatureStatuses, type SolanaRpc } from "@sdp/rpc/solana";
+import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import {
   type Address,
   isAddress,

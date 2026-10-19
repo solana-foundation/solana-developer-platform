@@ -11,16 +11,16 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
 import type {
-  AllowedOperation,
   ApiKeyEnvironment,
-  ApiKeyRole,
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
-  Permission,
-} from "@sdp/types";
+} from "@sdp/types/api-keys";
+import type { ApiKeyRole, Permission } from "@sdp/types/permissions";
 import type { Context, Next } from "hono";
-import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { assertNoCachedTerminalRefusal } from "@/lib/api-key-refusal-cache";
 import { getClientIp } from "@/lib/client-ip";
@@ -28,7 +28,7 @@ import { AppError } from "@/lib/errors";
 import { authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   API_KEY_PRE_READ_MAX_REQUESTS,
   apiKeyFloodGuardIdentifier,

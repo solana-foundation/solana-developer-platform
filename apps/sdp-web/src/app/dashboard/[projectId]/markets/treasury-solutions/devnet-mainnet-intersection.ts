@@ -1,4 +1,4 @@
-import type { EarnStrategy } from "@sdp/types";
+import type { EarnStrategy } from "@sdp/types/earn";
 
 /**
  * The Sandbox strategy shelf's devnet rows are the INTERSECTION with mainnet,

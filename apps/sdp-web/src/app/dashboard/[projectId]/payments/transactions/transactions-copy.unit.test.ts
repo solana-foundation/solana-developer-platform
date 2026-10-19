@@ -2,9 +2,9 @@ import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
   UNIFIED_TRANSACTION_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 import { describe, expect, it } from "vitest";
-import messages from "../../../../../../messages/en/dashboard-payments.json";
+import messages from "@/messages/en/dashboard-payments.json";
 
 describe("unified transaction English copy", () => {
   it("covers every module, kind, and status class in the registry", () => {

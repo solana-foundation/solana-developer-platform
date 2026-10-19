@@ -1,12 +1,12 @@
 "use client";
 
-import { getCryptoRailAssetLabel } from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { Button } from "@sdp/ui/button";
 import { SendIcon } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { WizardSummaryList } from "../wizard-summary-list";
 import { InstructionActionButton } from "./components/instruction-action-button";
 import { OfframpStepContent } from "./components/offramp-step-content";
 import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";

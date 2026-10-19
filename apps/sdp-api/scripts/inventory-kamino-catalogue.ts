@@ -38,7 +38,8 @@ import {
   KaminoEarnClient,
   kaminoTvlUsd,
 } from "@sdp/earn/providers/kamino/client";
-import { EARN_DEPOSIT_TOKEN_SYMBOLS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { EARN_DEPOSIT_TOKEN_SYMBOLS } from "@sdp/types/earn";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");

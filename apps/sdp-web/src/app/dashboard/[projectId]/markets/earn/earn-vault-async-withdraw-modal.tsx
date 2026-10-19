@@ -1,6 +1,7 @@
 "use client";
 
-import type { EarnVaultPosition, EarnVaultWithdrawal, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
 import type {
   EarnVaultAsyncWithdrawalEvent,
   EarnVaultAsyncWithdrawalRoute,

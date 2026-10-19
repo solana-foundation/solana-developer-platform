@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { requireHumanSession } from "@/middleware/human-session";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   deleteOrganization,
   getOrganization,
@@ -15,7 +15,7 @@ import {
 } from "./handlers";
 import { updateOrgSchema } from "./schemas";
 
-const organizations = new Hono<{ Bindings: Env }>();
+export const organizations = new Hono<{ Bindings: Env }>();
 
 // Protected routes below require authentication
 organizations.use("/:orgId/*", unifiedAuthMiddleware());
@@ -41,5 +41,3 @@ organizations.delete(
   requirePermissions("org:admin"),
   deleteOrganization
 );
-
-export default organizations;

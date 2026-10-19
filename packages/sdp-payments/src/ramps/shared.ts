@@ -5,7 +5,7 @@ import {
   type RampCountrySupport,
   type RampCurrencyLimit,
 } from "@sdp/types/payment-rails";
-import { internalError } from "../errors";
+import { internalError } from "#/errors";
 
 let icuModernCurrencies: Set<string> | undefined;
 let countryDisplayNames: Intl.DisplayNames | undefined;

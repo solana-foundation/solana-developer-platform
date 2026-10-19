@@ -4,43 +4,36 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ChevronRightIcon, PlusIcon, RepeatIcon, SearchIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { z } from "zod";
 import {
+  formatDisplayAmount,
+  resolveTokenByMint,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
-import { Select, SelectItem } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
-  formatDisplayAmount,
-  resolveTokenByMint,
-  shortenAddress,
-} from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
-  RECURRING_PAYMENT_STATUSES,
   type RecurringPaymentsListState,
 } from "./recurring-payments.data";
 import {
@@ -213,7 +206,7 @@ export function RecurringPaymentsWorkspace({
               }}
             >
               <SelectItem value="all">{t("DashboardPayments.recurring.allStatuses")}</SelectItem>
-              {RECURRING_PAYMENT_STATUSES.map((status) => (
+              {PAYMENT_RECURRING_PAYMENT_STATUSES.map((status) => (
                 <SelectItem key={status} value={status}>
                   {t(STATUS_TRANSLATION_KEYS[status])}
                 </SelectItem>

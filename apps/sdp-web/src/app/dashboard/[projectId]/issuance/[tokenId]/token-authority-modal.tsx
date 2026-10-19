@@ -1,16 +1,20 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import { TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
+import {
+  toWalletIdentity,
+  WalletIdentityBadge,
+} from "@/app/dashboard/[projectId]/issuance/wallet-identity";
 import { useTranslations } from "@/i18n/provider";
-import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
 import type { PermissionRow } from "./token-management-workspace.types";
 import {
+  getNoneConfirmationCopy,
   getSignerWalletOptionLabel,
   getSignerWalletUnavailableReason,
   SOLANA_ADDRESS_PATTERN,
@@ -488,40 +492,4 @@ function CustomAuthorityWarning() {
       <p>{t("DashboardIssuance.authority.customWalletWarning")}</p>
     </div>
   );
-}
-
-function getNoneConfirmationCopy(
-  row: PermissionRow,
-  t: ReturnType<typeof useTranslations>
-): {
-  title: string;
-  description: string;
-  impact: string;
-} {
-  switch (row.authorityRole) {
-    case "mint":
-      return {
-        title: t("DashboardIssuance.authority.mintNoneTitle"),
-        description: t("DashboardIssuance.authority.mintNoneDescription"),
-        impact: t("DashboardIssuance.authority.mintNoneImpact"),
-      };
-    case "freeze":
-      return {
-        title: t("DashboardIssuance.authority.freezeNoneTitle"),
-        description: t("DashboardIssuance.authority.freezeNoneDescription"),
-        impact: t("DashboardIssuance.authority.freezeNoneImpact"),
-      };
-    case "permanentDelegate":
-      return {
-        title: t("DashboardIssuance.authority.delegateNoneTitle"),
-        description: t("DashboardIssuance.authority.delegateNoneDescription"),
-        impact: t("DashboardIssuance.authority.delegateNoneImpact"),
-      };
-    case "metadata":
-      return {
-        title: t("DashboardIssuance.authority.metadataNoneTitle"),
-        description: t("DashboardIssuance.authority.metadataNoneDescription"),
-        impact: t("DashboardIssuance.authority.metadataNoneImpact"),
-      };
-  }
 }

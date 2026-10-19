@@ -11,12 +11,12 @@ import type {
   ReadIdentityResult,
   RekeyIdentityInput,
   RingsGatewayPort,
-  RuntimeHealth,
   SyncPhotonInput,
   SyncPhotonResult,
   VerifyIndexedResult,
-} from "@sdp/helius-rings";
-import { SecretRef } from "@sdp/helius-rings";
+} from "@sdp/helius-rings/port";
+import { SecretRef } from "@sdp/helius-rings/secrets";
+import type { RuntimeHealth } from "@sdp/helius-rings/types";
 
 /** Wrapped SOL, the mint SDP uses to mean native lamports. */
 const NATIVE_MINT = "So11111111111111111111111111111111111111112";

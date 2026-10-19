@@ -1,23 +1,17 @@
 import {
-  type DeleteAnchorageOptions as CustodyDeleteAnchorageOptions,
-  type ProvisionAnchorageOptions as CustodyProvisionAnchorageOptions,
   type ProvisionCoinbaseCdpOptions as CustodyProvisionCoinbaseCdpOptions,
   type ProvisionFireblocksOptions as CustodyProvisionFireblocksOptions,
-  type CustodyProvisioningRuntime,
   type ProvisionParaOptions as CustodyProvisionParaOptions,
   type ProvisionPrivyOptions as CustodyProvisionPrivyOptions,
   type ProvisionTurnkeyOptions as CustodyProvisionTurnkeyOptions,
   type ProvisionUtilaOptions as CustodyProvisionUtilaOptions,
-  deleteAnchorageWallet as deleteAnchorageWalletInCustody,
   findPrivyWalletByExternalId as findPrivyWalletByExternalIdInCustody,
-  type ProvisionAnchorageResult,
   type ProvisionCoinbaseCdpResult,
   type ProvisionFireblocksResult,
   type ProvisionParaResult,
   type ProvisionPrivyResult,
   type ProvisionTurnkeyResult,
   type ProvisionUtilaResult,
-  provisionAnchorageWallet as provisionAnchorageWalletInCustody,
   provisionCoinbaseCdpAccount as provisionCoinbaseCdpAccountInCustody,
   provisionFireblocksVaultAccount as provisionFireblocksVaultAccountInCustody,
   provisionParaWallet as provisionParaWalletInCustody,
@@ -25,6 +19,14 @@ import {
   provisionTurnkeyPrivateKey as provisionTurnkeyPrivateKeyInCustody,
   provisionUtilaWallet as provisionUtilaWalletInCustody,
 } from "@sdp/custody/provisioning";
+import {
+  type DeleteAnchorageOptions as CustodyDeleteAnchorageOptions,
+  type ProvisionAnchorageOptions as CustodyProvisionAnchorageOptions,
+  deleteAnchorageWallet as deleteAnchorageWalletInCustody,
+  type ProvisionAnchorageResult,
+  provisionAnchorageWallet as provisionAnchorageWalletInCustody,
+} from "@sdp/custody/provisioning/anchorage";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";
 
@@ -35,21 +37,16 @@ export type ProvisionFireblocksOptions = CustodyProvisionFireblocksOptions & {
   apiKey?: string;
   apiSecretPem?: string;
 };
-export type { ProvisionFireblocksResult };
 
 export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
-export type { PrivyCredentialAuthentication, ProvisionPrivyResult };
 
 export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
   network?: "solana" | "solana-devnet";
 };
-export type { ProvisionCoinbaseCdpResult };
 
 export type ProvisionParaOptions = CustodyProvisionParaOptions;
-export type { ProvisionParaResult };
 
 export type ProvisionTurnkeyOptions = CustodyProvisionTurnkeyOptions;
-export type { ProvisionTurnkeyResult };
 
 export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
   serviceAccountEmail?: string;
@@ -57,10 +54,8 @@ export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
   vaultId?: string;
   network?: "networks/solana-mainnet" | "networks/solana-devnet";
 };
-export type { ProvisionUtilaResult };
 
 export type ProvisionAnchorageOptions = CustodyProvisionAnchorageOptions;
-export type { ProvisionAnchorageResult };
 
 export type DeleteAnchorageOptions = CustodyDeleteAnchorageOptions;
 

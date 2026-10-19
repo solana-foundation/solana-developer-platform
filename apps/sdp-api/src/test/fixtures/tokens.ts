@@ -2,7 +2,7 @@
  * Token test fixtures
  */
 
-import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
 import type { SeededApiKey } from "@/test/mocks/kv";
 import { TEST_ORG, TEST_USER } from "./organizations";
 

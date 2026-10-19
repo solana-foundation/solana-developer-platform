@@ -18,10 +18,11 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
-import { deriveAssociatedTokenAddress, isAddress } from "@sdp/solana/address";
+import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
+import { isAddress } from "@solana/kit";
 import { SdpOndoError } from "./errors";
 import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner } from "./types";
 

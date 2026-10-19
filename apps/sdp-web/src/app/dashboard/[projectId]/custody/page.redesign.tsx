@@ -1,11 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
+import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types/custody";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import {
   isKnownCustodyProvider,
   type KnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import {
   fetchActiveApiKeys,
   resolvePlaygroundApiBaseUrl,
@@ -20,7 +21,6 @@ import {
   type SdpApiClient,
 } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
-import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace.redesign";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -77,7 +77,7 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-async function CurrentCustodyPage() {
+export async function CurrentCustodyPage() {
   const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -155,5 +155,3 @@ async function CurrentCustodyPage() {
     throw error;
   }
 }
-
-export default CurrentCustodyPage;

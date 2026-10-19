@@ -1,6 +1,6 @@
+import { cn } from "@sdp/ui/cn";
+import { TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import type { ReactNode } from "react";
-import { TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 import { PAYMENTS_TABLE_HEAD } from "./payments-table";
 
 export interface PaymentsTableColumn {

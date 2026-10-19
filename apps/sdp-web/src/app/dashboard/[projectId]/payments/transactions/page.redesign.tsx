@@ -1,12 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import {
+  fetchIssuedTokensByMint,
+  fetchPaymentsWallets,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { fetchCounterparties } from "../counterparty/counterparty-page.data";
-import { fetchIssuedTokensByMint, fetchPaymentsWallets } from "../payments-page.data";
 import { enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data.redesign";
 import { parseTransactionFilters } from "./transactions-query.redesign";
@@ -20,7 +23,7 @@ interface TransactionsPageProps {
 // API's maximum page size; a contact beyond it still filters by id from a deep link.
 const CONTACT_OPTION_LIMIT = 100;
 
-async function TransactionsPage({ searchParams }: TransactionsPageProps) {
+export async function TransactionsPage({ searchParams }: TransactionsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
@@ -65,5 +68,3 @@ async function TransactionsPage({ searchParams }: TransactionsPageProps) {
     />
   );
 }
-
-export default TransactionsPage;
