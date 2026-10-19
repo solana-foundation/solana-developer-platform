@@ -480,6 +480,29 @@ describe("sweepRampTransferStatuses", () => {
     expect((await row("xfr_expired_sale")).status).toBe("expired");
   });
 
+  it("asks about an expired transfer for two weeks after it went quiet, then stops", async () => {
+    await seedTransfer({
+      id: "xfr_long_running",
+      provider: "moonpay",
+      status: "expired",
+      createdAt: minutesAgo(20 * 24 * 60),
+      updatedAt: minutesAgo(2 * 24 * 60),
+    });
+    await seedTransfer({
+      id: "xfr_long_quiet",
+      provider: "moonpay",
+      status: "expired",
+      createdAt: minutesAgo(20 * 24 * 60),
+      updatedAt: minutesAgo(15 * 24 * 60),
+    });
+
+    await sweep();
+
+    expect(requestsTo("api.moonpay.com")).toBe(1);
+    expect((await row("xfr_long_running")).provider_status_last_polled_at).not.toBeNull();
+    expect((await row("xfr_long_quiet")).provider_status_last_polled_at).toBeNull();
+  });
+
   it("revives an expired checkout once the provider shows progress", async () => {
     await seedTransfer({
       id: "xfr_revived",

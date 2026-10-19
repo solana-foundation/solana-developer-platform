@@ -788,9 +788,9 @@ export function createPostgresPaymentsRepository(
           "PaymentsRepository.claimRampTransferForStatusPull is system-only"
         );
       }
-      const createdAfterClause =
-        params.createdAfter === undefined ? "" : "AND candidate.created_at > ?";
-      const createdAfterValues = params.createdAfter === undefined ? [] : [params.createdAfter];
+      const updatedAfterClause =
+        params.updatedAfter === undefined ? "" : "AND candidate.updated_at > ?";
+      const updatedAfterValues = params.updatedAfter === undefined ? [] : [params.updatedAfter];
       // The verifier finishes a settling row once it holds the provider's
       // settlement and, for an onramp, its delivery signature; asking again
       // would only spend a provider request.
@@ -807,7 +807,7 @@ export function createPostgresPaymentsRepository(
                AND candidate.updated_at < ?
                AND (candidate.provider_status_last_polled_at IS NULL
                     OR candidate.provider_status_last_polled_at < ?)
-               ${createdAfterClause}
+               ${updatedAfterClause}
                AND NOT (
                  candidate.status = 'settling'
                  AND jsonb_typeof(candidate.provider_data->'providerSettlement') = 'object'
@@ -836,7 +836,7 @@ export function createPostgresPaymentsRepository(
           [...params.environments],
           params.updatedBefore,
           params.polledBefore,
-          ...createdAfterValues,
+          ...updatedAfterValues,
           params.polledAt
         )
         .first<PaymentTransferProjectionRow & { project_environment: unknown }>();

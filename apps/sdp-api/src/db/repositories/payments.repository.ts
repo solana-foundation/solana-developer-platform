@@ -299,8 +299,8 @@ export interface PaymentsRepository {
     updatedBefore: string;
     /** Rows polled since are not due yet. */
     polledBefore: string;
-    /** Rows created before are past their revival window. */
-    createdAfter?: string;
+    /** Rows quiet since before this are past their revival window. */
+    updatedAfter?: string;
     polledAt: string;
   }): Promise<{ transfer: PaymentTransferRow; environment: SdpEnvironment } | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;

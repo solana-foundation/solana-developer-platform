@@ -32,7 +32,7 @@ export const RAMP_STATUS_PULLS_PER_SWEEP = 25;
 const WEBHOOK_GRACE_MS = 10 * MINUTE_MS;
 /** How often an open transfer is asked about again. */
 const OPEN_REPOLL_MS = 15 * MINUTE_MS;
-/** How often an expired transfer is asked about, for as long as it can still be revived. */
+/** How often an expired transfer is asked about, and for how long after it went quiet. */
 const EXPIRED_REPOLL_MS = HOUR_MS;
 const REVIVAL_WINDOW_MS = 14 * 24 * HOUR_MS;
 /** No pull starts after this, so a slow provider cannot run into the next slot. */
@@ -243,24 +243,24 @@ async function pullTransfer(
 /**
  * The two queues one provider's sweep drains in order: open transfers first, so
  * a pile of abandoned checkouts never starves a live one, then expired ones
- * still young enough to be revived.
+ * that went quiet recently enough to be revived.
  */
 function sweepQueues(now: number): {
   statuses: readonly PaymentTransferStatus[];
   polledBefore: string;
-  createdAfter: string | undefined;
+  updatedAfter: string | undefined;
 }[] {
   const iso = (ms: number) => new Date(ms).toISOString();
   return [
     {
       statuses: OPEN_PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
       polledBefore: iso(now - OPEN_REPOLL_MS),
-      createdAfter: undefined,
+      updatedAfter: undefined,
     },
     {
       statuses: [RAMP_TRANSFER_TRANSITIONS.checkout_abandoned.to],
       polledBefore: iso(now - EXPIRED_REPOLL_MS),
-      createdAfter: iso(now - REVIVAL_WINDOW_MS),
+      updatedAfter: iso(now - REVIVAL_WINDOW_MS),
     },
   ];
 }
@@ -297,7 +297,7 @@ async function sweepProvider(
         statuses: queue.statuses,
         updatedBefore: new Date(now - WEBHOOK_GRACE_MS).toISOString(),
         polledBefore: queue.polledBefore,
-        createdAfter: queue.createdAfter,
+        updatedAfter: queue.updatedAfter,
         polledAt: new Date().toISOString(),
       });
       if (claimed === null) {
