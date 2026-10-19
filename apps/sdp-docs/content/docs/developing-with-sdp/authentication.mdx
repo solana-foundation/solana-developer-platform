@@ -26,7 +26,7 @@ A request must clear every layer that is configured on its key:
 | --- | --- |
 | **Grants** | The actions (`module.verb`) the key may perform. Each route needs exactly one; see [Grants by module](/docs/developing-with-sdp/manage-api-keys#grants-by-module) |
 | **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
-| **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from |
+| **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from, set on the key; an organization-wide list under **Settings** applies to every key on top. Neither restricts signed-in dashboard members |
 
 ## Errors
 
@@ -38,7 +38,7 @@ Authentication and authorization failures are always machine-distinguishable:
 | Malformed or unknown key | 401 | `INVALID_API_KEY` |
 | Key has been revoked, its organization was deleted or suspended, or its project was archived | 401 | `REVOKED_API_KEY` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
-| Request origin not in the key's IP allowlist | 403 | `FORBIDDEN` |
+| Request origin not in the key's or the organization's IP allowlist | 403 | `FORBIDDEN` |
 | Key lacks the route's action (`error.details.action` names it) | 403 | `INSUFFICIENT_PERMISSIONS` |
 | Per-key rate limit exceeded | 429 | `RATE_LIMITED` |
 

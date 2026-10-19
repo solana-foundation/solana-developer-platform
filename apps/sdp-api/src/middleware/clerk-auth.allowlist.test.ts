@@ -45,7 +45,7 @@ async function createApp() {
   return { app, token };
 }
 
-describe("Clerk auth against the organization IP allowlist", () => {
+describe("Clerk auth and the organization IP allowlist", () => {
   const issuerReady = ensureTestClerkIssuer(env);
   beforeEach(async () => {
     await issuerReady;
@@ -102,7 +102,9 @@ describe("Clerk auth against the organization IP allowlist", () => {
     return { memberships: Number(memberships.total), projects: Number(projects.total) };
   }
 
-  it("refuses a blocked origin before provisioning anything", async () => {
+  // The allowlist governs API keys only: dashboard requests reach the API from
+  // SDP's own servers, so filtering a session would filter SDP itself.
+  it("admits a session from an origin outside the allowlist", async () => {
     const { app, token } = await createApp();
 
     const res = await app.request(
@@ -116,9 +118,8 @@ describe("Clerk auth against the organization IP allowlist", () => {
       env
     );
 
-    expect(res.status).toBe(403);
-
-    expect(await provisionedRows()).toEqual({ memberships: 0, projects: 0 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ organizationId: ORG_ID });
   });
 
   it("provisions normally from an allowed origin", async () => {
