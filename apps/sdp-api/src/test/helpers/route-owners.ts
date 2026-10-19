@@ -6,7 +6,6 @@ import {
 import { createApp } from "@/app";
 import type { RouteHandler } from "@/middleware/authorize";
 import { routeOwnerOf } from "@/routes/route-modules";
-import { noopObservability } from "@/runtime/observability";
 
 const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 const STABLE_MODULES: ReadonlySet<SdpModule> = new Set(SDP_RELEASE_CHANNELS.stable);
@@ -37,7 +36,6 @@ function covers(pattern: string, path: string): boolean {
  */
 export function stableMutatingRouteSteps(): StableMutatingRouteStep[] {
   const app = createApp({
-    observability: noopObservability,
     rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
   });
   const steps: StableMutatingRouteStep[] = [];

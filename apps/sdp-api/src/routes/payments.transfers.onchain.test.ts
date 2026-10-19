@@ -1,12 +1,17 @@
 import type { createFeePaymentAdapter } from "@sdp/fee-payment";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import { generateKeyPairSigner } from "@solana/kit";
+import {
+  generateKeyPairSigner,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+} from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -38,6 +43,60 @@ import {
 } from "@/test/helpers/payments-transfers";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+
+function testProjectPaymentsRepository() {
+  return createPostgresPaymentsRepository(
+    getDb(env),
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+  );
+}
+
+/** An off-ramp awaiting its 1 SOL deposit to wallet2, as a MoonPay sell leaves it. */
+async function seedSolOfframpDeposit(transferId: string) {
+  await testProjectPaymentsRepository().createTransfer({
+    id: transferId,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    walletId: TEST_WALLET_ID,
+    counterpartyId: null,
+    sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+    destinationAddress: null,
+    token: SOL_MINT,
+    amount: "1",
+    memo: null,
+    type: "offramp",
+    direction: "outbound",
+    status: "awaiting_payment",
+    provider: "moonpay",
+    providerReference: "moonpay-ramp-deposit",
+    deliveryMode: "hosted",
+    fiatCurrency: "USD",
+    fiatAmount: "100",
+    providerData: {
+      cryptoDeposit: {
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        amount: "1.0",
+      },
+    },
+    serializedTx: null,
+    signature: null,
+    slot: null,
+    initiatedByKeyId: TEST_API_KEY.id,
+    idempotencyKey: null,
+    idempotencyFingerprint: null,
+  });
+}
+
+function solOfframpDepositRequest(transferId: string) {
+  return {
+    transferId,
+    sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+    destination: TEST_SOLANA_ADDRESSES.wallet2,
+    token: "SOL",
+    amount: "1",
+  };
+}
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
@@ -231,54 +290,9 @@ describe("Payments routes — on-chain transfers", () => {
 
   it("uses the existing off-ramp row for its on-chain deposit", async () => {
     const transferId = generatePaymentTransferId();
-    const repository = createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-      })
-    );
-    await repository.createTransfer({
-      id: transferId,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      destinationAddress: null,
-      token: SOL_MINT,
-      amount: "1",
-      memo: null,
-      type: "offramp",
-      direction: "outbound",
-      status: "awaiting_payment",
-      provider: "moonpay",
-      providerReference: "moonpay-ramp-deposit",
-      deliveryMode: "hosted",
-      fiatCurrency: "USD",
-      fiatAmount: "100",
-      providerData: {
-        cryptoDeposit: {
-          destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-          amount: "1.0",
-        },
-      },
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: TEST_API_KEY.id,
-      idempotencyKey: null,
-      idempotencyFingerprint: null,
-    });
+    await seedSolOfframpDeposit(transferId);
 
-    const requestBody = JSON.stringify({
-      transferId,
-      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      destination: TEST_SOLANA_ADDRESSES.wallet2,
-      token: "SOL",
-      amount: "1",
-    });
+    const requestBody = JSON.stringify(solOfframpDepositRequest(transferId));
     const res = await postTransfer(JSON.parse(requestBody), {});
 
     const responseText = await res.text();
@@ -312,6 +326,85 @@ describe("Payments routes — on-chain transfers", () => {
     expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
     expect(await countTransferRows()).toBe(1);
+  });
+
+  it("rejects a deposit after MoonPay fails the sale", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedSolOfframpDeposit(transferId);
+    expect(
+      await moonpayWebhook.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "offramp",
+        reference: "moonpay-ramp-deposit",
+        transferId,
+        providerObservedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
+
+    const staleClaim = await testProjectPaymentsRepository().updateOnchainTransferForRamp({
+      transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: SOL_MINT,
+      amount: "1",
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotency: null,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(staleClaim).toBeNull();
+
+    const response = await postTransfer(solOfframpDepositRequest(transferId), {});
+    expect(response.status).toBe(400);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const row = await readTransferRow(transferId);
+    expect(row.status).toBe("failed");
+    expect(row.provider_reference).toBe("moonpay-ramp-deposit");
+    expect(row.provider_data.cryptoDeposit).toBeNull();
+  });
+
+  it("fails a claimed off-ramp deposit when audit-ledger admission is refused", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedSolOfframpDeposit(transferId);
+    const beginSpy = vi
+      .spyOn(AuditService.prototype, "beginCritical")
+      .mockRejectedValueOnce(new Error("audit ledger unavailable"));
+
+    try {
+      const res = await postTransfer(solOfframpDepositRequest(transferId), {});
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+
+      const row = await readTransferRow(transferId);
+      expect(row.status).toBe("failed");
+      expect(row.error).toContain("Audit ledger admission failed");
+    } finally {
+      beginSpy.mockRestore();
+    }
+  });
+
+  it("keeps a deposit the provider completed mid-send at completed", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedSolOfframpDeposit(transferId);
+    sendTransactionMock.mockImplementationOnce(async (_rpc, transactionBytes) => {
+      await testProjectPaymentsRepository().transitionRampTransfer({
+        transferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        transition: "provider_settled",
+        updatedAt: new Date().toISOString(),
+      });
+      return getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes));
+    });
+
+    const res = await postTransfer(solOfframpDepositRequest(transferId), {});
+
+    expect(res.status, await res.text()).toBe(200);
+    expect((await readTransferRow(transferId)).status).toBe("completed");
   });
 
   it("funds a Production off-ramp with the mainnet USDC mint its quote recorded", async () => {

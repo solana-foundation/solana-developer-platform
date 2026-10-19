@@ -3,6 +3,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   PaymentTransferStatus,
   PaymentTransferType,
+  RampTransferSettlement,
   RampTransferTransitionId,
 } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
@@ -32,6 +33,8 @@ export interface PaymentTransferRow {
   /** A retired provider's historical row reads too; writes take a live `RampProviderId`. */
   provider: PersistedRampProviderId | null;
   provider_reference: string | null;
+  /** MoonPay's canonical top-level updatedAt for the currently bound transaction. */
+  provider_observed_at: string | null;
   delivery_mode: PaymentTransferDeliveryMode | null;
   fiat_currency: string | null;
   fiat_amount: string | null;
@@ -121,8 +124,13 @@ export interface TransferStatusChangeFields {
   sourceAddress?: string | null;
   destinationAddress?: string | null;
   signature?: string | null;
+  serializedTx?: string | null;
+  slot?: number | null;
+  blockTime?: string | null;
+  fee?: number | null;
   amount?: string | null;
   fiatAmount?: string | null;
+  deliveryMode?: PaymentTransferDeliveryMode | null;
   providerData?: Record<string, unknown>;
   error?: string | null;
 }
@@ -132,6 +140,8 @@ export interface RampTransferTransitionInput extends TransferStatusChangeFields 
   organizationId: string;
   projectId: string;
   transition: RampTransferTransitionId;
+  /** MoonPay observations compare this timestamp only for the bound reference. */
+  providerObservation?: { reference: string; observedAt: string };
   updatedAt: string;
 }
 
@@ -195,8 +205,10 @@ export interface PaymentsRepositoryContext {
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
-   * Claims an awaiting off-ramp row for its crypto deposit transaction. The
-   * update succeeds only while every on-chain submission field is unoccupied.
+   * Claims an awaiting off-ramp row for its crypto deposit transaction through
+   * the `offramp_deposit_claimed` transition. The update succeeds only while
+   * the row still matches its deposit instruction and every on-chain
+   * submission field is unoccupied.
    */
   updateOnchainTransferForRamp(input: {
     transferId: string;
@@ -222,6 +234,10 @@ export interface PaymentsRepository {
     projectId: string;
     idempotencyKey: string;
   }): Promise<PaymentTransferRow | null>;
+  /**
+   * Updates a transfer's fields. An update carrying a `status` matches no ramp
+   * row: ramp statuses move only through `transitionRampTransfer`.
+   */
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   persistSignedTransfer(input: {
     transferId: string;
@@ -238,21 +254,6 @@ export interface PaymentsRepository {
     projectId: string;
     startedAt: string;
   }): Promise<PaymentTransferRow | null>;
-  /**
-   * Atomically transitions a transfer's status only if it is currently one of
-   * `fromStatuses`, scoped to org/project. Returns the updated row, or null when
-   * no row matched (wrong owner, missing, or status changed concurrently).
-   */
-  updateTransferStatusGuarded(
-    input: TransferStatusChangeFields & {
-      transferId: string;
-      organizationId: string;
-      projectId: string;
-      fromStatuses: readonly PaymentTransferStatus[];
-      toStatus: PaymentTransferStatus;
-      updatedAt: string;
-    }
-  ): Promise<PaymentTransferRow | null>;
   /**
    * Applies one `RAMP_TRANSFER_TRANSITIONS` entry as a compare-and-swap: the
    * row must be a ramp transfer of one of the transition's types, in one of its
@@ -315,18 +316,45 @@ export interface PaymentsRepository {
     transferId: string;
     provider: RampProviderId;
   }): Promise<SdpEnvironment | null>;
+  /** Locks the transfer while a MoonPay claim or failed-attempt release is decided. Transaction only. */
+  lockTransferForProvider(input: {
+    transferId: string;
+    provider: RampProviderId;
+  }): Promise<{ transfer: PaymentTransferRow; environment: SdpEnvironment } | null>;
   /**
-   * Atomically binds a provider-owned reference to a provider transfer selected
-   * by SDP's internal correlation ID. Replays with the same reference succeed;
-   * a different occupied reference is never overwritten.
+   * Serializes MoonPay claims and failures for one transaction id, then reads
+   * its bound owner. Transaction only.
    */
-  setProviderReferenceIfEmpty(input: {
+  lockMoonpayTransactionOwner(transactionId: string): Promise<string | null>;
+  getFailedMoonpayTransaction(transactionId: string): Promise<{
+    transferId: string;
+    providerObservedAt: string;
+  } | null>;
+  recordFailedMoonpayTransaction(input: {
+    transactionId: string;
+    transferId: string;
+    providerObservedAt: string;
+    failureReason?: string;
+    settlement?: RampTransferSettlement;
+  }): Promise<void>;
+  /**
+   * Claims a provider reference after the caller locks and checks its transfer.
+   * MoonPay callers also lock the transaction id before checking its owner.
+   * Failed MoonPay transaction ids cannot claim even after the reference clears.
+   */
+  claimProviderReference(input: {
     transferId: string;
     provider: RampProviderId;
     providerReference: string;
     environment: SdpEnvironment;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
+  /** Clears a failed MoonPay attempt after its guarded status transition. Transaction only. */
+  releaseMoonpayProviderReference(input: {
+    transferId: string;
+    providerReference: string | null;
+    providerObservedAt: string | null;
+  }): Promise<void>;
   listTransfersBySignatures(params: {
     signatures: string[];
     organizationId: string;

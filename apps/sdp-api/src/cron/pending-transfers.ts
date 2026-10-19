@@ -1,46 +1,12 @@
-/**
- * Pending-transfers reconciliation entrypoint.
- *
- * Wraps `trackPendingTransfers` with a Sentry cron monitor when observability
- * is supplied, and hands the resulting promise to the BackgroundRunner so the
- * Node background runner keeps it alive past the initiating tick and drains it
- * during graceful shutdown.
- */
-
-import type { BackgroundRunner } from "@/runtime/background";
-import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
-import type { Observability } from "@/runtime/observability";
-import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import type { Env } from "@/types/env";
+import { alwaysEnabled, defineCron } from "./define-cron";
 
-export const PENDING_TRANSFERS_MONITOR = "sdp-api-track-pending-transfers";
-export const PENDING_TRANSFERS_CRON = "* * * * *";
-
-export interface PendingTransfersReconciliationDeps {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}
-
-export function runPendingTransfersReconciliation(deps: PendingTransfersReconciliationDeps): void {
-  const work = async () => {
-    await Promise.all([
-      runInEachClusterScope(() => trackPendingTransfers(deps.env)),
-      reconcileSponsorshipBudgets(deps.env),
-    ]);
-  };
-
-  // Both branches must hand bg.run() a promise — never invoke `work` eagerly,
-  // since a sync throw before the first await inside trackPendingTransfers
-  // (e.g. createPaymentsRepository construction) would otherwise propagate to
-  // the runtime entrypoint instead of becoming a rejected promise the
-  // BackgroundRunner can track and the platform can log.
-  const promise = deps.observability
-    ? deps.observability.withMonitor(PENDING_TRANSFERS_MONITOR, work, {
-        schedule: { type: "crontab", value: PENDING_TRANSFERS_CRON },
-      })
-    : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
-}
+/** Pending payment transfers: settles sent transfers against the chain. */
+export const pendingTransfersCron = defineCron({
+  name: "track-pending-transfers",
+  schedule: "* * * * *",
+  scope: "cluster",
+  effect: "finishes",
+  enabled: alwaysEnabled,
+  run: trackPendingTransfers,
+});
