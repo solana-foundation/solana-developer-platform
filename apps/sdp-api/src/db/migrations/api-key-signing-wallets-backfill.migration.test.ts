@@ -40,11 +40,13 @@ const USER = "usr_signing_backfill";
 
 /** Each key, its legacy bindings, and the scope and wallets it must come out with. */
 const KEYS = [
+  // A module-specific binding signed only that module, and the list is not
+  // per module, so it does not carry over.
   {
     id: "key_write",
     bindings: [["wal_a", '["payments:write"]']],
     scope: "selected",
-    wallets: ["cw_a"],
+    wallets: [],
   },
   { id: "key_star", bindings: [["wal_a", '["*"]']], scope: "selected", wallets: ["cw_a"] },
   // Could not sign before, so it may not now.

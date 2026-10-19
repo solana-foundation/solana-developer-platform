@@ -4847,21 +4847,25 @@ describe("Payments routes — recurring", () => {
       });
     });
 
-    it("reports one with an operation in flight as failed, and leaves it", async () => {
-      const activated = await activateRecurringPaymentFixture({
-        ...DEFAULT_RECURRING_FIXTURE,
-        headers: RECURRING_HEADERS,
-      });
-      // A resume that has signed but not yet recorded its result: it becomes
-      // active when it settles, so the revoke must surface it.
-      await getDb(env)
-        .prepare("UPDATE payment_recurring_payments SET status = 'resuming' WHERE id = ?")
-        .bind(activated.id)
-        .run();
+    it.each(["resuming", "canceling"] as const)(
+      "reports one %s as failed, and leaves it",
+      async (inFlight) => {
+        const activated = await activateRecurringPaymentFixture({
+          ...DEFAULT_RECURRING_FIXTURE,
+          headers: RECURRING_HEADERS,
+        });
+        // A resume that has signed but not recorded its result becomes active
+        // when it settles; a cancel in flight that fails goes back to active.
+        // Either way the revoke must surface it.
+        await getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET status = ? WHERE id = ?")
+          .bind(inFlight, activated.id)
+          .run();
 
-      expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [], failed: [activated.id] });
-      expect(await statusOf(activated.id)).toBe("resuming");
-    });
+        expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [], failed: [activated.id] });
+        expect(await statusOf(activated.id)).toBe(inFlight);
+      }
+    );
 
     it("cancels nothing for an unrelated key", async () => {
       const activated = await activateRecurringPaymentFixture({

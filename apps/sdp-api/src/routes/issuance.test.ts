@@ -786,6 +786,43 @@ describe("Issuance Routes", () => {
       }
     );
 
+    // HOO-2099: the custody signer refuses a wallet outside the key's scope;
+    // the resolver refuses it first, so no token transaction row is written
+    // under the key and a retry after the scope is fixed runs.
+    it("refuses a burn from a wallet outside the key's scope before writing its row", async () => {
+      const token = await seedIssuedToken({ id: "tok_burn_out_of_scope" });
+      await seedApiKeyRow(env, apiKeyHash, {
+        ...TEST_PROJECT_CACHED_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+      const idempotencyKey = "burn-out-of-scope";
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}/burn`,
+        {
+          method: "POST",
+          headers: headers(idempotencyKey),
+          body: JSON.stringify({
+            signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+            burn: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { details: { reason: "wallet_out_of_scope" } },
+      });
+      expect(
+        await getDb(env)
+          .prepare("SELECT id FROM issuance_transactions WHERE idempotency_key = ?")
+          .bind(idempotencyKey)
+          .first()
+      ).toBeNull();
+    });
+
     it("replays burn before runtime checks and rejects a different exact wallet", async () => {
       const token = await seedIssuedToken({
         id: "tok_direct_burn_replay",

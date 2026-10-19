@@ -463,6 +463,48 @@ describe("Custody wallet by ID route", () => {
     expect(res.status).toBe(404);
   });
 
+  // HOO-2099: a selected key reaches only the wallets it lists, for writes as
+  // for reads (the wallet detail above), refused before the key is claimed.
+  it.each([
+    ["deletes", "DELETE", "/v1/wallets", { walletId: "para_wallet_a" }],
+    ["relabels", "PATCH", "/v1/wallets/para_wallet_a", { label: "taken" }],
+  ] as const)(
+    "returns 404 when a selected key %s a wallet it does not list",
+    async (_verb, method, path, body) => {
+      await seedCachedKey({ walletScope: "selected", walletIds: [] });
+      const before = await getDb(env)
+        .prepare("SELECT status, label FROM custody_wallets WHERE wallet_id = 'para_wallet_a'")
+        .first<{ status: string; label: string | null }>();
+
+      const res = await app.request(
+        path,
+        {
+          method,
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": `wallet-scope-${method}`,
+          },
+          body: JSON.stringify(body),
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      expect(
+        await getDb(env)
+          .prepare("SELECT status, label FROM custody_wallets WHERE wallet_id = 'para_wallet_a'")
+          .first<{ status: string; label: string | null }>()
+      ).toEqual(before);
+      expect(
+        await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
+          .bind(`wallet-scope-${method}`)
+          .first<{ count: number }>()
+      ).toEqual({ count: 0 });
+    }
+  );
+
   it("returns 403 when the API key does not include wallets:read permission", async () => {
     await seedCachedKey({
       grants: ["transfers.read"],
