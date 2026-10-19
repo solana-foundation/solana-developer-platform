@@ -19,16 +19,17 @@ describe("GET /llms.txt", () => {
     expect(body).toContain("/v1/api-keys");
     expect(body).toContain("/v1/wallets");
     expect(body).toContain("/v1/issuance");
+    expect(body).toContain("/v1/compliance");
     expect(body).not.toContain("/admin/allowlist");
     expect(body).not.toContain("/v1/onboarding");
     expect(body).not.toContain("/v1/organizations");
   });
 
-  it("lists only the families the deployment's release channel publishes", async () => {
-    const body = await llmsBody("stable");
+  it.each(["beta", "stable"])("lists only the families %s publishes", async (channel) => {
+    const body = await llmsBody(channel);
 
     expect(body).toContain("/v1/payments");
-    expect(body).toContain("/v1/compliance");
+    expect(body).not.toContain("/v1/compliance");
     expect(body).not.toContain("/v1/issuance");
     expect(body).not.toMatch(/earn/i);
   });
