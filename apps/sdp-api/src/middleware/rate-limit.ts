@@ -330,6 +330,32 @@ export const keyedIpBackstopFallback = new InProcessRateLimiter(
  *   estimated count has reached maxRequests; AppError SERVICE_UNAVAILABLE
  *   (503) when failClosed is set and the counter store is unavailable.
  */
+/**
+ * The earliest instant a refused identifier could be admitted, assuming no
+ * other admission meanwhile (another one only pushes it later). The estimate
+ * is `current + previous * weight`, and only the weight moves: it falls
+ * linearly to zero across this window. When even a zero weight leaves the
+ * current window full, nothing admits before it ends.
+ */
+export function nextAdmissionAt(input: {
+  maxRequests: number;
+  cost: number;
+  windowStart: number;
+  windowMs: number;
+  admission: { current: number; previous: number };
+}): number {
+  const { maxRequests, cost, windowStart, windowMs, admission } = input;
+  const windowEnd = windowStart + windowMs;
+  // The store admits while current + previous * weight + cost - 1 < max, so
+  // the previous window's weighted share must fall below this room.
+  const room = maxRequests - admission.current - Math.max(1, Math.floor(cost)) + 1;
+  if (room <= 0 || admission.previous <= 0) {
+    return windowEnd;
+  }
+  const elapsed = windowMs * (1 - room / admission.previous);
+  return Math.min(windowEnd, windowStart + Math.max(0, Math.floor(elapsed) + 1));
+}
+
 export async function enforceRateLimit(
   c: Context<{ Bindings: Env }>,
   identifier: string,
@@ -341,6 +367,12 @@ export async function enforceRateLimit(
     metricTier?: string;
     /** Counts in this instance's memory when the counter store is unavailable. */
     fallback?: InProcessRateLimiter;
+    /**
+     * Told, on a refusal the counter store decided, the earliest instant this
+     * identifier could be admitted again: refused requests are not counted,
+     * so only the previous window's weight decaying can admit it.
+     */
+    onRefused?: (admitAtMs: number) => void;
   } = {}
 ): Promise<void> {
   const kv = c.var.kv?.rateLimits;
@@ -402,6 +434,9 @@ export async function enforceRateLimit(
   c.header("X-RateLimit-Reset", Math.ceil(windowEndMs / 1000).toString());
 
   if (!admission.admitted) {
+    options.onRefused?.(
+      nextAdmissionAt({ maxRequests, cost: options.cost ?? 1, windowStart, windowMs, admission })
+    );
     const retryAfter = Math.max(1, Math.ceil((windowEndMs - now) / 1000));
     c.header("Retry-After", retryAfter.toString());
     getLogger().warn(
