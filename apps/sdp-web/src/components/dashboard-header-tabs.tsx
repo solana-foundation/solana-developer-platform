@@ -30,6 +30,21 @@ export interface DashboardHeaderTabsConfig {
 
 const EMPTY_HEADER_TAB_COUNTS: Record<string, number> = {};
 
+/** The strip's right edge while tabs sit past it: the last 2.5rem fade out. */
+const TAB_STRIP_FADE = "linear-gradient(to right, black calc(100% - 2.5rem), transparent)";
+
+/**
+ * The shell's tab row, which scrolls the strip sideways: the strip's parent when it scrolls on
+ * the x axis, or null when it doesn't. Only that one element is checked, so a page's own scroll
+ * container is never faded.
+ */
+function tabRowScroller(strip: HTMLElement): HTMLElement | null {
+  const row = strip.parentElement;
+  if (!row) return null;
+  const { overflowX } = getComputedStyle(row);
+  return overflowX === "auto" || overflowX === "scroll" ? row : null;
+}
+
 let headerTabCounts = EMPTY_HEADER_TAB_COUNTS;
 const headerTabCountListeners = new Set<() => void>();
 
@@ -118,21 +133,29 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTab]);
 
-  // While the tabs overflow, the list marks itself so its right edge fades: the hidden tabs read
-  // as scrollable. Runs after every render so it follows the strip mounting on a resize from
-  // mobile, and the sidebar opening, which changes the room the tabs have.
+  // While tabs sit past the strip's right edge, that edge fades so they read as scrollable; the
+  // fade goes once the strip is scrolled to its end. The shell's tab row does the scrolling, so
+  // that is the element measured and faded. Runs after every render so it follows the strip
+  // mounting on a resize from mobile, and the sidebar opening.
   useEffect(() => {
     const strip = stripRef.current;
     const list = strip?.querySelector<HTMLElement>('[role="tablist"]');
-    if (!strip || !list) return;
-    const measure = () => {
-      list.dataset.overflowing = String(list.scrollWidth > list.clientWidth + 1);
+    const scroller = strip ? tabRowScroller(strip) : null;
+    if (!list || !scroller) return;
+    const update = () => {
+      const hiddenWidth = scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft;
+      scroller.style.maskImage = hiddenWidth > 1 ? TAB_STRIP_FADE : "";
     };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(strip);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
     observer.observe(list);
-    return () => observer.disconnect();
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => {
+      observer.disconnect();
+      scroller.removeEventListener("scroll", update);
+      scroller.style.maskImage = "";
+    };
   });
 
   useEffect(() => {
@@ -169,7 +192,7 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
         {/* From md, 14px under a refresh label to its underline, 3px more than above it, as drawn;
           a phone draws 8px above and 11px under. The tab sets its padding inline, hence the
           important. */}
-        <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6.5 refresh:[&>*]:whitespace-nowrap max-md:refresh:[&_[role=tab]]:!pt-2 md:refresh:[&_[role=tab]]:!pb-3.5 data-[overflowing=true]:[mask-image:linear-gradient(to_right,black_calc(100%_-_2.5rem),transparent)]">
+        <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6.5 refresh:[&>*]:whitespace-nowrap max-md:refresh:[&_[role=tab]]:!pt-2 md:refresh:[&_[role=tab]]:!pb-3.5">
           {tabs.map((tab) => (
             <Tab key={tab.id} value={tab.id}>
               {tab.id in headerTabCountByTabId
