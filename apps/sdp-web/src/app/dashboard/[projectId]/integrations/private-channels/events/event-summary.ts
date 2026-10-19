@@ -1,4 +1,7 @@
-import type { PrivateChannelEventDisplayPayloadKey, PrivateChannelEventDto } from "@sdp/types";
+import type {
+  PrivateChannelEventDisplayPayloadKey,
+  PrivateChannelEventDto,
+} from "@sdp/types/private-channels";
 
 export type PrivateChannelEventSummaryKind =
   | "deposit"

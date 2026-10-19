@@ -6,7 +6,8 @@
  * actions and the derivations all build from the pinned response.
  */
 
-import type { DvpPartyRef, DvpTrade, DvpTradeLeg, DvpTradeStatus } from "./dvp-trade";
+import type { DvpTradeStatus } from "@sdp/types/dvp";
+import type { DvpPartyRef, DvpTrade, DvpTradeLeg } from "./dvp-trade";
 
 export const LEG_ESCROW_A = "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU";
 export const LEG_ESCROW_B = "6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y";

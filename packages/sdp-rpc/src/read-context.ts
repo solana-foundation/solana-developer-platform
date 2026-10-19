@@ -2,12 +2,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { RpcTransport } from "@solana/kit";
 import { fetchWithReadSocketRetry } from "./socket-retry";
 
-/**
- * Provider read transports sit on these, below any in-flight sharing and the
- * read context, so one re-send serves every joiner with the scoped payload.
- */
-export { fetchWithReadSocketRetry, withReadSocketRetry } from "./socket-retry";
-
 const reads = new AsyncLocalStorage<{
   minimumSlot: number;
   observations: number;

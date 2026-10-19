@@ -4,7 +4,7 @@ import {
   normalizeOrganizationRole,
   type OrganizationRole,
   type Permission,
-} from "@sdp/types";
+} from "@sdp/types/permissions";
 
 export interface DashboardCapabilities {
   canManageApiKeys: boolean;

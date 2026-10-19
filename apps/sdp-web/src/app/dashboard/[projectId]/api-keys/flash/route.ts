@@ -1,9 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  API_KEY_FLASH_COOKIE,
+  type ApiKeyFlash,
+  apiKeyFlashCookieOptions,
+} from "@/app/dashboard/[projectId]/api-keys/api-key-flash";
+import { unsealApiKeyFlash } from "@/app/dashboard/[projectId]/api-keys/api-key-flash-seal";
 import { requestProjectId } from "@/lib/sdp-api";
-import { API_KEY_FLASH_COOKIE, type ApiKeyFlash, apiKeyFlashCookieOptions } from "../api-key-flash";
-import { unsealApiKeyFlash } from "../api-key-flash-seal";
 
 async function clearFlashCookie(response: NextResponse) {
   response.cookies.set(

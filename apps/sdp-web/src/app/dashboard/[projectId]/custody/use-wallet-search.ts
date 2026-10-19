@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";

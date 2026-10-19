@@ -126,8 +126,9 @@ types (HOO-2033).
 - **Sources come from the table, never the caller.**
   `PaymentsRepository.transitionRampTransfer` applies the named entry as a
   compare-and-swap on status and type, so an illegal source matches zero rows,
-  the same answer a lost race gives. The settlement core logs that as
-  `sdp_api_ramp_settlement_refused`.
+  the same answer a lost race gives. The settlement core treats stale or lost
+  transitions as `ignored`; a settled event that lost to cancellation is
+  re-read and refused as `settled_after_cancel`.
 - **No terminal status is a source except `expired`**, which a provider
   observation revives.
 - **Only the settlement core writes through it so far.** Cancel, MoonPay quote
@@ -139,6 +140,16 @@ types (HOO-2033).
   even in a listed file.
 - **Add a transition to the table, not a source set to a call site.** Mirror
   what the writer allows today, and let `transitionRampTransfer` read it.
+
+## Ramps: webhook environment boundary
+
+The verified webhook endpoint supplies the environment for settlement. Stripe
+and MoonPay match the globally unique provider reference, then compare the
+transfer's project environment before applying an event. MoonPay's first
+reference claim checks that environment inside its UPDATE (HOO-2039 PR A).
+Cross-environment events and settlement after cancellation are `refused` with
+specific inbox reasons. Production parks them for review; sandbox discards
+them. Stale and final events remain `ignored`.
 
 ## Ramps: retired provider ids
 

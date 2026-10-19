@@ -1,6 +1,7 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
+import { Badge } from "@sdp/ui/badge";
 import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import {
@@ -19,7 +20,6 @@ import {
   formatWalletMeta,
 } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/[projectId]/custody/wallet-label-inline-editor";
-import { Badge } from "@/components/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useWalletSearch } from "./use-wallet-search";

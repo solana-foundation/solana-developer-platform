@@ -1,6 +1,6 @@
 import type { SpcAuthClient } from "@sdp/private-channels/auth";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { PrivateChannelUserRow } from "@/db/repositories";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import { createSpcCredentialCipher } from "@/lib/spc-credential-crypto";
 import type { KVPutOptions, KVStore } from "@/runtime/kv";
 import { generateEncryptionKey } from "@/services/encryption.service";
@@ -10,7 +10,8 @@ import { getSpcSession } from "./spc-session";
 // getSpcSession only needs PrivateChannelError from this package; stub it so importing
 // the package index doesn't pull in gateway.ts → @sdp/rpc/solana (an unresolved subpath
 // in the node test pool). Mirrors the cron tests' approach.
-vi.mock("@sdp/private-channels", () => ({
+vi.mock("@sdp/private-channels/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/private-channels/errors")>()),
   PrivateChannelError: class PrivateChannelError extends Error {
     constructor(
       public readonly code: string,

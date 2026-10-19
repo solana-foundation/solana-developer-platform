@@ -1,12 +1,11 @@
-import {
-  CUSTODY_PROVIDERS,
-  type CustodyWalletAggregate,
-  type PaymentsDashboardWallet,
-  type PaymentTransferBatch,
-  type PaymentTransferRecipient,
-  type PaymentTransferSummary,
-  type PaymentTransferType,
-} from "@sdp/types";
+import { CUSTODY_PROVIDERS, type CustodyWalletAggregate } from "@sdp/types/custody";
+import type {
+  PaymentsDashboardWallet,
+  PaymentTransferBatch,
+  PaymentTransferRecipient,
+  PaymentTransferSummary,
+  PaymentTransferType,
+} from "@sdp/types/payments";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parsePaymentApiErrorText } from "./payment-api-errors";

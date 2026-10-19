@@ -1,7 +1,7 @@
 "use client";
 
+import { Modal } from "@sdp/ui/modal";
 import type { ReactNode } from "react";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 
 interface TokenManagementModalShellProps {

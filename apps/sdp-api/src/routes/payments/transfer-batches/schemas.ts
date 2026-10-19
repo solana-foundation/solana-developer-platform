@@ -1,9 +1,9 @@
 import {
   PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
   PAYMENT_TRANSFER_BATCH_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { z } from "zod";
-import { paymentAmountSchema, paymentTokenSchema } from "../schemas";
+import { paymentAmountSchema, paymentTokenSchema } from "@/routes/payments/schemas";
 
 export const priorityFeeSchema = z.enum(["none", "low", "medium", "high", "auto"]);
 

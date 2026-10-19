@@ -17,12 +17,17 @@ import type { KeychainPrivyConfig } from "./types";
 export class KeychainPrivyAdapter extends BaseKeychainAdapter {
   readonly providerId = "privy";
 
+  readonly appId: string;
+  readonly requestDelayMs: number | undefined;
+
   private readonly config: KeychainPrivyConfig;
   private readonly signerByWalletId = new Map<string, Promise<PrivySigner>>();
 
   constructor(config: KeychainPrivyConfig) {
     super();
     this.config = config;
+    this.appId = config.appId;
+    this.requestDelayMs = config.requestDelayMs;
   }
 
   /**

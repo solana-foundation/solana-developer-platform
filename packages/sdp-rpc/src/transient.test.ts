@@ -6,7 +6,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SolanaError,
 } from "@solana/kit";
-import { solanaRpcError } from "./errors";
+import { RpcTimeoutError } from "./errors";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 
 async function kitHttpError(status: number, statusText: string): Promise<unknown> {
@@ -60,10 +60,7 @@ test("still classifies network-level failures as transient", () => {
   assert.equal(isTransientRpcError(new TypeError("fetch failed")), true);
   assert.equal(isTransientRpcError(new Error("socket hang up")), true);
   assert.equal(isTransientRpcError(new Error("read ECONNRESET")), true);
-  assert.equal(
-    isTransientRpcError(solanaRpcError("RPC request timed out after 25ms", { timedOut: true })),
-    true
-  );
+  assert.equal(isTransientRpcError(new RpcTimeoutError(25)), true);
   assert.equal(isTransientRpcError(new Error("503 Service Unavailable")), true);
   assert.equal(isTransientRpcError(new Error("Blockhash not found")), false);
 });

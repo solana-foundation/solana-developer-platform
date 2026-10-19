@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FetchResult } from "./payments-page.data";
 import {

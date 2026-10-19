@@ -20,21 +20,23 @@ describe("designModuleForPath", () => {
     ["/dashboard/wallets/setup", "wallets"],
     ["/dashboard/wallets/connections", null],
     ["/dashboard/wallets/wal_1/policy", null],
-    ["/dashboard/issuance", null],
+    ["/dashboard/issuance", "issuance"],
+    ["/dashboard/issuance/create", "issuance"],
+    ["/dashboard/issuance/tok_1", "issuance"],
+    ["/dashboard/issuance-archive", null],
   ])("puts %s in %s", (pathname, designModule) => {
     expect(designModuleForPath(pathname)).toBe(designModule);
   });
 });
 
 describe("isNewDesignPage", () => {
-  it.each([
-    "/dashboard/tokens",
-    "/dashboard/issuance",
-    "/dashboard/integrations/private-channels/setup",
-  ])("puts %s on NEW DESIGN alone", (pathname) => {
-    expect(isNewDesignPage(pathname, { newDesign: true })).toBe(true);
-    expect(isNewDesignPage(pathname, { newDesign: false })).toBe(false);
-  });
+  it.each(["/dashboard/tokens", "/dashboard/integrations/private-channels/setup"])(
+    "puts %s on NEW DESIGN alone",
+    (pathname) => {
+      expect(isNewDesignPage(pathname, { newDesign: true })).toBe(true);
+      expect(isNewDesignPage(pathname, { newDesign: false })).toBe(false);
+    }
+  );
 
   it("puts a module's page on its own flag, under NEW DESIGN", () => {
     const contacts = "/dashboard/payments/counterparty";

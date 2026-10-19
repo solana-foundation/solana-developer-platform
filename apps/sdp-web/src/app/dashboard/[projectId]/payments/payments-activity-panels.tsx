@@ -1,7 +1,7 @@
 "use client";
 
+import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { type ReactNode, useState } from "react";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 
 type ActivityView = "transfers" | "batches";
 

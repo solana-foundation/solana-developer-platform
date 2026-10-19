@@ -1,4 +1,7 @@
-import { normalizeAllowedOperations, upgradeStoredAllowedOperations } from "@sdp/types";
+import {
+  normalizeAllowedOperations,
+  upgradeStoredAllowedOperations,
+} from "@sdp/types/allowed-operations";
 /**
  * API Key Service
  *
@@ -7,14 +10,9 @@ import { normalizeAllowedOperations, upgradeStoredAllowedOperations } from "@sdp
 
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  ApiKeyStatus,
-  ApiKeyWalletScope,
-  Permission,
-} from "@sdp/types";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
+import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { ApiKeyRole, Permission } from "@sdp/types/permissions";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";

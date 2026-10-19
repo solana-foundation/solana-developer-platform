@@ -1,5 +1,5 @@
 import { importJWK, importPKCS8, SignJWT } from "jose";
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,

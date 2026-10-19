@@ -2,8 +2,8 @@ import type {
   PrivateChannelEventFamily,
   PrivateChannelEventStatus,
   PrivateChannelEventType,
-} from "@sdp/types";
-import type { AppDb } from "@/db";
+} from "@sdp/types/private-channels";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import { asPostgresJsonObject } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import type {

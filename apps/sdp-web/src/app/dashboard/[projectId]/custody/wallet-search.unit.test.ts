@@ -1,4 +1,4 @@
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { describe, expect, it } from "vitest";
 import { filterWallets } from "./wallet-search";
 

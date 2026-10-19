@@ -1,11 +1,10 @@
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
-  Counterparty,
-  CounterpartyAccount,
   PaymentRampQuoteDeliveryMode,
   PaymentRecurringPayment,
   PaymentTransferRecipient,
-  RampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   CREATED_BY,
   DEMO_TOKENS,

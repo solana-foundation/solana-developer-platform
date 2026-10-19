@@ -1,9 +1,12 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
-import { Select, SelectItem } from "@/components/ui/select";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Select, SelectItem } from "@sdp/ui/select";
+import {
+  toWalletIdentity,
+  WalletIdentityBadge,
+} from "@/app/dashboard/[projectId]/issuance/wallet-identity";
 import { useTranslations } from "@/i18n/provider";
-import { toWalletIdentity, WalletIdentityBadge } from "../wallet-identity";
 import {
   getSignerWalletOptionLabel,
   getSignerWalletUnavailableReason,

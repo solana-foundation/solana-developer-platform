@@ -1,15 +1,15 @@
 "use client";
 
-import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import { Button } from "@sdp/ui/button";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { Loader2Icon, ShieldAlertIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { WizardFrame } from "@/components/wizard-frame";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";

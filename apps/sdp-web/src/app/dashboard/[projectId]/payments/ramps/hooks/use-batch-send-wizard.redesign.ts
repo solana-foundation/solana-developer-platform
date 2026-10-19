@@ -1,14 +1,13 @@
 "use client";
 
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
 import {
-  type CounterpartyAccountSummary,
-  type CustodyWalletTokenBalance,
   isWellKnownTokenSymbol,
-  type PaymentsDashboardWallet,
   type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
   wellKnownMint,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import {
   addDecimalFixedPoint,
   decimalFixedPoint,
@@ -25,18 +24,24 @@ import {
   estimateTransferBatch,
   fetchBatchRecipients,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import type { BulkImportRow } from "@/app/dashboard/[projectId]/payments/ramps/bulk-import.redesign";
+import {
+  batchSendSchema,
+  MAX_BATCH_RECIPIENTS,
+  ONCHAIN_AMOUNT_PATTERN,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
+import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { BulkImportRow } from "../bulk-import.redesign";
-import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
-import { walletBalanceAssetOptions } from "../wallet-options";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard.redesign";
 
@@ -469,7 +474,10 @@ export function useBatchSendWizard({
       } else {
         toast.success(t("DashboardPayments.batchSend.resultSubmitted"), {
           id: toastId,
-          description: t("DashboardPayments.batchSend.status", { status }),
+          // Still processing: the key is kept, so a resend returns this batch (APE-461).
+          description: isMovementInFlight(status)
+            ? t("Shared.idempotency.processingCheckStatus")
+            : t("DashboardPayments.batchSend.status", { status }),
           position: "bottom-right",
         });
       }

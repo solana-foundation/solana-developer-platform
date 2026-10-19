@@ -1,5 +1,5 @@
 import type { Context, Next } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { type ApiKeyContext, getAuth } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { findMemberProject } from "@/middleware/project-context";

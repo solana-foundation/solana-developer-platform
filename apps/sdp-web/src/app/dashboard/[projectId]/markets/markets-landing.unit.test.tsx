@@ -12,6 +12,7 @@ const flagMocks = vi.hoisted(() => ({
   dvp: vi.fn(async () => true),
 }));
 vi.mock("@/flags", () => flagMocks);
+vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,

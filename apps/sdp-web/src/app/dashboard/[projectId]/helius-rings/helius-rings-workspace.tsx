@@ -1,8 +1,8 @@
 "use client";
 
+import { Callout } from "@sdp/ui/callout";
+import { Card, CardContent } from "@sdp/ui/card";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Callout } from "@/components/ui/callout";
-import { Card, CardContent } from "@/components/ui/card";
 import { useTranslations } from "@/i18n/provider";
 import { ActivityCard } from "./activity-card";
 import { RingsConfigurationCard } from "./configuration-card";

@@ -139,6 +139,25 @@ jobs:
           git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
+      # Scripts sit outside every TypeScript program, and the diff-scoped lint above never re-reads
+      # one when the package it imports changes its exports, so these are linted in full every run.
+      - name: Lint script imports
+        run: |
+          git ls-files -z ':(glob)**/*.mjs' ':(glob)**/*.cjs' ':(glob)**/scripts/**' ':(glob).github/scripts/**' ':(exclude,glob)examples/**' \
+            | xargs -0 pnpm exec biome lint --no-errors-on-unmatched --diagnostic-level=error
+
+      # A package.json edit changes what every file in its workspace may import, and the
+      # diff-scoped lint re-reads only the manifest, so the dependency rule runs over all sources.
+      - name: Lint declared dependencies
+        run: pnpm exec biome lint --only=correctness/noUndeclaredDependencies --diagnostic-level=error apps packages
+
+      # Biome's noRestrictedImports does not read vi.mock-family strings or typeof import() type
+      # queries, and its options are replaced per override, so every copy must carry the ../ group.
+      - name: Check parent-relative imports
+        run: |
+          if git grep -nE "(vi\.(mock|doMock|unmock|importActual|importMock)|import)\(['\"]\.\./" -- ':(glob)apps/*/src/**' ':(glob)apps/*/scripts/**' ':(glob)packages/*/src/**' ':(exclude,glob)**/generated/**'; then exit 1; fi
+          jq -e '[.. | objects | .noRestrictedImports? | objects] | length == 5 and all(.options.patterns | any(.group | index("../**")))' biome.json
+
       - name: Check pinned dependencies
         run: pnpm check:pinned-dependencies
 
@@ -237,7 +256,7 @@ jobs:
           changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
           printf '%s\n' "$changed"
           detect() {
-            if printf '%s\n' "$changed" | grep -qE "$2"; then
+            if printf '%s\n' "$changed" | grep -E "$2" >/dev/null; then
               echo "$1=true" >> "$GITHUB_OUTPUT"
             else
               echo "$1=false" >> "$GITHUB_OUTPUT"
@@ -993,13 +1012,20 @@ jobs:
           - name: Issuance E2E (allowlist)
             issuance_group: allowlist
             artifact_suffix: issuance-allowlist
+          - name: Issuance E2E (new design)
+            issuance_group: redesign
+            new_design_issuance: "true"
+            artifact_suffix: issuance-redesign
     env:
       E2E_AFFECTED: ${{ needs.unit_test_scope.outputs.e2e }}
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED,SDP_FLAG_NEW_DESIGN_ISSUANCE
       ISSUANCE_ENABLED: "true"
+      # issuance.e2e.spec.ts drives the previous Issuance design, which production still serves
+      # (NEW DESIGN is off there). A matrix entry sets new_design_issuance to run the new one.
+      SDP_FLAG_NEW_DESIGN_ISSUANCE: ${{ matrix.new_design_issuance || 'false' }}
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"
@@ -1159,17 +1185,17 @@ jobs:
     permissions:
       actions: read
     steps:
-      - name: Require all five issuance groups green
+      - name: Require all six issuance groups green
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-            --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist)\\)$")) | .conclusion]')
+            --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist|new design)\\)$")) | .conclusion]')
           count=$(jq 'length' <<<"${conclusions}")
           green=$(jq '[.[] | select(. == "success")] | length' <<<"${conclusions}")
-          if [ "${count}" -ne 5 ] || [ "${green}" -ne 5 ]; then
-            echo "Expected 5 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
+          if [ "${count}" -ne 6 ] || [ "${green}" -ne 6 ]; then
+            echo "Expected 6 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
             exit 1
           fi
-          echo "All 5 issuance e2e groups passed."
+          echo "All 6 issuance e2e groups passed."

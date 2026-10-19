@@ -1,6 +1,12 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { SearchInput } from "@sdp/ui/search-input";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { LayoutGridIcon, RotateCwIcon, Rows3Icon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -22,23 +28,11 @@ import {
   truncateMiddle,
 } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
-import { Button } from "@/components/ui/button";
-import { SearchInput } from "@/components/ui/search-input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useDebounce } from "@/lib/use-debounce";
-import { cn } from "@/lib/utils";
 import { syncWalletFavorites, type WalletFavorite } from "@/lib/wallet-favorites";
 import { useWalletFavoriteToggle } from "./use-wallet-favorite-toggle";
 import { WalletActionsMenu } from "./wallet-actions-menu.redesign";

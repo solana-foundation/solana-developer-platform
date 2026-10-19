@@ -1,20 +1,17 @@
 // @vitest-environment jsdom
 
-import type {
-  CounterpartyAccount,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
-} from "@sdp/types";
-import { SOL_MINT } from "@sdp/types";
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetTransferIdempotencyStateForTests } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { resetTransferIdempotencyStateForTests } from "../../transfer-idempotency";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard.redesign";
 
 const mocks = vi.hoisted(() => ({

@@ -8,8 +8,8 @@
 import type { SolanaSigner } from "@solana/keychain-core";
 import { createUtilaSigner } from "@solana/keychain-utila";
 import type { Address, TransactionSigner } from "@solana/kit";
-import { denormalizeUtilaWalletId } from "../provider-wallet-ids";
-import { SigningError } from "../signing";
+import { denormalizeUtilaWalletId } from "#/provider-wallet-ids";
+import { SigningError } from "#/signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainUtilaConfig } from "./types";
 

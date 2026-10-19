@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@sdp/ui/card";
 import { Loader2, RefreshCw } from "lucide-react";
 import { formatCurrencyAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { ProjectRing, RingsWallet, RingsWalletSync } from "./helius-rings.data";
 import {

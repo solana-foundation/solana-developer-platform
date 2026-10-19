@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { Loader2 } from "lucide-react";
 import { AnimatePresence, domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 function UnsavedChangesMessage({ dirty, errorCount }: { dirty: boolean; errorCount: number }) {

@@ -147,22 +147,32 @@ test.describe
     test("canonicalizes an unambiguous provider-ID bookmark to its internal wallet URL", async ({
       page,
     }) => {
-      const { otherApi, otherProjectId, otherWallet } = fixture;
+      const { api, projectId, bookmarkWallet } = fixture;
       await expect(
-        otherApi.get(`/v1/payments/wallets/${encodeURIComponent(otherWallet.walletId)}/balances`)
+        api.get(`/v1/payments/wallets/${encodeURIComponent(bookmarkWallet.walletId)}/balances`)
       ).rejects.toThrow("(404)");
       const data = balanceDataSchema.parse(
-        await otherApi.get<unknown>(
-          `/v1/payments/wallets/${encodeURIComponent(otherWallet.id)}/balances`
+        await api.get<unknown>(
+          `/v1/payments/wallets/${encodeURIComponent(bookmarkWallet.id)}/balances`
         )
       );
       expect(data.walletBalances).not.toHaveProperty("walletId");
-      const walletBalances = parseWalletBalanceResponse({ data }, otherWallet.id);
-      expect(walletBalances.custodyWalletId).toBe(otherWallet.id);
-      expect(walletBalances.address).toBe(otherWallet.publicKey);
-      const newDesignWallets =
-        process.env.SDP_FLAG_NEW_DESIGN === "true" &&
-        process.env.SDP_FLAG_NEW_DESIGN_WALLETS === "true";
+      const walletBalances = parseWalletBalanceResponse({ data }, bookmarkWallet.id);
+      expect(walletBalances.custodyWalletId).toBe(bookmarkWallet.id);
+      expect(walletBalances.address).toBe(bookmarkWallet.publicKey);
+      const nativeSol = walletBalances.balances.find(isSolBalance);
+      expect(nativeSol).toBeDefined();
+      expect(Number(nativeSol?.uiAmount)).toBeGreaterThan(0);
+      expect(Number(nativeSol?.amount)).toBeGreaterThan(0);
+      await gotoProjectPage(
+        page,
+        projectId,
+        `/dashboard/wallets/${encodeURIComponent(bookmarkWallet.id)}`
+      );
+      await expect(
+        page.getByRole("heading", { name: "Wallet Identity Bookmark", exact: true })
+      ).toBeVisible();
+      const newDesignWallets = await page.locator("[data-wallet-detail]").isVisible();
       const bookmarkParams = new URLSearchParams({ label: "Wallet & Treasury" });
       bookmarkParams.append("filter", "a");
       bookmarkParams.append("filter", "b");
@@ -170,10 +180,10 @@ test.describe
       const bookmarkedQuery = `?${bookmarkParams}`;
       await gotoProjectPage(
         page,
-        otherProjectId,
-        `/dashboard/wallets/${encodeURIComponent(otherWallet.walletId)}${bookmarkedQuery}`
+        projectId,
+        `/dashboard/wallets/${encodeURIComponent(bookmarkWallet.walletId)}${bookmarkedQuery}`
       );
-      const canonicalPath = projectHref(otherProjectId, `/dashboard/wallets/${otherWallet.id}`);
+      const canonicalPath = projectHref(projectId, `/dashboard/wallets/${bookmarkWallet.id}`);
       const expectCanonicalBookmark = async () => {
         await expect(page).toHaveURL(
           (url) =>
@@ -196,7 +206,7 @@ test.describe
       };
       await expectCanonicalBookmark();
       await expect(
-        page.getByRole("heading", { name: "Wallet Identity Other Project", exact: true })
+        page.getByRole("heading", { name: "Wallet Identity Bookmark", exact: true })
       ).toBeVisible();
       await page.reload();
       await expectCanonicalBookmark();

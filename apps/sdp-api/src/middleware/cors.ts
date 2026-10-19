@@ -1,4 +1,4 @@
-import { getSdpDocsOrigin } from "@sdp/types";
+import { getSdpDocsOrigin } from "@sdp/types/site";
 import { cors } from "hono/cors";
 import type { Env } from "@/types/env";
 

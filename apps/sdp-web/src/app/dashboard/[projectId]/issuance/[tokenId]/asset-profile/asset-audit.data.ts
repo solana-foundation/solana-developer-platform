@@ -1,6 +1,6 @@
 "use client";
 
-import type { AssetAuditEvent } from "@sdp/types";
+import type { AssetAuditEvent } from "@sdp/types/audit";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 
 export interface AssetAuditHistory {

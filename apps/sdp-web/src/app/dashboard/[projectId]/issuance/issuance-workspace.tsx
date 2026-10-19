@@ -1,6 +1,10 @@
 "use client";
 
 import { Popover } from "@base-ui/react/popover";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { SearchInput } from "@sdp/ui/search-input";
 import { Info, PlusIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -16,13 +20,9 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { SearchInput } from "@/components/ui/search-input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { IssuanceFilterPopover } from "./issuance-filter-popover";
 import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
 import type { IssuanceFilterState, IssuanceListQuery } from "./issuance-list-query";

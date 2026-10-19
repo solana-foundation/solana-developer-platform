@@ -12,7 +12,7 @@
  * blocked submit in either state.
  */
 
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CUSTOM, useDvpLeg } from "./use-dvp-leg";

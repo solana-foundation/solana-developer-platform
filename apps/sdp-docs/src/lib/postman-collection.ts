@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { POSTMAN_COLLECTION_FILENAME } from "../../scripts/lib/public-openapi.mjs";
+import { POSTMAN_COLLECTION_FILENAME } from "@/scripts/lib/public-openapi.mjs";
 
 const collectionPath = path.join(process.cwd(), "public", "postman", POSTMAN_COLLECTION_FILENAME);
 

@@ -1,4 +1,4 @@
-import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { z } from "zod";
 
 export const basicsSchema = z.object({

@@ -1,4 +1,4 @@
-import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types";
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import {
   type RampProviderFlagReads,

@@ -1,8 +1,8 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { createContext, type ReactNode, useContext } from "react";
 import type { RampDirection, SelectedRampPair } from "@/lib/ramps";
 

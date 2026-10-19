@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
-import type { PaymentRampQuote, PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types";
+import type {
+  PaymentRampQuote,
+  PaymentTransferStatus,
+  PaymentTransferSummary,
+} from "@sdp/types/payments";
 import { address } from "@solana/kit";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";

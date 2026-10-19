@@ -2,7 +2,7 @@ import {
   resolveSdpReleaseChannel,
   SDP_RELEASE_CHANNEL_NAMES,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import { z } from "zod";
 import { findSdpApiBaseUrl, type SdpApiBaseUrlEnv } from "@/lib/sdp-api-base-url";
 

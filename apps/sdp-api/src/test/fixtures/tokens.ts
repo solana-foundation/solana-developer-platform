@@ -2,7 +2,8 @@
  * Token test fixtures
  */
 
-import type { CachedApiKey, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
 import { TEST_ORG, TEST_USER } from "./organizations";
 
 export const TEST_PROJECT = {

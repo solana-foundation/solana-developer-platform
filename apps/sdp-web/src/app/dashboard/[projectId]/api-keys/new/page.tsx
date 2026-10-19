@@ -1,10 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchApiKeyAuthoringWallets } from "@/app/dashboard/[projectId]/api-keys/api-key-authoring.data";
+import { ApiKeyAuthoringWorkspace } from "@/app/dashboard/[projectId]/api-keys/api-key-authoring-workspace";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { fetchApiKeyAuthoringWallets } from "../api-key-authoring.data";
-import { ApiKeyAuthoringWorkspace } from "../api-key-authoring-workspace";
 
 export const dynamic = "force-dynamic";
 

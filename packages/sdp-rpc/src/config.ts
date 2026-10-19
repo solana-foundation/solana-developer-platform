@@ -1,4 +1,4 @@
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
 import type { RpcEnv } from "./types";
 
 export interface SolanaConfig {

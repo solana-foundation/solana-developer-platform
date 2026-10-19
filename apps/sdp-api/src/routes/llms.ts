@@ -1,17 +1,16 @@
+import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import {
   DEFAULT_SDP_AI_GUIDE_URL,
   DEFAULT_SDP_API_URL,
   DEFAULT_SDP_DOCS_URL,
-  resolveSdpReleaseChannel,
-  type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/site";
 import { Hono } from "hono";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
 
-const llms = new Hono<{ Bindings: Env }>();
+export const llms = new Hono<{ Bindings: Env }>();
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
@@ -97,5 +96,3 @@ llms.get("/", (c) => {
   c.header("Cache-Control", "public, max-age=3600");
   return c.body(body);
 });
-
-export default llms;

@@ -1,14 +1,13 @@
-import {
-  OFFRAMP_SUPPORT,
-  ONRAMP_SUPPORT,
-  type PaymentRampEstimate,
-  type PaymentRampQuote,
-  type RampProviderEstimateResult,
-  type RampProviderId,
-} from "@sdp/types";
+import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type {
+  PaymentRampEstimate,
+  PaymentRampQuote,
+  RampProviderEstimateResult,
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
-import { getRampProviderLabel } from "../ramps";
+import { getRampProviderLabel } from "@/lib/ramps";
 import {
   DEMO_TOKENS,
   type DemoTokenKey,
@@ -1019,7 +1018,7 @@ export function demoFlowRead(
   segments: readonly string[],
   params: URLSearchParams,
   world: DemoWorld,
-  now: Date
+  _now: Date
 ): DemoAnswer | undefined {
   const requirementsRead = matchesShape(segments, "counterparties/*/requirements");
   const walletSelectorRead =

@@ -1,7 +1,11 @@
 "use client";
 
 import { toast } from "sonner";
-import type { CreatedTransfer, CreateTransferInput, Translate } from "../payments-workspace.data";
+import type {
+  CreatedTransfer,
+  CreateTransferInput,
+  Translate,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 
 /** Present the result of funding one existing off-ramp transfer. */
 export async function submitOfframpDeposit(

@@ -1,6 +1,6 @@
 import { getBase58Decoder, signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { createPostgresDvpLegTransferRepository } from "@/db/repositories/dvp-leg-transfer.repository";
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";

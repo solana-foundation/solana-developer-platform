@@ -1,7 +1,7 @@
 import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -16,8 +16,6 @@ import {
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 
-export { SOL_MINT } from "@/services/payment-operation.service";
-
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
 const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] as const;
@@ -26,6 +24,9 @@ export type TokenLabelsByMint = ReadonlyMap<string, string>;
 
 interface GetSplTokenBalancesOptions {
   tokenLabelsByMint?: TokenLabelsByMint;
+  /** Refuse answers from chain state older than this slot (the node errors instead). */
+  minContextSlot?: bigint;
+  abortSignal?: AbortSignal;
 }
 
 function issuedTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string | null {
@@ -97,9 +98,13 @@ export async function getSplTokenBalances(
         .getTokenAccountsByOwner(
           owner,
           { programId },
-          { encoding: "jsonParsed", commitment: "confirmed" }
+          {
+            encoding: "jsonParsed",
+            commitment: "confirmed",
+            minContextSlot: options?.minContextSlot,
+          }
         )
-        .send()
+        .send({ abortSignal: options?.abortSignal })
     )
   );
 

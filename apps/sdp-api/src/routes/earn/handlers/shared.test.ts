@@ -1,4 +1,4 @@
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { resolveDepositSwapRequest } from "./shared";
 

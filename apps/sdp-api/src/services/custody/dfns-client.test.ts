@@ -1,5 +1,9 @@
 import { generateKeyPairSync } from "node:crypto";
-import { createDfnsApiClient, createIbmHavenApiClient, type DfnsEnv } from "@sdp/custody/dfns";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  type DfnsEnv,
+} from "@sdp/custody/dfns/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const API_BASE_URL = "https://api.dfns.test";

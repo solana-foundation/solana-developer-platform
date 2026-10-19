@@ -1,4 +1,4 @@
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { address, getAddressEncoder } from "@solana/kit";
 import type { WisdomTreeChainReader } from "./chain";
 import { TRANSFER_HOOK_EXECUTE_DISCRIMINATOR } from "./transfer-hook";

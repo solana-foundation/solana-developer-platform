@@ -3,12 +3,12 @@
 import { useCallback, useRef } from "react";
 import useSWR from "swr";
 import { z } from "zod";
+import { earnQueryKeys } from "@/app/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import {
   walletBalanceResponseSchema,
   walletTokenBalanceSchema,
 } from "@/lib/wallet-balance-response";
-import { earnQueryKeys } from "../earn-query-key";
 
 /**
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the

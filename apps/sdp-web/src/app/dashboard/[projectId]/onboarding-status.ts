@@ -1,4 +1,4 @@
-import type { OrganizationOnboardingSetup } from "@sdp/types";
+import type { OrganizationOnboardingSetup } from "@sdp/types/organizations";
 
 export type OnboardingStatusResponse = {
   linked: boolean;

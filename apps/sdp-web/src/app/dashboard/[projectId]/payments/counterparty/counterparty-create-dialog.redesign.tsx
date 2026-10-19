@@ -1,7 +1,7 @@
 "use client";
 
-import type { Counterparty } from "@sdp/types";
-import { Modal } from "@/components/ui/modal";
+import type { Counterparty } from "@sdp/types/counterparties";
+import { Modal } from "@sdp/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { CounterpartyCreateProvider } from "./counterparty-create-context.redesign";
 import { CounterpartyCreatePage } from "./counterparty-create-page.redesign";

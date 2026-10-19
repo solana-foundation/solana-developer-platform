@@ -1,12 +1,12 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES,
   ONCHAIN_TRANSFER_SETTLED_STATUSES,
   type PaymentTransferBatchRecipientStatus,
   type PaymentTransferBatchStatus,
   type PaymentTransferStatus,
-  type SdpEnvironment,
   type TransferChainVerdictStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 
 /**
  * Rolls member statuses (chunk transfers or recipient rows) up into the parent

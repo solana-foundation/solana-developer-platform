@@ -8,7 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   runWithoutDatabaseIdentity,
   runWithSystemDatabaseIdentity,

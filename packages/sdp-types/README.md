@@ -23,7 +23,8 @@ This package is **internal only** and not published to npm. If you're building a
 ### Usage
 
 ```typescript
-import { CustodyProvider, Permission, OrganizationRole } from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import type { PaymentRequest } from "@sdp/types/payments";
 ```
 
 ### File Structure
@@ -40,16 +41,17 @@ packages/sdp-types/
 │   ├── provider-access.ts
 │   ├── sessions.ts
 │   ├── site.ts
-│   ├── tokens.ts
-│   └── index.ts       # Re-exports everything
+│   └── tokens.ts
 ├── package.json
 └── tsconfig.json
 ```
 
 ### Adding New Types
 
-1. Create a new file in `src/` (e.g. `src/my-domain.ts`)
-2. Export from `src/index.ts`
+1. Create a new file in `src/` (e.g. `src/my-domain.ts`).
+2. Add it to `package.json` `exports` as `"./my-domain"`, with the same `types` / `import` /
+   `default` targets as the other entries. Callers import `@sdp/types/my-domain`; there is no
+   root entry (ADR 0010).
 
 ### Validation
 

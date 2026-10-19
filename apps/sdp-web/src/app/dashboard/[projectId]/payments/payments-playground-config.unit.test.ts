@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getMessages, translate } from "@/i18n/messages";
+import { getMessages } from "@/i18n/messages";
+import { translate } from "@/i18n/translate";
 import { buildPaymentsPlaygroundEndpointConfigs } from "./payments-playground-config";
 
 describe("buildPaymentsPlaygroundEndpointConfigs", () => {

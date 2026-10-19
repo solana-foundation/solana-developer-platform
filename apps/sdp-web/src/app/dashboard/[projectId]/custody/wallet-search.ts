@@ -1,4 +1,4 @@
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 
 export const WALLET_SEARCH_QUERY_PARAM = "query";
 export const WALLET_SEARCH_MAX_LENGTH = 200;

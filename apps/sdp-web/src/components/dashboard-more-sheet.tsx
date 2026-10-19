@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import {
   BlocksIcon,
   CircleDotDashedIcon,
@@ -21,7 +22,6 @@ import {
   isDashboardNavItemActive,
 } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 
 type MoreItem = {
   label: string;

@@ -4,7 +4,7 @@
  * Configuration types for Solana Keychain signing backends.
  * These map to the underlying @solana/keychain-* package configs.
  */
-import type { DfnsApiClient } from "../dfns/client";
+import type { DfnsApiClient } from "#/dfns/client";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Fireblocks Configuration

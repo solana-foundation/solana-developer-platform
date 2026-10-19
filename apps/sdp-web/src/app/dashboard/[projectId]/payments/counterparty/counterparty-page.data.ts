@@ -1,11 +1,13 @@
 import type {
   Counterparty,
-  CounterpartyAccountSummary,
   CounterpartyResponse,
   ListCounterpartiesResponse,
+} from "@sdp/types/counterparties";
+import type { PaginatedResponse } from "@sdp/types/pagination";
+import type {
+  CounterpartyAccountSummary,
   ListProjectCounterpartyAccountsResponse,
-  PaginatedResponse,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const COUNTERPARTY_PAGE_SIZE = 10;

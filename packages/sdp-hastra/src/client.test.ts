@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import type { EarnRuntimeContext, EarnVaultInstruction } from "@sdp/earn/types";
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
-import { wellKnownMint } from "@sdp/types";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {

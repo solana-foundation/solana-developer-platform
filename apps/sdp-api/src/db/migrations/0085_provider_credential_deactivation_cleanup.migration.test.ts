@@ -3,13 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
-import { seedOrgProject } from "@/test/helpers/migration-db";
-import { seedTestDatabase } from "@/test/mocks/db";
 import {
   runPostgresMigrations,
   splitSqlStatements,
-} from "../../../scripts/lib/run-postgres-migrations.mjs";
+} from "@/scripts/lib/run-postgres-migrations.mjs";
+import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
+import { seedOrgProject } from "@/test/helpers/migration-db";
+import { seedTestDatabase } from "@/test/mocks/db";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const migrationFile = "0085_provider_credential_deactivation_cleanup.sql";

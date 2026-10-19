@@ -10,7 +10,10 @@
 
 import { confirmTransaction, type SolanaRpc } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
-import type { PrivateChannelDepositRepository, PrivateChannelDepositRow } from "@/db/repositories";
+import type {
+  PrivateChannelDepositRepository,
+  PrivateChannelDepositRow,
+} from "@/db/repositories/private-channel-deposit.repository";
 
 /**
  * Confirm a broadcast deposit on its chain and persist the outcome:

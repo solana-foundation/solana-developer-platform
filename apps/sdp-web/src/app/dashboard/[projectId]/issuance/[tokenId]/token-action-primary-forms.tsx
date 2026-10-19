@@ -1,8 +1,8 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
 import type { Dispatch, SetStateAction } from "react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { TokenActionCard } from "./token-action-card";
 import { ActionField } from "./token-action-field";

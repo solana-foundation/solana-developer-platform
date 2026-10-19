@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as feePayment from "@sdp/fee-payment";
-import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/fee-payment";
+import { createFeePaymentAdapter } from "@sdp/fee-payment";
+import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
@@ -18,7 +19,7 @@ import {
 } from "@solana/kit";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { ProjectService } from "@/services/project.service";
 import {

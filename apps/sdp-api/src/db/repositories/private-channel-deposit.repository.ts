@@ -2,8 +2,8 @@ import type {
   PrivateChannelDeposit,
   PrivateChannelTransferContext,
   PrivateChannelTransferStatus,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/types/private-channels";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelDepositId(): string {
   return `dep_${crypto.randomUUID()}`;

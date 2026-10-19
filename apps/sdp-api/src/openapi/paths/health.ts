@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
-import { healthReadyResponseSchema, healthResponseSchema } from "../schemas";
+import { healthReadyResponseSchema, healthResponseSchema } from "@/openapi/schemas/health";
 import { jsonContent } from "./helpers";
 
 export function registerHealthPaths(registry: OpenAPIRegistry) {

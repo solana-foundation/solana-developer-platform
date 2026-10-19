@@ -1,4 +1,4 @@
-import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {
@@ -104,7 +104,11 @@ describe("live funding wallet balances", () => {
     ["missing address", { custodyWalletId: "cwlt_requested", balances: [] }],
     [
       "malformed balance",
-      { custodyWalletId: "cwlt_requested", address: "address", balances: [{ token: "SOL" }] },
+      {
+        custodyWalletId: "cwlt_requested",
+        address: "address",
+        balances: [{ token: WELL_KNOWN_TOKENS.SOL.symbol }],
+      },
     ],
   ])("rejects a live balance response with %s", async (_condition, walletBalances) => {
     stubResponse({ data: { walletBalances } });

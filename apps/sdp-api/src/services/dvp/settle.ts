@@ -5,8 +5,8 @@
  * fees and ATA rent; closing never selects or provisions another wallet.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_CLOSE_REFUSAL } from "@sdp/types";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { DVP_CLOSE_REFUSAL, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   appendTransactionMessageInstructions,
   createNoopSigner,
@@ -21,9 +21,10 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
+import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { badRequest, conflict, transactionFailed } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -149,7 +150,7 @@ export async function closeDvpTrade(
   // After the local refusals, so a trade the row already rules out is answered
   // without a chain read, and an unreachable RPC cannot mask that answer. Before
   // the custody signer, so a refusal here never calls the provider.
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createRpc(env);
   const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
     a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
     b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
@@ -204,7 +205,7 @@ export async function closeDvpTrade(
       : buildCancelInstruction(trade, atas, signer),
   ];
 
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
@@ -301,14 +302,14 @@ export async function closeDvpTrade(
  */
 async function closeOutcome(
   trades: ReturnType<typeof createDvpTradeRepository>,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: ReturnType<typeof createRpc>,
   tradeId: string,
   action: DvpCloseAction,
   closeSignature: Signature
 ): Promise<boolean> {
-  let confirmation: Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>;
+  let confirmation: Awaited<ReturnType<typeof confirmTransaction>>;
   try {
-    confirmation = await solanaRpc.confirmTransaction(rpc, closeSignature, {
+    confirmation = await confirmTransaction(rpc, closeSignature, {
       timeoutMs: CLOSE_CONFIRM_TIMEOUT_MS,
     });
   } catch (error) {

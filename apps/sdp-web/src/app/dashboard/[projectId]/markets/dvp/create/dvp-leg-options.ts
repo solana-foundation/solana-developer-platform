@@ -3,7 +3,7 @@ import {
   SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKENS,
   type WellKnownToken,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import type { DvpCreateOption } from "./dvp-create.data";
 
 /**

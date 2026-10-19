@@ -1,13 +1,12 @@
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
-  COUNTERPARTY_ENTITY_TYPES,
-  OFFRAMP_CRYPTO_RAILS,
-  ONRAMP_CRYPTO_RAILS,
-  PERSISTED_RAMP_PROVIDERS,
   paymentSubscriptionCollectionAttemptMetadataSchema,
-  RAMP_PROVIDERS,
   RAMPS_MEMO_LIMITS,
-  UNIFIED_TRANSACTION_MODULE_CONTRACTS,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
+import { z } from "zod";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -21,6 +20,7 @@ import {
   recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
 } from "@/routes/payments/recurring-payments/schemas";
+import { transferIdParamsSchema as transferIdParamsSchemaBase } from "@/routes/payments/schemas";
 import {
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
@@ -57,7 +57,6 @@ import {
   transferTypeSchema as transferTypeSchemaBase,
 } from "@/routes/payments/transfers/schemas";
 import { walletIdParamsSchema as walletIdParamsSchemaBase } from "@/routes/payments/wallet-balances/schemas";
-import { transferIdParamsSchema as transferIdParamsSchemaBase } from "../../routes/payments/schemas";
 import {
   base64Schema,
   custodyWalletIdParamSchema,
@@ -68,7 +67,6 @@ import {
   transferIdParamSchema,
   walletIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 import { preparedTransactionSchema } from "./issuance";
 

@@ -1,6 +1,6 @@
 /* biome-ignore-all lint/security/noSecrets: Public Solana fixture account; no private keys. */
 import { expect, type Page, test } from "@playwright/test";
-import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types";
+import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types/payments";
 import { Client } from "pg";
 import { z } from "zod";
 import { projectHref } from "@/lib/dashboard-project-path";

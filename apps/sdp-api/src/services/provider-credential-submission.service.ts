@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { Context } from "hono";
-import { type DatabaseClient, getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";

@@ -1,20 +1,24 @@
-import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { isEarnProviderId } from "@sdp/earn";
+import { providerNotConfigured } from "@sdp/earn/errors";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
-import { isVaultDirectDepositEnabled, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type EarnProviderId,
   earnDepositSlippagePolicy,
   earnDepositStyle,
+  isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { getOptionalAuth } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import type { AppContext } from "@/routes/earn/context";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import {
   assertAnonymousEarnProviderOffered,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
-import { type AppContext, resolveSdpEnvironment } from "../context";
 
 /**
  * The ONE money-in admission predicate for an Earn catalogue row.

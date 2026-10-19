@@ -5,7 +5,7 @@ import {
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { noopObservability } from "@/runtime/observability";

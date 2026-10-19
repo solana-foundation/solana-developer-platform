@@ -3,7 +3,9 @@
 import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState } from "react";
 import { type AppLocale, defaultLocale, isAppLocale, localeCookieName } from "@/i18n/config";
-import { englishSourceMessages, loadMessages, type Messages, translate } from "@/i18n/messages";
+import { englishSourceMessages } from "@/i18n/locales/en";
+import { loadMessages, type Messages } from "@/i18n/messages";
+import { translate } from "@/i18n/translate";
 
 function resolveClientLocale(): AppLocale {
   const cookieLocale = document.cookie

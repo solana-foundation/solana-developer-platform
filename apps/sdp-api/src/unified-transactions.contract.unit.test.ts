@@ -1,13 +1,13 @@
+import { DVP_TRADE_STATUSES } from "@sdp/types/dvp";
+import { HELIUS_RINGS_OPERATION_STATUSES } from "@sdp/types/helius-rings";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import { PRIVATE_CHANNEL_TRANSACTION_STATUSES } from "@sdp/types/private-channels";
+import { TOKEN_TRANSACTION_STATUSES } from "@sdp/types/tokens";
 import {
-  DVP_TRADE_STATUSES,
   EARN_TRANSACTION_MODULE_STATUSES,
-  HELIUS_RINGS_OPERATION_STATUSES,
-  PAYMENT_TRANSFER_STATUSES,
-  PRIVATE_CHANNEL_TRANSACTION_STATUSES,
-  TOKEN_TRANSACTION_STATUSES,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 import { unifiedTransactionSchema } from "./routes/transactions/schemas";
 
 describe("unified transaction contract", () => {

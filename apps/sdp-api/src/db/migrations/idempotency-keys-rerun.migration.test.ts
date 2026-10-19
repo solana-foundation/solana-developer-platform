@@ -2,8 +2,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { runPostgresMigrations } from "@/scripts/lib/run-postgres-migrations.mjs";
 import { adminDatabaseUrl as databaseUrl } from "@/test/helpers/env";
-import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 

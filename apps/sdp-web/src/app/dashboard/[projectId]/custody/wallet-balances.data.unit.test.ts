@@ -1,4 +1,4 @@
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
 import { SANDBOX_PROJECT } from "@/test/projects";

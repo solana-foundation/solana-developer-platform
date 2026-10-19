@@ -1,31 +1,36 @@
+import type {
+  Counterparty,
+  CounterpartyAccount,
+  CounterpartyEntityType,
+} from "@sdp/types/counterparties";
+import type {
+  CustodyProvider,
+  CustodyWalletAggregate,
+  CustodyWalletTokenBalance,
+} from "@sdp/types/custody";
+import type {
+  CounterpartyAccountSummary,
+  PaymentRampQuoteDeliveryMode,
+  PaymentRecurringPayment,
+  PaymentRecurringPaymentStatus,
+  PaymentRequest,
+  PaymentRequestStatus,
+  PaymentSubscriptionCollectionAttempt,
+  PaymentsDashboardWallet,
+  PaymentTransferBatch,
+  PaymentTransferBatchStatus,
+  PaymentTransferRecipient,
+  PaymentTransferStatus,
+  PaymentTransferSummary,
+  PaymentTransferType,
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
-  type Counterparty,
-  type CounterpartyAccount,
-  type CounterpartyAccountSummary,
-  type CounterpartyEntityType,
-  type CustodyProvider,
-  type CustodyWalletAggregate,
-  type CustodyWalletTokenBalance,
-  type PaymentRampQuoteDeliveryMode,
-  type PaymentRecurringPayment,
-  type PaymentRecurringPaymentStatus,
-  type PaymentRequest,
-  type PaymentRequestStatus,
-  type PaymentSubscriptionCollectionAttempt,
-  type PaymentsDashboardWallet,
   type PaymentTransactionKind,
-  type PaymentTransferBatch,
-  type PaymentTransferBatchStatus,
-  type PaymentTransferRecipient,
-  type PaymentTransferStatus,
-  type PaymentTransferSummary,
-  type PaymentTransferType,
-  type RampProviderId,
-  SOL_MINT,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   type UnifiedTransaction,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 
 /*
  * Demo data for the Payments screens. Every GET the Payments pages send upstream is answered

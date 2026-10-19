@@ -1,5 +1,5 @@
+import { Callout } from "@sdp/ui/callout";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Callout } from "@/components/ui/callout";
 import { getTranslations } from "@/i18n/server";
 
 /**

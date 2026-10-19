@@ -1,4 +1,4 @@
-import type { Permission } from "@sdp/types";
+import type { Permission } from "@sdp/types/permissions";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";

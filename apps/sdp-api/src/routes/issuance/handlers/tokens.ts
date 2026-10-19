@@ -1,29 +1,29 @@
-import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
+import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates/definitions";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import type { Context } from "hono";
 import { z } from "zod";
-import { asTransactionalClient, getDb } from "@/db";
-import { createPostgresAssetProfilesRepository } from "@/db/repositories";
+import { asTransactionalClient, getDb } from "@/db/client";
+import { createPostgresAssetProfilesRepository } from "@/db/repositories/asset-profile.repository.postgres";
 import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
 import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
 import { created, paginated, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { AuditService } from "@/services/audit.service";
-import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
-} from "../helpers";
+} from "@/routes/issuance/helpers";
 import {
   type createTokenSchema,
   getTokenQuerySchema,
   listTokensQuerySchema,
   type updateTokenSchema,
-} from "../schemas";
+} from "@/routes/issuance/schemas";
+import { AuditService } from "@/services/audit.service";
+import type { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,

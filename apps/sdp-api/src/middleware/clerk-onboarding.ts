@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
-import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import {
   extractBearerToken,
   resolveClerkEmail,

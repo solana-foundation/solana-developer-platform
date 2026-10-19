@@ -1,9 +1,9 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { type ReactNode, useEffect, useState } from "react";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 const DEFAULT_RELOAD_DELAY_MS = 15_000;
 const SIDEBAR_ROW_IDS = ["home", "wallets", "issuance", "payments", "api-keys"];
@@ -30,7 +30,7 @@ export function FullscreenLoadingIndicator({
   statusMessage?: string;
   action?: ReactNode;
   paused?: boolean;
-  /** NEW DESIGN: the 272px ruled sidebar and a flat page; off, the previous design's card. */
+  /** NEW DESIGN: the 280px ruled sidebar and a flat page; off, the previous design's card. */
   newDesign?: boolean;
 }) {
   const t = useTranslations();
@@ -66,7 +66,7 @@ export function FullscreenLoadingIndicator({
     >
       <div
         aria-hidden="true"
-        style={{ width: isSidebarOpen ? (newDesign ? 272 : 296) : 64 }}
+        style={{ width: isSidebarOpen ? (newDesign ? 280 : 296) : 64 }}
         className={cn(
           "hidden shrink-0 flex-col gap-8 px-4 py-5 md:flex",
           newDesign && "border-r border-border-default"

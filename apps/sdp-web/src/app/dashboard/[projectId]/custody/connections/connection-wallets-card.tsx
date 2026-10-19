@@ -1,21 +1,15 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
+import { Badge } from "@sdp/ui/badge";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { WalletAddressCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import {
   formatCreatedDate,
   formatWalletMeta,
 } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 

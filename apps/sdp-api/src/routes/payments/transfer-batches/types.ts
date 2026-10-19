@@ -1,14 +1,14 @@
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { getRecentBlockhash, SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import type { z } from "zod";
+import type { ResolvedScope } from "@/routes/payments/wallets";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { ResolvedScope } from "../wallets";
 import type { createTransferBatchSchema } from "./schemas";
 
 export type CreateTransferBatchInput = z.infer<typeof createTransferBatchSchema>;
 export type TransferBatchRecipientInput = CreateTransferBatchInput["recipients"][number];
-export type Rpc = solanaRpc.SolanaRpc;
-export type RecentBlockhash = Awaited<ReturnType<typeof solanaRpc.getRecentBlockhash>>;
+export type Rpc = SolanaRpc;
+export type RecentBlockhash = Awaited<ReturnType<typeof getRecentBlockhash>>;
 
 export type TokenContext =
   | {

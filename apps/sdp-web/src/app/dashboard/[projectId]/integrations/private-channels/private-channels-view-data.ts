@@ -1,4 +1,4 @@
-import type { PrivateChannelTokenEligibility } from "@sdp/types";
+import type { PrivateChannelTokenEligibility } from "@sdp/types/private-channels";
 
 export function enabledTokenSymbols(tokens: PrivateChannelTokenEligibility[]): string[] {
   const symbols: string[] = [];

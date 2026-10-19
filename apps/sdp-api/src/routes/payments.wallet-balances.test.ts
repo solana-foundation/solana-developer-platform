@@ -1,13 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { walletBalancesSchema } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import {
+  installClusterRpcResponder,
+  systemAccountInfoResult,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
-  getAccountInfoMock,
-  getSplTokenBalancesMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
   TEST_API_KEY,
@@ -32,6 +36,12 @@ const readBalances = (walletId: string) =>
 
 describe("Payments wallet balance identity", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcResponder();
+
+  beforeEach(() => {
+    rpc.answer("getAccountInfo", systemAccountInfoResult(1, 4_200_000_000));
+    rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(1, []));
+  });
 
   it("reads the exact SDP wallet without exposing its provider wallet reference", async () => {
     const response = await app.request(
@@ -47,21 +57,24 @@ describe("Payments wallet balance identity", () => {
         walletBalances: {
           custodyWalletId: TEST_CUSTODY_WALLET_ID,
           balances: expect.arrayContaining([
-            expect.objectContaining({ token: "SOL", amount: "4200000000", uiAmount: "4.2" }),
+            expect.objectContaining({
+              token: WELL_KNOWN_TOKENS.SOL.symbol,
+              amount: "4200000000",
+              uiAmount: "4.2",
+            }),
           ]),
         },
       },
     });
     expect(body.data.walletBalances).not.toHaveProperty("walletId");
-    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
-    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(1);
+    expect(rpc.calls.filter((call) => call.method === "getAccountInfo")).toHaveLength(1);
+    expect(rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner")).toHaveLength(2);
   });
 
   it("rejects a provider wallet reference before reading balances", async () => {
     const response = await readBalances(TEST_WALLET_ID);
     expect(response.status).toBe(404);
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
-    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+    expect(rpc.calls).toEqual([]);
   });
 
   it("uses an unambiguous selected-key binding and rejects a wallet without read permission", async () => {
@@ -103,8 +116,8 @@ describe("Payments wallet balance identity", () => {
       ],
     });
     expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(403);
-    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
-    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(1);
+    expect(rpc.calls.filter((call) => call.method === "getAccountInfo")).toHaveLength(1);
+    expect(rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner")).toHaveLength(2);
   });
 
   it("rejects selected-key reads when the provider binding matches multiple wallets", async () => {
@@ -116,8 +129,7 @@ describe("Payments wallet balance identity", () => {
     for (const custodyWalletId of [TEST_CUSTODY_WALLET_ID, "cwlt_payments_duplicate_test"]) {
       expect((await readBalances(custodyWalletId)).status).toBe(403);
     }
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
-    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+    expect(rpc.calls).toEqual([]);
   });
 
   it("reads distinct Config and Connection exact IDs while rejecting their ambiguous Provider ID", async () => {
@@ -133,8 +145,8 @@ describe("Payments wallet balance identity", () => {
       });
     }
     expect((await readBalances(TEST_WALLET_ID)).status).toBe(404);
-    expect(getAccountInfoMock).toHaveBeenCalledTimes(2);
-    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(2);
+    expect(rpc.calls.filter((call) => call.method === "getAccountInfo")).toHaveLength(2);
+    expect(rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner")).toHaveLength(4);
   });
 
   it("reads only the exact wallet when its ID is another wallet's provider reference", async () => {
@@ -154,8 +166,8 @@ describe("Payments wallet balance identity", () => {
         },
       },
     });
-    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
-    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(1);
+    expect(rpc.calls.filter((call) => call.method === "getAccountInfo")).toHaveLength(1);
+    expect(rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner")).toHaveLength(2);
   });
 
   it("does not reinterpret an inactive exact ID as another wallet's Provider ID", async () => {
@@ -170,8 +182,7 @@ describe("Payments wallet balance identity", () => {
       .bind(TEST_CUSTODY_WALLET_ID)
       .run();
     expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(404);
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
-    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+    expect(rpc.calls).toEqual([]);
   });
 
   it("does not reinterpret an unknown internal namespace selector as a Provider ID", async () => {
@@ -182,7 +193,6 @@ describe("Payments wallet balance identity", () => {
       label: "Unknown alias",
     });
     expect((await readBalances("cwlt_missing")).status).toBe(404);
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
-    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+    expect(rpc.calls).toEqual([]);
   });
 });

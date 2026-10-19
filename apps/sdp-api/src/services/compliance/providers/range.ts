@@ -2,7 +2,7 @@ import type {
   ComplianceAddressScreeningInput,
   ComplianceProvider,
   ComplianceProviderResult,
-} from "../types";
+} from "@/services/compliance/types";
 
 const DEFAULT_RANGE_API_BASE_URL = "https://api.range.org";
 

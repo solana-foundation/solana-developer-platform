@@ -1,6 +1,7 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
-import { errorResponseSchema, onboardingCompleteRequestSchema } from "../schemas";
+import { errorResponseSchema } from "@/openapi/schemas/base";
+import { onboardingCompleteRequestSchema } from "@/openapi/schemas/onboarding";
 import { errorResponses, jsonContent } from "./helpers";
 import { onboardingCompleteResponse, onboardingStatusResponse } from "./responses";
 

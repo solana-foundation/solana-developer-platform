@@ -1,21 +1,21 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "@/routes/issuance/helpers";
+import type { forceBurnSchema } from "@/routes/issuance/schemas";
 import { AuditService } from "@/services/audit.service";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
-import {
-  createIssuanceMosaicService,
-  getTenantTokenService,
-  requireProjectScope,
-} from "../helpers";
-import type { forceBurnSchema } from "../schemas";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,

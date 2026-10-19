@@ -19,7 +19,7 @@ const RPC_QUOTA: MeteredQuotaConfig = { name: "rpc", actorMax: 300, orgMax: 1200
 // bytes before validation runs.
 const MAX_BODY_BYTES = 1024 * 1024;
 
-const rpc = new Hono<{ Bindings: Env }>();
+export const rpc = new Hono<{ Bindings: Env }>();
 
 rpc.use("*", unifiedAuthMiddleware());
 rpc.use("*", projectContextMiddleware());
@@ -50,5 +50,3 @@ rpc.post(
   }),
   relayRpcRequest
 );
-
-export default rpc;

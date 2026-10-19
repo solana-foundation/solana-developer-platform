@@ -1,9 +1,9 @@
 "use client";
 
-import type { CustodyProvider } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon, Undo2Icon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { rollbackCredentialAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";

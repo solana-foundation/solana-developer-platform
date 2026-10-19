@@ -1,11 +1,10 @@
+import type { PaginatedResponse } from "@sdp/types/pagination";
+import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types/payments";
 import {
-  type ListPaymentRequestsResponse,
-  type PaginatedResponse,
-  type PaymentRequest,
   type SolanaCluster,
   WELL_KNOWN_TOKENS,
   type WellKnownToken,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 

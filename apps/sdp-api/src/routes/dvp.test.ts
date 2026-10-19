@@ -1,11 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, Permission } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { Permission } from "@sdp/types/permissions";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
-import app from "@/index";
+import { app } from "@/index";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

@@ -7,10 +7,10 @@ import {
   RAMP_TRANSFER_TRANSITIONS,
   RAMP_TRANSFER_TYPES,
   type RampTransferTransitionId,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createSystemPaymentsRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import * as events from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -179,28 +179,28 @@ describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
     expect(await readStatus("xfr_wallet")).toBe("pending");
   });
 
-  it("logs a settlement event the table refuses and writes nothing", async () => {
+  it("ignores an out-of-order settlement event and writes nothing", async () => {
     const logEvent = vi.spyOn(events, "logEvent").mockImplementation(() => {});
     await seedTransfer({
-      id: "xfr_refused",
+      id: "xfr_stale",
       status: "settling",
       type: "offramp",
-      reference: "moonpay_refused",
+      reference: "moonpay_stale",
     });
 
-    const result = await applyRampSettlementEvent(env, {
+    const result = await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "awaiting_payment",
-      reference: "moonpay_refused",
+      reference: "moonpay_stale",
     });
 
-    expect(result).toEqual({ applied: false });
-    expect(await readStatus("xfr_refused")).toBe("settling");
+    expect(result).toEqual({ applied: false, outcome: "ignored" });
+    expect(await readStatus("xfr_stale")).toBe("settling");
     expect(logEvent).toHaveBeenCalledWith(
       "info",
       expect.objectContaining({
-        event: "sdp_api_ramp_settlement_refused",
-        transfer_id: "xfr_refused",
+        event: "sdp_api_ramp_settlement_ignored",
+        transfer_id: "xfr_stale",
         transition: "provider_awaiting_payment",
         from_status: "settling",
         to_status: "awaiting_payment",

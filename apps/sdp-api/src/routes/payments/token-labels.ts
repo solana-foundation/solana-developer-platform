@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";

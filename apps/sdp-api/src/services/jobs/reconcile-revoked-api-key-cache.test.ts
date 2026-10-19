@@ -11,7 +11,7 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Gauge for the sweep's Redis fan-out: tracks how many kv.get calls are in
@@ -54,7 +54,7 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";

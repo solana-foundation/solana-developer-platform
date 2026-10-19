@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { SdpPaymentsError } from "../../../errors";
-import { RAMP_PROVIDER_CLIENTS } from "../../index";
-import { replayExchanges } from "../../test-kit";
+import { SdpPaymentsError } from "#/errors";
+import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
+import { replayExchanges } from "#/ramps/test-kit";
 import { StripeRampClient } from "./client";
 import { STRIPE_SESSION_TERMS, STRIPE_TEST_KIT, stripeSessionExchange } from "./test-kit";
 

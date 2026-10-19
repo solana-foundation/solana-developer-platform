@@ -1,5 +1,8 @@
-// biome-ignore lint/style/noRestrictedImports: this is the gated list; it filters the tuple by the channel-capped flags
-import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransactionModule } from "@sdp/types";
+import {
+  // biome-ignore lint/style/noRestrictedImports: this is the gated list; it filters the tuple by the channel-capped flags
+  UNIFIED_TRANSACTION_MODULES,
+  type UnifiedTransactionModule,
+} from "@sdp/types/unified-transactions";
 import type { DashboardFlags } from "@/flags/dashboard";
 
 export type TransactionModuleFlags = Pick<

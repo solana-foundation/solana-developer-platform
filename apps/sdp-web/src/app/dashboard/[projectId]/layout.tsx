@@ -14,7 +14,8 @@ import { isDesignModuleOn } from "@/lib/design-modules";
 import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
 import { loadQuickStartStatus } from "@/lib/quick-start-server.redesign";
-import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
+import { listSdpProjects } from "@/lib/sdp-api";
+import { getSdpAuth } from "@/lib/sdp-auth";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
 /**

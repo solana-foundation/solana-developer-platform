@@ -13,7 +13,7 @@ import {
 } from "./handlers";
 import { createOfframpQuoteSchema, estimateOfframpSchema } from "./schemas";
 
-const offramp = new Hono<{ Bindings: Env }>();
+export const offramp = new Hono<{ Bindings: Env }>();
 
 offramp.get("/currency", requirePermissions("payments:read"), listOfframpCurrencies);
 offramp.post(
@@ -32,5 +32,3 @@ offramp.post(
   requestGate({ extract: extractOfframpQuoteRequest }),
   createOfframpQuote
 );
-
-export default offramp;

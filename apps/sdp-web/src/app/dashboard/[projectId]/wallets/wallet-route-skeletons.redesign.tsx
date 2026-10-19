@@ -1,7 +1,7 @@
+import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { DesignSwitch } from "@/components/new-design";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import { cn } from "@/lib/utils";
 import {
   WalletDetailSkeleton as LegacyWalletDetailSkeleton,
   WalletSetupSkeleton as LegacyWalletSetupSkeleton,
@@ -182,12 +182,6 @@ export function CurrentWalletDetailSkeleton() {
     </DashboardWorkspaceOverviewPanel>
   );
 }
-
-// The connection pages and the onboarding fallback are the same in both designs, so their skeletons are the base design's own.
-export {
-  WalletConnectionsListSkeleton,
-  WalletsOnboardingSkeleton,
-} from "./wallet-route-skeletons";
 
 // The Wallets list, setup and wallet page were redesigned for NEW DESIGN; the previous design keeps
 // its own skeletons for them (the pages re-exported above are the same in both). These

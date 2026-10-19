@@ -15,8 +15,8 @@ const provisionCoinbaseCdpAccountMock = vi.spyOn(
   "provisionCoinbaseCdpAccount"
 );
 
-vi.mock("@sdp/custody/dfns", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/custody/dfns")>();
+vi.mock("@sdp/custody/dfns/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/custody/dfns/client")>();
 
   return {
     ...actual,

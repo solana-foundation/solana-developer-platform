@@ -21,7 +21,7 @@ const MAX_REQUESTS_PER_MINUTE = 120;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const MAX_TRACKED_ADDRESSES = 4096;
 
-const webhooks = new Hono<{ Bindings: Env }>();
+export const webhooks = new Hono<{ Bindings: Env }>();
 
 webhooks.use(
   "*",
@@ -50,5 +50,3 @@ webhooks.post("/payments/ramps/sandbox/:provider", (c) => handleRampProviderWebh
 webhooks.post("/payments/ramps/production/:provider", (c) =>
   handleRampProviderWebhook(c, "production")
 );
-
-export default webhooks;
