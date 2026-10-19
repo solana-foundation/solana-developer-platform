@@ -207,5 +207,5 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   `DOPPLER_PROJECT=solana-developer-platform DOPPLER_CONFIG=dev pnpm --filter
   @sdp/api currencies:discover <provider> --allow-shrink`, then
   `ramp-support:generate`. Never build on `automation/ramp-support-refresh`:
-  the job force-pushes it, and opens its PR only if the repo lets Actions
-  create PRs.
+  the job force-pushes it and opens its PR as the release app, minting that
+  token only after install and discovery.

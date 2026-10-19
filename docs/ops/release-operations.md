@@ -72,7 +72,7 @@ Release automation also reads these repository variables:
 ### Repository secrets
 
 - `DOPPLER_CI_IDENTITY_ID` (repository variable) — Doppler service-account identity for OIDC-based secret-aware CI
-- `RELEASE_APP_ID` — GitHub App ID used by release automation
+- `RELEASE_APP_ID` — GitHub App ID used by release automation and the ramp-rails refresh PR
 - `RELEASE_APP_PRIVATE_KEY` — corresponding GitHub App private key
 - `TRANSLATION_AGENT_USERNAME` and `TRANSLATION_AGENT_PASSWORD` — HTTP Basic credentials required when a release has missing UI translations
 
