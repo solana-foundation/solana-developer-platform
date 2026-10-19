@@ -255,21 +255,6 @@ export interface PaymentsRepository {
     startedAt: string;
   }): Promise<PaymentTransferRow | null>;
   /**
-   * Atomically transitions a transfer's status only if it is currently one of
-   * `fromStatuses`, scoped to org/project. Returns the updated row, or null when
-   * no row matched (wrong owner, missing, or status changed concurrently).
-   */
-  updateTransferStatusGuarded(
-    input: TransferStatusChangeFields & {
-      transferId: string;
-      organizationId: string;
-      projectId: string;
-      fromStatuses: readonly PaymentTransferStatus[];
-      toStatus: PaymentTransferStatus;
-      updatedAt: string;
-    }
-  ): Promise<PaymentTransferRow | null>;
-  /**
    * Applies one `RAMP_TRANSFER_TRANSITIONS` entry as a compare-and-swap: the
    * row must be a ramp transfer of one of the transition's types, in one of its
    * source statuses, scoped to org/project. Returns the updated row, or null

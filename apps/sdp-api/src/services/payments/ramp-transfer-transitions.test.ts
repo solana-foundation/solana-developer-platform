@@ -321,7 +321,7 @@ interface RampStatusWriter {
   file: string;
   /** A string that must appear in `file`, so a moved or deleted writer fails this test. */
   evidence: string;
-  /** Its `transitionRampTransfer` or `updateTransferStatusGuarded` calls, so a new one in a listed file still fails. */
+  /** Its `transitionRampTransfer` calls, so a new one in a listed file still fails. */
   guardedCalls: number;
 }
 
@@ -366,7 +366,7 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
   },
 ];
 
-const GUARDED_STATUS_WRITE = /\.(transitionRampTransfer|updateTransferStatusGuarded)\(/g;
+const GUARDED_STATUS_WRITE = /\.transitionRampTransfer\(/g;
 
 function apiSourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -402,12 +402,5 @@ describe("ramp transfer status writers", () => {
     }
 
     expect(actual).toEqual(expected);
-  });
-
-  it("keeps every writer off the caller-supplied guard", () => {
-    for (const writer of RAMP_STATUS_WRITERS) {
-      const source = readFileSync(path.join(repositoryRoot, writer.file), "utf8");
-      expect(source, writer.file).not.toContain(".updateTransferStatusGuarded(");
-    }
   });
 });

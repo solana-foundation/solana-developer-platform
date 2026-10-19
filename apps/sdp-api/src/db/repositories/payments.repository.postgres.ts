@@ -302,19 +302,18 @@ export function createPostgresPaymentsRepository(
     guard: {
       fromStatuses: readonly PaymentTransferStatus[];
       toStatus: PaymentTransferStatus;
-      types?: readonly RampTransferType[];
+      types: readonly RampTransferType[];
     },
     sql: StatusChangeSql
   ): Promise<PaymentTransferRow | null> => {
     assertScope(input);
-    const extraClauses = ["id = ?", "status = ANY(?)"];
-    const extraValues: unknown[] = [input.transferId, [...guard.fromStatuses]];
-    if (guard.types !== undefined) {
-      extraClauses.push("type = ANY(?)");
-      extraValues.push([...guard.types]);
-    }
-    extraClauses.push(...sql.clauses);
-    extraValues.push(...sql.clauseValues);
+    const extraClauses = ["id = ?", "status = ANY(?)", "type = ANY(?)", ...sql.clauses];
+    const extraValues: unknown[] = [
+      input.transferId,
+      [...guard.fromStatuses],
+      [...guard.types],
+      ...sql.clauseValues,
+    ];
     const scope = buildTransferScopeWhere({
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -691,14 +690,6 @@ export function createPostgresPaymentsRepository(
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
-    },
-
-    async updateTransferStatusGuarded(input) {
-      return updateTransferStatusIf(
-        input,
-        { fromStatuses: input.fromStatuses, toStatus: input.toStatus },
-        NO_STATUS_CHANGE_SQL
-      );
     },
 
     async transitionRampTransfer(input) {
