@@ -1,4 +1,4 @@
-# 0010. No barrel files, no default exports
+# 0010. Module boundaries
 
 Date: 2026-10-18
 Status: Proposed (HOO-2136). Numbers from a one-off knip 6.41.0 audit run outside the tree.
@@ -11,7 +11,7 @@ convention:
 | Barrel | Callers via barrel | Callers importing the file directly |
 |---|---|---|
 | `db/repositories/index.ts` (85 re-export lines) | 85 | 70 |
-| `middleware/index.ts` | 2 | 137 |
+| `middleware/index.ts` | 0 | 136 |
 | `services/domain/index.ts` | 0 | 26 |
 | `services/solana/index.ts` | 19 | 4 |
 
