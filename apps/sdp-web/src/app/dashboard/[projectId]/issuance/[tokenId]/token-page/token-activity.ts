@@ -8,8 +8,6 @@ import useSWRInfinite from "swr/infinite";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
 import { usePagedList } from "@/lib/use-paged-list";
-import { issuanceQueryKeys } from "../../issuance-query-key";
-import { type AssetAuditHistory, fetchAssetAuditHistory } from "../asset-profile/asset-audit.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 

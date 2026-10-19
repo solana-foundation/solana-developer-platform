@@ -11,8 +11,12 @@ import {
   getNoneConfirmationCopy,
   getSignerWalletUnavailableReason,
   isValidSolanaAddressInput,
-} from "../token-management-workspace.utils";
-import { TokenSignerSelect } from "../token-signer-select";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import { TokenSignerSelect } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-signer-select";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectItem } from "@/components/ui/select";
+import { useTranslations } from "@/i18n/provider";
 import { shortAddress, type TokenTabProps } from "./token-page.shared";
 
 const NONE = "__none_authority__";

@@ -6,6 +6,8 @@ import { Button } from "@sdp/ui/button";
 import { ArrowUpRightIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo } from "react";
+import { useAssetProfileForm } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-asset-profile-form";
+import { useTokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -15,8 +17,6 @@ import {
   useDashboardTab,
   useDashboardUrlState,
 } from "@/lib/dashboard-url-state";
-import { useAssetProfileForm } from "../asset-profile/use-asset-profile-form";
-import { useTokenOperations } from "../asset-profile/use-token-operations";
 import { TokenActivityTab } from "./activity-tab";
 import { TokenComplianceTab } from "./compliance-tab";
 import { TokenDetailsTab } from "./details-tab";

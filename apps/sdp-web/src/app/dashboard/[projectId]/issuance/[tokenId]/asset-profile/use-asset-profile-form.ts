@@ -5,10 +5,6 @@ import type { Token } from "@sdp/types/tokens";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useTranslations } from "@/i18n/provider";
-import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
-import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
-import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import {
   getSignerWalletUnavailableReason,
   isMaxSupplyBelowMintedSupply,
@@ -21,6 +17,7 @@ import {
 } from "@/app/dashboard/[projectId]/issuance/create/draft-mapping";
 import type { DraftState } from "@/app/dashboard/[projectId]/issuance/create/issuance-draft-wizard.types";
 import { useTranslations } from "@/i18n/provider";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { updateAssetProfileAction } from "./actions";
 import {
   areDraftsEquivalent,

@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftFlow } from "./issuance-draft-flow.redesign";
 
 interface CreateDraftPageProps {

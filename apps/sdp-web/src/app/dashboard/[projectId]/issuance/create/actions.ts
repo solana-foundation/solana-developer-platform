@@ -6,7 +6,6 @@ import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import {
   type AuthorityKey,
   buildDraftPayload,

@@ -18,14 +18,6 @@ import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
-import { parseIssuanceListQuery } from "../issuance-list-query";
-import {
-  attachIssuanceAssetProfiles,
-  fetchIssuanceTokenFacets,
-  fetchIssuanceTokensPage,
-} from "../issuance-tokens.data";
-import { IssuanceWorkspace } from "../issuance-workspace";
 import { IssuancePage as RedesignIssuancePage } from "./page.redesign";
 
 interface IssuanceTemplateView {

@@ -1,4 +1,4 @@
-import { IssuancePageSkeleton } from "../issuance-route-skeletons.redesign";
+import { IssuancePageSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-route-skeletons.redesign";
 
 /**
  * Issuance overview Suspense fallback. It can't await the async

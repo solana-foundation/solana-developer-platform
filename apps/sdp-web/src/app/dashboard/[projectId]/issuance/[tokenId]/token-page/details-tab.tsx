@@ -8,6 +8,7 @@ import { Label } from "@sdp/ui/label";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { LockIcon, PencilIcon } from "lucide-react";
 import { useState } from "react";
+import { getTokenTypeLabel } from "@/app/dashboard/[projectId]/issuance/issuance-token-fields";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordBlock, RecordRow } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";

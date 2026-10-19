@@ -1,8 +1,8 @@
 "use client";
 
-import type { TokenOperations } from "../asset-profile/use-token-operations";
-import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
-import { TokenDeployWalletDialog } from "../token-deploy-wallet-dialog";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
+import { TokenActionConfirmationDialog } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-action-confirmation-dialog";
+import { TokenDeployWalletDialog } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-deploy-wallet-dialog";
 
 /**
  * The dialogs token operations go through, shared with the previous design's page: the signer

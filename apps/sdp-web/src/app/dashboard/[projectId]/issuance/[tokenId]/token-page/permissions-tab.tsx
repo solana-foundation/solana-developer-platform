@@ -4,11 +4,11 @@ import { Button } from "@sdp/ui/button";
 import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { KeyRoundIcon, type LucideIcon, PencilIcon, SnowflakeIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
+import type { PermissionRowId } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
+import { getTokenTypeLabel } from "@/app/dashboard/[projectId]/issuance/issuance-token-fields";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { getTokenTypeLabel } from "../../issuance-token-fields";
-import type { PermissionRowId } from "../token-management-workspace.types";
 import { AuthorityForm, DraftHolderForm } from "./authority-form";
 import {
   accessControlLabel,

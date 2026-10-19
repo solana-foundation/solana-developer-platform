@@ -5,11 +5,6 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { type ReactNode, useId } from "react";
 import { useTranslations } from "@/i18n/provider";
-import {
-  getSignerWalletUnavailableReason,
-  isValidSolanaAddressInput,
-} from "../token-management-workspace.utils";
-import { TokenSignerSelect } from "../token-signer-select";
 import type { TokenTabProps } from "./token-page.shared";
 
 /**

@@ -21,9 +21,9 @@ import { TableCell } from "@sdp/ui/table";
 import { TableRow } from "@solana/design-system/table";
 import { ArrowUpRightIcon, XIcon } from "lucide-react";
 import { useMemo } from "react";
+import { ISSUANCE_TOOLBAR_CONTROLS } from "@/app/dashboard/[projectId]/issuance/issuance-toolbar.redesign";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { ISSUANCE_TOOLBAR_CONTROLS } from "../../issuance-toolbar.redesign";
 import {
   ACTIVITY_ACTIONS,
   activityActorType,
