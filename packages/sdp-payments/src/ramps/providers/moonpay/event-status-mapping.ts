@@ -116,8 +116,8 @@ function buildMoonpaySettlement(
 
 /**
  * Maps one MoonPay transaction to the provider-agnostic settlement event, the
- * single mapping used by both the webhook processor and the reconciliation
- * cron so the two delivery paths cannot diverge.
+ * single mapping used by both the webhook processor and the status pull
+ * (`fetchTransferStatus`) so the two delivery paths cannot diverge.
  *
  * @param data - The MoonPay transaction payload (webhook `data` or API transaction object).
  * @returns The settlement event, or an ignore event for unmatchable payloads.

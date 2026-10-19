@@ -72,12 +72,18 @@ A change that triggers one of these must handle it.
 - Follow [`ramp-provider-safety.md`](ramp-provider-safety.md) for immutable
   quotes, durable webhook replay, chain-verified completion, recovery, and
   required sandbox evidence. Provider `settled` is not transfer `completed`.
-- One directory per provider at `packages/sdp-payments/src/ramps/providers/<id>/`: `client.ts` (HTTP only: auth, signing, parsing; no database or `AppContext`), optional `counterparty.ts` (present only when requirements are non-trivial), optional `provider-data.ts` (JSON codecs).
-- The package defines the optional provider webhook contract but contains no
-  webhook handlers. Payload schemas, parsers, and processors live in
+- One directory per provider at `packages/sdp-payments/src/ramps/providers/<id>/`: `client.ts` (HTTP only: auth, signing, parsing; no database or `AppContext`), a status mapping (`*-status-mapping.ts`: the provider's transaction object to `RampSettlementEvent`), optional `counterparty.ts` (present only when requirements are non-trivial), optional `provider-data.ts` (JSON codecs).
+- One mapping per provider: the webhook parser and `fetchTransferStatus` both
+  call the package's status mapping, so a pulled observation and a delivered
+  one cannot diverge. The package contains no webhook handlers: envelope
+  parsing, signature verification, and processors live in
   `apps/sdp-api/src/services/ramps/webhooks/<id>.ts`, with ingress in
-  `routes/webhooks/handlers.ts`. Parsers `safeParse` a zod
-  `z.discriminatedUnion` per event type; unknown event types map to `ignore`.
+  `routes/webhooks/handlers.ts`. Parsers `safeParse` with zod; unknown event
+  types map to `ignore`.
+- Every live provider implements `fetchTransferStatus` (one request per
+  lookup) and has a status-pull entry and an abandonment horizon in
+  `apps/sdp-api/src/services/jobs/sweep-ramp-transfer-statuses.ts`;
+  typecheck fails until it does.
 - Provider instances come only from `RAMP_PROVIDER_CLIENTS`. A second instance breaks the webhook tests' `vi.spyOn` mocks.
 - Provider clients never access the database. Route handlers and background jobs access it through repositories.
 
