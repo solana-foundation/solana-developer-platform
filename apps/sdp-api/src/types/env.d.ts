@@ -345,6 +345,9 @@ declare module "hono" {
     // The organization row authentication read (tier and settings), for handlers
     // that decide from it; see lib/organization-access.ts
     organizationProviderState: OrganizationProviderState;
+    // The user who created the API key that authenticated this request, read from
+    // the key's live row by authentication (null when the row records none)
+    keyCreator?: string | null;
     // Set by requestGate middleware for gated routes
     requestGate?: RequestGateContext;
     // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)

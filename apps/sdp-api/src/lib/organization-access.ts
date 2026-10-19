@@ -196,7 +196,7 @@ export async function enforceApiKeyOrganizationAccess(
     .prepare(
       `SELECT o.status AS organization_status, o.tier, o.settings,
               ak.status, ak.expires_at, ak.rotation_deadline,
-              ak.signing_wallet_id, wb.wallet_bindings
+              ak.signing_wallet_id, ak.created_by, wb.wallet_bindings
          FROM organizations o
          LEFT JOIN api_keys ak ON ak.id = ? AND ak.organization_id = o.id
          LEFT JOIN LATERAL (
@@ -257,12 +257,13 @@ export async function enforceApiKeyOrganizationAccess(
         settings: string | null;
         wallet_bindings: unknown;
       } & (
-        | (ApiKeyLifecycleColumns & { signing_wallet_id: string | null })
+        | (ApiKeyLifecycleColumns & { signing_wallet_id: string | null; created_by: string | null })
         | {
             status: null;
             expires_at: null;
             rotation_deadline: null;
             signing_wallet_id: null;
+            created_by: null;
           }
       )
     >();
@@ -288,6 +289,8 @@ export async function enforceApiKeyOrganizationAccess(
     tier: row.tier,
     settings: row.settings,
   });
+  // The creator a write by this key is attributed to, from the same live row.
+  c.set("keyCreator", row.created_by);
   return {
     settings: row.settings,
     walletAuthorization: resolveApiKeyWalletAuthorization(
