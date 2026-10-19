@@ -281,6 +281,13 @@ describe("Payments routes — list transfers", () => {
         ).toEqual(["xfr_scope_plain"]);
       });
 
+      it("answers a category it can read nothing of with an empty page", async () => {
+        const res = await asTransfersOnly("/v1/payments/transfers?category=ramp");
+
+        expect(res.status).toBe(200);
+        expect(transferIdsSchema.parse(await res.json()).data).toEqual([]);
+      });
+
       it("refuses a type filter it cannot read, naming the read", async () => {
         const res = await asTransfersOnly("/v1/payments/transfers?type=onramp");
 
