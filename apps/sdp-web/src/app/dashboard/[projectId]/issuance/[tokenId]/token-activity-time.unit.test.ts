@@ -10,6 +10,11 @@ afterEach(() => vi.unstubAllEnvs());
 describe("issuance activity timestamps", () => {
   it("interprets timezone-less SQL audit timestamps as UTC", () => {
     vi.stubEnv("TZ", "America/Toronto");
+    // Ground truth: the SQL timestamp is the UTC instant 2026-09-08T02:13:36Z,
+    // which Toronto (EDT, UTC-4) renders on the previous day at 10:13 PM. If
+    // the space-form were parsed as local time, the day would not shift.
+    expect(formatDateTime("2026-09-08 02:13:36", "en")).toBe("Sep 07, 2026, 10:13 PM");
+    expect(formatDate("2026-09-08 02:13:36", "en")).toBe("Sep 07, 2026");
     for (const format of [formatDateTime, formatActivityTimestamp, formatDate]) {
       expect(format("2026-09-08 02:13:36", "en")).toBe(format("2026-09-08T02:13:36Z", "en"));
     }
