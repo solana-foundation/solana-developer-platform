@@ -262,6 +262,43 @@ describe("moonpayWebhook.process", () => {
     expect(row).toEqual({ status: "pending", provider_reference: null });
   });
 
+  it("refuses a first failed-buy observation with a provider crypto transaction id", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    expect(
+      await processor.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "onramp",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
+        settlement: {
+          provider: "moonpay",
+          status: "failed",
+          transactionId: MOONPAY_TRANSACTION_ID,
+          baseCurrencyCode: "USD",
+          baseCurrencyAmount: 25,
+          quoteCurrencyCode: "SOL",
+          quoteCurrencyAmount: 0.2,
+          feeAmount: 1,
+          extraFeeAmount: 0,
+          networkFeeAmount: 0,
+          areFeesIncluded: true,
+          usdRate: 125,
+          cryptoTransactionId: "provider-crypto-id",
+        },
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_failure_after_funding" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "pending", provider_reference: null });
+  });
+
   it("rolls back a failed buy when recording its retired id fails", async () => {
     await getDb(env)
       .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
