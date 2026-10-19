@@ -33,7 +33,7 @@ import {
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
 /**

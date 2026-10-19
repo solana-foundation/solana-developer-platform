@@ -1,6 +1,6 @@
 import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-import type { SeededApiKey } from "@/test/mocks/kv";
+import type { SeededApiKey } from "@/test/mocks/db";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Counters for unique IDs

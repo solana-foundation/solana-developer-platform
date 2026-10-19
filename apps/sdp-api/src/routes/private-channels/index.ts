@@ -53,7 +53,7 @@ import {
   getPrivateChannelWithdrawalById,
   listPrivateChannelWithdrawals,
 } from "@/routes/private-channels/handlers/withdrawals";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   addPrincipalMembershipBodySchema,
   connectPrivateChannelInstanceSchema,

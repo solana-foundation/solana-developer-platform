@@ -12,7 +12,7 @@ import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * The one uncached organization read every authenticated request makes, and

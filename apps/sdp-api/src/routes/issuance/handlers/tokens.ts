@@ -23,7 +23,7 @@ import {
 } from "@/routes/issuance/schemas";
 import { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,

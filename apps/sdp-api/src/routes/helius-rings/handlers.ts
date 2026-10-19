@@ -11,7 +11,7 @@ import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import { getRingsSetupStatus } from "@/services/helius-rings/connection.service";
 import type { HeliusRingsActor } from "@/services/helius-rings/service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   type AppContext,
   getHeliusRingsOperationRepository,

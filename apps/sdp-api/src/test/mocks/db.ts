@@ -5,13 +5,22 @@
  * during the cutover branch.
  */
 
+import type { Action } from "@sdp/types/actions";
+import type {
+  ApiKeyEnvironment,
+  ApiKeyStatus,
+  ApiKeyWalletScope,
+  RateLimitTier,
+} from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
+import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import {
   AUDIT_LEDGER_CHECKPOINT_KEY,
   AUDIT_LEDGER_SESSION_LOCK_KEY,
 } from "@/services/audit.service";
-import type { Env } from "@/types/env.d";
+import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_SLUG } from "@/test/helpers/projects";
+import type { Env } from "@/types/env";
 
 // FK-dependency ordered: dependents before the rows they point at.
 //
@@ -169,4 +178,147 @@ export async function seedTestDatabase(env: Env): Promise<void> {
   }
 
   await seedSponsorshipBudgetPolicies(env);
+}
+
+/**
+ * The state of an API key a suite seeds: the `api_keys` columns authentication
+ * reads, plus the signing wallets to list. Authentication reads all of it from
+ * Postgres on every request, so this is exactly what a request sees.
+ */
+export interface SeededApiKey {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  /** The key's explicit grants (`api_keys.grants`). */
+  grants: readonly Action[];
+  environment: ApiKeyEnvironment;
+  rateLimitTier: RateLimitTier;
+  allowedIps: string[] | null;
+  /** `api_keys.wallet_scope`; `all` unless the seed names a scope or wallets. */
+  walletScope?: ApiKeyWalletScope;
+  /**
+   * Custody wallet ids (`custody_wallets.id`) a `selected` key lists. Naming
+   * them makes the key `selected` and replaces its list; the wallets must
+   * already exist (the list has a foreign key).
+   */
+  walletIds?: string[];
+  status: ApiKeyStatus;
+  expiresAt: string | null;
+  rotationDeadline?: string | null;
+  /** Ignored: authentication reads the organization row's own status. */
+  organizationStatus?: string;
+}
+
+/** Creates the user a seeded key row needs when the suite has none. */
+const SEEDED_KEY_CREATOR_ID = "usr_seeded_key_creator";
+
+/**
+ * Writes the `api_keys` row for a seeded key, inserting it or overwriting the
+ * columns authentication reads, so a second seed of the same key changes what
+ * its next request sees. The key joins `projectId` when the organization has
+ * it; otherwise the organization's active project in the key's environment
+ * (one per environment), which is created as `projectId`, with the default
+ * project's name and slug, when there is none.
+ * Skipped when the organization does not exist.
+ */
+export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKey): Promise<void> {
+  // A seed can bring a refused key back to life within a test; the
+  // instance's refusal cache must not outlive that.
+  resetTerminalRefusalsForTesting();
+  const db = getDb(env);
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, email_verified, status)
+       SELECT ?, 'seeded-key-creator@example.test', 1, 'active'
+        WHERE NOT EXISTS (SELECT 1 FROM users)
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(SEEDED_KEY_CREATOR_ID)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       SELECT ?, o.id, ?, ?, ?, 'active',
+              (SELECT id FROM users ORDER BY id LIMIT 1)
+         FROM organizations o
+        WHERE o.id = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM projects
+             WHERE organization_id = o.id AND environment = ? AND status = 'active'
+          )
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(
+      data.projectId,
+      DEFAULT_PROJECT_NAME[data.environment],
+      DEFAULT_PROJECT_SLUG[data.environment],
+      data.environment,
+      data.organizationId,
+      data.environment
+    )
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO api_keys
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+          grants, status, expires_at, rotation_deadline, wallet_scope,
+          allowed_ips, rate_limit_tier)
+       SELECT ?, p.organization_id, p.id, (SELECT id FROM users ORDER BY id LIMIT 1),
+              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?, ?
+         FROM projects p
+        WHERE p.organization_id = ?
+          AND (p.id = ? OR (p.environment = ? AND p.status = 'active'))
+        ORDER BY (p.id = ?) DESC
+        LIMIT 1
+       ON CONFLICT (id) DO UPDATE SET
+         key_hash = EXCLUDED.key_hash,
+         grants = EXCLUDED.grants,
+         status = EXCLUDED.status,
+         expires_at = EXCLUDED.expires_at,
+         rotation_deadline = EXCLUDED.rotation_deadline,
+         wallet_scope = EXCLUDED.wallet_scope,
+         allowed_ips = EXCLUDED.allowed_ips,
+         rate_limit_tier = EXCLUDED.rate_limit_tier`
+    )
+    .bind(
+      data.id,
+      keyHash,
+      [...data.grants],
+      data.status,
+      data.expiresAt,
+      data.rotationDeadline ?? null,
+      data.walletScope ?? (data.walletIds === undefined ? "all" : "selected"),
+      data.allowedIps === null ? null : JSON.stringify(data.allowedIps),
+      data.rateLimitTier,
+      data.organizationId,
+      data.projectId,
+      data.environment,
+      data.projectId
+    )
+    .run();
+
+  // The signing list lives in its own table: a seed that names wallets
+  // replaces the key's rows with them. One that names none leaves rows a test
+  // inserted itself.
+  if (data.walletIds === undefined) {
+    return;
+  }
+  const walletIds = data.walletIds;
+  // One replacement: a failed insert must not leave the key partly listed.
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      `UPDATE api_key_signing_wallets
+          SET status = 'archived', archived_at = sdp_iso_now()
+        WHERE api_key_id = ? AND status = 'active' AND NOT (custody_wallet_id = ANY(?::text[]))`,
+      [data.id, walletIds]
+    );
+    await tx.execute(
+      `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+       SELECT ak.id, w FROM api_keys ak CROSS JOIN unnest(?::text[]) AS w WHERE ak.id = ?
+       ON CONFLICT (api_key_id, custody_wallet_id) DO UPDATE
+         SET status = 'active', archived_at = NULL
+       WHERE api_key_signing_wallets.status = 'archived'`,
+      [walletIds, data.id]
+    );
+  });
 }

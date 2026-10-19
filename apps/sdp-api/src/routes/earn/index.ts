@@ -15,7 +15,7 @@ import { requestGate } from "@/middleware/request-gate";
 import { requireAction, requireActionWhenAuthenticated } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { isEarnExitOrRead } from "./exits";
 import {
   createEarnExternalWalletDeposit,

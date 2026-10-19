@@ -22,7 +22,7 @@ import {
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/sponsor-signing";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import type { SponsorshipMovementScope } from "./sponsorship.service";
 import { BudgetedFeePayment, createKoraClusterRpc } from "./sponsorship-budget.service";
 

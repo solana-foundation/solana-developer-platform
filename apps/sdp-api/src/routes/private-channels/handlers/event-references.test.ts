@@ -12,7 +12,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { listPrivateChannelEventReferences } from "./event-references";
 
 const ORGANIZATION_ID = "org_test_event_refs_test";

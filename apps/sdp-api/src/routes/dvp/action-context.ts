@@ -20,7 +20,7 @@ import {
   type DvpSettlementWallet,
   readDvpSettlementWallet,
 } from "@/services/dvp/settlement-wallet";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { type DvpTradeAuditActor, dvpTradeAuditActor } from "./trade-audit";
 
 export interface DvpLegActionContext {

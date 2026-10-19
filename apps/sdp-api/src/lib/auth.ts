@@ -9,7 +9,7 @@ import { type Action, apiKeyMayPerform, organizationRoleMayPerform } from "@sdp/
 import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { z } from "zod";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
 export type AuthType = "api_key" | "clerk";

@@ -6,7 +6,7 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { notFound } from "@/lib/errors";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { ProjectService } from "@/services/project.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * The payment request a public `/pay` link names.

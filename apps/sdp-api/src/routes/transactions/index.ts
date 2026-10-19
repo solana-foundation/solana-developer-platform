@@ -4,7 +4,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateQuery } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { listUnifiedTransactions } from "./handlers";
 import { unifiedTransactionsQuerySchema } from "./schemas";
 

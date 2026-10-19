@@ -6,7 +6,7 @@ import {
   movementNeedsAdmissionFacts,
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * A sponsor signs fees, never with a custody wallet, so no wallet scope

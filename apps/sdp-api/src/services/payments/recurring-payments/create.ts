@@ -5,7 +5,7 @@ import { internalError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { assertRecurringPaymentTokenMint } from "./shared";
 
 /** A create request's Idempotency-Key and the fingerprint of the schedule it creates. */

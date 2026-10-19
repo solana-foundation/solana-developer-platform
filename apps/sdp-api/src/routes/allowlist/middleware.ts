@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Context, Next } from "hono";
 import { AppError } from "@/lib/errors";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 // SHA-256 digests both sides before comparing: equal-length inputs make
 // timingSafeEqual run in constant time without leaking the key's length via a

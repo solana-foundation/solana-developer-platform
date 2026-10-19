@@ -31,7 +31,7 @@ import {
 } from "@/lib/money-principal";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * Money admission (HOO-1955, HOO-2099): whether a principal may start new

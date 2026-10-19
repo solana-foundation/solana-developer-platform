@@ -18,7 +18,7 @@ import { getClientIp } from "@/lib/client-ip";
 import type { KVStore } from "@/runtime/kv";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "./audit-ledger-timeout";
 
 // Runtime list is the source of truth for the AuditAction type so callers can

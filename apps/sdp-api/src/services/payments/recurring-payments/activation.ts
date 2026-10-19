@@ -54,7 +54,7 @@ import {
   resolveProjectSponsorshipScope,
 } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,

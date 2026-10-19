@@ -16,7 +16,7 @@ import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
 import { AppError, badRequest } from "@/lib/errors";
 import type { ApiKeySigningWalletScope } from "@/services/api-key.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * A signed-in person may grant a key only actions an API key may hold, and

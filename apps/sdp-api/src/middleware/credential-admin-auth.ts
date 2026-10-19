@@ -1,7 +1,7 @@
 import type { Context, Next } from "hono";
 import { canManageOrganizationCredentials, getAuth } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { unifiedAuthMiddleware } from "./auth";
 
 /**

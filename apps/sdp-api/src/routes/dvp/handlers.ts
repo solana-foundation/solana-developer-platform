@@ -47,7 +47,7 @@ import {
 import { reclaimDvpTradeLeg } from "@/services/dvp/reclaim";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { resolveCloseAction, resolveLegAction } from "./action-context";
 import { type DvpActionWallet, readDvpActionWallets } from "./action-wallets";
 import {

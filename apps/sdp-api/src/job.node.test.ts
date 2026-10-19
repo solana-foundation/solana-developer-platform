@@ -22,7 +22,7 @@ import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   describeCronFailure,
   getManagedMonitorSlug,

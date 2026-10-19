@@ -68,7 +68,7 @@ import {
 import { AppError } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { RingsAdapterError, redactAdapterMessage } from "./adapter-error";
 import { resolveDefaultRingsConnectionId, resolveRingsConnection } from "./connection-resolver";
 import {

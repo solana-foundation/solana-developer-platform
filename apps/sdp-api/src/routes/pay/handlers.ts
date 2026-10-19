@@ -12,7 +12,7 @@ import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { findPaymentRequest } from "./context";
 import type { transactionRequestBodySchema } from "./schemas";
 

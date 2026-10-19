@@ -6,7 +6,7 @@ import { AppError } from "@/lib/errors";
 import { requireAction } from "@/middleware/require-action";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { listOfframpCurrencies } from "./ramps/offramp/handlers";
 import { listOnrampCurrencies } from "./ramps/onramp/handlers";
 

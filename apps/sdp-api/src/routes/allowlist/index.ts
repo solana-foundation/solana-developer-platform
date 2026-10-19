@@ -7,7 +7,7 @@ import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { publicRoute } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { addEntry, listEntries, removeEntry } from "./handlers";
 import { adminAuth } from "./middleware";
 import { addEntrySchema } from "./schemas";

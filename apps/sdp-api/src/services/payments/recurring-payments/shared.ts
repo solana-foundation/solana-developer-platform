@@ -65,7 +65,7 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 const RECURRING_PAYMENT_TOKEN_ERROR =
   "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported";

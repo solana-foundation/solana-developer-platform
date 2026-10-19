@@ -1,6 +1,6 @@
 import type { Context, ContextVariableMap, MiddlewareHandler } from "hono";
 import { AppError, forbidden } from "@/lib/errors";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /** The refusal an API key gets on a human-only route. */
 export const HUMAN_SESSION_REQUIRED_MESSAGE =

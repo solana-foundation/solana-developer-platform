@@ -21,7 +21,7 @@ import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
