@@ -69,6 +69,9 @@ A change that triggers one of these must handle it.
 
 ### Ramp providers
 
+- Follow [`ramp-provider-safety.md`](ramp-provider-safety.md) for immutable
+  quotes, durable webhook replay, chain-verified completion, recovery, and
+  required sandbox evidence. Provider `settled` is not transfer `completed`.
 - One directory per provider at `packages/sdp-payments/src/ramps/providers/<id>/`: `client.ts` (HTTP only: auth, signing, parsing; no database or `AppContext`), optional `counterparty.ts` (present only when requirements are non-trivial), optional `provider-data.ts` (JSON codecs).
 - The package defines the optional provider webhook contract but contains no
   webhook handlers. Payload schemas, parsers, and processors live in

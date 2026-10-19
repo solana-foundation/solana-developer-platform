@@ -55,10 +55,17 @@ describe("stripeWebhook", () => {
             destination_amount: "0.5",
             destination_currency: "usdc",
             destination_network: "solana",
+            transaction_id: "stripe-chain-signature",
+            wallet_address: "quoted-wallet",
           },
         })
       )
-    ).toMatchObject({ kind: "settled", reference: "cos_1", receivedAmount: "0.5" });
+    ).toMatchObject({
+      kind: "settled",
+      reference: "cos_1",
+      receivedAmount: "0.5",
+      onchain: { signature: "stripe-chain-signature", destinationAddress: "quoted-wallet" },
+    });
     expect(parseStripeEvent(event("rejected"))).toMatchObject({ kind: "failed" });
     expect(parseStripeEvent(event("initialized"))).toMatchObject({ kind: "ignore" });
     expect(parseStripeEvent({ type: "crypto.onramp_session.created", data: {} })).toMatchObject({

@@ -948,7 +948,7 @@ describe("MoonPay ramp webhook", () => {
       currency: { code: "sol" },
     },
   };
-  it("records the delivered crypto amount and per-provider economics on a completed webhook", async () => {
+  it("records provider economics without replacing quoted terms or claiming completion", async () => {
     const res = await sendMoonpayWebhook(completedPayload);
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
@@ -965,11 +965,11 @@ describe("MoonPay ramp webhook", () => {
           settlement?: Record<string, unknown>;
         };
       }>();
-    expect(required(transfer).status).toBe("completed");
-    expect(required(transfer).amount).toBe("0.649");
+    expect(required(transfer).status).toBe("settling");
+    expect(required(transfer).amount).toBeNull();
     expect(required(transfer).provider_reference).toBe(MOONPAY_TRANSACTION_ID);
     expect(required(transfer).destination_address).toBe(
-      "WebhookDestinationSolanaWallet111111111111111111"
+      "DestinationSolanaWallet111111111111111111111111"
     );
     expect(required(transfer).signature).toBe(
       "t11paHKpm79qTHVgSQ4rr9PAqE7ZT87MWpi1f5Nim8XzPyc7aPux"
@@ -1096,11 +1096,11 @@ describe("MoonPay ramp webhook", () => {
         provider_reference: string | null;
       }>();
     expect(transfer).toEqual({
-      status: "completed",
+      status: "settling",
       amount: "0.2",
-      fiat_amount: "16.31",
+      fiat_amount: null,
       source_address: sourceAddress,
-      destination_address: destinationAddress,
+      destination_address: null,
       signature: submittedSignature,
       provider_reference: moonpayTransactionId,
     });

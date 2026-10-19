@@ -8,6 +8,10 @@ disable-model-invocation: true
 
 Use this router for a provider-owned integration PR. Keep the reusable provider adapter in `packages/sdp-payments`, shared public types in `packages/sdp-types`, and API/webhook/DB orchestration in `apps/sdp-api`.
 
+Read `docs/contributing/ramp-provider-safety.md` before adding a provider. Its
+quote, durable replay, chain proof, sandbox evidence, and Critical review
+requirements apply to every direction this provider supports.
+
 ## Inputs
 
 - **`docs`** — provider API documentation URL; use it as the source of truth for auth, endpoints, payloads, status semantics, and signatures.

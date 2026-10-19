@@ -131,7 +131,7 @@ describe("moonpaySellTransactionSettlementEvent", () => {
     });
   });
 
-  it("maps a completed sell deposit onto SDP's on-chain transfer fields", () => {
+  it("keeps a sell refund wallet distinct from the on-chain sender", () => {
     const event = moonpaySellTransactionSettlementEvent(
       parseSell({
         ...waitingForDepositPayload,
@@ -150,10 +150,10 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       providerObservedAt: "2026-08-28T11:00:00.000Z",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       receivedAmount: "16.31",
+      refundAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
       onchain: {
         signature:
           "4gYf6JwRXvV9LhJqR6CjvhgpqpNrp41cYwHC1PJNBJdk6FHaaBxTkZQHUnwNi1trGf31FyHg6pQJfUmK4D3kVQnG",
-        sourceAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
         destinationAddress: "NEQhyijWMWBYq1khA2YaeG6FyxMBVMbnFsasxa9DZvU",
         amount: "0.2",
       },
@@ -173,6 +173,7 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       providerObservedAt: "2026-08-28T11:00:00.000Z",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       receivedAmount: "16.31",
+      refundAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
     });
   });
 

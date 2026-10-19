@@ -126,6 +126,39 @@ async function verifyStripeSignatures(input: {
   throw unauthorized("Invalid Stripe webhook signature");
 }
 
+function stripeSettledEvent(
+  reference: string,
+  session: Record<string, unknown>
+): Extract<RampSettlementEvent, { kind: "settled" }> {
+  const details = readRecord(session.transaction_details);
+  const currency = details ? readString(details.destination_currency) : undefined;
+  const network = details ? readString(details.destination_network) : undefined;
+  if (currency === undefined || network === undefined) {
+    throw badRequest(
+      'Stripe "crypto.onramp_session.updated" webhook is missing the completed session\'s destination currency or network',
+      { provider: "stripe" }
+    );
+  }
+  const receivedAmount = details ? readString(details.destination_amount) : undefined;
+  const transactionId = details ? readString(details.transaction_id) : undefined;
+  const walletAddress = details ? readString(details.wallet_address) : undefined;
+  return {
+    provider: "stripe",
+    kind: "settled",
+    reference,
+    deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
+    ...(receivedAmount ? { receivedAmount } : {}),
+    ...(transactionId
+      ? {
+          onchain: {
+            signature: transactionId,
+            ...(walletAddress ? { destinationAddress: walletAddress } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 export const stripeWebhook = {
   provider: "stripe" as const,
   signature: {
@@ -238,29 +271,7 @@ export const stripeWebhook = {
       };
     }
     if (kind === "settled") {
-      const transactionDetails = readRecord(session.transaction_details);
-      const currency = transactionDetails
-        ? readString(transactionDetails.destination_currency)
-        : undefined;
-      const network = transactionDetails
-        ? readString(transactionDetails.destination_network)
-        : undefined;
-      if (currency === undefined || network === undefined) {
-        throw badRequest(
-          `Stripe "${type}" webhook is missing the completed session's destination currency or network`,
-          { provider: this.provider }
-        );
-      }
-      const receivedAmount = transactionDetails
-        ? readString(transactionDetails.destination_amount)
-        : undefined;
-      return {
-        provider: this.provider,
-        kind,
-        reference,
-        deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
-        ...(receivedAmount ? { receivedAmount } : {}),
-      };
+      return stripeSettledEvent(reference, session);
     }
     return { provider: this.provider, kind, reference };
   },

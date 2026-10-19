@@ -131,7 +131,9 @@ interface BaseRampSettlementEvent {
   providerObservedAt?: string;
   /** Provider-side customer identifier observed on the event, when the provider reports one. */
   providerCustomerId?: string;
-  /** Canonical on-chain movement reported by the provider for this ramp transfer. */
+  /** Provider refund destination, separate from the on-chain sending wallet. */
+  refundAddress?: string;
+  /** On-chain movement reported by the provider, to verify independently. */
   onchain?: RampOnchainTransfer;
 }
 
@@ -149,9 +151,8 @@ export type RampSettlementEvent =
   | (BaseRampSettlementEvent & {
       kind: "settling";
       /**
-       * On-ramp only: the fiat amount the observed pay-in settled for (writes
-       * `fiat_amount`). Off-ramp settling events leave it absent; when the
-       * type ever carries it, it writes `amount`.
+       * Provider-reported amount in the event's receiving currency, stored as
+       * an observation without replacing the quote.
        */
       receivedAmount?: string;
     })

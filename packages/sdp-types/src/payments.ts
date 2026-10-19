@@ -277,6 +277,12 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   },
   provider_settled: {
     from: PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+    to: "settling",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // A provider's word is not delivery. Only the chain verifier may complete.
+  delivery_verified: {
+    from: ["settling"],
     to: "completed",
     types: RAMP_TRANSFER_TYPES,
   },

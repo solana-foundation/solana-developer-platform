@@ -53,6 +53,8 @@ Public docs and AI artifacts should mirror the supported public surface only.
 ## Implementation guidance
 
 - Follow `docs/contributing/code-standards.md` (correctness, concurrency, TypeScript, API, and dashboard rules). Reviews enforce it.
+- Every new ramp provider and ramp settlement change follows
+  `docs/contributing/ramp-provider-safety.md` before review or release.
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
 - Implement each optional-auth Earn endpoint once. A valid credential enriches that request with tenant context and retains its previous permission requirement; an anonymous request must never acquire tenant identity or persist a build, advisory, movement, or position row.
 - Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys, plus Clerk tokens without organization context, return 401.

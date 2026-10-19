@@ -387,7 +387,7 @@ describe("Payments routes — on-chain transfers", () => {
     }
   });
 
-  it("keeps a deposit the provider completed mid-send at completed", async () => {
+  it("keeps a deposit the provider completed mid-send at settling", async () => {
     const transferId = generatePaymentTransferId();
     await seedSolOfframpDeposit(transferId);
     sendTransactionMock.mockImplementationOnce(async (_rpc, transactionBytes) => {
@@ -404,7 +404,7 @@ describe("Payments routes — on-chain transfers", () => {
     const res = await postTransfer(solOfframpDepositRequest(transferId), {});
 
     expect(res.status, await res.text()).toBe(200);
-    expect((await readTransferRow(transferId)).status).toBe("completed");
+    expect((await readTransferRow(transferId)).status).toBe("settling");
   });
 
   it("funds a Production off-ramp with the mainnet USDC mint its quote recorded", async () => {

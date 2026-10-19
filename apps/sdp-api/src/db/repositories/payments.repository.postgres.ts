@@ -24,7 +24,6 @@ import type {
   PaymentsRepository,
   PaymentTransferRow,
   RampTransferTransitionInput,
-  TransferStatusChangeFields,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
 
@@ -44,6 +43,37 @@ const NO_STATUS_CHANGE_SQL: StatusChangeSql = {
   assignments: [],
   assignmentValues: [],
 };
+
+function appendRampTransitionGuards(
+  input: RampTransferTransitionInput,
+  clauses: string[],
+  values: unknown[]
+): void {
+  if (input.providerObservation !== undefined) {
+    clauses.push(
+      "provider_reference = ?",
+      "(provider_observed_at IS NULL OR provider_observed_at < ?)"
+    );
+    values.push(input.providerObservation.reference, input.providerObservation.observedAt);
+  }
+  if (input.deliveryEvidence !== undefined) {
+    clauses.push("signature = ?", "provider_data->'providerSettlement' = ?::jsonb");
+    values.push(
+      input.deliveryEvidence.signature,
+      JSON.stringify(input.deliveryEvidence.providerSettlement)
+    );
+  }
+  if (input.providerSettlementUnclaimed) {
+    clauses.push(
+      "(provider_data->'providerSettlement' IS NULL OR provider_data->'providerSettlement' = 'null'::jsonb)"
+    );
+  }
+  if (input.providerSettlementMissingSignature) {
+    clauses.push(
+      "(provider_data->'providerSettlement' IS NULL OR provider_data #>> '{providerSettlement,onchain,signature}' IS NULL)"
+    );
+  }
+}
 
 function paymentTransferSearchExpression(alias: string): string {
   return `(
@@ -295,13 +325,7 @@ export function createPostgresPaymentsRepository(
     }
   };
   const updateTransferStatusIf = async (
-    input: TransferStatusChangeFields & {
-      transferId: string;
-      organizationId: string;
-      projectId: string;
-      updatedAt: string;
-      providerObservation?: { reference: string; observedAt: string };
-    },
+    input: RampTransferTransitionInput,
     guard: {
       fromStatuses: readonly PaymentTransferStatus[];
       toStatus: PaymentTransferStatus;
@@ -317,12 +341,7 @@ export function createPostgresPaymentsRepository(
       [...guard.types],
       ...sql.clauseValues,
     ];
-    if (input.providerObservation !== undefined) {
-      extraClauses.push("provider_reference = ?");
-      extraValues.push(input.providerObservation.reference);
-      extraClauses.push("(provider_observed_at IS NULL OR provider_observed_at < ?)");
-      extraValues.push(input.providerObservation.observedAt);
-    }
+    appendRampTransitionGuards(input, extraClauses, extraValues);
     const scope = buildTransferScopeWhere({
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -586,7 +605,7 @@ export function createPostgresPaymentsRepository(
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: [
           "id = ?",
-          "status = 'processing'",
+          "(status = 'processing' OR (type = 'offramp' AND status = 'settling'))",
           "signature IS NULL",
           "signed_transaction IS NULL",
           "last_valid_block_height IS NULL",
@@ -681,7 +700,7 @@ export function createPostgresPaymentsRepository(
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: [
           "id = ?",
-          "status = 'processing'",
+          "(status = 'processing' OR (type = 'offramp' AND status = 'settling'))",
           "signature IS NOT NULL",
           "signed_transaction IS NOT NULL",
           "last_valid_block_height IS NOT NULL",
@@ -706,7 +725,49 @@ export function createPostgresPaymentsRepository(
     },
 
     async transitionRampTransfer(input) {
+      if ((input.transition === "delivery_verified") !== (input.deliveryEvidence !== undefined)) {
+        throw new Error("Ramp delivery verification requires matching chain evidence");
+      }
       return applyRampTransition(input, NO_STATUS_CHANGE_SQL);
+    },
+
+    async listRampTransfersToVerify({ environment, limit }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.listRampTransfersToVerify is system-only"
+        );
+      }
+      const rows = await db
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           JOIN projects p ON p.id = pt.project_id
+           WHERE p.environment = ? AND pt.status = 'settling'
+             AND pt.type = ANY(?)
+             AND jsonb_typeof(pt.provider_data->'providerSettlement') = 'object'
+           ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
+           LIMIT ?`
+        )
+        .bind(environment, [...RAMP_TRANSFER_TYPES], limit)
+        .all<PaymentTransferProjectionRow>();
+      return rows.results.map(mapTransferRow);
+    },
+
+    async markRampTransfersVerificationPolled({ transferIds, polledAt }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.markRampTransfersVerificationPolled is system-only"
+        );
+      }
+      if (transferIds.length === 0) return;
+      await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET finalization_last_polled_at = ?
+           WHERE id = ANY(?) AND status = 'settling'`
+        )
+        .bind(polledAt, [...transferIds])
+        .run();
     },
 
     async getTransferById(params) {

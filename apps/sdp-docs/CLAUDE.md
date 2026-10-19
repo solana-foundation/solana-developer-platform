@@ -193,6 +193,11 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 
 Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp providers and API-key operations, Earn's hold included); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
 
+Before documenting a new ramp provider, follow
+`docs/contributing/ramp-provider-safety.md` and verify its sandbox settlement
+evidence. Describe provider `settled` as pending chain verification, not final
+delivery.
+
 Gates follow module declarations, never sentences:
 
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.

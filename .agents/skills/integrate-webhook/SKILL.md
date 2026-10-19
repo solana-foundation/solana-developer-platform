@@ -6,21 +6,35 @@ disable-model-invocation: true
 
 # Integrate webhook
 
-Webhooks drive a transfer's lifecycle after the quote: `awaiting_payment → settling → completed | failed | expired`. Implement one `WebhookProcessor` in `apps/sdp-api/src/routes/webhooks/ramps/<id>.ts` using the interface in `processor.ts`:
+Webhooks drive a transfer toward settlement after the quote. Provider `settled`
+only reaches `settling`; `verify-ramp-deliveries` checks the chain before
+`completed`. Follow `docs/contributing/ramp-provider-safety.md`. Implement one
+`WebhookProcessor` in `apps/sdp-api/src/services/ramps/webhooks/<id>.ts` using
+the interface in `processor.ts`:
 
-- `verify(context)` — verify the signature, return the parsed payload.
-- `parse(payload)` — pure wire-format → `RampSettlementEvent` mapping.
-- `process(c, environment, event)` — DB orchestration; calls `applyRampSettlementEvent`.
+- `verify(context)` — verify the raw request signature, return the raw body.
+- `parse(rawBody, environment)` — pure wire-format → `RampSettlementEvent` mapping.
+- `process(env, environment, event)` — DB orchestration through `applyRampSettlementEvent`.
 
-Canonical examples: the registered processors in `apps/sdp-api/src/routes/webhooks/ramps/` — read the closest one before writing yours.
+Canonical examples: the registered processors in
+`apps/sdp-api/src/services/ramps/webhooks/`.
 
 ## Mount + flow
 
-Webhooks are **not** under `/v1`. They land at `POST /webhooks/payments/ramps/{sandbox|production}/:provider`. `parseRampWebhookProvider` accepts an id only after registration in `apps/sdp-api/src/routes/webhooks/handlers.ts`. The handler reads the raw body → verifies → parses → returns 2xx → runs `process` through `c.executionCtx.waitUntil`.
+Webhooks are **not** under `/v1`. They land at
+`POST /webhooks/payments/ramps/{sandbox|production}/:provider`.
+`parseRampWebhookProvider` accepts an id only after registration in
+`apps/sdp-api/src/services/ramps/webhooks/registry.ts`. The handler verifies
+the raw body and persists it in the durable inbox before its 2xx response.
+The same typed processor handles the background apply and replay.
 
 ## verify
 
-`verify(context: RampWebhookValidationContext): Promise<Payload>`. `context` = `{ env, environment, headers, rawBody, requestUrl? }`. Read the mode-keyed verification secret/key from `env`, verify the signature over the **raw** body, then `JSON.parse` and return the payload. Throw `UNAUTHORIZED` on a missing/invalid signature; throw `badRequest` on non-JSON. Use `apps/sdp-api/src/lib/webhook-signature.ts` and supply the upstream timestamp as `timestampSeconds`; the helper enforces replay tolerance as well as signature verification.
+`verify(context: RampWebhookValidationContext): Promise<string>`. `context` =
+`{ env, environment, headers, rawBody, requestUrl? }`. Read the mode-keyed
+verification key, verify the signature over the **raw** body, and return that
+body. Throw `UNAUTHORIZED` on a missing or invalid signature. Use
+`apps/sdp-api/src/lib/webhook-signature.ts` with the provider-signed timestamp.
 
 The shared verifier currently supports HMAC-SHA256, and it requires a provider-signed timestamp. If the upstream uses another algorithm or does not sign a timestamp, stop and extend/review the shared verification contract; do not fabricate a local timestamp or bypass replay protection.
 
@@ -35,35 +49,39 @@ Signature variety across the registered webhook providers:
 
 ## parse
 
-`(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. Validate the provider envelope and event types (see the MoonPay and Stripe processors); an event type the schema doesn't know is an `ignore` event, not a parse failure. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
+`(rawBody: string, environment?: SdpEnvironment) → Event`, typically
+`RampSettlementEvent` from `@sdp/payments/ramps/types`. Validate the provider
+envelope and event types; unknown event types map to `ignore`. Set `reference`
+to the provider transaction or session id bound to the SDP quote. Parse amounts
+in their real currency: a MoonPay buy's `quoteCurrencyAmount` is crypto, while
+a sell's `quoteCurrencyAmount` is fiat. Keep refund wallets distinct from
+on-chain sending wallets.
 
-`parse` runs synchronously **before** the 2xx ack, so it must be total over every payload the provider can legitimately sign: unknown event types and transactions the platform didn't create (sandbox tests, manual payments on the same account) must map to an `ignore` event or an absent reference — never a throw, which turns into a non-2xx and a provider retry loop. Reserve throws for payloads that violate the provider's own guaranteed envelope (e.g. a missing event type), where a loud deterministic failure is the point. Example: references not minted by SDP return `undefined` from the processor's reference reader and get logged-and-skipped in `process`.
+Signed but irrelevant events should map to `ignore`; malformed provider
+envelopes should fail loudly. The durable inbox classifies sandbox and
+production failures differently, so preserve that path for every provider.
 
-`RampSettlementEvent` (`packages/sdp-payments/src/ramps/types.ts`):
-
-```
-
-`receivedAmount` is a major/display-unit string. For a settled on-ramp it is the received crypto amount; for an off-ramp it is the received fiat amount.
-| { kind: "awaiting_payment"; provider; reference }
-| { kind: "settling";         provider; reference }
-| { kind: "settled";          provider; reference; receivedAmount?; settlement? }
-| { kind: "failed";           provider; reference; error?; settlement? }
-| { kind: "expired";          provider; reference; error?; settlement? }
-| { kind: "ignore";           provider; reason }
-```
+`RampSettlementEvent` (`packages/sdp-payments/src/ramps/types.ts`) has
+`awaiting_payment`, `settling`, `settled`, `failed`, `expired`, and `ignore`
+kinds. `receivedAmount` is a major-unit string: crypto for a settled on-ramp,
+fiat for a settled off-ramp. Carry the provider's chain signature and any
+reported destination in `onchain`; keep refund addresses separate.
 
 ## process
 
-`process(c, environment, event)` is thin — ignore or apply:
+`process(env, environment, event)` is thin:
 
 ```ts
-async process(c: AppContext, _environment: SdpEnvironment, event: RampSettlementEvent) {
-  if (event.kind === "ignore") return;
-  await applyRampSettlementEvent(c, event);
+async process(env: Env, environment: SdpEnvironment, event: RampSettlementEvent) {
+  return applyRampSettlementEvent(env, environment, event);
 }
 ```
 
-Then register the class in `RAMP_PROVIDER_WEBHOOK_PROCESSOR` in `apps/sdp-api/src/routes/webhooks/handlers.ts`, or explicitly extend the excluded no-webhook provider union. `applyRampSettlementEvent` finds the transfer by `(provider, reference)`, skips terminal rows on redelivery, maps `kind → status`, persists received amounts for the relevant direction plus settlement economics, and records failed/expired errors.
+Register the processor in `RAMP_PROVIDER_WEBHOOK_PROCESSOR` in
+`apps/sdp-api/src/services/ramps/webhooks/registry.ts`.
+`applyRampSettlementEvent` verifies correlation and environment, then stores
+provider observations separately from quoted fields. A settled event stays
+`settling` until `verify-ramp-deliveries` proves the delivery on chain.
 
 ## Beyond settlement: provisioning auto-advance
 

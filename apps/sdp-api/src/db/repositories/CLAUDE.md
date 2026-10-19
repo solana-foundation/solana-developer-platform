@@ -132,7 +132,7 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   observation revives.
 - **Every ramp status write goes through it** (HOO-2087): settlement, cancel,
   MoonPay quote fill and failure, MoonPay failed-buy recovery, and the off-ramp
-  deposit claim and outcome.
+  deposit claim and outcome, plus chain-verified delivery.
   `updateTransfer` with a `status` matches no ramp row. The deposit claim adds
   its deposit-instruction preconditions to the same compare-and-swap inside
   the repository, and a landed deposit moves to `settling`, never `confirmed`
@@ -141,6 +141,11 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   guarded writes per file, so a new call fails it even in a listed file.
 - **Add a transition to the table, not a source set to a call site.** Mirror
   what the writer allows today, and let `transitionRampTransfer` read it.
+- **Provider `settled` only enters `settling`.** The cluster-scoped delivery
+  verifier alone takes `delivery_verified` to `completed`. It compares the
+  provider observation and row signature in the same guarded write. Quoted
+  values stay fixed; provider amounts and addresses live in `provider_data`.
+  Every new provider follows `docs/contributing/ramp-provider-safety.md`.
 
 ## Ramps: webhook environment boundary
 
@@ -163,7 +168,8 @@ A failed MoonPay sale with no claimed deposit moves to `failed` and withdraws
 returns `refused` for review. A sale whose deposit was already claimed stays
 open for reconciliation and refuses the failure without regressing its state.
 If the failed event reports a deposit hash, the row moves to `settling`, holds
-the signature and reference, and withdraws the instruction for review.
+the reported hash in `provider_data` and its reference, leaves any SDP-signed
+deposit signature untouched, and withdraws the instruction for review.
 
 ## Ramps: retired provider ids
 

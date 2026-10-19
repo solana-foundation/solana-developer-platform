@@ -142,6 +142,11 @@ export interface RampTransferTransitionInput extends TransferStatusChangeFields 
   transition: RampTransferTransitionId;
   /** MoonPay observations compare this timestamp only for the bound reference. */
   providerObservation?: { reference: string; observedAt: string };
+  /** Chain verdict must still match the provider observation and row signature it checked. */
+  deliveryEvidence?: { providerSettlement: Record<string, unknown>; signature: string };
+  /** Untimed providers may claim completion evidence once, never replace it by redelivery. */
+  providerSettlementUnclaimed?: boolean;
+  providerSettlementMissingSignature?: boolean;
   updatedAt: string;
 }
 
@@ -267,6 +272,16 @@ export interface PaymentsRepository {
    * not a ramp transfer of those types).
    */
   transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
+  /** Fair, cluster-scoped page of provider-settled rows awaiting chain proof. */
+  listRampTransfersToVerify(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<PaymentTransferRow[]>;
+  /** Rotate polled rows without changing their business updated_at or status. */
+  markRampTransfersVerificationPolled(params: {
+    transferIds: readonly string[];
+    polledAt: string;
+  }): Promise<void>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled

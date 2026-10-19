@@ -119,7 +119,8 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
   it("lands each provider event on the status it names, for both ramp types", () => {
     expect(RAMP_TRANSFER_TRANSITIONS.provider_awaiting_payment.to).toBe("awaiting_payment");
     expect(RAMP_TRANSFER_TRANSITIONS.provider_settling.to).toBe("settling");
-    expect(RAMP_TRANSFER_TRANSITIONS.provider_settled.to).toBe("completed");
+    expect(RAMP_TRANSFER_TRANSITIONS.provider_settled.to).toBe("settling");
+    expect(RAMP_TRANSFER_TRANSITIONS.delivery_verified.to).toBe("completed");
     expect(RAMP_TRANSFER_TRANSITIONS.provider_failed.to).toBe("failed");
     expect(RAMP_TRANSFER_TRANSITIONS.provider_expired.to).toBe("expired");
     const providerTransitions = [
@@ -210,6 +211,35 @@ describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
 
     expect(updated?.status).toBe("settling");
     expect(await readStatus("xfr_legal")).toBe("settling");
+  });
+
+  it("persists SDP's signed deposit when a provider settles during submission", async () => {
+    await seedTransfer({ id: "xfr_submission_race", status: "processing", type: "offramp" });
+    const repo = createSystemPaymentsRepository(env);
+    await transition("xfr_submission_race", "provider_settled");
+
+    const signed = await repo.persistSignedTransfer({
+      transferId: "xfr_submission_race",
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      signature: "submitted-signature",
+      signedTransaction: "signed-by-sdp",
+      lastValidBlockHeight: "100",
+      updatedAt: "2026-10-13T01:00:01.000Z",
+    });
+    expect(signed?.status).toBe("settling");
+    const started = await repo.markTransferSubmissionStarted({
+      transferId: "xfr_submission_race",
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      startedAt: "2026-10-13T01:00:02.000Z",
+    });
+    expect(started).toMatchObject({
+      status: "settling",
+      signature: "submitted-signature",
+      signed_transaction: "signed-by-sdp",
+      submission_started_at: "2026-10-13T01:00:02.000Z",
+    });
   });
 
   it("matches nothing from an unlisted source status and leaves the row alone", async () => {
@@ -352,6 +382,12 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
     file: "apps/sdp-api/src/services/payments/ramp-settlements.ts",
     evidence: ".transitionRampTransfer(update)",
     guardedCalls: 1,
+  },
+  {
+    writer: "ramp chain delivery verifier",
+    file: "apps/sdp-api/src/services/jobs/verify-ramp-deliveries.ts",
+    evidence: 'transition: "delivery_verified"',
+    guardedCalls: 2,
   },
   {
     writer: "MoonPay failed buy attempt",
