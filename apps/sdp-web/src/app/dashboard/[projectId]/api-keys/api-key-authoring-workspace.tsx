@@ -7,6 +7,7 @@ import { cn } from "@sdp/ui/cn";
 import { DateTimePicker } from "@sdp/ui/date-picker";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
+import { Textarea } from "@sdp/ui/textarea";
 import { CircleCheck, FileText, Globe, KeyRound, Layers, Search, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
@@ -205,9 +206,9 @@ function DetailsStep({
           description={t("DashboardCustody.apiKeyNetworkAccessDescription")}
         >
           <Label htmlFor="api-key-allowed-ips">{t("DashboardCustody.apiKeyAllowedIpsLabel")}</Label>
-          <textarea
+          <Textarea
             id="api-key-allowed-ips"
-            className="mt-2 w-full rounded-[14px] border border-border-default bg-surface-raised px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted focus:border-border-strong focus:ring-2 focus:ring-border-default"
+            className="mt-2"
             rows={3}
             value={draft.allowedIps}
             onChange={(event) => update({ allowedIps: event.currentTarget.value })}

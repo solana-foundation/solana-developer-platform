@@ -2,6 +2,7 @@
 
 import { Button } from "@sdp/ui/button";
 import { Label } from "@sdp/ui/label";
+import { Textarea } from "@sdp/ui/textarea";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
@@ -35,9 +36,9 @@ export function OrganizationIpAllowlistForm({
         <Label htmlFor="organization-allowed-ips">
           {t("Shared.organizationAccess.allowedIpsLabel")}
         </Label>
-        <textarea
+        <Textarea
           id="organization-allowed-ips"
-          className="mt-2 w-full rounded-[14px] border border-border-default bg-surface-raised px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted focus:border-border-strong focus:ring-2 focus:ring-border-default"
+          className="mt-2"
           rows={4}
           value={value}
           onChange={(event) => setValue(event.currentTarget.value)}
