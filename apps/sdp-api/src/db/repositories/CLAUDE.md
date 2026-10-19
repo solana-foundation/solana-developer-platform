@@ -132,7 +132,8 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   observation revives.
 - **Every ramp status write goes through it** (HOO-2087): settlement, cancel,
   MoonPay quote fill and failure, MoonPay failed-buy recovery, and the off-ramp
-  deposit claim and outcome, plus chain-verified delivery.
+  deposit claim and outcome, plus chain-verified delivery and the status
+  sweep's abandoned-checkout expiry (`checkout_abandoned`).
   `updateTransfer` with a `status` matches no ramp row. The deposit claim adds
   its deposit-instruction preconditions to the same compare-and-swap inside
   the repository, and a landed deposit moves to `settling`, never `confirmed`
@@ -146,6 +147,22 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   provider observation and row signature in the same guarded write. Quoted
   values stay fixed; provider amounts and addresses live in `provider_data`.
   Every new provider follows `docs/contributing/ramp-provider-safety.md`.
+
+## Ramps: status pull queue
+
+The `sweep-ramp-transfer-statuses` cron recovers missed webhooks (HOO-2040).
+
+- **One claim per row.** `claimRampTransferForStatusPull` selects and stamps
+  `provider_status_last_polled_at` in one statement (`FOR UPDATE SKIP
+  LOCKED`), so overlapping sweeps never ask about the same row. It leaves
+  `updated_at` alone: that column is the abandonment clock.
+- **Its own queue.** The verifier rotates `finalization_last_polled_at`;
+  neither queue stamps the other's column. Open rows drain before expired
+  ones, and a settling row whose evidence the verifier already holds is never
+  claimed.
+- **Expiry loses to a fresh write.** `checkout_abandoned` passes
+  `expectedUpdatedAt`, so a webhook that lands while the pull is in flight
+  wins.
 
 ## Ramps: webhook environment boundary
 

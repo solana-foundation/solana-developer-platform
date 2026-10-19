@@ -7,6 +7,7 @@ import {
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
 import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -29,12 +30,14 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
+import type { DatabaseExecutor } from "@/db/client";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
 import { createTokenRepository } from "@/db/repositories/repository-factory";
+import type { ApiKeyLifecycleColumns } from "@/lib/api-key-rotation";
 import {
   AppError,
   badRequest,
@@ -43,9 +46,12 @@ import {
   PUBLIC_INTERNAL_ERROR_MESSAGE,
   transactionFailed,
 } from "@/lib/errors";
+import { assertMovementAdmitted, decidePrincipal } from "@/lib/money-admission";
+import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { parseGrantsColumn } from "@/services/api-key.service";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -451,4 +457,100 @@ export async function confirmSubscriptionSignature(
 
 export function recurringPaymentErrorMessage(error: Error): string {
   return error instanceof AppError ? error.message : PUBLIC_INTERNAL_ERROR_MESSAGE;
+}
+
+/**
+ * Inside a claim the job can later finish as the mandate, re-reads the key
+ * that is starting it under a share lock and decides it as the signing waist
+ * would (HOO-2099): live, holding the movement's action, and with every
+ * wallet the claim signs with in its scope. Revocation and every key edit
+ * (grants, wallet list) write the key row first, under its row lock, so the
+ * two are ordered: a narrowing that lands first makes this refuse and the
+ * claim roll back, and a claim that commits first is what revocation lists.
+ * The job later signs as the mandate without the key, so this is the last
+ * point the key's authority is read. A member activator is decided the same
+ * way from their membership row, which removal and role changes write; no
+ * activator (the job itself) reads nothing.
+ *
+ * @throws MoneyMovementRefusedError with the waist's refusal (403).
+ */
+export async function lockLiveActivatingKey(
+  tx: DatabaseExecutor,
+  input: {
+    activator: ReturnType<typeof currentMandateActivator>;
+    organizationId: string;
+    projectId: string;
+    movement: MovementId;
+    recurringPaymentId: string;
+    /** The custody wallets the claimed operation signs with. */
+    custodyWalletIds: readonly string[];
+  }
+): Promise<void> {
+  const context = {
+    surface: "http",
+    movement: input.movement,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subjectId: input.recurringPaymentId,
+  } as const;
+  const userId = input.activator?.userId;
+  if (userId) {
+    const member = await tx.queryOne<{ status: string; role: string }>(
+      `SELECT status, role FROM organization_members
+        WHERE user_id = ? AND organization_id = ?
+        FOR SHARE`,
+      [userId, input.organizationId]
+    );
+    assertMovementAdmitted(
+      decidePrincipal(
+        input.movement,
+        { readAt: Date.now(), principal: { kind: "member", member } },
+        { custodyWalletId: null }
+      ),
+      context
+    );
+    return;
+  }
+  const apiKeyId = input.activator?.apiKeyId;
+  if (!apiKeyId) {
+    return;
+  }
+  const key = await tx.queryOne<
+    ApiKeyLifecycleColumns & { grants: unknown; wallet_scope: ApiKeyWalletScope }
+  >(
+    `SELECT status, expires_at, rotation_deadline, grants, wallet_scope
+       FROM api_keys
+      WHERE id = ? AND organization_id = ? AND project_id = ?
+      FOR SHARE`,
+    [apiKeyId, input.organizationId, input.projectId]
+  );
+  const listed = key
+    ? await tx.queryMany<{ custody_wallet_id: string }>(
+        `SELECT custody_wallet_id FROM api_key_signing_wallets
+          WHERE api_key_id = ? AND status = 'active' AND custody_wallet_id = ANY(?::text[])`,
+        [apiKeyId, [...input.custodyWalletIds]]
+      )
+    : [];
+  const readAt = Date.now();
+  for (const custodyWalletId of input.custodyWalletIds) {
+    const decision = decidePrincipal(
+      input.movement,
+      {
+        readAt,
+        principal: {
+          kind: "api_key",
+          key: key && {
+            status: key.status,
+            expires_at: key.expires_at,
+            rotation_deadline: key.rotation_deadline,
+            grants: parseGrantsColumn(key.grants),
+            walletScope: key.wallet_scope,
+            walletListed: listed.some((row) => row.custody_wallet_id === custodyWalletId),
+          },
+        },
+      },
+      { custodyWalletId }
+    );
+    assertMovementAdmitted(decision, context);
+  }
 }

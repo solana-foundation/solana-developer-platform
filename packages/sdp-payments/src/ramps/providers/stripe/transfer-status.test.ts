@@ -88,9 +88,17 @@ describe("StripeRampClient.fetchTransferStatus", () => {
         error: "Stripe rejected the on-ramp session.",
       },
     ]);
-    for (const status of ["initialized", "toString"]) {
+    assert.deepEqual(await eventsFor("initialized", STRIPE_SESSION_TERMS), [
+      { provider: "stripe", kind: "ignore", reason: "untracked_status:initialized" },
+    ]);
+    for (const status of ["fulfillment_paused", "toString"]) {
       assert.deepEqual(await eventsFor(status, STRIPE_SESSION_TERMS), [
-        { provider: "stripe", kind: "ignore", reason: `unsupported_status:${status}` },
+        {
+          provider: "stripe",
+          kind: "ignore",
+          reason: `unsupported_status:${status}`,
+          unmappedStatus: status,
+        },
       ]);
     }
   });
@@ -109,6 +117,38 @@ describe("StripeRampClient.fetchTransferStatus", () => {
     assert.equal(await railFor("sol", "solana"), "sol.solana");
     assert.equal(await railFor("usdc", "ethereum"), null);
     assert.equal(await railFor("eth", "solana"), null);
+  });
+
+  it("reads a session that leaves out the fields it does not report", async () => {
+    assert.deepEqual(
+      await eventsFor("fulfillment_complete", {
+        destination_currency: "usdc",
+        destination_network: "solana",
+      }),
+      [
+        {
+          provider: "stripe",
+          kind: "settled",
+          reference: "cos_contract",
+          deliveredAssetRail: "usdc.solana",
+        },
+      ]
+    );
+    const { settled, requests } = await lookUp(
+      [
+        stripeSessionLookupExchange(200, {
+          ...STRIPE_COMPLETED_SESSION,
+          status: "requires_payment",
+          transaction_details: "garbled",
+        }),
+      ],
+      LOOKUP
+    );
+    assert.equal(requests, 1);
+    assert.ok(settled.ok, "an unread field never fails a lookup");
+    assert.deepEqual(settled.events, [
+      { provider: "stripe", kind: "awaiting_payment", reference: "cos_contract" },
+    ]);
   });
 
   it("carries the chain transaction only when Stripe reports one", async () => {
@@ -159,7 +199,7 @@ describe("StripeRampClient.fetchTransferStatus", () => {
         ),
         "PROVIDER_RESPONSE_INVALID",
         1,
-        "stripe returned a completed session without its destination currency or network"
+        "A completed Stripe session is missing its destination currency or network"
       );
     }
   });
@@ -183,7 +223,7 @@ describe("StripeRampClient.fetchTransferStatus", () => {
         result,
         "PROVIDER_RESPONSE_INVALID",
         1,
-        "stripe returned a completed session with malformed delivery proof"
+        "A completed Stripe session has malformed delivery proof"
       );
       assert.ok(!result.settled.ok && result.settled.cause instanceof SdpPaymentsError);
       assert.deepEqual(

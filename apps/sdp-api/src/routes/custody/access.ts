@@ -1,13 +1,10 @@
 import { getDb } from "@/db/client";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
-import {
-  assertApiKeyNotWalletScoped,
-  isApiKeyWalletAccessDenied,
-  resolveApiKeyCustodyWalletId,
-  resolveApiKeySigningWalletId,
-} from "@/services/api-key-scope.service";
+import { findProjectOperationalWallet } from "@/routes/custody/handlers/wallets";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { AppContext } from "./context";
 
 /**
@@ -15,7 +12,9 @@ import type { AppContext } from "./context";
  * before the Idempotency-Key step, so a replay passes exactly these checks.
  * They check the credential's access, never a wallet's status: a wallet
  * deactivated or deleted since a request ran still lets that request be
- * answered. Whether a wallet is usable now is the handler's call.
+ * answered. Whether a wallet is usable now is the handler's call. They are
+ * project-scoped: whether a key may sign with a wallet is the custody
+ * signer's decision (HOO-2099).
  */
 
 function body<T>(input: AuthorizeInput): T {
@@ -24,28 +23,6 @@ function body<T>(input: AuthorizeInput): T {
 }
 
 const walletNotFound = () => new AppError("NOT_FOUND", "Custody wallet not found");
-
-type WalletPermissions = Parameters<typeof resolveApiKeyCustodyWalletId>[2];
-
-/**
- * A custody wallet the request names by provider wallet id (or custody wallet
- * id): the key's bindings as authentication read them on this request
- * (HOO-2048), deactivated wallets kept. A denied binding reads as a missing
- * wallet, as the handlers answer.
- */
-function authorizeCustodyWalletBinding(
-  c: AppContext,
-  walletId: string,
-  requiredPermissions: WalletPermissions,
-  notFound: () => AppError
-): void {
-  try {
-    resolveApiKeyCustodyWalletId(getAuth(c), walletId, requiredPermissions, true);
-  } catch (error) {
-    if (isApiKeyWalletAccessDenied(error)) throw notFound();
-    throw error;
-  }
-}
 
 /**
  * The named wallet belongs to the caller's project, whatever its status or its
@@ -86,30 +63,9 @@ async function assertCustodyWalletInProject(
   }
 }
 
-/**
- * A wallet the request names: the credential's binding (a denial reads as
- * "Custody wallet not found"), then the wallet in the project (`notFound`, the
- * handler's own answer for a missing wallet).
- */
-async function authorizeCustodyWallet(
-  c: AppContext,
-  walletId: string,
-  requiredPermissions: WalletPermissions,
-  options: { allowRecordIdAlias: boolean; notFound: () => AppError }
-): Promise<void> {
-  authorizeCustodyWalletBinding(c, walletId, requiredPermissions, walletNotFound);
-  await assertCustodyWalletInProject(c, walletId, options.allowRecordIdAlias, options.notFound);
-}
-
-/** Provider initialize: never a wallet-scoped key (the new wallet is outside its bindings). */
-export function authorizeInitializeSigning(c: AppContext): void {
-  assertApiKeyNotWalletScoped(getAuth(c), "initialize custody providers");
-}
-
-/** Wallet create: never a wallet-scoped key, and any named connection belongs to the project. */
+/** Wallet create: any named connection belongs to the project. */
 export async function authorizeCreateWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
   const auth = getAuth(c);
-  assertApiKeyNotWalletScoped(auth, "create custody wallets");
   const { connectionId } = body<{ connectionId?: string }>(input);
   if (connectionId === undefined) return;
   const connection = await getDb(c.env)
@@ -132,33 +88,54 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
     throw badRequest("Invalid wallet ID");
   }
   // The handler resolves the path's id with its record-id alias and answers "Wallet not found".
-  return authorizeCustodyWallet(c, walletId, ["wallets:write"], {
-    allowRecordIdAlias: true,
-    notFound: () => new AppError("NOT_FOUND", "Wallet not found"),
-  });
+  const notFound = () => new AppError("NOT_FOUND", "Wallet not found");
+  await assertCustodyWalletInProject(c, walletId, true, notFound);
+  // A selected key reaches only the wallets it lists (HOO-2099), as on the
+  // wallet detail read: the record the handler updates is checked here.
+  const wallet = await findProjectOperationalWallet(c, walletId, true);
+  if (wallet && !walletAccessAllows(getAuth(c).walletAccess, wallet.id)) {
+    throw notFound();
+  }
 }
 
 /** Wallet delete: the wallet the body names. */
 export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
-  return authorizeCustodyWallet(c, body<{ walletId: string }>(input).walletId, ["wallets:write"], {
-    allowRecordIdAlias: false,
-    notFound: walletNotFound,
+  const walletId = body<{ walletId: string }>(input).walletId;
+  await assertCustodyWalletInProject(c, walletId, false, walletNotFound);
+  // A selected key reaches only the wallets it lists (HOO-2099): the record
+  // the handler would deactivate is checked here, before the key is claimed.
+  const auth = getAuth(c);
+  const owned = await new CustodyRuntimeTargets(
+    getDb(c.env),
+    c.env,
+    new Map()
+  ).findOwnedWalletForMutation({
+    organizationId: auth.organizationId,
+    projectId: requireProjectId(c),
+    walletId,
   });
+  if (owned && !walletAccessAllows(auth.walletAccess, owned.id)) {
+    throw walletNotFound();
+  }
 }
 
-/** Signer check: the wallet the body names, or the key's own signing wallet. */
-export function authorizeSignerCheck(c: AppContext, input: AuthorizeInput): void {
-  const auth = getAuth(c);
-  const walletId = resolveApiKeySigningWalletId(auth, body<{ walletId?: string }>(input).walletId, [
-    "wallets:write",
-  ]);
-  if (walletId === null) {
-    throw badRequest(
-      auth.authType === "api_key"
-        ? "API key is not bound to a signing wallet"
-        : "walletId is required for session or Clerk authentication"
-    );
+/**
+ * Signer check: the wallet the body names, in the caller's project, with the
+ * route's own 400 for an unknown one, which is never stored. Whether the
+ * caller may sign with it is the custody signer's decision (HOO-2099).
+ */
+export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput): Promise<void> {
+  const walletId = body<{ walletId: string }>(input).walletId;
+  await assertCustodyWalletInProject(c, walletId, false, () =>
+    badRequest("Custody wallet not found")
+  );
+  // The scope is checked against the exact record the handler signs with: a
+  // provider wallet id can be on several records. The custody signer refuses
+  // it too; refusing here keeps the refused check out of the Idempotency-Key
+  // store, so a retry after a scope fix runs. No operational record: the
+  // handler answers that.
+  const wallet = await findProjectOperationalWallet(c, walletId);
+  if (wallet) {
+    assertCallerWalletInScope(getAuth(c).walletAccess, wallet.id);
   }
-  // An unknown wallet is a 400 here, which is never stored, so the handler resolves it.
-  authorizeCustodyWalletBinding(c, walletId, ["wallets:write"], walletNotFound);
 }

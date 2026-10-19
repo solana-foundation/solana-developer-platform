@@ -1,6 +1,6 @@
 /**
  * Redis-backed KVStore implementation. One ioredis client per REDIS_URL is shared
- * across the three logical stores (apiKeys / rateLimits / cache);
+ * across the logical stores (rateLimits / cache);
  * each store prefixes its keys so list() doesn't bleed across domains.
  *
  * ioredis is loaded lazily — the top-level `import type` is erased at emit
@@ -253,14 +253,13 @@ export class RedisKVStore implements KVStore {
 }
 
 const STORE_PREFIXES = {
-  apiKeys: "apiKeys",
   rateLimits: "rateLimits",
   cache: "cache",
 } as const;
 
 /**
  * Prefix stores with the vitest pool id so parallel workers cannot clobber
- * API-key cache or the audit-ledger checkpoint if Redis SELECT-by-pathname
+ * rate-limit counters or the audit-ledger checkpoint if Redis SELECT-by-pathname
  * is ignored. Empty in production.
  */
 function testWorkerStorePrefix(): string {
@@ -283,7 +282,6 @@ export function createKVStoreSet(env: Env): KVStoreSet {
   const clientPromise = ensureClient(url);
   const namespace = testWorkerStorePrefix();
   return {
-    apiKeys: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.apiKeys}`),
     rateLimits: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.rateLimits}`),
     cache: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.cache}`),
   };

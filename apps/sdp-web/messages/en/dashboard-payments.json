@@ -1282,6 +1282,7 @@
       "paymentRequest": "Payment request",
       "amountRequested": "Amount requested",
       "paymentLinkCopied": "Payment link copied",
+      "paymentLinkCopyFailed": "Could not copy the payment link.",
       "reference": "Reference",
       "expires": "Expires",
       "destinationWalletId": "Destination wallet ID",
@@ -1329,7 +1330,8 @@
       "noPaymentRequests": "No payment requests yet",
       "noPaymentRequestsDescription": "Create a payment link to request a fixed payment.",
       "paymentRequestDetails": "Payment request details",
-      "copy": "Copy"
+      "copy": "Copy",
+      "paymentLinkNotPermitted": "Only members who can manage payment requests can copy their links."
     },
     "depositMethod": {
       "address": "Solana address",

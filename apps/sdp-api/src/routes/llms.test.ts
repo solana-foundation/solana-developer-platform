@@ -15,8 +15,8 @@ describe("GET /llms.txt", () => {
 
     expect(body).toContain("/openapi.json");
     expect(body).toContain("/docs");
-    expect(body).toContain("- API Keys: https://");
-    expect(body).toContain("/v1/api-keys");
+    // Keys are managed in the dashboard by a signed-in person (HOO-2099).
+    expect(body).not.toContain("/v1/api-keys");
     expect(body).toContain("/v1/wallets");
     expect(body).toContain("/v1/issuance");
     expect(body).toContain("/v1/compliance");

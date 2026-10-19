@@ -10,16 +10,16 @@ The platform serves a generated support matrix — which `(fiat, crypto)` pairs 
 
 Implement rail support in `packages/sdp-payments`; the codegen (`apps/sdp-api/scripts/ramp-support.ts`) owns snapshots and the generated matrix. Choose one source:
 
-1. **Upstream discovery API:** add `RAMP_RAIL_DUMPS.<id>` in `packages/sdp-payments/src/ramps/shared.ts`; `_discoverRails` writes raw responses; `distillRailSupport` reads and normalizes them.
-2. **No discovery API:** make `_discoverRails` a no-op and return an explicit, tested snapshot from `distillRailSupport`. Do not invent a network endpoint or dump.
+1. **Upstream discovery API:** add `RAMP_RAIL_DUMPS.<id>` in `packages/sdp-payments/src/ramps/shared.ts`; `discoverCurrencyAndRails` writes the raw responses, then reads them back and distills them.
+2. **No discovery API:** `discoverCurrencyAndRails` returns an explicit, tested snapshot and reads no credentials. Do not invent a network endpoint or dump.
 
-Both paths declare `<PROVIDER>_DECLARED_RAIL_SUPPORT` for entity types and country support not discovered in the snapshot. Reference the existing providers under `packages/sdp-payments/src/ramps/providers/` — single-dump, multi-endpoint, discovered-country-support, and static-support variants are all represented.
+Both paths declare `<PROVIDER>_DECLARED_RAIL_SUPPORT` for entity types and country support not discovered in the snapshot. The live references under `packages/sdp-payments/src/ramps/providers/` are MoonPay (two dumps, discovered country support) and Stripe (static support).
 
 ## The data flow
 
 ```
-_discoverRails ──fetch──▶ .ramp-support/raw/<id>/*.json        (gitignored raw dumps)
-distillRailSupport ──parse──▶ .ramp-support/<id>.currency.json  (committed snapshot)
+discoverCurrencyAndRails ──fetch──▶ .ramp-support/raw/<id>/*.json   (gitignored raw dumps)
+                         ──distill──▶ .ramp-support/<id>.currency.json  (committed snapshot)
 ramp-support:generate ──merge snapshots + declared consts──▶ ramp.generated.ts  (committed)
 ```
 
@@ -35,25 +35,28 @@ For discovery-backed support, add an entry to `RAMP_RAIL_DUMPS` in `packages/sdp
 },
 ```
 
-`name` is what `_discoverRails` writes; `file` is what `distillRailSupport` reads back. For static support, skip the dump entry.
+`name` is what `discoverCurrencyAndRails` writes; `file` is what it reads back. For static support, skip the dump entry.
 
-## Step 2 — `_discoverRails`
+## Step 2 — `discoverCurrencyAndRails`
 
-HTTP only. Read **sandbox** creds from the passed `env` with `requireEnv`, fetch each upstream endpoint with the injected `fetchJson`, and `writeDump` the raw response. No parsing or mapping here. For static support, use a no-op method and read no credentials.
+One contract method does both halves. Unless `context.offline`, read **sandbox** creds from `context.env` with `requireEnv`, fetch each upstream endpoint with the injected `context.fetchJson`, and persist the raw answer with `context.writeDump`. Then always read the dumps back with `context.readDump` and distill them, so an offline run re-distills the dumps already on disk. For static support, return the snapshot and read no credentials.
 
 ```ts
-async _discoverRails({ env, fetchJson, writeDump }: Parameters<RampProvider["_discoverRails"]>[0]) {
-  const apiKey = requireEnv(env, "<PROVIDER>_SANDBOX_API_KEY");
-  await writeDump(
-    RAMP_RAIL_DUMPS.<id>.currencies.name,
-    await fetchJson(this.id, "GET /currencies", `https://.../currencies?apiKey=${apiKey}`)
-  );
+async discoverCurrencyAndRails(context: RampDiscoveryContext): Promise<ProviderRailSupportDistillation> {
+  if (!context.offline) {
+    const apiKey = requireEnv(context.env, "<PROVIDER>_SANDBOX_API_KEY");
+    await context.writeDump(
+      RAMP_RAIL_DUMPS.<id>.currencies.name,
+      await context.fetchJson(this.id, "GET /currencies", `https://.../currencies?apiKey=${apiKey}`)
+    );
+  }
+  return distill<Id>RailSupport(await context.readDump(RAMP_RAIL_DUMPS.<id>.currencies.file));
 }
 ```
 
-Use the provider's most public/anonymous discovery endpoints where possible (some upstreams expose anonymous paged catalog endpoints). `_discoverRails` is `@internal` — only the discovery script ever calls it.
+Use the provider's most public/anonymous discovery endpoints where possible (some upstreams expose anonymous paged catalog endpoints). Only the discovery script (`apps/sdp-api/scripts/ramp-support.ts`) calls this method, never the runtime.
 
-## Step 3 — `distillRailSupport`
+## Step 3 — `distill<Id>RailSupport`
 
 Pure: map the dump(s), or an explicit static declaration, into the types from `packages/sdp-payments/src/ramps/types.ts`:
 
@@ -79,7 +82,7 @@ export function distill<Id>RailSupport(raw: unknown): ProviderRailSupportDistill
 }
 ```
 
-Keep the mapping in a standalone `distill<Id>RailSupport(raw)` (as above) so it's unit-testable without HTTP; the class's `distillRailSupport(readDump)` method just reads the dump and calls it.
+Keep the mapping in a standalone exported `distill<Id>RailSupport(raw)` (as above, like `distillMoonpayRailSupport`) so it's unit-testable without HTTP; `discoverCurrencyAndRails` only reads the dumps and calls it.
 
 Mapping rules (helpers live in `shared.ts`):
 
@@ -133,8 +136,8 @@ Commit `.ramp-support/<id>.currency.json` and the regenerated `ramp.generated.ts
 
 ## Rules
 
-- HTTP only in `_discoverRails` — no DB, no business logic.
-- `distillRailSupport` is pure over the dumps — no fetching. A malformed dump should throw, not silently yield empty support; unsupported currency/country codes get reported in `droppedCurrencyCodes`/`droppedCountryCodes`, not swallowed.
+- HTTP only in `discoverCurrencyAndRails` — no DB, no business logic.
+- `distill<Id>RailSupport` is pure over the dumps — no fetching. A malformed dump should throw, not silently yield empty support; unsupported currency/country codes get reported in `droppedCurrencyCodes`/`droppedCountryCodes`, not swallowed.
 - No fallbacks: a missing cred throws via `requireEnv`.
 - Strong typing: the declared-support const is `as const satisfies ProviderDeclaredRailSupport`; no `any`.
 - Your provider must already be registered (`register-provider`) — the codegen iterates `RAMP_PROVIDERS` and will fail if a client is missing.

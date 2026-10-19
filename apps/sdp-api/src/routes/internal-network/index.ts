@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { requireClerkSession, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
+import { publicRoute } from "@/middleware/require-action";
 import type { Env } from "@/types/env";
 import { getNetworkSnapshot } from "./handlers";
 
@@ -11,6 +13,10 @@ import { getNetworkSnapshot } from "./handlers";
 export const internalNetwork = new Hono<{ Bindings: Env }>();
 
 internalNetwork.use("*", unifiedAuthMiddleware());
-internalNetwork.use("*", requireClerkSession());
+internalNetwork.use("*", requireHumanSession());
 
-internalNetwork.get("/", getNetworkSnapshot);
+internalNetwork.get(
+  "/",
+  publicRoute("a dashboard session reads chain-wide figures; no tenant data"),
+  getNetworkSnapshot
+);

@@ -7,7 +7,7 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getPaymentsRepository } from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
-import { assertPaymentWalletExactAccess, resolveScope } from "@/routes/payments/wallets";
+import { resolveScope } from "@/routes/payments/wallets";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import { admitRamp } from "./admission";
 import type { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
@@ -77,7 +77,6 @@ export async function simulateSandboxTransfer(
   if (transfer.custody_wallet_id === null) {
     throw internalError("On-ramp transfer has no destination custody wallet.");
   }
-  assertPaymentWalletExactAccess(c, transfer.custody_wallet_id, ["payments:write"]);
   if (transfer.provider === null) {
     throw internalError("On-ramp transfer has no provider.");
   }

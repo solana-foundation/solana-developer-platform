@@ -10,6 +10,7 @@ import type {
 } from "@sdp/types/custody";
 import type {
   CounterpartyAccountSummary,
+  CreatedPaymentRequest,
   PaymentRampQuoteDeliveryMode,
   PaymentRecurringPayment,
   PaymentRecurringPaymentStatus,
@@ -769,7 +770,8 @@ export interface DemoWorld {
   accounts: Record<string, CounterpartyAccount>;
   transfers: DemoTransferRow[];
   batches: DemoBatch[];
-  requests: PaymentRequest[];
+  /** Each request with its link token, which reads never return (APE-849). */
+  requests: CreatedPaymentRequest[];
   schedules: PaymentRecurringPayment[];
   attempts: PaymentSubscriptionCollectionAttempt[];
   /** `provider:counterpartyId` for each contact that accepted a ramp provider's agreements. */
@@ -1126,7 +1128,7 @@ function buildRequest(
   world: WorldBase,
   transfers: readonly DemoTransferRow[],
   clock: Clock
-): PaymentRequest {
+): CreatedPaymentRequest {
   const wallet = world.wallets[spec.wallet];
   const createdAt = clock.ago(spec.createdAgo);
   const paidAt = transfers.find((row) => row.transfer.id === spec.paidByTransferId)?.transfer
@@ -1514,7 +1516,7 @@ function requestsBody(world: DemoWorld, params: URLSearchParams) {
   );
   return {
     data: {
-      paymentRequests: page.rows,
+      paymentRequests: page.rows.map(withoutLinkToken),
       total: page.total,
       page: page.page,
       pageSize: page.pageSize,
@@ -1541,6 +1543,25 @@ function recurringPaymentsBody(world: DemoWorld, params: URLSearchParams) {
       pageSize: page.pageSize,
     },
   };
+}
+
+function withoutLinkToken({
+  publicToken: _publicToken,
+  ...request
+}: CreatedPaymentRequest): PaymentRequest {
+  return request;
+}
+
+/** One request, as `GET /v1/payments/requests/:id` answers it: no link token. */
+function requestBody(world: DemoWorld, requestId: string) {
+  const request = world.requests.find((candidate) => candidate.id === requestId);
+  return request ? { data: withoutLinkToken(request) } : undefined;
+}
+
+/** `GET /v1/payments/requests/:id/link`; a demo link never opens on the public pay page. */
+function requestLinkBody(world: DemoWorld, requestId: string) {
+  const request = world.requests.find((candidate) => candidate.id === requestId);
+  return request ? { data: { id: request.id, publicToken: request.publicToken } } : undefined;
 }
 
 function recurringPaymentBody(world: DemoWorld, recurringPaymentId: string) {
@@ -1589,12 +1610,15 @@ function paymentsRoute(rest: string[], params: URLSearchParams, world: DemoWorld
         return transferBody(world, id);
       case "transfer-batches":
         return batchBody(world, id);
+      case "requests":
+        return requestBody(world, id);
       case "recurring-payments":
         return recurringPaymentBody(world, id);
       default:
         return undefined;
     }
   }
+  if (collection === "requests" && child === "link") return requestLinkBody(world, id);
   if (collection === "subscriptions" && child === "collection-attempts") {
     return collectionAttemptsBody(world, id, params);
   }

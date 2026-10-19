@@ -6,8 +6,19 @@ import { z } from "zod";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
-import { classifiedValues, isValuePublished, publishedModules } from "./release-channel-values";
-import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
+import {
+  classifiedValues,
+  hiddenValues,
+  isValuePublished,
+  publishedModules,
+} from "./release-channel-values";
+import {
+  createOpenApiDocument,
+  createPublicOpenApiDocument,
+  createPublicSurfaceManifest,
+} from "./spec";
+
+const forbiddenResponseSchema = z.object({ description: z.string() });
 
 /** The widest public document: every module's routes, as dev serves it. */
 const EXPERIMENTAL = { releaseChannel: "experimental" } as const;
@@ -61,27 +72,71 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
-  it("documents API key and Clerk access for shared private-channel and member operations", () => {
+  it("documents API key and Clerk access for shared private-channel operations", () => {
     const doc = createOpenApiDocument();
     for (const [path, method] of [
       ["/v1/private-channels/balance", "get"],
       ["/v1/private-channels/wallets", "get"],
       ["/v1/private-channels/wallets/{walletId}/verify", "post"],
       ["/v1/private-channels/wallets/{pubkey}", "delete"],
-      ["/v1/members", "get"],
-      ["/v1/members/invite", "post"],
-      ["/v1/members/invitations/{invitationId}", "delete"],
-      ["/v1/members/{memberId}", "delete"],
     ] as const) {
       expect(doc.paths?.[path]?.[method]?.security).toEqual([
         { apiKeyAuth: [] },
         { clerkBearerAuth: [] },
       ]);
     }
-    expect(doc.paths?.["/v1/members/accept"]?.post?.security).toEqual([{ clerkBearerAuth: [] }]);
   });
 
-  it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
+  it("keeps a route's own 403 reasons after its action requirement", () => {
+    const forbidden = forbiddenResponseSchema.parse(
+      createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.responses?.["403"]
+    );
+    expect(forbidden.description).toContain("Requires the `wallets.configure` action");
+    expect(forbidden.description).toContain("custody_mode_not_allowed");
+  });
+
+  it("gives a route without its own 403 reasons the action requirement alone", () => {
+    const forbidden = forbiddenResponseSchema.parse(
+      createOpenApiDocument().paths?.["/v1/payments/transfers"]?.get?.responses?.["403"]
+    );
+    expect(forbidden.description).toMatch(/^Forbidden\. Requires the `transfers\.read` action/);
+    expect(forbidden.description).not.toContain("\n\nError");
+  });
+
+  // Keys are credentials, not administrators (HOO-2099): key, member, project
+  // member and organization administration answer a signed-in person only.
+  it("documents administration as Clerk-session only and keeps it out of the public document", () => {
+    const doc = createOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
+    for (const [path, method] of [
+      ["/v1/api-keys", "get"],
+      ["/v1/api-keys", "post"],
+      ["/v1/api-keys/{keyId}", "get"],
+      ["/v1/api-keys/{keyId}", "patch"],
+      ["/v1/api-keys/{keyId}", "delete"],
+      ["/v1/api-keys/{keyId}/rotate", "post"],
+      ["/v1/projects/{projectId}/api-keys", "get"],
+      ["/v1/projects/{projectId}/api-keys", "post"],
+      ["/v1/projects/{projectId}/members", "get"],
+      ["/v1/projects/{projectId}/members", "post"],
+      ["/v1/projects/{projectId}/members/{memberId}", "patch"],
+      ["/v1/projects/{projectId}/members/{memberId}", "delete"],
+      ["/v1/members", "get"],
+      ["/v1/members/invite", "post"],
+      ["/v1/members/accept", "post"],
+      ["/v1/members/invitations/{invitationId}", "delete"],
+      ["/v1/members/{memberId}", "delete"],
+      ["/v1/organizations/{orgId}", "patch"],
+      ["/v1/organizations/{orgId}", "delete"],
+    ] as const) {
+      expect(doc.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual([
+        { clerkBearerAuth: [] },
+      ]);
+      expect(publicDocument.paths?.[path]?.[method], `${method} ${path}`).toBeUndefined();
+    }
+  });
+
+  it("documents exact signer-check runtime failures and requires its Provider-ID request", () => {
     const operation = createPublicOpenApiDocument({ releaseChannel: "stable" }).paths?.[
       "/v1/wallets/signer-check"
     ]?.post;
@@ -90,7 +145,8 @@ describe("OpenAPI spec", () => {
     expect(operation?.responses).toHaveProperty("409");
     const request = getJsonSchema(operation?.requestBody);
     expect(request.properties).toEqual({ walletId: expect.any(Object) });
-    expect(request.required).toBeUndefined();
+    // A wallet scope has no default signing wallet, so the request names one.
+    expect(request.required).toEqual(["walletId"]);
   });
 
   it("documents path-based versioning policy", () => {
@@ -585,32 +641,20 @@ describe("OpenAPI spec", () => {
     });
   });
 
-  it("documents optional exact-owner provisioning for both API-key create routes", () => {
+  it("documents no wallet provisioning on either API-key create route", () => {
     const doc = createOpenApiDocument();
 
     for (const path of ["/v1/api-keys", "/v1/projects/{projectId}/api-keys"]) {
       const operation = doc.paths?.[path]?.post;
       const requestSchema = getJsonSchema(operation?.requestBody);
 
-      expect(requestSchema.properties?.connectionId).toBeUndefined();
-      expect(
-        requestSchema.properties?.provisionWallet?.anyOf?.map((variant) => ({
-          required: variant.required,
-          not: variant.not,
-        }))
-      ).toEqual([
-        { required: ["provider"], not: { required: ["connectionId"] } },
-        { required: ["connectionId"], not: { required: ["provider"] } },
-      ]);
-      expect(requestSchema.example).toMatchObject({
-        provisionWallet: { connectionId: "cconn_123" },
-      });
+      // Creating a key never creates a wallet (HOO-2099).
+      for (const field of ["connectionId", "provisionWallet", "walletLabel", "walletPurpose"]) {
+        expect(requestSchema.properties?.[field], `${path} ${field}`).toBeUndefined();
+      }
+      expect(requestSchema.example).toMatchObject({ walletIds: ["cwlt_0f2c8c1e"] });
       expect(operation?.responses?.["201"]).toBeDefined();
       expect(operation?.responses?.["400"]).toBeDefined();
-      expect(operation?.responses?.["403"]).toBeDefined();
-      expect(operation?.responses?.["404"]).toBeDefined();
-      expect(operation?.responses?.["409"]).toBeDefined();
-      expect(operation?.responses?.["503"]).toBeDefined();
     }
   });
 
@@ -740,7 +784,6 @@ describe("OpenAPI spec", () => {
 
     expect(doc.tags?.map((tag) => tag.name)).toEqual([
       "Health",
-      "API Keys",
       "Wallets",
       "Projects",
       "Issuance",
@@ -811,19 +854,33 @@ describe("OpenAPI spec", () => {
   // so stored records still validate, while request enums list what it accepts.
   it("narrows request enums and opens response enums that lose values", () => {
     const doc = createPublicOpenApiDocument({ releaseChannel: "stable" });
-    const create = getJsonSchema(doc.paths?.["/v1/api-keys"]?.post?.requestBody);
-    const requested = create.properties?.permissions?.items?.enum ?? [];
-    expect(requested).toContain("payments:write");
-    expect(requested).not.toContain("tokens:read");
+    const create = JSON.stringify(getJsonSchema(doc.paths?.["/v1/wallets"]?.post?.requestBody));
+    expect(create).toContain('"fee_payer"');
+    expect(create).not.toContain('"mint_authority"');
 
-    const read = getJsonSchema(doc.paths?.["/v1/api-keys/{keyId}"]?.get?.responses?.["200"]);
-    const stored = JSON.stringify(read);
-    expect(stored).toContain('"permissions"');
-    expect(stored).not.toMatch(/tokens:|earn:/);
-    const permissions = (read.properties?.data?.properties?.permissions ??
-      read.properties?.data?.properties?.apiKey?.properties?.permissions) as TestJsonSchema;
-    expect(permissions?.items?.enum).toBeUndefined();
-    expect(permissions?.items?.type).toBe("string");
+    const read = JSON.stringify(
+      getJsonSchema(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses?.["200"])
+    );
+    expect(read).toContain('"purpose"');
+    expect(read).not.toContain('"mint_authority"');
+    expect(read).not.toContain('"fee_payer"');
+  });
+
+  it("names the hidden families' actions in no channel's document or surface manifest", () => {
+    expect([...hiddenValues()].sort()).toEqual([
+      "organizations.manage",
+      "organizations.read",
+      "rpc.execute",
+    ]);
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      const published = JSON.stringify(createPublicOpenApiDocument({ releaseChannel }));
+      const manifest = createPublicSurfaceManifest(releaseChannel);
+      for (const value of hiddenValues()) {
+        expect(published).not.toContain(`"${value}"`);
+      }
+      expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("rpc");
+      expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("organizations");
+    }
   });
 
   it("names Earn nowhere in any channel's document while the hold is on", () => {
@@ -834,25 +891,18 @@ describe("OpenAPI spec", () => {
 
   it("keeps the values of modules a channel runs", () => {
     const stable = JSON.stringify(createPublicOpenApiDocument({ releaseChannel: "stable" }));
-    for (const value of [
-      "payments:write",
-      "payment_transfer_execute",
-      "recurring_payment_create",
-    ]) {
-      expect(stable).toContain(`"${value}"`);
-    }
+    expect(stable).toContain('"fee_payer"');
     const experimental = JSON.stringify(createPublicOpenApiDocument(EXPERIMENTAL));
-    for (const value of ["tokens:write", "issuance_mint_execute", "mint_authority"]) {
+    for (const value of ["mint_authority", "moonpay"]) {
       expect(experimental).toContain(`"${value}"`);
     }
-    expect(classifiedValues()).toContain("earn:write");
+    expect(classifiedValues()).toContain("earn.execute");
   });
 
   it("documents only the stable modules for production", () => {
     const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });
     expect(stable.tags?.map((tag) => tag.name)).toEqual([
       "Health",
-      "API Keys",
       "Wallets",
       "Projects",
       "Payments",

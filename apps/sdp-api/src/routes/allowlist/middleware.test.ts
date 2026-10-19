@@ -1,7 +1,7 @@
-import type { Context } from "hono";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { adminAuth } from "./middleware";
@@ -46,10 +46,9 @@ describe("allowlist adminAuth", () => {
         id: "key_customer",
         organizationId: "org_customer",
         projectId: "prj_customer",
-        role: "api_admin",
-        permissions: ["*"],
+        grants: ALL_API_KEY_GRANTS,
         environment: "production",
-        signingWalletId: null,
+        walletAccess: { scope: "all" } as const,
       });
     });
 
@@ -85,8 +84,7 @@ describe("allowlist adminAuth", () => {
       c.set("clerk", {
         userId: "usr_admin",
         organizationId: ADMIN_ORG_ID,
-        permissions: ["org:admin"],
-        role: "admin",
+        role: "admin" as const,
         clerkUserId: "clerk_usr",
         clerkOrgId: "clerk_org",
         email: "admin@platform.test",
@@ -104,8 +102,7 @@ describe("allowlist adminAuth", () => {
       c.set("clerk", {
         userId: "usr_admin",
         organizationId: "org_other",
-        permissions: ["org:admin"],
-        role: "admin",
+        role: "admin" as const,
         clerkUserId: "clerk_usr",
         clerkOrgId: "clerk_org",
         email: "admin@other.test",

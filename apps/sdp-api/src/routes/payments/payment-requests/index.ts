@@ -1,19 +1,34 @@
 import { Hono } from "hono";
-import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import { authorizePaymentRequest } from "@/routes/payments/access";
 import type { Env } from "@/types/env";
-import { createPaymentRequest, listPaymentRequests } from "./handlers";
+import {
+  createPaymentRequest,
+  getPaymentRequest,
+  getPaymentRequestLink,
+  listPaymentRequests,
+} from "./handlers";
 import { createPaymentRequestSchema } from "./schemas";
 
 export const paymentRequests = new Hono<{ Bindings: Env }>();
 
-paymentRequests.get("/", requirePermissions("payments:read"), listPaymentRequests);
+paymentRequests.get("/", requireAction("payment_requests.read"), listPaymentRequests);
+paymentRequests.get(
+  "/:paymentRequestId",
+  requireAction("payment_requests.read"),
+  getPaymentRequest
+);
+paymentRequests.get(
+  "/:paymentRequestId/link",
+  requireAction("payment_requests.manage"),
+  getPaymentRequestLink
+);
 paymentRequests.post(
   "/",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("payment_requests.manage"),
   validateBody(createPaymentRequestSchema),
   authorize(authorizePaymentRequest),
   idempotent({ key: "accepted", serverErrors: "store" }),

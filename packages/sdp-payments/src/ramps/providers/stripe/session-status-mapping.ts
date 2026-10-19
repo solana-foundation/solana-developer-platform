@@ -6,6 +6,8 @@ import { providerResponseIssues } from "#/ramps/fetch";
 import type { RampSettlementEvent } from "#/ramps/types";
 
 const STRIPE_SESSION_STATUS = {
+  // Known, but no settlement news: the customer has not started checkout.
+  initialized: "ignore",
   requires_payment: "awaiting_payment",
   fulfillment_processing: "settling",
   fulfillment_complete: "settled",
@@ -36,8 +38,8 @@ function stripeDeliveredAssetRail(currency: string, network: string): CryptoRail
   return STRIPE_SOLANA_RAILS[currency];
 }
 
-/** A session text field, read as the webhook reads one: trimmed, and blank as absent. */
-const stripeSessionText = z.string().nullish().transform(readString);
+/** A session text field, read as Stripe's webhook always was: trimmed, and blank or non-text as absent. */
+const stripeSessionText = z.unknown().optional().transform(readString);
 
 /** The delivery proof a completed session carries: each field absent or non-blank text. */
 const stripeDeliveryProofSchema = z.object({
@@ -47,9 +49,10 @@ const stripeDeliveryProofSchema = z.object({
 });
 
 /**
- * The fields a status lookup reads from a Stripe onramp session, the object a
- * `crypto.onramp_session.updated` webhook carries. `status` stays an open
- * string so a status Stripe ships later maps to an ignore event.
+ * The fields SDP reads from a Stripe onramp session: the object a
+ * `crypto.onramp_session.updated` webhook carries and a status lookup returns,
+ * mapped once for both. `status` stays an open string so a status Stripe ships
+ * later maps to an ignore event.
  */
 export const stripeOnrampSessionStatusSchema = z.object({
   id: z.string().trim().min(1),
@@ -59,11 +62,13 @@ export const stripeOnrampSessionStatusSchema = z.object({
       destination_currency: stripeSessionText,
       destination_network: stripeSessionText,
       // Read only once the session completes, then checked as delivery proof.
-      destination_amount: z.unknown(),
-      transaction_id: z.unknown(),
-      wallet_address: z.unknown(),
+      destination_amount: z.unknown().optional(),
+      transaction_id: z.unknown().optional(),
+      wallet_address: z.unknown().optional(),
     })
-    .nullish(),
+    .nullish()
+    // Every field above is optional, so only a non-object lands here: absent, as ever.
+    .catch(undefined),
 });
 export type StripeOnrampSessionStatus = z.output<typeof stripeOnrampSessionStatusSchema>;
 
@@ -72,7 +77,7 @@ export type StripeOnrampSessionStatus = z.output<typeof stripeOnrampSessionStatu
  * A completed session names the asset it delivered, so settlement can refuse
  * another one, and its chain transaction, for the delivery verifier.
  *
- * @param session - The session Stripe answered a lookup with.
+ * @param session - The session a webhook carried or a status lookup returned.
  * @returns The settlement event, or an ignore event for a status SDP does not track.
  * @throws SdpPaymentsError PROVIDER_RESPONSE_INVALID for a completed session without its
  *   destination currency or network, or with malformed delivery proof.
@@ -81,9 +86,17 @@ export function stripeSessionSettlementEvent(
   session: StripeOnrampSessionStatus
 ): RampSettlementEvent {
   if (!isTrackedStripeSessionStatus(session.status)) {
-    return { provider: "stripe", kind: "ignore", reason: `unsupported_status:${session.status}` };
+    return {
+      provider: "stripe",
+      kind: "ignore",
+      reason: `unsupported_status:${session.status}`,
+      unmappedStatus: session.status,
+    };
   }
   const kind = STRIPE_SESSION_STATUS[session.status];
+  if (kind === "ignore") {
+    return { provider: "stripe", kind, reason: `untracked_status:${session.status}` };
+  }
   const reference = session.id;
   if (kind === "failed") {
     return { provider: "stripe", kind, reference, error: "Stripe rejected the on-ramp session." };
@@ -97,7 +110,7 @@ export function stripeSessionSettlementEvent(
   if (currency === undefined || network === undefined) {
     throw new SdpPaymentsError(
       "PROVIDER_RESPONSE_INVALID",
-      "stripe returned a completed session without its destination currency or network",
+      "A completed Stripe session is missing its destination currency or network",
       { provider: "stripe", outcome: "unknown" }
     );
   }
@@ -105,7 +118,7 @@ export function stripeSessionSettlementEvent(
   if (!proof.success) {
     throw new SdpPaymentsError(
       "PROVIDER_RESPONSE_INVALID",
-      "stripe returned a completed session with malformed delivery proof",
+      "A completed Stripe session has malformed delivery proof",
       { provider: "stripe", outcome: "unknown" },
       { issues: providerResponseIssues(proof.error) }
     );

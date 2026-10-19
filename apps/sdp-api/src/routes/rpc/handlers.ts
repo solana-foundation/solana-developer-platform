@@ -4,7 +4,7 @@ import {
   resolveRpcTarget,
 } from "@sdp/rpc/relay";
 import { getDb } from "@/db/client";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -113,7 +113,11 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
   // Before EITHER dispatch branch: a `requestAirdrop` inside a JSON-RPC batch
   // array skips the faucet branch below, so a check living only there would be
   // bypassed by wrapping the call in an array.
-  await assertFaucetDestinationsOwned(getDb(c.env), auth.organizationId, payload);
+  await assertFaucetDestinationsOwned(
+    getDb(c.env),
+    { organizationId: auth.organizationId, projectId: requireProjectId(c) },
+    payload
+  );
 
   if (shouldRoundRobinFaucetRequest(payload, methodNames)) {
     const targets = await resolveRoundRobinRpcTargets({ env: c.env, cache: c.var.kv.cache });

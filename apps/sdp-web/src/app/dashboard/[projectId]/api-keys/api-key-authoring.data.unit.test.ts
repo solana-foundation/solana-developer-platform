@@ -36,8 +36,8 @@ describe("fetchApiKeyAuthoringWallets", () => {
 });
 
 describe("fetchApiKeyForAuthoring", () => {
-  it("returns the key with its allowed operations", async () => {
-    const key = { id: "key_1", name: "Payouts", allowedOperations: ["payment", "ramp"] };
+  it("returns the key with its grants", async () => {
+    const key = { id: "key_1", name: "Payouts", grants: ["transfers.execute"] };
     const { client, paths } = clientAnswering(() => Response.json({ data: key }));
 
     await expect(fetchApiKeyForAuthoring(client, "key_1")).resolves.toEqual(key);

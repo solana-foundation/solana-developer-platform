@@ -111,117 +111,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     return { account, counterparty };
   }
 
-  it("persists exact source identities and authorizes Provider IDs only for legacy rows", async () => {
-    const { account, counterparty } = await seedCounterpartyAccount();
-    const createdAt = "2026-06-29T12:00:00.000Z";
-    const create = (id: string, sourceCustodyWalletId: string) =>
-      repo.createRecurringPayment({
-        id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        sourceCustodyWalletId,
-        sourceWalletId: TEST_PROVIDER_WALLET_ID,
-        sourceAddress: TEST_SOURCE_ADDRESS,
-        counterpartyId: counterparty.id,
-        counterpartyAccountId: account.id,
-        destinationAddress: "Destination111111111111111111111111111111",
-        token: "USDC",
-        amount: "10.00",
-        periodHours: 24,
-        firstCollectionAt: null,
-        metadataUri: null,
-        createdBy: TEST_USER.id,
-        createdAt,
-        updatedAt: createdAt,
-        idempotencyKey: null,
-        idempotencyFingerprint: null,
-      });
-
-    const exact = await create("recpay_repo_exact_filter", TEST_CUSTODY_WALLET_ID);
-    expect(exact).not.toBeNull();
-    if (exact === null) throw new Error("Failed to create recurring payment");
-    await create("recpay_repo_legacy_filter", TEST_CUSTODY_WALLET_ID);
-    await create("recpay_repo_sibling_filter", TEST_SIBLING_CUSTODY_WALLET_ID);
-    await getDb(env)
-      .prepare(
-        `UPDATE payment_recurring_payments
-            SET source_custody_wallet_id = NULL
-          WHERE id = 'recpay_repo_legacy_filter'`
-      )
-      .run();
-
-    const attempt = await repo.createUpdateAttempt({
-      id: "recpay_update_exact_source",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      recurringPaymentId: exact.id,
-      mode: "replacement",
-      status: "processing",
-      stage: "claim",
-      oldPlanId: null,
-      oldSubscriptionId: null,
-      newPlanId: null,
-      newSubscriptionId: null,
-      newSourceCustodyWalletId: TEST_SIBLING_CUSTODY_WALLET_ID,
-      planUpdateSignature: null,
-      planCreationSignature: null,
-      authorizationSetupSignature: null,
-      authorizationSignature: null,
-      oldCancelSignature: null,
-      changedFields: ["sourceCustodyWalletId"],
-      beforeValues: {},
-      afterValues: { sourceCustodyWalletId: TEST_SIBLING_CUSTODY_WALLET_ID },
-      error: null,
-      createdBy: TEST_USER.id,
-      createdAt,
-      updatedAt: createdAt,
-    });
-    const authorized = await repo.listRecurringPayments({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: {
-        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-        providerWalletIds: [TEST_PROVIDER_WALLET_ID],
-      },
-      limit: 20,
-      offset: 0,
-    });
-
-    expect(attempt).not.toBeNull();
-    if (attempt === null) throw new Error("Failed to create recurring payment update attempt");
-    expect(exact.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(attempt.new_source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
-    expect(authorized.rows.map((row) => row.id).sort()).toEqual([
-      "recpay_repo_exact_filter",
-      "recpay_repo_legacy_filter",
-    ]);
-    await expect(
-      repo.getRecurringPaymentById({
-        recurringPaymentId: "recpay_repo_sibling_filter",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        walletAuthorization: {
-          custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-          providerWalletIds: [TEST_PROVIDER_WALLET_ID],
-        },
-      })
-    ).resolves.toBeNull();
-
-    const promoted = await repo.updateRecurringPayment({
-      recurringPaymentId: exact.id,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      sourceCustodyWalletId: TEST_SIBLING_CUSTODY_WALLET_ID,
-      sourceWalletId: TEST_PROVIDER_WALLET_ID,
-      sourceAddress: TEST_SOURCE_ADDRESS,
-      expectedStatus: "pending_activation",
-      updatedAt: "2026-06-29T12:01:00.000Z",
-    });
-    expect(promoted).not.toBeNull();
-    if (promoted === null) throw new Error("Failed to update recurring payment");
-    expect(promoted.source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
-  });
-
   it("guards pending updates with the expected updated_at value", async () => {
     const { account, counterparty } = await seedCounterpartyAccount();
     const createdAt = "2026-06-29T12:00:00.000Z";
@@ -310,7 +199,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       recurringPaymentId: created.id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      walletAuthorization: null,
     });
 
     const updated = await repo.updateRecurringPaymentActivation({
@@ -329,7 +217,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         recurringPaymentId: created.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        walletAuthorization: null,
       })
     ).toEqual(before);
   });

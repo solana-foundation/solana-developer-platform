@@ -32,7 +32,6 @@ import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
 import {
-  assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
@@ -190,7 +189,6 @@ export async function resolveRampQuoteRequest(
   }
 
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
-  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }
 

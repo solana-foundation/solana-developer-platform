@@ -3,13 +3,14 @@ import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
 import { AppError } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { rootLogger } from "@/runtime/logger";
 import { env as baseEnv } from "@/test/helpers/env";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const THROW_PATH = "/__internal_error_test_throw";
 const VALIDATED_BODY_PATH = "/__internal_error_test_validated_body";
@@ -207,6 +208,12 @@ describe("createApp plugin registration", () => {
 });
 
 describe("createApp onError", () => {
+  beforeEach(async () => {
+    // These requests are anonymous, so they share the per-IP anonymous window
+    // with every suite this worker ran in the same minute; start it empty.
+    await clearKVStores(baseEnv);
+  });
+
   it("answers an unexpected error with the 500 INTERNAL_ERROR envelope", async () => {
     const app = buildApp();
 

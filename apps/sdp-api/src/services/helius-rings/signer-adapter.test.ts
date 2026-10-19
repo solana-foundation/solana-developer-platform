@@ -155,7 +155,10 @@ describe("signRingsOuterTransaction", () => {
 
       // Looked up by key: a signature is only valid from the key the
       // transaction names.
-      expect(findActiveWalletByPublicKey).toHaveBeenCalledWith("org_1", "prj_1", FEE_PAYER);
+      expect(findActiveWalletByPublicKey).toHaveBeenCalledWith("org_1", "prj_1", FEE_PAYER, {
+        custodyWalletId: null,
+        ringsWalletId: null,
+      });
       expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
         env,
         "org_1",

@@ -8,13 +8,17 @@ import {
   assertMoneyStartAdmitted,
   decideMoneyStart,
   decideMovement,
+  decidePrincipal,
   type MoneyAdmissionFacts,
   MoneyMovementRefusedError,
+  type MoneyPrincipalFacts,
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
+import { type MoneyPrincipal, runAsMoneyPrincipal } from "@/lib/money-principal";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { LIVE_KEY_PRINCIPAL_FACTS } from "@/test/helpers/money-admission";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -25,9 +29,13 @@ function facts(overrides: Partial<MoneyAdmissionFacts> = {}): MoneyAdmissionFact
     organizationStatus: "active",
     projectEnvironment: "production",
     rawSettings: ENTITLED,
+    principal: LIVE_KEY_PRINCIPAL_FACTS,
+    readAt: Date.now(),
     ...overrides,
   };
 }
+
+const NO_WALLET = { custodyWalletId: null } as const;
 
 describe("decideMoneyStart", () => {
   it.each<[string, Partial<MoneyAdmissionFacts>]>([
@@ -89,8 +97,9 @@ const asSystem = <T>(read: () => Promise<T>) =>
   runWithSystemDatabaseIdentity("test:money-admission", read);
 
 describe("MOVEMENTS exits", () => {
-  // SECURITY REVIEW GATE: an exit is never refused, so this list changes only
-  // with a named security reviewer (see packages/sdp-types/src/movements.ts).
+  // SECURITY REVIEW GATE: an exit is never refused for the organization, only
+  // for its credential, so this list changes only with a named security
+  // reviewer (see packages/sdp-types/src/movements.ts).
   it("exempts exactly the reviewed exits from admission", () => {
     const exits = (Object.keys(MOVEMENTS) as MovementId[])
       .filter((movement) => MOVEMENTS[movement].kind === "exit")
@@ -125,12 +134,39 @@ describe("decideMovement", () => {
       cases.map(([label, subject]) => [movement, label, subject] as const)
     )
   )("decides %s for %s", (movement, _label, subject) => {
-    // An exit always passes (ADR 0002); a start is exactly the start decision.
-    expect(decideMovement(movement, subject)).toEqual(
+    // An exit never depends on the organization (ADR 0002) and these facts
+    // carry a live principal; a start is exactly the start decision.
+    expect(decideMovement(movement, subject, NO_WALLET)).toEqual(
       MOVEMENTS[movement].kind === "exit" ? { admitted: true } : decideMoneyStart(subject)
     );
   });
 });
+
+const PRODUCTION_KEY_ID = "key_money_admission_production";
+const PRODUCTION_KEY: MoneyPrincipal = { kind: "api_key", apiKeyId: PRODUCTION_KEY_ID };
+
+async function seedProductionKey(
+  overrides: { grants?: readonly string[]; walletScope?: "all" | "selected" } = {}
+): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix,
+                             key_hash, grants, wallet_scope, status)
+       VALUES (?, ?, ?, ?, 'Money admission key', 'sk_live', ?, ?, ?, 'active')
+       ON CONFLICT (id) DO UPDATE SET grants = EXCLUDED.grants,
+                                      wallet_scope = EXCLUDED.wallet_scope`
+    )
+    .bind(
+      PRODUCTION_KEY_ID,
+      TEST_ORG.id,
+      TEST_PRODUCTION_PROJECT.id,
+      TEST_USER.id,
+      `hash_${PRODUCTION_KEY_ID}`,
+      [...(overrides.grants ?? ["recurring.execute"])],
+      overrides.walletScope ?? "all"
+    )
+    .run();
+}
 
 describe("money admission reads", () => {
   beforeEach(async () => {
@@ -155,12 +191,20 @@ describe("money admission reads", () => {
   it("reads the project's environment and its organization's status and settings in one join", async () => {
     await expect(
       asSystem(() =>
-        readMoneyAdmissionFacts(env, { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        readMoneyAdmissionFacts(
+          env,
+          { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
+          NO_WALLET
+        )
       )
     ).resolves.toMatchObject({ organizationStatus: "active", projectEnvironment: "sandbox" });
     await expect(
       asSystem(() =>
-        readMoneyAdmissionFacts(env, { organizationId: "org_other", projectId: TEST_PROJECT.id })
+        readMoneyAdmissionFacts(
+          env,
+          { organizationId: "org_other", projectId: TEST_PROJECT.id },
+          NO_WALLET
+        )
       )
     ).resolves.toBeNull();
   });
@@ -177,9 +221,9 @@ describe("money admission reads", () => {
       .bind(TEST_ORG.id)
       .run();
 
-    const refusal = await asSystem(() => assertMoneyStartAdmitted(env, scope, context)).catch(
-      (error: unknown) => error
-    );
+    const refusal = await asSystem(() =>
+      assertMoneyStartAdmitted(env, scope, context, NO_WALLET)
+    ).catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
     expect(refusal).toMatchObject({
@@ -203,14 +247,19 @@ describe("money admission reads", () => {
         .run();
 
     await setSettings(ENTITLED);
+    await seedProductionKey();
     await expect(
-      asSystem(() => assertMoneyStartAdmitted(env, scope, context))
+      asSystem(() =>
+        runAsMoneyPrincipal(PRODUCTION_KEY, () =>
+          assertMoneyStartAdmitted(env, scope, context, NO_WALLET)
+        )
+      )
     ).resolves.toBeUndefined();
 
     await setSettings(JSON.stringify({}));
-    const refusal = await asSystem(() => assertMoneyStartAdmitted(env, scope, context)).catch(
-      (error: unknown) => error
-    );
+    const refusal = await asSystem(() =>
+      assertMoneyStartAdmitted(env, scope, context, NO_WALLET)
+    ).catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
     expect(refusal).toMatchObject({
@@ -218,14 +267,313 @@ describe("money admission reads", () => {
       reason: "production_not_enabled",
       message: "Production is not enabled for this organization",
     });
+    // The sandbox project needs no entitlement; it still needs a principal.
     await expect(
       asSystem(() =>
         assertMoneyStartAdmitted(
           env,
           { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
-          context
+          context,
+          NO_WALLET
         )
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ reason: "principal_missing" });
+  });
+});
+
+describe("MOVEMENTS starts", () => {
+  // Each start names the actions that may sign it (HOO-2099). The waist
+  // refuses a principal holding none of them; this pins every pairing.
+  it("name the actions that sign them", () => {
+    const actions = Object.fromEntries(
+      Object.entries(MOVEMENTS).flatMap(([movement, definition]) =>
+        definition.kind === "start" ? [[movement, [...definition.actions]]] : []
+      )
+    );
+    expect(actions).toEqual({
+      "custody.signer_check": ["wallets.execute"],
+      "payments.transfer": ["transfers.execute"],
+      "payments.transfer_batch": ["transfer_batches.execute"],
+      "payments.pay_request": ["payment_requests.manage"],
+      "ramps.onramp_quote": ["onramp.execute"],
+      "ramps.offramp_quote": ["offramp.execute"],
+      "recurring.activate": ["recurring.execute"],
+      "recurring.update": ["recurring.execute"],
+      "recurring.collect": ["recurring.execute"],
+      "recurring.resume": ["recurring.execute"],
+      "issuance.authority": [
+        "issuance.manage",
+        "issuance.execute",
+        "issuance.enforce",
+        "issuance.authority",
+      ],
+      "issuance.seize": ["issuance.enforce"],
+      "dvp.create": ["dvp.manage"],
+      "dvp.fund": ["dvp.execute"],
+      "dvp.settle": ["dvp.execute"],
+      "earn.deposit": ["earn.execute"],
+      "earn.queued_withdraw_cancel": ["earn.manage"],
+      "private_channels.session": ["private_channels.execute"],
+      "private_channels.deposit": ["private_channels.execute"],
+      "private_channels.transfer": ["private_channels.execute"],
+      "helius_rings.operation_start": ["helius_rings.execute"],
+      "helius_rings.bring_up": ["helius_rings.manage", "helius_rings.execute"],
+    });
+  });
+});
+
+describe("decidePrincipal", () => {
+  const WALLET = { custodyWalletId: "cwlt_signing" } as const;
+  const readAt = Date.parse("2026-10-14T00:00:00.000Z");
+  const liveKey = (
+    key: Partial<NonNullable<Extract<MoneyPrincipalFacts, { kind: "api_key" }>["key"]>> = {}
+  ): MoneyPrincipalFacts => ({
+    kind: "api_key",
+    key: {
+      status: "active",
+      expires_at: null,
+      rotation_deadline: null,
+      grants: ["transfers.execute"],
+      walletScope: "all",
+      walletListed: true,
+      ...key,
+    },
+  });
+  const decide = (
+    principal: MoneyPrincipalFacts,
+    subject: { custodyWalletId: string | null } = WALLET,
+    movement: MovementId = "payments.transfer"
+  ) => decidePrincipal(movement, { principal, readAt }, subject);
+
+  it("refuses a start with no principal", () => {
+    expect(decide({ kind: "none" })).toEqual({ admitted: false, reason: "principal_missing" });
+  });
+
+  // An exit is decided by its credential alone (HOO-2099): no action, and a
+  // reconciler with no principal still finishes a payout.
+  it("admits an exit with no principal", () => {
+    expect(decide({ kind: "none" }, WALLET, "private_channels.withdraw")).toEqual({
+      admitted: true,
+    });
+  });
+
+  it("admits an exit by a live key in scope that holds no start action", () => {
+    expect(decide(liveKey({ grants: [] }), WALLET, "private_channels.withdraw")).toEqual({
+      admitted: true,
+    });
+  });
+
+  it.each<[string, MoneyPrincipalFacts, string]>([
+    ["a revoked key", liveKey({ status: "deactivated" }), "principal_not_live"],
+    [
+      "a key whose scope leaves the wallet out",
+      liveKey({ walletScope: "selected", walletListed: false }),
+      "wallet_out_of_scope",
+    ],
+    [
+      "a mandate for another wallet",
+      { kind: "mandate", mandate: { status: "canceling", sourceCustodyWalletId: "cwlt_other" } },
+      "wallet_out_of_scope",
+    ],
+  ])("refuses an exit by %s", (_label, principal, reason) => {
+    expect(decide(principal, WALLET, "private_channels.withdraw")).toEqual({
+      admitted: false,
+      reason,
+    });
+  });
+
+  it("admits a mandate's own exit in any status", () => {
+    expect(
+      decide(
+        {
+          kind: "mandate",
+          mandate: { status: "canceling", sourceCustodyWalletId: "cwlt_signing" },
+        },
+        WALLET,
+        "recurring.cancel"
+      )
+    ).toEqual({ admitted: true });
+  });
+
+  it("admits a live key that holds the action", () => {
+    expect(decide(liveKey())).toEqual({ admitted: true });
+  });
+
+  it.each<[string, Partial<Extract<MoneyPrincipalFacts, { kind: "api_key" }>["key"] & object>]>([
+    ["revoked", { status: "deactivated" }],
+    ["expired", { expires_at: "2026-10-13T00:00:00.000Z" }],
+    ["past its rotation deadline", { rotation_deadline: "2026-10-13T00:00:00.000Z" }],
+  ])("refuses a %s key", (_label, key) => {
+    expect(decide(liveKey(key))).toEqual({ admitted: false, reason: "principal_not_live" });
+  });
+
+  it("refuses a key that is not in the project", () => {
+    expect(decide({ kind: "api_key", key: null })).toEqual({
+      admitted: false,
+      reason: "principal_not_live",
+    });
+  });
+
+  it("refuses a key that does not hold the movement's action", () => {
+    expect(decide(liveKey({ grants: ["transfers.read", "recurring.execute"] }))).toEqual({
+      admitted: false,
+      reason: "action_not_held",
+    });
+  });
+
+  it("scopes a selected key to its listed wallets, and never widens an empty list", () => {
+    expect(decide(liveKey({ walletScope: "selected", walletListed: true }))).toEqual({
+      admitted: true,
+    });
+    expect(decide(liveKey({ walletScope: "selected", walletListed: false }))).toEqual({
+      admitted: false,
+      reason: "wallet_out_of_scope",
+    });
+    // A sponsor signature names no custody wallet: the custody signer scopes it.
+    expect(decide(liveKey({ walletScope: "selected", walletListed: null }), NO_WALLET)).toEqual({
+      admitted: true,
+    });
+  });
+
+  it("admits an active member whose role holds the action, and refuses one who left", () => {
+    expect(decide({ kind: "member", member: { status: "active", role: "member" } })).toEqual({
+      admitted: true,
+    });
+    expect(decide({ kind: "member", member: { status: "removed", role: "admin" } })).toEqual({
+      admitted: false,
+      reason: "principal_not_live",
+    });
+    expect(
+      decide(
+        { kind: "member", member: { status: "active", role: "member" } },
+        WALLET,
+        "issuance.seize"
+      )
+    ).toEqual({ admitted: false, reason: "action_not_held" });
+  });
+
+  it("admits a mandate only for its own movement, status and source wallet", () => {
+    const mandate = (status: string): MoneyPrincipalFacts => ({
+      kind: "mandate",
+      mandate: { status, sourceCustodyWalletId: WALLET.custodyWalletId },
+    });
+    expect(decide(mandate("active"), WALLET, "recurring.collect")).toEqual({ admitted: true });
+    expect(decide(mandate("canceled"), WALLET, "recurring.collect")).toEqual({
+      admitted: false,
+      reason: "principal_not_live",
+    });
+    expect(decide(mandate("active"), WALLET, "payments.transfer")).toEqual({
+      admitted: false,
+      reason: "principal_not_live",
+    });
+    expect(
+      decide(mandate("active"), { custodyWalletId: "cwlt_other" }, "recurring.collect")
+    ).toEqual({ admitted: false, reason: "wallet_out_of_scope" });
+    expect(decide(mandate("activating"), WALLET, "recurring.activate")).toEqual({
+      admitted: true,
+    });
+  });
+
+  it("admits a payment link only for its open request's sponsorship", () => {
+    const link = (status: string): MoneyPrincipalFacts => ({
+      kind: "payment_request",
+      request: { status },
+    });
+    expect(decide(link("awaiting_payment"), NO_WALLET, "payments.pay_request")).toEqual({
+      admitted: true,
+    });
+    expect(decide(link("paid"), NO_WALLET, "payments.pay_request")).toEqual({
+      admitted: false,
+      reason: "principal_not_live",
+    });
+    expect(decide(link("awaiting_payment"), WALLET, "payments.pay_request")).toEqual({
+      admitted: false,
+      reason: "wallet_out_of_scope",
+    });
+  });
+});
+
+describe("money admission reads the principal in the same statement", () => {
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
+      db
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(TEST_USER.id, TEST_USER.email),
+    ]);
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [TEST_USER.id],
+      ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+    });
+  });
+
+  const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
+
+  it("reads a key's live row, grants and wallet listing", async () => {
+    await seedProductionKey({ walletScope: "selected" });
+    const read = await asSystem(() =>
+      runAsMoneyPrincipal(PRODUCTION_KEY, () =>
+        readMoneyAdmissionFacts(env, scope, { custodyWalletId: "cwlt_not_listed" })
+      )
+    );
+    expect(read?.principal).toEqual({
+      kind: "api_key",
+      key: {
+        status: "active",
+        expires_at: null,
+        rotation_deadline: null,
+        grants: ["recurring.execute"],
+        walletScope: "selected",
+        walletListed: false,
+      },
+    });
+  });
+
+  it("refuses a key's next start once it is revoked, uncached", async () => {
+    await seedProductionKey();
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(ENTITLED, TEST_ORG.id)
+      .run();
+    const start = () =>
+      asSystem(() =>
+        runAsMoneyPrincipal(PRODUCTION_KEY, () =>
+          assertMoneyStartAdmitted(
+            env,
+            scope,
+            { surface: "http", movement: "recurring.collect", subjectId: "prp_test" },
+            NO_WALLET
+          )
+        )
+      );
+    await expect(start()).resolves.toBeUndefined();
+    await getDb(env)
+      .prepare("UPDATE api_keys SET status = 'deactivated' WHERE id = ?")
+      .bind(PRODUCTION_KEY_ID)
+      .run();
+    await expect(start()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "principal_not_live",
+    });
+  });
+
+  it("finds no key of another project", async () => {
+    await seedProductionKey();
+    const read = await asSystem(() =>
+      runAsMoneyPrincipal(PRODUCTION_KEY, () =>
+        readMoneyAdmissionFacts(
+          env,
+          { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
+          NO_WALLET
+        )
+      )
+    );
+    expect(read?.principal).toEqual({ kind: "api_key", key: null });
   });
 });

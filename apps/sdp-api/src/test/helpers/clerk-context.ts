@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { getPermissionsForOrgRole } from "@sdp/types/permissions";
 import type { ClerkAuthContext } from "@/lib/auth";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -25,7 +24,6 @@ export async function testClerkContext(env: Env): Promise<ClerkAuthContext> {
     userId: TEST_USER.id,
     organizationId: TEST_ORG.id,
     role: "admin",
-    permissions: getPermissionsForOrgRole("admin"),
     clerkUserId: claims.sub,
     clerkOrgId: claims.o.id,
     email: claims.email,

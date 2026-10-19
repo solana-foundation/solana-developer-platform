@@ -62,6 +62,7 @@ const EXEMPT = {
 const NAMES_NOTHING = {
   "POST /v1/counterparties":
     "creates a counterparty in the caller's own project; it names no existing resource",
+  "POST /v1/wallets/initialize": "connects a provider in the caller's own project",
 } as const satisfies Record<string, string>;
 
 interface RouteSteps {

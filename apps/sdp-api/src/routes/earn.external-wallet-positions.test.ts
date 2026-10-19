@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import type { EarnExternalWalletPositionSummaryResponse } from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -12,11 +11,12 @@ import { app } from "@/index";
 import * as auth from "@/lib/auth";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
 import { getLogger } from "@/runtime/logger";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
@@ -48,17 +48,15 @@ const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const SHARE = "So11111111111111111111111111111111111111112";
 
-function cachedKey(): CachedApiKey {
+function cachedKey(): SeededApiKey {
   return {
     id: KEY.id,
     organizationId: ORG,
     projectId: PROJECT,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -66,7 +64,7 @@ function cachedKey(): CachedApiKey {
 
 async function seedScope() {
   const keyHash = await hashString(KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey());
+  await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -86,10 +84,9 @@ async function seedScope() {
     organizationId: ORG,
     projectId: `${PROJECT}_production`,
     createdBy: USER,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
-  await seedCachedApiKey(env, productionKeyHash, {
+  await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
     id: PRODUCTION_KEY.id,
     projectId: `${PROJECT}_production`,
@@ -99,10 +96,10 @@ async function seedScope() {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'External positions', 'sk_test_ext', ?, 'api_admin', '["*"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'External positions', 'sk_test_ext', ?, ?, 'active')`
       )
-      .bind(KEY.id, ORG, PROJECT, USER, keyHash),
+      .bind(KEY.id, ORG, PROJECT, USER, keyHash, ALL_API_KEY_GRANTS),
   ]);
 }
 

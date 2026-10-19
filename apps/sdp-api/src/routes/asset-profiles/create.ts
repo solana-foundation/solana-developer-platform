@@ -52,7 +52,6 @@ export const createTokenWithAssetProfile = async (
         env: c.env,
         auth,
         custodyWalletId: tokenInput.signingCustodyWalletId,
-        requiredWalletPermissions: ["tokens:write"],
       })
     : null;
 

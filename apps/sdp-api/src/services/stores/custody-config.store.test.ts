@@ -54,6 +54,81 @@ describe("CustodyConfigStore project scope", () => {
     expect(await readCustodyRows()).toEqual(rowsBefore);
   });
 
+  // HOO-2099: several active records can hold one key; Rings signs with the
+  // record its wallet links to, the one the route checked the caller's scope on.
+  it("prefers a named record, then the Rings-linked one, among records holding a key", async () => {
+    await seedPrivyConfig({ projectId: PROJECT_ID, status: "active" });
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cust_custody_config_store_turnkey",
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "turnkey",
+          configEncrypted: "encrypted",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: "cwlt_custody_config_store_same_key",
+          owner: { kind: "config", custodyConfigId: "cust_custody_config_store_turnkey" },
+          walletId: "turnkey_custody_config_store",
+          publicKey: PUBLIC_KEY,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
+    // The newer config wins on recency alone.
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET updated_at = '2999-01-01T00:00:00.000Z' WHERE id = ?")
+      .bind("cust_custody_config_store_turnkey")
+      .run();
+    const store = new CustodyConfigStore(getDb(env), env);
+    const picked = async (
+      custodyWalletId: string | null = null,
+      ringsWalletId: string | null = null
+    ) =>
+      (
+        await store.findActiveWalletByPublicKey(ORGANIZATION_ID, PROJECT_ID, PUBLIC_KEY, {
+          custodyWalletId,
+          ringsWalletId,
+        })
+      )?.id;
+
+    expect(await picked()).toBe("cwlt_custody_config_store_same_key");
+    await getDb(env)
+      .prepare(
+        `INSERT INTO helius_rings_wallets (id, organization_id, project_id, sdp_wallet_id, name, custody_wallet_id)
+         VALUES ('hrw_custody_config_store', ?, ?, ?, 'Rings', ?)`
+      )
+      .bind(ORGANIZATION_ID, PROJECT_ID, PROVIDER_WALLET_ID, CUSTODY_WALLET_ID)
+      .run();
+    expect(await picked()).toBe(CUSTODY_WALLET_ID);
+    expect(await picked("cwlt_custody_config_store_same_key")).toBe(
+      "cwlt_custody_config_store_same_key"
+    );
+    // A second Rings wallet links the other record: naming it picks that one.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO helius_rings_wallets (id, organization_id, project_id, sdp_wallet_id, name, custody_wallet_id)
+         VALUES ('hrw_custody_config_store_other', ?, ?, ?, 'Rings 2', ?)`
+      )
+      .bind(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        "turnkey_custody_config_store",
+        "cwlt_custody_config_store_same_key"
+      )
+      .run();
+    expect(await picked(null, "hrw_custody_config_store_other")).toBe(
+      "cwlt_custody_config_store_same_key"
+    );
+    expect(await picked(null, "hrw_custody_config_store")).toBe(CUSTODY_WALLET_ID);
+  });
+
   it("never resolves a wallet under another project's config", async () => {
     await seedPrivyConfig({ projectId: PROJECT_ID, status: "active" });
     const rowsBefore = await readCustodyRows();

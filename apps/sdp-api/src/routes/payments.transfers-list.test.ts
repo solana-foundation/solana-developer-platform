@@ -36,7 +36,6 @@ import {
   getSignaturesForAddressMock,
   getSplTokenAccountAddressesMock,
   installPaymentsRouteTestHooks,
-  seedCachedKey,
   seedCounterparty,
   seedProductionPrivyWallet,
   TEST_API_KEY,
@@ -182,8 +181,7 @@ describe("Payments routes — list transfers", () => {
       organizationId: TEST_ORG.id,
       projectId: `${TEST_PROJECT.id}_production`,
       createdBy: TEST_USER.id,
-      role: "api_admin",
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
   });
 
@@ -243,6 +241,67 @@ describe("Payments routes — list transfers", () => {
       getSplTokenAccountAddressesMock.mockReset();
       rpc.answer("getSignaturesForAddress", []);
       rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(1, []));
+    });
+
+    // A ramp or batch row is that module's record: transfers.read alone shows
+    // neither, here or in the unified feed (HOO-2099).
+    describe("with transfers.read alone", () => {
+      const TRANSFERS_ONLY_KEY = {
+        id: "key_transfers_read_only",
+        raw: "sk_test_transfers_read_only",
+        prefix: "sk_test_tro",
+      };
+      const asTransfersOnly = (path: string) =>
+        app.request(
+          path,
+          { method: "GET", headers: { Authorization: `Bearer ${TRANSFERS_ONLY_KEY.raw}` } },
+          env
+        );
+      const transferIdsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
+
+      beforeEach(async () => {
+        await seedProjectApiKey(getDb(env), env, {
+          key: TRANSFERS_ONLY_KEY,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          createdBy: TEST_USER.id,
+          grants: ["transfers.read"],
+        });
+        await seedTransfer({ id: "xfr_scope_plain", status: "confirmed" });
+        await seedTransfer({ id: "xfr_scope_onramp", status: "confirmed", type: "onramp" });
+        await seedTransfer({ id: "xfr_scope_batch", status: "confirmed", type: "transfer_batch" });
+      });
+
+      it("lists only plain transfers", async () => {
+        const res = await asTransfersOnly("/v1/payments/transfers");
+
+        expect(res.status).toBe(200);
+        expect(
+          transferIdsSchema.parse(await res.json()).data.map((transfer) => transfer.id)
+        ).toEqual(["xfr_scope_plain"]);
+      });
+
+      it("answers a category it can read nothing of with an empty page", async () => {
+        const res = await asTransfersOnly("/v1/payments/transfers?category=ramp");
+
+        expect(res.status).toBe(200);
+        expect(transferIdsSchema.parse(await res.json()).data).toEqual([]);
+      });
+
+      it("refuses a type filter it cannot read, naming the read", async () => {
+        const res = await asTransfersOnly("/v1/payments/transfers?type=onramp");
+
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({
+          error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "onramp.read" } },
+        });
+      });
+
+      it("does not disclose another module's row by id", async () => {
+        expect((await asTransfersOnly("/v1/payments/transfers/xfr_scope_onramp")).status).toBe(404);
+        expect((await asTransfersOnly("/v1/payments/transfers/xfr_scope_batch")).status).toBe(404);
+        expect((await asTransfersOnly("/v1/payments/transfers/xfr_scope_plain")).status).toBe(200);
+      });
     });
 
     it("matches a token filter against every form the ledger stores it in", async () => {
@@ -747,166 +806,6 @@ describe("Payments routes — list transfers", () => {
       expect(body.meta.total).toBe(0);
     });
 
-    it("enforces payments:read wallet grants for database-backed transfer lists", async () => {
-      const writeOnlyCustodyWalletId = "cwlt_payments_write_only";
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          writeOnlyCustodyWalletId,
-          "cust_cfg_payments_test",
-          "wal_payments_write_only",
-          TEST_SOLANA_ADDRESSES.wallet2,
-          "Write-only wallet",
-          "transfer",
-          "active"
-        )
-        .run();
-      await seedTransfer({ id: "xfr_wallet_readable", status: "confirmed" });
-      await seedTransfer({
-        id: "xfr_wallet_write_only",
-        status: "confirmed",
-        custodyWalletId: writeOnlyCustodyWalletId,
-        walletId: "wal_payments_write_only",
-      });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:read"],
-          },
-          {
-            walletId: "wal_payments_write_only",
-            custodyWalletId: writeOnlyCustodyWalletId,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const listRes = await app.request(
-        "/v1/payments/transfers?includeObserved=false",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(listRes.status).toBe(200);
-      const listBody = (await listRes.json()) as { data: Array<{ id: string }> };
-      expect(listBody.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_readable"]);
-
-      const forbiddenRes = await app.request(
-        `/v1/payments/transfers?custodyWalletId=${writeOnlyCustodyWalletId}&includeObserved=false`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(forbiddenRes.status).toBe(403);
-    });
-
-    it("keeps authorized legacy null-pin transfers visible to selected keys", async () => {
-      await seedTransfer({
-        id: "xfr_legacy_authorized",
-        status: "confirmed",
-        custodyWalletId: null,
-        walletId: TEST_WALLET_ID,
-      });
-      await seedTransfer({
-        id: "xfr_legacy_unauthorized",
-        status: "confirmed",
-        custodyWalletId: null,
-        walletId: "wal_legacy_unauthorized",
-      });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:read"],
-          },
-        ],
-      });
-
-      const response = await app.request(
-        "/v1/payments/transfers?includeObserved=false",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as { data: Array<{ id: string }> };
-      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_legacy_authorized"]);
-    });
-
-    it("returns no rows when selected wallets grant no payments:read access", async () => {
-      await seedTransfer({ id: "xfr_wallet_not_readable", status: "confirmed" });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/payments/transfers?includeObserved=false",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[]; meta: { total: number } };
-      expect(body.data).toEqual([]);
-      expect(body.meta.total).toBe(0);
-    });
-
-    it("enforces payments:read on exact provider-reference lookups", async () => {
-      await seedTransfer({
-        id: "xfr_provider_reference_private",
-        status: "completed",
-        type: "offramp",
-        provider: "moonpay",
-        providerReference: "private-provider-reference",
-      });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/payments/transfers?provider=moonpay&providerReference=private-provider-reference",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string; message: string } };
-      expect(body.error.code).toBe("FORBIDDEN");
-      expect(body.error.message).toContain("requested wallet");
-    });
-
     it("composes exact provider-reference lookups with every ledger filter and pagination", async () => {
       const counterpartyId = await seedCounterparty({ id: "cpty_exact_reference" });
       await seedTransfer({
@@ -1392,32 +1291,6 @@ describe("Payments routes — list transfers", () => {
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
       });
-    });
-
-    it("enforces payments:read when getting a transfer by ID", async () => {
-      await seedTransfer({ id: "xfr_single_write_only", status: "confirmed" });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/payments/transfers/xfr_single_write_only",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("FORBIDDEN");
     });
 
     it("returns 404 for another project's transfer", async () => {

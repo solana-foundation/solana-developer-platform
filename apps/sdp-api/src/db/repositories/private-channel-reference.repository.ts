@@ -6,16 +6,13 @@ export interface PrivateChannelReferenceRow {
   name: string;
 }
 
-export type PrivateChannelReferenceWalletScope =
-  | { scope: "all" }
-  | { scope: "selected"; walletIds: string[] }
-  | { scope: "none" };
+export type PrivateChannelReferenceWalletScope = { scope: "all" } | { scope: "none" };
 
 export interface ListPrivateChannelReferencesParams {
   organizationId: string;
   projectId: string;
   /**
-   * Wallet visibility after applying wallets:read and API-key wallet bindings.
+   * Wallet visibility: `wallets.read`, project-wide.
    */
   walletScope: PrivateChannelReferenceWalletScope;
   /**

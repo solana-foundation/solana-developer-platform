@@ -221,6 +221,37 @@ describe("createConfiguredRingsGateway", () => {
     });
   });
 
+  // HOO-2099: several active records can hold the owner's key; a flow for a
+  // Rings wallet signs with the record that wallet links to.
+  it("names the Rings wallet a flow signs for, and none outside a flow", async () => {
+    const signCalls: { ringsWalletId?: string | null }[] = [];
+    let signFromSdk: (() => Promise<string>) | undefined;
+    const gateway = create({
+      createGateway: (config) => {
+        signFromSdk = () => config.signTransaction("unsigned", "OwnerPublicKey");
+        return gatewayStub({
+          provisionIdentity: async () => {
+            if (!signFromSdk) throw new Error("no sign callback");
+            await signFromSdk();
+            // SAFETY: the gateway returns the SDK's result untouched, and this
+            // test reads only the signer calls the flow made.
+            return {} as never;
+          },
+        });
+      },
+      signOuterTransaction: async (input) => {
+        signCalls.push(input);
+        return "signed";
+      },
+    });
+
+    await gateway.provisionIdentity({ walletId: "hrw_1", sdpAddress: "OwnerPublicKey" });
+    if (!signFromSdk) throw new Error("no sign callback");
+    await signFromSdk();
+
+    expect(signCalls.map((call) => call.ringsWalletId)).toEqual(["hrw_1", null]);
+  });
+
   it("binds message signing to the tenant and owner", async () => {
     const { captured, createGateway } = capturingCreate();
     const calls: unknown[] = [];

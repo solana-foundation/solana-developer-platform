@@ -81,6 +81,10 @@ function appendRampTransitionGuards(
       "(provider_data->'providerSettlement' IS NULL OR provider_data #>> '{providerSettlement,onchain,signature}' IS NULL)"
     );
   }
+  if (input.expectedUpdatedAt !== undefined) {
+    clauses.push("updated_at = ?");
+    values.push(input.expectedUpdatedAt);
+  }
 }
 
 function paymentTransferSearchExpression(alias: string): string {
@@ -113,34 +117,8 @@ function buildTransferListWhere(params: ListTransfersInput): {
   };
 
   addEquals("pt.project_id", params.projectId ?? undefined);
-  if (params.walletAuthorization) {
-    const authorizationClauses: string[] = [];
-    if (params.walletAuthorization.custodyWalletIds.length > 0) {
-      authorizationClauses.push(
-        `pt.custody_wallet_id IN (${buildInClause(params.walletAuthorization.custodyWalletIds.length)})`
-      );
-      values.push(...params.walletAuthorization.custodyWalletIds);
-    }
-    if (params.walletAuthorization.providerWalletIds.length > 0) {
-      authorizationClauses.push(
-        `(pt.custody_wallet_id IS NULL AND pt.wallet_id IN (${buildInClause(params.walletAuthorization.providerWalletIds.length)}))`
-      );
-      values.push(...params.walletAuthorization.providerWalletIds);
-    }
-    clauses.push(
-      authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
-    );
-  }
   addEquals("pt.custody_wallet_id", params.custodyWalletId);
   addEquals("pt.wallet_id", params.walletId);
-  // walletIds is an authorization allowlist, not an optional filter: an empty
-  // list means "authorized for no wallet" and must match nothing, while the
-  // other addIn params legitimately treat an empty/absent list as no filter.
-  if (params.walletIds !== undefined && params.walletIds.length === 0) {
-    clauses.push("1 = 0");
-  } else {
-    addIn("pt.wallet_id", params.walletIds);
-  }
   addEquals("pt.counterparty_id", params.counterpartyId);
 
   if (params.walletAddress) {
@@ -776,6 +754,72 @@ export function createPostgresPaymentsRepository(
         )
         .bind(polledAt, [...transferIds])
         .run();
+    },
+
+    async claimRampTransferForStatusPull(params) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.claimRampTransferForStatusPull is system-only"
+        );
+      }
+      const updatedAfterClause =
+        params.updatedAfter === undefined ? "" : "AND candidate.updated_at > ?";
+      const updatedAfterValues = params.updatedAfter === undefined ? [] : [params.updatedAfter];
+      // The verifier finishes a settling row once it holds the provider's
+      // settlement and, for an onramp, its delivery signature; asking again
+      // would only spend a provider request.
+      const row = await db
+        .prepare(
+          `WITH next AS (
+             SELECT candidate.id
+             FROM payment_transfers candidate
+             JOIN projects p ON p.id = candidate.project_id
+             WHERE candidate.provider = ?
+               AND candidate.type = ANY(?)
+               AND candidate.status = ANY(?)
+               AND p.environment = ANY(?)
+               AND candidate.updated_at < ?
+               AND (candidate.provider_status_last_polled_at IS NULL
+                    OR candidate.provider_status_last_polled_at < ?)
+               ${updatedAfterClause}
+               AND NOT (
+                 candidate.status = 'settling'
+                 AND jsonb_typeof(candidate.provider_data->'providerSettlement') = 'object'
+                 AND (candidate.type = 'offramp'
+                      OR candidate.provider_data #>> '{providerSettlement,onchain,signature}' IS NOT NULL)
+               )
+             ORDER BY candidate.provider_status_last_polled_at ASC NULLS FIRST,
+                      candidate.created_at ASC, candidate.id ASC
+             LIMIT 1
+             FOR UPDATE OF candidate SKIP LOCKED
+           ), pt AS (
+             UPDATE payment_transfers
+             SET provider_status_last_polled_at = ?
+             FROM next
+             WHERE payment_transfers.id = next.id
+             RETURNING payment_transfers.*
+           )
+           SELECT pt.*, p.environment AS project_environment,
+                  ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM pt JOIN projects p ON p.id = pt.project_id`
+        )
+        .bind(
+          params.provider,
+          [...RAMP_TRANSFER_TYPES],
+          [...params.statuses],
+          [...params.environments],
+          params.updatedBefore,
+          params.polledBefore,
+          ...updatedAfterValues,
+          params.polledAt
+        )
+        .first<PaymentTransferProjectionRow & { project_environment: unknown }>();
+      if (!row) return null;
+      const transfer = mapTransferRow(row);
+      return {
+        transfer: { ...transfer, type: z.enum(RAMP_TRANSFER_TYPES).parse(transfer.type) },
+        environment: z.enum(SDP_ENVIRONMENTS).parse(row.project_environment),
+      };
     },
 
     async getTransferById(params) {

@@ -6,12 +6,13 @@ import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
@@ -184,7 +185,7 @@ describe("Clerk webhooks", () => {
       required(updatedOrg).settings ? JSON.parse(required(required(updatedOrg).settings)) : null
     ).toBeNull();
   });
-  it("invalidates cached API keys when Clerk deletes an organization", async () => {
+  it("refuses the organization's API keys once Clerk deletes it", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
     const orgId = "org_webhook_cache_invalidation";
     const projectId = "prj_webhook_cache_invalidation";
@@ -218,28 +219,28 @@ describe("Clerk webhooks", () => {
     await db.batch([
       db
         .prepare(`INSERT INTO api_keys
-             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, 'api_admin', ?, 'active')`)
-        .bind(keyId, orgId, projectId, userId, keyHash, JSON.stringify(["*"])),
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, ?, 'active')`)
+        .bind(keyId, orgId, projectId, userId, keyHash, ALL_API_KEY_GRANTS),
     ]);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       id: keyId,
       organizationId: orgId,
       projectId,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
       rateLimitTier: "standard",
       allowedIps: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
       status: "active",
       expiresAt: null,
       rotationDeadline: null,
     });
     const authedRequest = () =>
-      app.request("/v1/api-keys", { headers: { Authorization: `Bearer ${rawKey}` } }, env);
+      app.request(
+        `/v1/organizations/${orgId}`,
+        { headers: { Authorization: `Bearer ${rawKey}` } },
+        env
+      );
     expect((await authedRequest()).status).toBe(200);
     const res = await simulateClerkWebhook({
       type: "organization.deleted",
@@ -736,7 +737,7 @@ describe("Clerk webhooks", () => {
     assert(lifecycleProject, "Expected the Clerk organization sandbox project to exist");
     await getDb(env)
       .prepare(`INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
          SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?, ?, ?
          FROM auth_organization_identities aoi
          WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
@@ -747,7 +748,7 @@ describe("Clerk webhooks", () => {
         "Lifecycle Key",
         "sk_test_web",
         apiKeyHash,
-        "api_admin",
+        ALL_API_KEY_GRANTS,
         "active",
         "org_clerk_lifecycle"
       )

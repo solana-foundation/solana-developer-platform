@@ -5,8 +5,7 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { ParsedInstruction } from "@sdp/rpc/solana";
-import { type createRpc, getTransaction } from "@sdp/rpc/solana";
+import { type createRpc, getTransaction, type ParsedInstruction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -52,8 +51,10 @@ import type {
   PaymentSubscriptionsRepository,
 } from "@/db/repositories/payment-subscriptions.repository";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
-import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+import {
+  generatePaymentTransferId,
+  type PaymentTransferRow,
+} from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import {
   createPaymentRecurringPaymentsRepository,
@@ -1444,7 +1445,6 @@ async function recoverRecurringPaymentCollection(input: {
         recurringPaymentId: input.recurringPayment.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        walletAuthorization: null,
       })) ?? input.recurringPayment;
     const currentSubscription =
       (await input.subscriptionsRepo.getSubscriptionById({

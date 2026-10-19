@@ -171,6 +171,12 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
     expect(RAMP_TRANSFER_TRANSITIONS.provider_expired.from).not.toContain("settling");
   });
 
+  it("lets SDP abandon only a checkout still waiting on its customer", () => {
+    expect(sortedSources("checkout_abandoned")).toEqual(["awaiting_payment", "pending"]);
+    expect(RAMP_TRANSFER_TRANSITIONS.checkout_abandoned.to).toBe("expired");
+    expect(RAMP_TRANSFER_TRANSITIONS.checkout_abandoned.types).toEqual(RAMP_TRANSFER_TYPES);
+  });
+
   it("starts from no terminal status except expired", () => {
     const terminalSources = new Set(
       Object.values(RAMP_TRANSFER_TRANSITIONS)
@@ -388,6 +394,12 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
     file: "apps/sdp-api/src/services/jobs/verify-ramp-deliveries.ts",
     evidence: 'transition: "delivery_verified"',
     guardedCalls: 2,
+  },
+  {
+    writer: "abandoned checkout expiry (provider status sweep)",
+    file: "apps/sdp-api/src/services/jobs/sweep-ramp-transfer-statuses.ts",
+    evidence: 'transition: "checkout_abandoned"',
+    guardedCalls: 1,
   },
   {
     writer: "MoonPay failed buy attempt",

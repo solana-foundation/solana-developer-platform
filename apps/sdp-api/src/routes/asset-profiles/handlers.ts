@@ -8,7 +8,6 @@ import {
   isAssetTypeSupported,
   type ListAssetProfilesResponse,
 } from "@sdp/types/asset-profiles";
-import { hasPermission } from "@sdp/types/permissions";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
@@ -28,6 +27,7 @@ import {
 } from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
+import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getAssetProfilesRepository } from "./context";
@@ -120,8 +120,8 @@ function sortRecursively(value: unknown): unknown {
 }
 
 // True when a PATCH would alter the compliance policy vs. the persisted profile.
-// Editing the policy requires tokens:admin even though the route gate is
-// tokens:write; this is the server backstop for the admin-only compliance tab.
+// Editing the policy requires issuance.enforce even though the route's action is
+// issuance.manage; this is the server backstop for the admin-only compliance tab.
 export function compliancePolicyChanged(before: unknown, after: unknown): boolean {
   return (
     JSON.stringify(sortRecursively(compliancePolicyView(before))) !==
@@ -244,18 +244,19 @@ export const updateAssetProfile = async (
     throw notFound("Asset profile");
   }
 
-  // Compliance policy is admin-governed. The route gate (tokens:write) covers
-  // the rest of the profile, but changing the advanced settings, capacities, or
-  // access-control mode requires tokens:admin — mirroring the admin-only
-  // compliance tab in the dashboard.
+  // Compliance policy is enforcement. The route's action (issuance.manage)
+  // covers the rest of the profile, but changing the advanced settings,
+  // capacities, or access-control mode requires issuance.enforce — mirroring
+  // the admin-only compliance tab in the dashboard.
   if (
     body.issuanceMetadata !== undefined &&
     compliancePolicyChanged(current.issuance_metadata, body.issuanceMetadata) &&
-    !hasPermission(auth.permissions, "tokens:admin")
+    !callerMayPerform(c, "issuance.enforce")
   ) {
     throw new AppError(
       "INSUFFICIENT_PERMISSIONS",
-      "Editing compliance policy requires the tokens:admin permission"
+      "Missing action: issuance.enforce (editing compliance policy)",
+      { action: "issuance.enforce" }
     );
   }
 

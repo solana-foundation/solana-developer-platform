@@ -232,7 +232,6 @@ async function resolveMintReplayBeforeLiveChecks(
     env: c.env,
     auth: resolved.auth,
     custodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const recovered = await recoverSettledMintReplay(
     new AuditService(getDb(c.env)),
@@ -481,7 +480,6 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: mintAuthority,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const { signer, custodyWalletId } = authority;
   // Build unsigned transaction using Mosaic
@@ -689,7 +687,6 @@ export async function extractMintRequest(
     auth,
     requestedCustodyWalletId: input.signingCustodyWalletId,
     currentAuthority,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(input.mint.destination, "destination");
@@ -801,7 +798,6 @@ export const executeMint = async (c: AppContext) => {
       auth,
       custodyWalletId: tx.custodyWalletId,
       currentAuthority,
-      requiredWalletPermissions: ["tokens:write"],
     });
     const signer = authority.signer;
     const mosaic = createIssuanceMosaicService(c, authority, "sponsored");

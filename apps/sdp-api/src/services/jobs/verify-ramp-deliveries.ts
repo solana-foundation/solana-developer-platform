@@ -21,6 +21,9 @@ import type { Env } from "@/types/env";
 // transaction read each to prove the quoted mint reached the quoted wallet.
 const MAX_PER_SWEEP = 64;
 
+// Validator block times can trail wall-clock time by a little.
+const DELIVERY_CLOCK_SKEW_SECONDS = 120n;
+
 export interface RampChainReader {
   getTransaction(signature: Signature): Promise<ParsedTransaction | null>;
   getSignatureStatuses(signatures: Signature[]): Promise<Array<SignatureStatusInfo | null>>;
@@ -103,6 +106,17 @@ function reportedFieldsMatch(transfer: PaymentTransferRow, settled: ProviderSett
   return true;
 }
 
+/** A transaction proves this transfer's delivery only if it landed after SDP created the transfer. */
+function landedAfterTransfer(
+  transfer: PaymentTransferRow,
+  transaction: ParsedTransaction
+): boolean {
+  const blockTime = transaction.blockTime ?? null;
+  const createdAtMs = Date.parse(transfer.created_at);
+  if (blockTime === null || !Number.isFinite(createdAtMs)) return false;
+  return blockTime + DELIVERY_CLOCK_SKEW_SECONDS >= BigInt(Math.floor(createdAtMs / 1000));
+}
+
 function onrampReceivedAmount(
   transfer: PaymentTransferRow,
   settled: ProviderSettlement,
@@ -170,6 +184,18 @@ async function verifyOnramp(
   }
   const transaction = await chain.getTransaction(transactionSignature);
   if (!transaction) return false;
+  if (!landedAfterTransfer(transfer, transaction)) {
+    getLogger().warn(
+      {
+        transfer_id: transfer.id,
+        signature: transactionSignature,
+        block_time: transaction.blockTime?.toString() ?? null,
+        transfer_created_at: transfer.created_at,
+      },
+      "verifyRampDeliveries: on-ramp delivery did not land after the transfer"
+    );
+    return false;
+  }
   const amount = onrampReceivedAmount(transfer, settled, transaction);
   if (amount === null || transaction.slot > BigInt(Number.MAX_SAFE_INTEGER)) return false;
   const slot = Number(transaction.slot);

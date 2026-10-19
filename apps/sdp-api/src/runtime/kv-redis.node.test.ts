@@ -226,13 +226,11 @@ describe("RedisKVStore (HOO-510)", () => {
       await closeAllRedisClients();
     });
 
-    it("wires three prefixed stores sharing one connection", async () => {
+    it("wires two prefixed stores sharing one connection", async () => {
       const set = createKVStoreSet(env);
-      await set.apiKeys.put("same-key", "from-apiKeys");
       await set.rateLimits.put("same-key", "from-rateLimits");
       await set.cache.put("same-key", "from-cache");
 
-      expect(await set.apiKeys.get("same-key")).toBe("from-apiKeys");
       expect(await set.rateLimits.get("same-key")).toBe("from-rateLimits");
       expect(await set.cache.get("same-key")).toBe("from-cache");
     });
@@ -242,8 +240,10 @@ describe("RedisKVStore (HOO-510)", () => {
       // regresses to per-call construction, the connection-leak comes back.
       const set1 = createKVStoreSet(env);
       const set2 = createKVStoreSet(env);
-      const p1 = (set1.apiKeys as unknown as { clientPromise: Promise<Redis> }).clientPromise;
-      const p2 = (set2.apiKeys as unknown as { clientPromise: Promise<Redis> }).clientPromise;
+      // The client is private to the store; Reflect reads it without a cast.
+      const p1: unknown = Reflect.get(set1.rateLimits, "clientPromise");
+      const p2: unknown = Reflect.get(set2.rateLimits, "clientPromise");
+      expect(p1).toBeInstanceOf(Promise);
       expect(p1).toBe(p2);
     });
 

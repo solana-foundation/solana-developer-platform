@@ -10,11 +10,16 @@ contract; this document defines the money movement acceptance gate.
    Solana rails, sandbox limitations, signature scheme, event ordering field,
    transaction identifier, and status meanings. Obtain sanitized sandbox
    examples for successive statuses in both supported directions.
-2. Write a change-level threat model: untrusted provider claims, wrong tenant
+2. Record how SDP looks a transfer up without a webhook: the endpoint that
+   finds the provider's transactions by SDP's own reference, what it answers
+   when it holds none, and how long an abandoned checkout stays open on the
+   provider's side. A provider with no such lookup cannot launch: a lost
+   webhook would leave its transfers open forever.
+3. Write a change-level threat model: untrusted provider claims, wrong tenant
    or environment, wrong asset or destination, replay, reordering, concurrent
    cancellation, provider outage, chain RPC outage, and a crash after an
    external action. State how each case recovers without a second money move.
-3. Keep each quoted source amount, fiat currency, asset mint, wallet, and
+4. Keep each quoted source amount, fiat currency, asset mint, wallet, and
    destination immutable. Name provider-reported amounts by their actual unit
    and direction. Store observations separately; compare crypto to crypto and
    fiat to fiat. Never infer delivery from a price or fiat amount.
@@ -49,9 +54,22 @@ contract; this document defines the money movement acceptance gate.
   `settling` for retry and operator review. Do not treat a missing signature,
   RPC timeout, provider timeout, or generic error as proof that no money moved.
   Never release a once-only claim unless the provider definitely rejected it.
-- Keep retries idempotent and bounded. A background worker must run per
-  environment on its matching cluster and continue even when a provider's
-  public API family is hidden by a release channel.
+- Recover missed webhooks by pulling. `fetchTransferStatus` makes one request
+  per transfer, maps the answer through the same package mapping as the
+  webhook parser, and returns no events only when the provider holds no
+  transaction. The status sweep applies each event through the provider's
+  webhook processor. A failed pull or a refused event is never absence.
+- SDP expires a checkout itself, from `pending` or `awaiting_payment` only,
+  once the provider's abandonment horizon passes with no provider activity,
+  and only while the row is unchanged since the sweep read it. A provider
+  status the mapping does not know (`unmappedStatus`) holds the transfer for
+  review instead. An expired off-ramp withdraws its deposit instruction. Only provider progress revives an
+  expired transfer, so a provider's repeated "not paid yet" without an
+  ordering field never counts as activity.
+- Keep retries idempotent and bounded. A worker that reads the chain runs per
+  environment on its matching cluster; a worker that only calls provider APIs
+  runs once and resolves each row's environment. Both continue when a release
+  channel hides a provider's public API family, so its transfers still finish.
 
 ## Evidence before review
 
@@ -61,6 +79,10 @@ contract; this document defines the money movement acceptance gate.
 - Test chain verification with finalized, pending, failed, missing, wrong mint,
   wrong owner, short amount, conflicting provider observation, and a concurrent
   status change. Pin the RPC request count for each sweep.
+- Run the status pull against the sandbox: a known transaction in each
+  supported direction, a transfer the provider holds nothing for, and a
+  provider error. Record the provider's empty answer in the contract kit and
+  pin one request per lookup.
 - Run focused API and provider tests, typecheck, lint, and applicable CI.
   Record checks that could not run. This is a Critical fund movement change:
   obtain standard code review and internal security review before release.

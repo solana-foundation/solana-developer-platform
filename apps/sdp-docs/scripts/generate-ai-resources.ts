@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
 import type { SdpModule } from "@sdp/types/release-channels";
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
@@ -82,7 +81,6 @@ const KEY_PAGE_SLUGS = [
   "reference/postman-collection",
   "reference/api/index",
   "reference/api/health",
-  "reference/api/api-keys",
   "reference/api/wallets",
   "reference/api/projects",
   "reference/api/issuance",

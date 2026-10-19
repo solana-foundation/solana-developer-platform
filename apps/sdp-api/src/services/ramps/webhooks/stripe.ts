@@ -1,4 +1,9 @@
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import { readRecord, readString } from "@sdp/payments/json";
+import {
+  stripeOnrampSessionStatusSchema,
+  stripeSessionSettlementEvent,
+} from "@sdp/payments/ramps/providers/stripe/session-status-mapping";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { RampWebhookProcessResult } from "@sdp/types/payments";
@@ -10,42 +15,8 @@ import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
 
-const STRIPE_SESSION_STATUS = {
-  requires_payment: "awaiting_payment",
-  fulfillment_processing: "settling",
-  fulfillment_complete: "settled",
-  rejected: "failed",
-} as const satisfies Record<string, RampSettlementEvent["kind"]>;
-
-type DeliveredAssetRail = NonNullable<
-  Extract<RampSettlementEvent, { kind: "settled" }>["deliveredAssetRail"]
->;
-
-/** The rail each Stripe destination currency settles on, on Solana. */
-const STRIPE_SOLANA_RAILS = {
-  usdc: "usdc.solana",
-  sol: "sol.solana",
-} as const satisfies Record<string, DeliveredAssetRail>;
-
-function isStripeSolanaCurrency(currency: string): currency is keyof typeof STRIPE_SOLANA_RAILS {
-  return Object.hasOwn(STRIPE_SOLANA_RAILS, currency);
-}
-
-/** The rail a completed Stripe session delivered, or null for an asset SDP does not sell on Solana. */
-function stripeDeliveredAssetRail(currency: string, network: string): DeliveredAssetRail | null {
-  if (network !== "solana" || !isStripeSolanaCurrency(currency)) {
-    return null;
-  }
-  return STRIPE_SOLANA_RAILS[currency];
-}
-
 /** The one field every Stripe event carries that says which mode it ran in. */
 const stripeEventModeSchema = z.object({ livemode: z.boolean() });
-const stripeDeliveryProofSchema = z.object({
-  destination_amount: z.string().trim().min(1).nullish(),
-  transaction_id: z.string().trim().min(1).nullish(),
-  wallet_address: z.string().trim().min(1).nullish(),
-});
 
 interface StripeSignatureHeader {
   timestamp: string;
@@ -131,41 +102,19 @@ async function verifyStripeSignatures(input: {
   throw unauthorized("Invalid Stripe webhook signature");
 }
 
-function stripeSettledEvent(
-  reference: string,
-  session: Record<string, unknown>
-): Extract<RampSettlementEvent, { kind: "settled" }> {
-  const details = readRecord(session.transaction_details);
-  const currency = details ? readString(details.destination_currency) : undefined;
-  const network = details ? readString(details.destination_network) : undefined;
-  if (currency === undefined || network === undefined) {
-    throw badRequest(
-      'Stripe "crypto.onramp_session.updated" webhook is missing the completed session\'s destination currency or network',
-      { provider: "stripe" }
-    );
+/**
+ * The 400 for a session the shared mapping cannot read, in the words operators
+ * already search the inbox for.
+ */
+function malformedSessionMessage(type: string, error: z.ZodError): string {
+  const fields = new Set(error.issues.map((issue) => issue.path[0]));
+  if (fields.has("id")) {
+    return `Stripe "${type}" webhook is missing the session id`;
   }
-  const proof = stripeDeliveryProofSchema.safeParse(details);
-  if (!proof.success) {
-    throw badRequest(
-      'Stripe "crypto.onramp_session.updated" webhook has malformed delivery proof',
-      {
-        provider: "stripe",
-        errors: proof.error.issues,
-      }
-    );
+  if (fields.has("status")) {
+    return `Stripe "${type}" webhook is missing the session status`;
   }
-  const event: Extract<RampSettlementEvent, { kind: "settled" }> = {
-    provider: "stripe",
-    kind: "settled",
-    reference,
-    deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
-  };
-  if (proof.data.destination_amount) event.receivedAmount = proof.data.destination_amount;
-  if (proof.data.transaction_id) {
-    event.onchain = { signature: proof.data.transaction_id };
-    if (proof.data.wallet_address) event.onchain.destinationAddress = proof.data.wallet_address;
-  }
-  return event;
+  return `Stripe "${type}" webhook carries a malformed session`;
 }
 
 export const stripeWebhook = {
@@ -254,35 +203,26 @@ export const stripeWebhook = {
       });
     }
 
-    const reference = readString(session.id);
-    if (!reference) {
-      throw badRequest(`Stripe "${type}" webhook is missing the session id`, {
+    const parsed = stripeOnrampSessionStatusSchema.safeParse(session);
+    if (!parsed.success) {
+      throw badRequest(malformedSessionMessage(type, parsed.error), {
         provider: this.provider,
+        errors: parsed.error.issues,
       });
     }
-
-    const status = readString(session.status);
-    if (status === undefined) {
-      throw badRequest(`Stripe "${type}" webhook is missing the session status`, {
-        provider: this.provider,
-      });
+    try {
+      return stripeSessionSettlementEvent(parsed.data);
+    } catch (error) {
+      // A completed session the mapping cannot settle: the 400 makes Stripe redeliver it.
+      if (error instanceof SdpPaymentsError && error.code === "PROVIDER_RESPONSE_INVALID") {
+        const details: Record<string, unknown> = { provider: this.provider };
+        if (error.diagnostics?.issues !== undefined) {
+          details.errors = error.diagnostics.issues;
+        }
+        throw badRequest(error.message, details);
+      }
+      throw error;
     }
-    const kind = STRIPE_SESSION_STATUS[status as keyof typeof STRIPE_SESSION_STATUS];
-    if (!kind) {
-      return { provider: this.provider, kind: "ignore", reason: `unsupported_status:${status}` };
-    }
-    if (kind === "failed") {
-      return {
-        provider: this.provider,
-        kind,
-        reference,
-        error: "Stripe rejected the on-ramp session.",
-      };
-    }
-    if (kind === "settled") {
-      return stripeSettledEvent(reference, session);
-    }
-    return { provider: this.provider, kind, reference };
   },
 
   async process(
