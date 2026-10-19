@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -162,14 +164,18 @@ function requestAsRequester(path: string, init: { method: string; body?: unknown
         "Content-Type": "application/json",
         Authorization: `Bearer ${API_KEY.raw}`,
       },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: JSON.stringify(init.body),
     },
     env
   );
 }
 
 /** Keys are created by a signed-in organization admin, never a key (HOO-2099). */
-async function requestAsAdmin(path: string, init: { method: string; body?: unknown }) {
+/** Sends a key-create body as a signed-in admin; the body is the route's own input type. */
+async function requestAsAdmin(
+  path: "/v1/api-keys",
+  init: { method: "POST"; body: z.input<typeof apiKeyCreateSchema> }
+) {
   const { headers } = await authenticateTestClerkUser(env, getDb(env), {
     userId: USER_ID,
     email: "custody-cross-project@example.com",
@@ -184,7 +190,7 @@ async function requestAsAdmin(path: string, init: { method: string; body?: unkno
     {
       method: init.method,
       headers: headers(REQUESTER_PROJECT_ID),
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: JSON.stringify(init.body),
     },
     env
   );
