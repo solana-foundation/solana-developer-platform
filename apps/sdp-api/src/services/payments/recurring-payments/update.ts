@@ -1868,6 +1868,30 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
   });
 }
 
+/**
+ * Admits an update that will sign, for every wallet it signs with: the source
+ * and, when the source changes, the new one, since the caller must be able to
+ * sign with the wallet it moves the mandate away from as well. A fresh update
+ * is admitted before its claim (`admitStart`). A recovered one passes none: it
+ * may only confirm saved work or finish the old plan's cancel (an exit), and
+ * any new signature it needs is decided by the signing waist (HOO-2099).
+ */
+async function admitUpdateExecution(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  walletIds: readonly string[];
+  admitStart: ((custodyWalletId: string) => Promise<void>) | null;
+}): Promise<void> {
+  for (const walletId of input.walletIds) {
+    await input.admitStart?.(walletId);
+  }
+  const signingService = createSigningService(input.env);
+  for (const walletId of input.walletIds) {
+    await signingService.admitRuntimeExecution(input.organizationId, input.projectId, walletId);
+  }
+}
+
 export async function updateRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -1880,9 +1904,10 @@ export async function updateRecurringPayment(input: {
   /** The request's Idempotency-Key and body fingerprint, written on the attempt it claims. */
   idempotency: RecurringPaymentUpdateIdempotency | null;
   /**
-   * Money admission (HOO-1955, HOO-2099) for one custody wallet the update
-   * will sign with, run before the attempt is claimed and only when it signs:
-   * a refusal leaves the recurring payment untouched.
+   * Money admission (HOO-1955, HOO-2099) for one custody wallet a fresh
+   * update will sign with, run before the attempt is claimed and only when it
+   * signs: a refusal leaves the recurring payment untouched. A recovered
+   * stale update skips it; the signing waist decides any signature it needs.
    */
   admitStart: (custodyWalletId: string) => Promise<void>;
 }): Promise<PaymentRecurringPaymentRow> {
@@ -1940,26 +1965,17 @@ export async function updateRecurringPayment(input: {
   const mode = requestedActiveUpdateMode(resolved.changedFields);
   const requiresRuntimeExecution =
     mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;
+  const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
   if (requiresRuntimeExecution) {
-    // Both wallets when the source changes: the caller must be able to sign
-    // with the wallet it moves the mandate away from as well as the new one.
-    await input.admitStart(input.sourceWallet.id);
-    if (sourceChanged) {
-      await input.admitStart(resolved.sourceWallet.id);
-    }
-    const signingService = createSigningService(input.env);
-    await signingService.admitRuntimeExecution(
-      input.organizationId,
-      input.projectId,
-      input.sourceWallet.id
-    );
-    if (sourceChanged) {
-      await signingService.admitRuntimeExecution(
-        input.organizationId,
-        input.projectId,
-        resolved.sourceWallet.id
-      );
-    }
+    await admitUpdateExecution({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      walletIds: sourceChanged
+        ? [input.sourceWallet.id, resolved.sourceWallet.id]
+        : [input.sourceWallet.id],
+      admitStart: recoveringStaleUpdate ? null : input.admitStart,
+    });
   }
 
   if (resolved.changedFields.length === 0) {
@@ -1972,7 +1988,6 @@ export async function updateRecurringPayment(input: {
     return settled.recurringPayment;
   }
 
-  const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
   const claimUpdatedAt = new Date().toISOString();
   const staleBefore = getRecurringPaymentOperationStaleBefore(nowIso);
   const claimResult = await getDb(input.env).transaction(async (tx) => {
