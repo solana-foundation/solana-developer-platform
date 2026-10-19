@@ -1,9 +1,11 @@
-import { getSolanaConfig } from "@sdp/rpc";
-import { withHeliusApiKey } from "@sdp/rpc/relay";
-import * as solanaRpc from "@sdp/rpc/solana";
+// biome-ignore lint/style/noRestrictedImports: observed transfers read wallet signature history through the Helius-first pool
+import { createClusterHistoryRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type * as solanaRpc from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import type { Address, Signature } from "@solana/kit";
 import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
   PaymentTransferDirection as TransferDirection,
@@ -12,7 +14,6 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
 import type { AppContext } from "../context";
 import * as tokenAccounts from "../token-accounts";
 
@@ -36,7 +37,7 @@ interface ParsedInstructionRecord {
 }
 
 interface ParsedInstructionGroup {
-  instructions?: ParsedInstructionRecord[];
+  instructions?: readonly ParsedInstructionRecord[];
 }
 
 interface ParsedAccountKey {
@@ -45,7 +46,7 @@ interface ParsedAccountKey {
 
 interface RpcTokenBalanceAmount {
   amount?: string;
-  decimals?: number;
+  decimals?: number | bigint;
   uiAmountString?: string | null;
 }
 
@@ -61,21 +62,19 @@ interface ParsedTransactionResponse {
     message?: string;
   };
   result?: {
-    blockTime?: number | null;
+    blockTime?: bigint | null;
     meta?: {
       err?: unknown;
-      fee?: number;
-      innerInstructions?: ParsedInstructionGroup[];
-      postBalances?: number[];
-      postTokenBalances?: RpcTokenBalanceRecord[];
-      preBalances?: number[];
-      preTokenBalances?: RpcTokenBalanceRecord[];
+      fee?: bigint;
+      innerInstructions?: readonly ParsedInstructionGroup[] | null;
+      postTokenBalances?: readonly RpcTokenBalanceRecord[] | null;
+      preTokenBalances?: readonly RpcTokenBalanceRecord[] | null;
     } | null;
-    slot?: number;
+    slot?: bigint;
     transaction?: {
       message?: {
-        accountKeys?: Array<string | ParsedAccountKey>;
-        instructions?: ParsedInstructionRecord[];
+        accountKeys?: readonly (string | ParsedAccountKey)[];
+        instructions?: readonly ParsedInstructionRecord[];
       };
     };
   } | null;
@@ -100,25 +99,6 @@ function resolveWalletIdForTokenAccount(
   }
 
   return context.walletIdsByAddress.get(tokenAccountAddress) ?? null;
-}
-
-export function createSignatureHistoryRpc(env: Env) {
-  // Prefer Helius when configured for richer signature history (getSignaturesForAddress).
-  // Falls back to the default RPC URL if Helius is not configured.
-  //
-  // TODO: Replace getSignaturesForAddress with a dedicated indexer (Helius webhooks,
-  // Triton stream, or similar) for production-scale history and comprehensive inbound
-  // transfer tracking. The current approach is limited to the most recent ~200 signatures.
-  const url = env.SOLANA_RPC_HELIUS_URL
-    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
-    : getSolanaConfig(env).rpcUrl;
-  return solanaRpc.createRpc(env, { rpcUrl: url });
-}
-
-function resolveSignatureHistoryRpcUrl(env: Env): string {
-  return env.SOLANA_RPC_HELIUS_URL
-    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
-    : getSolanaConfig(env).rpcUrl;
 }
 
 function resolveParsedAccountKey(accountKey: string | ParsedAccountKey | undefined): string | null {
@@ -160,13 +140,13 @@ function resolveObservedTimestamp(blockTime: bigint | number | null | undefined)
 
 function resolveObservedSlot(
   freshSlot: bigint | null | undefined,
-  cachedSlot: number | null | undefined
+  cachedSlot: bigint | null | undefined
 ): number | null {
   if (typeof freshSlot === "bigint") {
     return Number(freshSlot);
   }
 
-  return typeof cachedSlot === "number" && Number.isFinite(cachedSlot) ? cachedSlot : null;
+  return typeof cachedSlot === "bigint" ? Number(cachedSlot) : null;
 }
 
 function readInstructionInfoString(
@@ -182,6 +162,10 @@ function readInstructionInfoInteger(
   key: string
 ): bigint | null {
   const value = info?.[key];
+
+  if (typeof value === "bigint") {
+    return value >= 0n ? value : null;
+  }
 
   if (typeof value === "string" && /^\d+$/.test(value.trim())) {
     return BigInt(value.trim());
@@ -205,7 +189,8 @@ function readTokenAmountInfo(
   const rawTokenAmount = info?.tokenAmount;
   if (!rawTokenAmount || typeof rawTokenAmount !== "object" || Array.isArray(rawTokenAmount)) {
     const rawAmount = readInstructionInfoInteger(info, "amount");
-    const decimalsValue = info?.decimals;
+    const rawDecimals = info?.decimals;
+    const decimalsValue = typeof rawDecimals === "bigint" ? Number(rawDecimals) : rawDecimals;
     if (
       rawAmount === null ||
       typeof decimalsValue !== "number" ||
@@ -228,11 +213,13 @@ function readTokenAmountInfo(
     typeof tokenAmountRecord.amount === "string" && /^\d+$/.test(tokenAmountRecord.amount)
       ? BigInt(tokenAmountRecord.amount)
       : null;
+  const rawDecimals =
+    typeof tokenAmountRecord.decimals === "bigint"
+      ? Number(tokenAmountRecord.decimals)
+      : tokenAmountRecord.decimals;
   const decimalsValue =
-    typeof tokenAmountRecord.decimals === "number" &&
-    Number.isFinite(tokenAmountRecord.decimals) &&
-    Number.isInteger(tokenAmountRecord.decimals)
-      ? tokenAmountRecord.decimals
+    typeof rawDecimals === "number" && Number.isFinite(rawDecimals) && Number.isInteger(rawDecimals)
+      ? rawDecimals
       : null;
 
   if (amountValue === null || decimalsValue === null) {
@@ -283,7 +270,7 @@ export function dedupeSignatureHistory(
 
 export async function resolveWalletTokenAccountAddresses(
   c: AppContext,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   walletId: string
 ): Promise<Address[]> {
@@ -328,7 +315,7 @@ const inFlightParsedTransactions = new Map<string, Promise<ParsedTransactionResp
 
 /**
  * Drops every cached parsed transaction and in-flight lookup. Cache entries
- * are keyed by signature alone and shared across tenants (a parsed body is
+ * are keyed by cluster and signature and shared across tenants (a parsed body is
  * tenant-independent), so callers that stub the RPC must clear the cache to
  * stay isolated.
  */
@@ -337,22 +324,22 @@ export function clearObservedTransferCaches() {
   inFlightParsedTransactions.clear();
 }
 
-function readCachedParsedTransaction(signature: string): ParsedTransaction | null {
-  const entry = parsedTransactionCache.get(signature);
+function readCachedParsedTransaction(cacheKey: string): ParsedTransaction | null {
+  const entry = parsedTransactionCache.get(cacheKey);
   if (!entry) {
     return null;
   }
 
   if (entry.expiresAt <= Date.now()) {
-    parsedTransactionCache.delete(signature);
+    parsedTransactionCache.delete(cacheKey);
     return null;
   }
 
   return entry.value;
 }
 
-function writeParsedTransactionCache(signature: string, parsed: ParsedTransaction): void {
-  if (!parsedTransactionCache.has(signature)) {
+function writeParsedTransactionCache(cacheKey: string, parsed: ParsedTransaction): void {
+  if (!parsedTransactionCache.has(cacheKey)) {
     while (parsedTransactionCache.size >= PARSED_TRANSACTION_CACHE_MAX_ENTRIES) {
       const oldest = parsedTransactionCache.keys().next();
       if (oldest.done) {
@@ -362,7 +349,7 @@ function writeParsedTransactionCache(signature: string, parsed: ParsedTransactio
     }
   }
 
-  parsedTransactionCache.set(signature, {
+  parsedTransactionCache.set(cacheKey, {
     value: parsed,
     expiresAt: Date.now() + PARSED_TRANSACTION_CACHE_TTL_MS,
   });
@@ -378,53 +365,39 @@ function writeParsedTransactionCache(signature: string, parsed: ParsedTransactio
  * merely-confirmed transaction with different metadata.
  */
 async function fetchParsedTransactionFromRpc(
-  env: Env,
-  signature: string
+  rpc: SolanaRpc,
+  signature: Signature
 ): Promise<ParsedTransactionResponse["result"]> {
-  const rpcResponse = await fetch(resolveSignatureHistoryRpcUrl(env), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "getTransaction",
-      params: [
-        signature,
-        { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 },
-      ],
-    }),
-  });
-
-  if (!rpcResponse.ok) {
-    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
-  }
-
-  const payload = (await rpcResponse.json()) as ParsedTransactionResponse;
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "RPC returned an error");
-  }
-
-  return payload.result ?? null;
+  const parsedTransaction = await rpc
+    .getTransaction(signature, {
+      encoding: "jsonParsed",
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    })
+    .send();
+  // SAFETY: kit types each parsed instruction's `info` as `object`; it is the RPC's open
+  // jsonParsed map, which buildObservedTransferRows reads key by key and checks per value.
+  // kit parses its integers (lamports, tokenAmount.decimals) to bigint, so the readers
+  // accept bigint as well as string and number.
+  return parsedTransaction as ParsedTransactionResponse["result"];
 }
 
 async function fetchParsedTransaction(
-  env: Env,
-  signature: string,
+  signature: Signature,
   isFinalized: boolean
 ): Promise<ParsedTransactionResponse["result"]> {
-  const cached = readCachedParsedTransaction(signature);
+  const cacheKey = `${currentClusterScope().cluster} ${signature}`;
+  const cached = readCachedParsedTransaction(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const inFlight = inFlightParsedTransactions.get(signature);
+  const inFlight = inFlightParsedTransactions.get(cacheKey);
   if (inFlight) {
     return inFlight;
   }
 
-  const pending = fetchParsedTransactionFromRpc(env, signature)
+  const pending = fetchParsedTransactionFromRpc(createClusterHistoryRpc(), signature)
     .then((parsedTransaction) => {
       // Cache a body only once the fresh signature history reports the
       // signature finalized. A null means the transaction is not yet indexed
@@ -436,16 +409,26 @@ async function fetchParsedTransaction(
       // is never traded for the cache). Failures stay uncached so the next
       // read retries.
       if (parsedTransaction && isFinalized) {
-        writeParsedTransactionCache(signature, parsedTransaction);
+        writeParsedTransactionCache(cacheKey, parsedTransaction);
       }
       return parsedTransaction;
     })
     .finally(() => {
-      inFlightParsedTransactions.delete(signature);
+      inFlightParsedTransactions.delete(cacheKey);
     });
-  inFlightParsedTransactions.set(signature, pending);
+  inFlightParsedTransactions.set(cacheKey, pending);
 
   return pending;
+}
+
+/**
+ * The network fee a parsed transaction paid, as the transfer row stores it.
+ *
+ * @param parsedTransaction - The parsed transaction body.
+ * @returns The fee in lamports, or null when the body carries no meta.
+ */
+function observedFee(parsedTransaction: ParsedTransaction): number | null {
+  return parsedTransaction.meta?.fee === undefined ? null : Number(parsedTransaction.meta.fee);
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
@@ -572,7 +555,7 @@ function buildObservedTransferRows(
         submission_started_at: null,
         slot,
         block_time: timestamp,
-        fee: parsedTransaction.meta?.fee ?? null,
+        fee: observedFee(parsedTransaction),
         error: null,
         initiated_by_key_id: null,
         idempotency_key: null,
@@ -660,7 +643,7 @@ function buildObservedTransferRows(
         submission_started_at: null,
         slot,
         block_time: timestamp,
-        fee: parsedTransaction.meta?.fee ?? null,
+        fee: observedFee(parsedTransaction),
         error: null,
         initiated_by_key_id: null,
         idempotency_key: null,
@@ -756,7 +739,7 @@ function buildObservedTransferRows(
       submission_started_at: null,
       slot,
       block_time: timestamp,
-      fee: parsedTransaction.meta?.fee ?? null,
+      fee: observedFee(parsedTransaction),
       error: null,
       initiated_by_key_id: null,
       idempotency_key: null,
@@ -772,7 +755,6 @@ function buildObservedTransferRows(
 }
 
 export async function buildObservedTransfersForSignatures(
-  env: Env,
   signatures: Array<Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number]>,
   context: ObservedTransferContext
 ): Promise<TransferRow[]> {
@@ -790,11 +772,7 @@ export async function buildObservedTransfersForSignatures(
       // The history entry was fetched fresh for this request, so its
       // confirmationStatus is the current finality signal for the body gate.
       const isFinalized = signatureInfo.confirmationStatus === "finalized";
-      const parsedTransaction = await fetchParsedTransaction(
-        env,
-        String(signatureInfo.signature),
-        isFinalized
-      );
+      const parsedTransaction = await fetchParsedTransaction(signatureInfo.signature, isFinalized);
       return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
     }
   );

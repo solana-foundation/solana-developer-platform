@@ -11,8 +11,6 @@ import { createApp } from "@/app";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
-import { TerminalRampWebhookError } from "@/routes/webhooks/ramps/processor";
-import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/routes/webhooks/ramps/registry";
 import { noopObservability } from "@/runtime/observability";
 import * as replayJobs from "@/services/jobs/replay-ramp-webhook-events";
 import {
@@ -20,6 +18,8 @@ import {
   RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
   replayRampWebhookEvents,
 } from "@/services/jobs/replay-ramp-webhook-events";
+import { TerminalRampWebhookError } from "@/services/ramps/webhooks/processor";
+import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/services/ramps/webhooks/registry";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -28,8 +28,7 @@ import type { Env } from "@/types/env";
 /**
  * The durable ramp webhook inbox: a verified event is persisted before the
  * 200 ack, discharged by the background apply, and replayed by the job when
- * the background pass never ran or failed. MoonPay stands in for every
- * provider — the inbox is provider-agnostic and sits above the processors.
+ * the background pass never ran or failed.
  */
 describe("Ramp webhook event inbox", () => {
   const ORG_ID = "org_ramp_inbox";
@@ -38,6 +37,7 @@ describe("Ramp webhook event inbox", () => {
   const TRANSFER_ID = "xfr_ramp_inbox";
   const MOONPAY_TRANSACTION_ID = "e3a1f7cb-42c1-4a08-9d5f-0d51e94eb1af";
   const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
+  const STRIPE_WEBHOOK_SECRET = "whsec_ramp_inbox_test";
   function solMint(): string {
     const mint = wellKnownMint("SOL", "devnet");
     if (mint === undefined) {
@@ -55,9 +55,13 @@ describe("Ramp webhook event inbox", () => {
 
   async function sendMoonpayWebhook(
     payload: unknown,
-    options?: { settleBackground?: boolean; target?: { app: typeof app; env: Env } }
+    options?: {
+      rawBody?: string;
+      settleBackground?: boolean;
+      target?: { app: typeof app; env: Env };
+    }
   ) {
-    const body = JSON.stringify(payload);
+    const body = options?.rawBody ?? JSON.stringify(payload);
     const header = moonpaySignatureHeader(body, Math.floor(Date.now() / 1000));
     const background: Promise<unknown>[] = [];
     const executionCtx: ExecutionContext = {
@@ -82,6 +86,36 @@ describe("Ramp webhook event inbox", () => {
       await Promise.allSettled(background);
     }
     return { res, background };
+  }
+
+  async function sendStripeWebhook(rawBody: string) {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const signature = createHmac("sha256", STRIPE_WEBHOOK_SECRET)
+      .update(`${timestamp}.${rawBody}`)
+      .digest("hex");
+    const background: Promise<unknown>[] = [];
+    const executionCtx: ExecutionContext = {
+      waitUntil(promise) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+      props: {},
+    };
+    const res = await app.request(
+      "/webhooks/payments/ramps/sandbox/stripe",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Stripe-Signature": `t=${timestamp},v1=${signature}`,
+        },
+        body: rawBody,
+      },
+      env,
+      executionCtx
+    );
+    await Promise.allSettled(background);
+    return res;
   }
 
   async function seedMoonpayOnrampTransfer() {
@@ -157,17 +191,29 @@ describe("Ramp webhook event inbox", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     env.MOONPAY_SANDBOX_WEBHOOK_KEY = MOONPAY_WEBHOOK_KEY;
+    env.STRIPE_SANDBOX_WEBHOOK_SECRET = STRIPE_WEBHOOK_SECRET;
     await seedMoonpayOnrampTransfer();
   });
 
   afterEach(async () => {
     env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
+    env.STRIPE_SANDBOX_WEBHOOK_SECRET = undefined;
   });
 
   async function readInboxRows() {
     const result = await getDb(env)
-      .prepare("SELECT id, status, attempts, last_error FROM ramp_webhook_events")
-      .all<{ id: string; status: string; attempts: number; last_error: string | null }>();
+      .prepare(
+        "SELECT id, status, attempts, last_error, apply_outcome, provider_event_id, raw_body FROM ramp_webhook_events"
+      )
+      .all<{
+        id: string;
+        status: string;
+        attempts: number;
+        last_error: string | null;
+        apply_outcome: string | null;
+        provider_event_id: string | null;
+        raw_body: string | null;
+      }>();
     return result.results;
   }
 
@@ -179,15 +225,201 @@ describe("Ramp webhook event inbox", () => {
     return row?.status;
   }
 
-  it("applies a delivered event and discharges its inbox row", async () => {
+  it("applies a delivered event and retains its outcome", async () => {
     // The insert-before-ack ordering itself is exercised by the replay tests
     // below: a row that survives an apply that never ran is exactly what they
-    // seed. Here the whole path runs and must leave no row behind.
+    // seed. Here the whole path runs and must retain the outcome.
     const { res } = await sendMoonpayWebhook(completedPayload);
     expect(res.status).toBe(200);
 
     expect(await readTransferStatus()).toBe("completed");
-    expect(await readInboxRows()).toHaveLength(0);
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "discharged",
+        apply_outcome: "applied",
+        raw_body: null,
+      },
+    ]);
+  });
+
+  it("acks and records a signed malformed sandbox event as discarded", async () => {
+    const { res } = await sendMoonpayWebhook(null, { rawBody: "{invalid-json" });
+    expect(res.status).toBe(200);
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "discharged",
+        apply_outcome: "discarded",
+        raw_body: null,
+        last_error: expect.any(String),
+      },
+    ]);
+    expect(await readTransferStatus()).toBe("awaiting_payment");
+  });
+
+  it("stores a signed malformed Stripe event before discarding it in sandbox", async () => {
+    expect((await sendStripeWebhook("{invalid-json")).status).toBe(200);
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "discharged",
+        apply_outcome: "discarded",
+        raw_body: null,
+        last_error: expect.any(String),
+      },
+    ]);
+  });
+
+  it("inserts duplicate signed Stripe deliveries with one evt id only once", async () => {
+    const rawBody = JSON.stringify({ id: "evt_inbox123", livemode: false, type: "ignored.event" });
+    expect((await sendStripeWebhook(rawBody)).status).toBe(200);
+    expect((await sendStripeWebhook(rawBody)).status).toBe(200);
+    expect(await readInboxRows()).toMatchObject([
+      { provider_event_id: "evt_inbox123", status: "discharged", apply_outcome: "ignored" },
+    ]);
+  });
+
+  it("parks a signed malformed production event without applying it", async () => {
+    const { row } = await createPostgresRampWebhookEventsRepository(getDb(env)).insertVerifiedEvent(
+      {
+        provider: "moonpay",
+        environment: "production",
+        rawBody: "{invalid-json",
+        providerEventId: null,
+      }
+    );
+    expect(await applyStoredRampWebhookEvent(env, row, 1)).toBe(false);
+    expect(await readInboxRows()).toMatchObject([
+      { status: "failed", apply_outcome: "invalid", attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS },
+    ]);
+  });
+
+  it("discards a sandbox event for an unknown transfer without alerting", async () => {
+    const { res } = await sendMoonpayWebhook({
+      ...completedPayload,
+      data: { ...completedPayload.data, externalTransactionId: "xfr_not_yet_recorded" },
+    });
+    expect(res.status).toBe(200);
+    expect(await readInboxRows()).toMatchObject([
+      { status: "discharged", apply_outcome: "discarded", last_error: "provider event unmatched" },
+    ]);
+    expect(await readTransferStatus()).toBe("awaiting_payment");
+  });
+
+  it("retries an unmatched production event while the transfer may still arrive", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "moonpay",
+      environment: "production",
+      payload: {
+        ...completedPayload,
+        data: { ...completedPayload.data, externalTransactionId: "xfr_not_yet_recorded" },
+      },
+    });
+
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    expect(await readInboxRows()).toMatchObject([
+      { status: "pending", apply_outcome: "unmatched", attempts: 1 },
+    ]);
+  });
+
+  it("discharges a redelivery for an already-final transfer as ignored", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET status = 'completed' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    const { res } = await sendMoonpayWebhook(completedPayload);
+    expect(res.status).toBe(200);
+    expect(await readInboxRows()).toMatchObject([
+      { status: "discharged", apply_outcome: "ignored", attempts: 0 },
+    ]);
+    expect(await readTransferStatus()).toBe("completed");
+  });
+
+  it("does not dedupe providers without delivery ids", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const first = await events.insertVerifiedEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      rawBody: JSON.stringify(completedPayload),
+      providerEventId: null,
+    });
+    const second = await events.insertVerifiedEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      rawBody: JSON.stringify(completedPayload),
+      providerEventId: null,
+    });
+    expect(first.inserted).toBe(true);
+    expect(second.inserted).toBe(true);
+    expect(second.row.id).not.toBe(first.row.id);
+  });
+
+  it("dedupes a provider delivery id within its environment", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const first = await events.insertVerifiedEvent({
+      provider: "stripe",
+      environment: "sandbox",
+      rawBody: '{"id":"evt_one"}',
+      providerEventId: "evt_one",
+    });
+    const second = await events.insertVerifiedEvent({
+      provider: "stripe",
+      environment: "sandbox",
+      rawBody: '{"id":"evt_one"}',
+      providerEventId: "evt_one",
+    });
+    const production = await events.insertVerifiedEvent({
+      provider: "stripe",
+      environment: "production",
+      rawBody: '{"id":"evt_one"}',
+      providerEventId: "evt_one",
+    });
+    expect(first.inserted).toBe(true);
+    expect(second).toMatchObject({ inserted: false, row: { id: first.row.id } });
+    expect(production.inserted).toBe(true);
+    expect(await readInboxRows()).toHaveLength(2);
+  });
+
+  it("archives only discharged rows past retention", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const discharged = await events.insertVerifiedEvent({
+      provider: "stripe",
+      environment: "sandbox",
+      rawBody: "{}",
+      providerEventId: "evt_archive",
+    });
+    const pending = await events.insertVerifiedEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      rawBody: "{}",
+      providerEventId: null,
+    });
+    await events.dischargeEvent(discharged.row.id, "ignored");
+    await getDb(env)
+      .prepare("UPDATE ramp_webhook_events SET discharged_at = ? WHERE id = ?")
+      .bind("2026-06-18T00:00:00.000Z", discharged.row.id)
+      .run();
+    expect(await events.archiveDischarged("2026-06-19T00:00:00.000Z", 100)).toBe(1);
+    const rows = await readInboxRows();
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: pending.row.id, status: "pending" }),
+        expect.objectContaining({
+          id: discharged.row.id,
+          status: "archived",
+          apply_outcome: null,
+          provider_event_id: null,
+        }),
+      ])
+    );
+    const redelivery = await events.insertVerifiedEvent({
+      provider: "stripe",
+      environment: "sandbox",
+      rawBody: "{}",
+      providerEventId: "evt_archive",
+    });
+    expect(redelivery.inserted).toBe(true);
+    expect(redelivery.row.id).not.toBe(discharged.row.id);
   });
 
   it("persists the event before acking even when the background apply never runs", async () => {
@@ -252,7 +484,20 @@ describe("Ramp webhook event inbox", () => {
 
     expect(applied).toBe(1);
     expect(await readTransferStatus()).toBe("completed");
-    expect(await readInboxRows()).toHaveLength(0);
+    expect(await readInboxRows()).toMatchObject([{ status: "discharged" }]);
+  });
+
+  it("replays a legacy JSONB string without encoding it again", async () => {
+    const rawBody = JSON.stringify(completedPayload);
+    const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: rawBody,
+    });
+
+    expect(stored.rawBody).toBe(rawBody);
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(true);
+    expect(await readTransferStatus()).toBe("completed");
   });
 
   it("does not claim events still inside the background pass's window", async () => {
@@ -345,15 +590,16 @@ describe("Ramp webhook event inbox", () => {
     expect(row).toMatchObject({ status: "failed", attempts: 10 });
   });
 
-  it("keeps a failing event pending with its error, then parks it after the last attempt", async () => {
-    // A payload `parse` rejects stands in for any deterministic apply failure.
+  it("keeps a transient failure pending, then parks it after the last attempt", async () => {
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
     const stored = await events.insertEvent({
       provider: "moonpay",
       environment: "sandbox",
-      payload: { type: "transaction_updated", data: { status: 42 } },
+      payload: completedPayload,
     });
-
+    const processSpy = vi
+      .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
+      .mockRejectedValue(new Error("temporary database error"));
     expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
     let rows = await readInboxRows();
     expect(rows[0]?.status).toBe("pending");
@@ -362,11 +608,12 @@ describe("Ramp webhook event inbox", () => {
     expect(await applyStoredRampWebhookEvent(env, stored, RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS)).toBe(
       false
     );
+    processSpy.mockRestore();
     rows = await readInboxRows();
     expect(rows[0]?.status).toBe("failed");
   });
 
-  it("discards a sandbox event whose apply failed terminally instead of retrying it", async () => {
+  it("discards a terminal sandbox failure without alerting", async () => {
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
     const stored = await events.insertEvent({
       provider: "moonpay",
@@ -381,7 +628,9 @@ describe("Ramp webhook event inbox", () => {
     } finally {
       processSpy.mockRestore();
     }
-    expect(await readInboxRows()).toHaveLength(0);
+    expect(await readInboxRows()).toMatchObject([
+      { status: "discharged", apply_outcome: "discarded", attempts: 0 },
+    ]);
   });
 
   it("parks a production event whose apply failed terminally on the first attempt", async () => {
@@ -403,6 +652,81 @@ describe("Ramp webhook event inbox", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe("failed");
     expect(rows[0]?.attempts).toBe(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS);
+  });
+
+  it("parks a refused production outcome on the first attempt", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "moonpay",
+      environment: "production",
+      payload: completedPayload,
+    });
+    const processSpy = vi
+      .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
+      .mockResolvedValue({ outcome: "refused", reason: "asset_mismatch" });
+    try {
+      expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    } finally {
+      processSpy.mockRestore();
+    }
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "failed",
+        apply_outcome: "refused",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+        last_error: "asset_mismatch",
+      },
+    ]);
+  });
+
+  it("parks a production event aimed at a sandbox transfer without binding it", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const { row: stored } = await events.insertVerifiedEvent({
+      provider: "moonpay",
+      environment: "production",
+      rawBody: JSON.stringify(completedPayload),
+      providerEventId: null,
+    });
+
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "failed",
+        apply_outcome: "refused",
+        last_error: "environment_mismatch",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      },
+    ]);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(transfer).toEqual({ status: "awaiting_payment", provider_reference: null });
+  });
+
+  it("parks a production settlement after cancellation with its reason", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET project_id = ?, status = 'canceled' WHERE id = ?")
+      .bind(`${PROJECT_ID}_production`, TRANSFER_ID)
+      .run();
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const { row: stored } = await events.insertVerifiedEvent({
+      provider: "moonpay",
+      environment: "production",
+      rawBody: JSON.stringify(completedPayload),
+      providerEventId: null,
+    });
+
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "failed",
+        apply_outcome: "refused",
+        last_error: "settled_after_cancel",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      },
+    ]);
+    expect(await readTransferStatus()).toBe("canceled");
   });
 
   /** Inserts a replayable row directly: `insertEvent` only takes a live provider. */
@@ -453,9 +777,12 @@ describe("Ramp webhook event inbox", () => {
     expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(1);
 
     expect(await readTransferStatus()).toBe("completed");
-    expect(await readInboxRows()).toEqual([
-      { id: unknown, status: "pending", attempts: 0, last_error: null },
-    ]);
+    expect(await readInboxRows()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: unknown, status: "pending", attempts: 0, last_error: null }),
+        expect.objectContaining({ id: stored.id, status: "discharged" }),
+      ])
+    );
   });
 
   describe("with one ramp provider in the release channel and another out", () => {
@@ -481,7 +808,7 @@ describe("Ramp webhook event inbox", () => {
         betaEnv()
       );
       expect(refused.status).toBe(403);
-      expect(await readInboxRows()).toHaveLength(0);
+      expect(await readInboxRows()).toMatchObject([{ status: "discharged" }]);
     });
 
     it("answers an unknown provider name as before", async () => {
@@ -541,7 +868,7 @@ describe("Ramp webhook event inbox", () => {
         .prepare("SELECT id, status, attempts, last_error FROM ramp_webhook_events")
         .all<{ id: string; status: string; attempts: number; last_error: string | null }>();
       const byId = new Map(rows.results.map((row) => [row.id, row]));
-      expect(byId.has(included.id)).toBe(false);
+      expect(byId.get(included.id)).toMatchObject({ status: "discharged" });
       expect(byId.get(excludedPending.id)).toMatchObject({
         status: "pending",
         attempts: 0,

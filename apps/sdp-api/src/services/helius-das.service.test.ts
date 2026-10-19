@@ -1,12 +1,19 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type SdpEnvironment,
+  type SolanaCluster,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
   clearHeliusDasCachesForTests,
-  getTrackedWalletBalancesByOwner,
 } from "@/services/helius-das.service";
 import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
+import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -15,16 +22,24 @@ const TEST_ORG_ID = "org_helius_das";
 const TEST_USER_ID = "usr_helius_das";
 const TEST_PROJECT_ID = "prj_helius_das";
 const TEST_STABLE_MINT = "GnaWvQYgS4xypWoqA3xPgHMFxr2iGnWhEEjF6HEdutBa";
-const TEST_OWNER = "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9";
+const TEST_DAS_MINT = "DasC1usterMint11111111111111111111111111111";
+const HELIUS_DAS_URL_BY_CLUSTER = {
+  devnet: "https://devnet.helius-das.sdp.test/?api-key=devnet",
+  "mainnet-beta": "https://mainnet.helius-das.sdp.test/?api-key=mainnet",
+} as const satisfies Record<SolanaCluster, string>;
+
+function inScope<TResult>(
+  environment: SdpEnvironment,
+  operation: () => Promise<TResult>
+): Promise<TResult> {
+  return runInClusterScope({ projectId: null, environment }, operation);
+}
 
 describe("helius-das service", () => {
-  const originalHeliusUrl = env.SOLANA_RPC_HELIUS_URL;
-  const originalHeliusApiKey = env.SOLANA_RPC_HELIUS_API_KEY;
-
   beforeEach(async () => {
     await seedTestDatabase(env);
-    env.SOLANA_RPC_HELIUS_URL = "https://helius.test/?api-key={API_KEY}";
-    env.SOLANA_RPC_HELIUS_API_KEY = "helius_test_key";
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", HELIUS_DAS_URL_BY_CLUSTER.devnet);
+    vi.stubEnv("SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL", HELIUS_DAS_URL_BY_CLUSTER["mainnet-beta"]);
 
     await getDb(env).batch([
       getDb(env)
@@ -68,71 +83,70 @@ describe("helius-das service", () => {
     vi.useRealTimers();
     clearHeliusDasCachesForTests();
     clearJupiterPriceCacheForTests();
-    env.SOLANA_RPC_HELIUS_URL = originalHeliusUrl;
-    env.SOLANA_RPC_HELIUS_API_KEY = originalHeliusApiKey;
+    vi.unstubAllEnvs();
   });
 
-  it("prices issued stablecoins at one USD each", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    const balances = await attachUsdValuesToBalances(env, [
-      {
-        token: "TEST",
-        mint: TEST_STABLE_MINT,
-        amount: "12500000",
-        uiAmount: "12.5",
-        decimals: 6,
-      },
-    ]);
-
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(balances[0]).toMatchObject({
+  it("prices a Sandbox-issued stablecoin at one USD under the sandbox scope only", async () => {
+    const balance = {
       token: "TEST",
       mint: TEST_STABLE_MINT,
-      usdPrice: 1,
-      usdValue: 12.5,
-    });
+      amount: "12500000",
+      uiAmount: "12.5",
+      decimals: 6,
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json({}));
+
+    const sandboxBalances = await inScope("sandbox", () =>
+      attachUsdValuesToBalances(env, [balance])
+    );
+
+    expect(sandboxBalances).toEqual([{ ...balance, usdPrice: 1, usdValue: 12.5 }]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const productionBalances = await inScope("production", () =>
+      attachUsdValuesToBalances(env, [balance])
+    );
+
+    expect(productionBalances).toEqual([balance]);
+    expect(fetchSpy).toHaveBeenCalled();
   });
 
-  it("tracks issued stablecoins in Helius owner balance results", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: {
-          items: [
-            {
-              id: TEST_STABLE_MINT,
-              content: { metadata: { symbol: "TEST" } },
-              token_info: {
-                mint: TEST_STABLE_MINT,
-                amount: "3000000",
-                decimals: 6,
-                uiAmountString: "3.0",
-              },
-            },
-          ],
-        },
-      }),
-    } as Response);
+  it("prices the built-in USDC when the issued stablecoin lookup fails", async () => {
+    const usdcMint = WELL_KNOWN_TOKENS.USDC.mints[CLUSTER_BY_SDP_ENVIRONMENT.sandbox];
+    const usdcBalance = {
+      token: WELL_KNOWN_TOKENS.USDC.symbol,
+      mint: usdcMint.address,
+      amount: "3000000",
+      uiAmount: "3",
+      decimals: usdcMint.decimals,
+    };
+    const issuedBalance = {
+      token: "TEST",
+      mint: TEST_STABLE_MINT,
+      amount: "12500000",
+      uiAmount: "12.5",
+      decimals: 6,
+    };
+    const db = getDb(env);
+    const statement = db.prepare("SELECT 1");
+    vi.spyOn(statement, "bind").mockReturnValue(statement);
+    vi.spyOn(statement, "all").mockRejectedValue(new Error("database unavailable"));
+    vi.spyOn(db, "prepare").mockReturnValue(statement);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({}));
 
-    const balancesByOwner = await getTrackedWalletBalancesByOwner(env, [TEST_OWNER]);
+    const balances = await inScope("sandbox", () =>
+      attachUsdValuesToBalances(env, [usdcBalance, issuedBalance])
+    );
 
-    expect(balancesByOwner.get(TEST_OWNER)).toEqual([
-      {
-        token: "TEST",
-        mint: TEST_STABLE_MINT,
-        amount: "3000000",
-        uiAmount: "3.0",
-        decimals: 6,
-      },
-    ]);
+    expect(balances).toEqual([{ ...usdcBalance, usdPrice: 1, usdValue: 3 }, issuedBalance]);
   });
 
   it("attaches DAS symbols to unlabeled token balances", async () => {
     const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({
         result: [
           {
             id: mint,
@@ -142,18 +156,20 @@ describe("helius-das service", () => {
             },
           },
         ],
-      }),
-    } as Response);
+      })
+    );
 
-    const balances = await attachTokenSymbolsToBalances(env, [
-      {
-        token: mint,
-        mint,
-        amount: "20000000",
-        uiAmount: "20",
-        decimals: 6,
-      },
-    ]);
+    const balances = await inScope("sandbox", () =>
+      attachTokenSymbolsToBalances([
+        {
+          token: mint,
+          mint,
+          amount: "20000000",
+          uiAmount: "20",
+          decimals: 6,
+        },
+      ])
+    );
 
     expect(balances[0]).toMatchObject({
       token: "EURC",
@@ -168,24 +184,27 @@ describe("helius-das service", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
     const balance = { token: mint, mint, amount: "20000000", uiAmount: "20", decimals: 6 };
-    const symbolResponse = {
-      ok: true,
-      json: async () => ({ result: [{ id: mint, token_info: { symbol: "EURC" } }] }),
-    } as Response;
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new Error("helius down"))
-      .mockResolvedValue(symbolResponse);
+      .mockImplementation(async () =>
+        Response.json({ result: [{ id: mint, token_info: { symbol: "EURC" } }] })
+      );
 
-    // The outage leaves the mint unlabeled and is not remembered.
-    expect((await attachTokenSymbolsToBalances(env, [balance]))[0]?.token).toBe(mint);
-    expect((await attachTokenSymbolsToBalances(env, [balance]))[0]?.token).toBe("EURC");
+    expect(await inScope("sandbox", () => attachTokenSymbolsToBalances([balance]))).toEqual([
+      balance,
+    ]);
+    expect(await inScope("sandbox", () => attachTokenSymbolsToBalances([balance]))).toEqual([
+      { ...balance, token: "EURC" },
+    ]);
     vi.advanceTimersByTime(59 * 60_000);
-    expect((await attachTokenSymbolsToBalances(env, [balance]))[0]?.token).toBe("EURC");
+    expect(await inScope("sandbox", () => attachTokenSymbolsToBalances([balance]))).toEqual([
+      { ...balance, token: "EURC" },
+    ]);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
 
     vi.advanceTimersByTime(60_000);
-    await attachTokenSymbolsToBalances(env, [balance]);
+    await inScope("sandbox", () => attachTokenSymbolsToBalances([balance]));
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
@@ -193,20 +212,55 @@ describe("helius-das service", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
 
-    const balances = await attachTokenSymbolsToBalances(env, [
-      {
-        token: "INSTITUTIONALUSD",
-        mint,
-        amount: "20000000",
-        uiAmount: "20",
-        decimals: 6,
-      },
-    ]);
+    const balances = await inScope("sandbox", () =>
+      attachTokenSymbolsToBalances([
+        {
+          token: "INSTITUTIONALUSD",
+          mint,
+          amount: "20000000",
+          uiAmount: "20",
+          decimals: 6,
+        },
+      ])
+    );
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(balances[0]).toMatchObject({
       token: "INSTITUTIONALUSD",
       mint,
     });
+  });
+
+  it("looks a mint's symbol up on each cluster's Helius endpoint instead of reusing one answer", async () => {
+    const balance = {
+      token: TEST_DAS_MINT,
+      mint: TEST_DAS_MINT,
+      amount: "20000000",
+      uiAmount: "20",
+      decimals: 6,
+    };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ result: [{ id: TEST_DAS_MINT, token_info: { symbol: "DEVEUR" } }] })
+      )
+      .mockResolvedValueOnce(
+        Response.json({ result: [{ id: TEST_DAS_MINT, token_info: { symbol: "MAINEUR" } }] })
+      );
+
+    const labeledByEnvironment: Awaited<ReturnType<typeof attachTokenSymbolsToBalances>>[] = [];
+    for (const { environment } of ENVIRONMENT_CLUSTER_CASES) {
+      labeledByEnvironment.push(
+        await inScope(environment, () => attachTokenSymbolsToBalances([balance]))
+      );
+    }
+
+    expect(labeledByEnvironment).toEqual([
+      [{ ...balance, token: "DEVEUR" }],
+      [{ ...balance, token: "MAINEUR" }],
+    ]);
+    expect(fetchSpy.mock.calls.map(([input]) => input)).toEqual(
+      ENVIRONMENT_CLUSTER_CASES.map(({ cluster }) => HELIUS_DAS_URL_BY_CLUSTER[cluster])
+    );
   });
 });

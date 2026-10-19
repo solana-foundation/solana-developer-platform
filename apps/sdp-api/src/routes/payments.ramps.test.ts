@@ -1,26 +1,35 @@
 import { createHmac } from "node:crypto";
-import { withRpcReadContext } from "@sdp/rpc/read-context";
-import * as solanaRpc from "@sdp/rpc/solana";
-import { createRpcFromTransport } from "@sdp/rpc/solana";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
-import type { Address } from "@solana/addresses";
-import type { RpcTransport } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  SDP_RAMP_PROVIDER_STAGES,
+  type SdpEnvironment,
+  SOL_MINT,
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
+import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED } from "@solana/kit";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import app from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
+import * as tokenLabels from "@/routes/payments/token-labels";
 import { noopObservability } from "@/runtime/observability";
+import * as jupiterPriceService from "@/services/jupiter-price.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import {
+  ENVIRONMENT_CLUSTER_CASES,
+  installClusterRpcResponder,
+  systemAccountInfoResult,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
-  getAccountInfoMock,
-  getSplTokenBalancesMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
   seedCounterparty,
+  seedProductionPrivyWallet,
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
@@ -351,121 +360,222 @@ describe("Payments routes — ramps", () => {
     ).toEqual({ custody_wallet_id: TEST_CONNECTION_CUSTODY_WALLET_ID });
   });
 
-  it("reads an active Connection wallet balance and preserves API-key wallet scope", async () => {
-    await seedActiveConnectionWallet({
-      walletId: TEST_CONNECTION_WALLET_ID,
-      publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+  describe("wallet balances", () => {
+    const rpc = installClusterRpcResponder();
+    const tokenAccountsFilterSchema = z.object({ programId: z.string() });
+
+    const BALANCE_WALLET_BY_ENVIRONMENT = {
+      sandbox: async () => TEST_WALLET_ID,
+      production: () =>
+        seedProductionPrivyWallet({
+          custodyWalletId: "cwlt_payments_production_balances",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+        }),
+    } as const satisfies Record<SdpEnvironment, () => Promise<string>>;
+
+    beforeEach(() => {
+      rpc.answer("getAccountInfo", { context: { slot: 101 }, value: null });
+      rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(101, []));
     });
-    await seedCachedKey({
-      walletBindings: [{ walletId: TEST_CONNECTION_WALLET_ID, permissions: ["wallets:read"] }],
-    });
 
-    const res = await app.request(
-      `/v1/payments/wallets/${TEST_CONNECTION_WALLET_ID}/balances`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
+    function balanceReads() {
+      return rpc.requests.filter((request) => request.method !== "getGenesisHash");
+    }
 
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
-      data: {
-        walletBalances: {
-          walletId: TEST_CONNECTION_WALLET_ID,
-          address: TEST_SOLANA_ADDRESSES.wallet2,
-        },
-      },
-    });
-    expect(getAccountInfoMock).toHaveBeenCalledWith(
-      expect.anything(),
-      TEST_SOLANA_ADDRESSES.wallet2
-    );
+    function balanceReadConfigs() {
+      return balanceReads()
+        .map((request) => ({ method: request.method, config: request.params.at(-1) }))
+        .sort((left, right) => left.method.localeCompare(right.method));
+    }
 
-    await seedCachedKey({
-      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:read"] }],
-    });
-    const forbiddenRes = await app.request(
-      `/v1/payments/wallets/${TEST_CONNECTION_WALLET_ID}/balances`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-
-    expect(forbiddenRes.status).toBe(403);
-  });
-
-  it.each([100, 101])(
-    "bounds every wallet RPC read to the requested confirmation slot (bank %s)",
-    async (slot) => {
-      const payloads: unknown[] = [];
-      const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
-        payloads.push(request.payload);
-        return { jsonrpc: "2.0", id: 1, result: { context: { slot }, value: null } } as T;
-      };
-      const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
-      const clusterRpc = vi.spyOn(solanaRpc, "createClusterRpc").mockReturnValueOnce(rpc);
-      // Exercise real kit transport and the route's context wrappers. Only the
-      // balance decoding helpers are fixtures in this broader payments suite.
-      getAccountInfoMock.mockImplementationOnce(
-        async () =>
-          (
-            await rpc
-              .getAccountInfo(TEST_SOLANA_ADDRESSES.wallet1 as Address, { encoding: "base64" })
-              .send()
-          ).value
-      );
-      getSplTokenBalancesMock.mockImplementationOnce(async () => {
-        await rpc
-          .getAccountInfo(TEST_SOLANA_ADDRESSES.wallet1 as Address, { encoding: "base64" })
-          .send();
-        return [];
-      });
-      const res = await app.request(
-        `/v1/payments/wallets/${TEST_WALLET_ID}/balances?minimumSlot=101`,
+    function requestBalances(walletId: string, query: string) {
+      return app.request(
+        `/v1/payments/wallets/${walletId}/balances${query}`,
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
-      const body = await res.json();
-      expect(res.status).toBe(slot < 101 ? 503 : 200);
-      if (slot < 101) expect(body).not.toHaveProperty("data.walletBalances");
-      else expect(body).toHaveProperty("data.balanceReadContext.minimumSlot", 101);
-      expect(clusterRpc).toHaveBeenCalledWith(env, "devnet", {
-        requestTimeoutMs: 3_000,
-        wrapTransport: withRpcReadContext,
-      });
-      expect(payloads).toHaveLength(2);
-      for (const payload of payloads)
-        expect(payload).toMatchObject({
-          params: [TEST_SOLANA_ADDRESSES.wallet1, { commitment: "confirmed", minContextSlot: 101 }],
-        });
     }
-  );
 
-  it.each(["both", "SOL", "SPL"])(
-    "returns unavailable rather than invented balances when %s RPC reads fail",
-    async (failure) => {
-      if (failure !== "SPL") getAccountInfoMock.mockRejectedValueOnce(new Error("rpc unavailable"));
-      if (failure !== "SOL")
-        getSplTokenBalancesMock.mockRejectedValueOnce(new Error("rpc unavailable"));
-      const res = await app.request(
-        `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
-        {
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+    it("reads an active Connection wallet balance and preserves API-key wallet scope", async () => {
+      await seedActiveConnectionWallet({
+        walletId: TEST_CONNECTION_WALLET_ID,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_CONNECTION_WALLET_ID, permissions: ["wallets:read"] }],
+      });
+
+      const res = await requestBalances(TEST_CONNECTION_WALLET_ID, "");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          walletBalances: {
+            walletId: TEST_CONNECTION_WALLET_ID,
+            address: TEST_SOLANA_ADDRESSES.wallet2,
+          },
         },
-        env
-      );
+      });
+      expect(balanceReads().map((request) => request.params[0])).toEqual([
+        TEST_SOLANA_ADDRESSES.wallet2,
+        TEST_SOLANA_ADDRESSES.wallet2,
+        TEST_SOLANA_ADDRESSES.wallet2,
+      ]);
+
+      await seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:read"] }],
+      });
+      const forbiddenRes = await requestBalances(TEST_CONNECTION_WALLET_ID, "");
+
+      expect(forbiddenRes.status).toBe(403);
+    });
+
+    it.for(ENVIRONMENT_CLUSTER_CASES)(
+      "reads a $environment wallet's balances on $cluster only",
+      async ({ environment, cluster }) => {
+        const walletId = await BALANCE_WALLET_BY_ENVIRONMENT[environment]();
+        const usdc = WELL_KNOWN_TOKENS.USDC.mints[cluster];
+        rpc.answer("getAccountInfo", systemAccountInfoResult(101, 2_500_000_000));
+        rpc.respond("getTokenAccountsByOwner", (request) => ({
+          result: tokenAccountsByOwnerResult(
+            101,
+            tokenAccountsFilterSchema.parse(request.params[1]).programId ===
+              SPL_TOKEN_PROGRAMS["spl-token"]
+              ? [
+                  {
+                    pubkey: TEST_SOLANA_ADDRESSES.wallet1,
+                    mint: usdc.address,
+                    amount: "12500000",
+                    decimals: usdc.decimals,
+                    uiAmountString: "12.5",
+                  },
+                ]
+              : []
+          ),
+        }));
+        const jupiterPrices = vi
+          .spyOn(jupiterPriceService, "fetchJupiterUsdPrices")
+          .mockResolvedValue(new Map([[SOL_MINT, 150]]));
+        onTestFinished(() => jupiterPrices.mockRestore());
+
+        const res = await requestBalances(walletId, "");
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body).not.toHaveProperty("data.balanceReadContext");
+        expect(body).toHaveProperty("data.walletBalances.balances", [
+          {
+            token: "SOL",
+            mint: SOL_MINT,
+            amount: "2500000000",
+            uiAmount: "2.5",
+            decimals: 9,
+            usdPrice: 150,
+            usdValue: 375,
+          },
+          {
+            token: "USDC",
+            mint: usdc.address,
+            amount: "12500000",
+            uiAmount: "12.5",
+            decimals: 6,
+            usdPrice: 1,
+            usdValue: 12.5,
+          },
+        ]);
+        expect(balanceReadConfigs()).toEqual([
+          { method: "getAccountInfo", config: { encoding: "base64", commitment: "confirmed" } },
+          {
+            method: "getTokenAccountsByOwner",
+            config: { encoding: "jsonParsed", commitment: "confirmed" },
+          },
+          {
+            method: "getTokenAccountsByOwner",
+            config: { encoding: "jsonParsed", commitment: "confirmed" },
+          },
+        ]);
+        expect(new Set(rpc.calls.map((call) => call.cluster))).toEqual(new Set([cluster]));
+      }
+    );
+
+    it("sends ?minimumSlot as minContextSlot on every balance read", async () => {
+      const res = await requestBalances(TEST_WALLET_ID, "?minimumSlot=101");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toHaveProperty("data.balanceReadContext", { minimumSlot: 101 });
+      expect(balanceReadConfigs()).toEqual([
+        {
+          method: "getAccountInfo",
+          config: { encoding: "base64", commitment: "confirmed", minContextSlot: 101 },
+        },
+        {
+          method: "getTokenAccountsByOwner",
+          config: { encoding: "jsonParsed", commitment: "confirmed", minContextSlot: 101 },
+        },
+        {
+          method: "getTokenAccountsByOwner",
+          config: { encoding: "jsonParsed", commitment: "confirmed", minContextSlot: 101 },
+        },
+      ]);
+    });
+
+    it.for([
+      { failure: "both", methods: ["getAccountInfo", "getTokenAccountsByOwner"] },
+      { failure: "SOL", methods: ["getAccountInfo"] },
+      { failure: "SPL", methods: ["getTokenAccountsByOwner"] },
+    ] as const)(
+      "returns unavailable rather than invented balances when the node is behind ?minimumSlot on $failure reads",
+      async ({ methods }) => {
+        for (const method of methods) {
+          rpc.respond(method, () => ({
+            error: {
+              code: SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+              message: "Minimum context slot has not been reached",
+            },
+          }));
+        }
+
+        const res = await requestBalances(TEST_WALLET_ID, "?minimumSlot=101");
+
+        expect(res.status).toBe(503);
+        expect(await res.json()).not.toHaveProperty("data.walletBalances");
+      }
+    );
+
+    it("starts the balance read deadline after the token labels resolve and answers unavailable once it elapses mid-read", async () => {
+      const events: string[] = [];
+      const deadline = new AbortController();
+      const resolveLabels = tokenLabels.resolveIssuedTokenLabelsByMint;
+      const labels = vi
+        .spyOn(tokenLabels, "resolveIssuedTokenLabelsByMint")
+        .mockImplementation(async (c) => {
+          const labelsByMint = await resolveLabels(c);
+          events.push("labels-resolved");
+          return labelsByMint;
+        });
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+        events.push("deadline-started");
+        return deadline.signal;
+      });
+      onTestFinished(() => {
+        labels.mockRestore();
+        timeout.mockRestore();
+      });
+      rpc.respond("getAccountInfo", () => {
+        queueMicrotask(() =>
+          deadline.abort(new DOMException("The operation timed out", "TimeoutError"))
+        );
+        return { result: { context: { slot: 101 }, value: null } };
+      });
+
+      const res = await requestBalances(TEST_WALLET_ID, "");
+
+      expect(events).toEqual(["labels-resolved", "deadline-started"]);
+      expect(timeout.mock.calls).toEqual([[3_000]]);
       expect(res.status).toBe(503);
       expect(await res.json()).not.toHaveProperty("data.walletBalances");
-    }
-  );
+    });
+  });
 
   it("lists generated on-ramp currency provider support", async () => {
     const res = await app.request(

@@ -18,6 +18,7 @@ import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -41,6 +42,33 @@ import type { RampWizardStep } from "./use-ramp-wizard.redesign";
 export const ONCHAIN_SEND_STEP_IDS = ["DETAILS", "REVIEW"] as const;
 export type OnchainSendStepId = (typeof ONCHAIN_SEND_STEP_IDS)[number];
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+type SubmittedTransfer = Pick<PaymentTransferSummary, "status" | "signature">;
+
+/** Where a submitted transfer stands, for the toast that reports it. */
+function submittedTransferOutcome(transfer: SubmittedTransfer): "processing" | "sent" | "recorded" {
+  if (isMovementInFlight(transfer.status)) return "processing";
+  if (transfer.signature) return "sent";
+  return "recorded";
+}
+
+/** What the submitted-transfer toast says about the transfer it answered with. */
+function submittedTransferDescription(transfer: SubmittedTransfer, t: Translate): string {
+  const outcome = submittedTransferOutcome(transfer);
+  switch (outcome) {
+    // Still processing: the key is kept, so a resend returns this payment (APE-461).
+    case "processing":
+      return t("Shared.idempotency.processingCheckStatus");
+    case "sent":
+      return t("DashboardPayments.onchainSend.transactionSent");
+    case "recorded":
+      return t("DashboardPayments.onchainSend.transferStatus", { status: transfer.status });
+    default: {
+      const unreachable: never = outcome;
+      throw new Error(`Unknown transfer outcome: ${String(unreachable)}`);
+    }
+  }
+}
 
 export function getOnchainSendSteps(t: Translate): readonly RampWizardStep<OnchainSendStepId>[] {
   return [
@@ -161,9 +189,7 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
       setTransferResult(transfer);
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
-        description: transfer.signature
-          ? t("DashboardPayments.onchainSend.transactionSent")
-          : t("DashboardPayments.onchainSend.transferStatus", { status: transfer.status }),
+        description: submittedTransferDescription(transfer, t),
         position: "bottom-right",
       });
     } catch (error) {

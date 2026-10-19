@@ -108,6 +108,7 @@ function WizardStepHeading({
 
   return (
     <div
+      data-wizard-heading
       className={cn(
         "mb-6 gap-3 sm:gap-4",
         titleRowEmpty && "sr-only",

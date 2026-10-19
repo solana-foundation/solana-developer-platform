@@ -1,10 +1,15 @@
 import pg from "pg";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
+import { getLogger } from "@/runtime/logger";
 import { adminDatabaseUrl, env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
+
+// Every checkpoint call in this file answers at once unless a test stalls it,
+// so a short bound only matters to the HOO-2089 stall cases.
+vi.mock("./audit-ledger-timeout", () => ({ AUDIT_LEDGER_REDIS_TIMEOUT_MS: 50 }));
 
 /**
  * Privileged tampering must be simulated as a genuine superuser: the runtime
@@ -29,11 +34,46 @@ class MemoryCheckpointStore implements KVStore {
   private value: string | null = null;
   private compareAndSetCalls = 0;
   private rejectAtCall: number | null = null;
+  private stallAtCall: number | null = null;
+  private stalledEffect: (() => void) | null = null;
+  private lateAtCall: { call: number; delayMs: number } | null = null;
 
   reset() {
     this.value = null;
     this.compareAndSetCalls = 0;
     this.rejectAtCall = null;
+    this.stallAtCall = null;
+    this.stalledEffect = null;
+    this.lateAtCall = null;
+  }
+
+  /**
+   * The next compare-and-set answers, and takes effect, only after `delayMs`,
+   * and after any command sent meanwhile: `RedisKVStore.compareAndSet`'s
+   * EVALSHA came back NOSCRIPT and its fallback EVAL is sent behind them.
+   */
+  compareAndSetCallCount() {
+    return this.compareAndSetCalls;
+  }
+
+  answerNextCompareAndSetLate(delayMs: number) {
+    this.lateAtCall = { call: this.compareAndSetCalls + 1, delayMs };
+  }
+
+  /**
+   * The next compare-and-set stalls until the client's `commandTimeout` (60ms)
+   * rejects it, as on a stalled Redis. Its effect still lands, in order, before
+   * the next command the store receives, as a
+   * queued command does once the connection recovers.
+   */
+  stallNextCompareAndSet() {
+    this.stallAtCall = this.compareAndSetCalls + 1;
+  }
+
+  private catchUp() {
+    const effect = this.stalledEffect;
+    this.stalledEffect = null;
+    effect?.();
   }
 
   rejectCompareAndSetAfter(offset = 1) {
@@ -43,6 +83,7 @@ class MemoryCheckpointStore implements KVStore {
   get(_key: string): Promise<string | null>;
   get<T>(_key: string, _type: "json"): Promise<T | null>;
   async get<T>(_key: string, type?: "json"): Promise<string | T | null> {
+    this.catchUp();
     if (this.value === null) return null;
     return type === "json" ? (JSON.parse(this.value) as T) : this.value;
   }
@@ -56,7 +97,28 @@ class MemoryCheckpointStore implements KVStore {
   }
 
   async compareAndSet(_key: string, expected: string | null, value: string): Promise<boolean> {
+    this.catchUp();
     this.compareAndSetCalls += 1;
+    if (this.compareAndSetCalls === this.stallAtCall) {
+      this.stallAtCall = null;
+      this.stalledEffect = () => {
+        if (this.value === expected) this.value = value;
+      };
+      return new Promise<boolean>((_, reject) => {
+        setTimeout(() => reject(new Error("Command timed out")), 60);
+      });
+    }
+    if (this.compareAndSetCalls === this.lateAtCall?.call) {
+      const { delayMs } = this.lateAtCall;
+      this.lateAtCall = null;
+      return new Promise<boolean>((resolve) => {
+        setTimeout(() => {
+          if (this.value !== expected) return resolve(false);
+          this.value = value;
+          resolve(true);
+        }, delayMs);
+      });
+    }
     if (this.compareAndSetCalls === this.rejectAtCall) {
       this.rejectAtCall = null;
       return false;
@@ -67,6 +129,7 @@ class MemoryCheckpointStore implements KVStore {
   }
 
   async compareAndDelete(_key: string, expected: string): Promise<boolean> {
+    this.catchUp();
     this.compareAndSetCalls += 1;
     if (this.compareAndSetCalls === this.rejectAtCall) {
       this.rejectAtCall = null;
@@ -200,6 +263,101 @@ describe("tamper-evident audit ledger", () => {
     expect(
       await db.queryOne<{ count: number }>("SELECT count(*)::integer AS count FROM audit_logs")
     ).toMatchObject({ count: 1 });
+  });
+
+  it("fails the write and frees the audit lock when Redis stalls inside it (HOO-2089)", async () => {
+    const bounded = audit;
+    await bounded.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "before_stall",
+    });
+    // The pending-witness CAS stalls past the bound, then lands late.
+    checkpoint.stallNextCompareAndSet();
+    await expect(
+      bounded.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "stalled_witness",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    expect(
+      await db.queryOne<{ count: number }>("SELECT count(*)::integer AS count FROM audit_logs")
+    ).toMatchObject({ count: 1 });
+    await expect(
+      bounded.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "after_stall",
+      })
+    ).resolves.toBeUndefined();
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: true,
+      checkedEntries: 2,
+      externalCheckpointMatches: true,
+    });
+  });
+
+  it("restores the predecessor only after a late NOSCRIPT fallback witness lands (HOO-2089)", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "before_late_witness",
+    });
+    // The witness outlives the 50ms bound and lands at 80ms, behind any restore
+    // sent at once; the writer waits for it before restoring.
+    checkpoint.answerNextCompareAndSetLate(80);
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "late_witness",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+    // Past the late witness, so a restore sent before it had already lost.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "after_late_witness",
+      })
+    ).resolves.toBeUndefined();
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: true,
+      checkedEntries: 2,
+      externalCheckpointMatches: true,
+    });
+  });
+
+  it("sends no restore, and alerts, when the witness call never settles (HOO-2089)", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "before_unsettled_witness",
+    });
+    const error = vi.spyOn(getLogger(), "error");
+    // Past the 150ms backstop: a store without the client's command bound.
+    checkpoint.answerNextCompareAndSetLate(400);
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "unsettled_witness",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "audit_ledger_witness_unsettled" }),
+      expect.any(String)
+    );
+    // The first write's witness and promotion, then this witness: no restore,
+    // which could run ahead of the witness.
+    expect(checkpoint.compareAndSetCallCount()).toBe(3);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    error.mockRestore();
   });
 
   it("detects tail deletion during the commit-to-checkpoint-promotion window", async () => {

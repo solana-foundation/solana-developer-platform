@@ -124,6 +124,30 @@ curl --fail-with-body https://api-dev.solana.com/health
 
 Also exercise the affected authenticated, webhook, or provider flow; `/health` only proves that the HTTP process is reachable.
 
+### Ramp webhook inbox
+
+Verified ramp deliveries are stored before acknowledgement. The worker parses
+and applies them, then clears the body while retaining the discharged outcome
+for seven days.
+After seven days the row is archived without a delivery ID or outcome. A row
+with `status = 'failed'` is parked for operator review; pending unmatched
+events retry for up to ten attempts. A terminal park stays parked across
+deployments, while a retryable park is rearmed once on a new build.
+
+Before enabling production ramp webhooks, confirm the Cloud Logging alert on
+`jsonPayload.event="sdp_api_ramp_webhook_event_exhausted"` covers both the API
+and cron services and routes to the money movement on-call. The event includes
+the inbox row id, provider, environment, attempt count, and failure reason; it
+does not include the signed body. An alert on
+`sdp_api_ramp_webhook_event_discarded` is optional for sandbox diagnostics.
+
+For each park, inspect `ramp_webhook_events` by `webhook_event_id` and check
+`apply_outcome`, `last_error`, `terminal`, and `parked_app_revision` against the
+corresponding transfer. Do not manually mark a transfer settled from the
+callback alone. Correct the underlying cause and replay only after confirming
+the provider transaction and the transfer match. Keep failed rows until
+resolved; the retention job archives only discharged rows.
+
 ### 2. Review the generated release pull request
 
 The Release Flow workflow maintains `sdp/release-main` and opens a pull request titled `chore(main): release X.Y.Z`. It updates:

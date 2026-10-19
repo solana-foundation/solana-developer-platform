@@ -12,6 +12,7 @@ import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
+  idempotencyFingerprintMatches,
   markIdempotencyCommitted,
   markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
@@ -96,7 +97,7 @@ export async function findTransferBatchRecordReplay(
     idempotencyKey: recordKey,
   });
   if (row === null || row.idempotency_fingerprint === null) return null;
-  if (row.idempotency_fingerprint !== getIdempotencyFingerprint(c)) {
+  if (!idempotencyFingerprintMatches(c, row.idempotency_fingerprint)) {
     // Another request's row: the step refuses it (422) without touching it.
     return { fingerprint: row.idempotency_fingerprint, respond: () => success(c, {}) };
   }
@@ -230,7 +231,10 @@ export async function createTransferBatch(
         idempotencyKey,
       });
       if (replay) {
-        if (replay.idempotency_fingerprint !== idempotencyFingerprint) {
+        if (
+          replay.idempotency_fingerprint === null ||
+          !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
+        ) {
           // Another request's row: refused unstored, so that request's own retry
           // is still answered from it.
           markIdempotencyRecordMismatch(c);

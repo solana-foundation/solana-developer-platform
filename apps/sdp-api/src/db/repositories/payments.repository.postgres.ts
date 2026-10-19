@@ -2,6 +2,7 @@ import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
   PERSISTED_RAMP_PROVIDERS,
+  SDP_ENVIRONMENTS,
   tokenFilterAliases,
 } from "@sdp/types";
 import { z } from "zod";
@@ -811,12 +812,38 @@ export function createPostgresPaymentsRepository(
       const row = await db
         .prepare(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
-           FROM payment_transfers pt WHERE ${scope.where}`
+           FROM payment_transfers pt
+           WHERE ${scope.where}`
         )
         .bind(...scope.values)
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
+    },
+
+    async getTransferProjectEnvironment(input) {
+      const scope = tenantScope
+        ? buildTransferScopeWhere({
+            organizationId: tenantScope.organizationId,
+            projectId: tenantScope.projectId,
+            includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+            tableAlias: "pt",
+            extraClauses: ["pt.id = ?", "pt.provider = ?"],
+            extraValues: [input.transferId, input.provider],
+          })
+        : {
+            where: "pt.id = ? AND pt.provider = ?",
+            values: [input.transferId, input.provider],
+          };
+      const row = await db
+        .prepare(
+          `SELECT p.environment FROM payment_transfers pt
+           JOIN projects p ON p.id = pt.project_id
+           WHERE ${scope.where}`
+        )
+        .bind(...scope.values)
+        .first<{ environment: unknown }>();
+      return row ? z.enum(SDP_ENVIRONMENTS).parse(row.environment) : null;
     },
 
     async setProviderReferenceIfEmpty(input) {
@@ -833,11 +860,21 @@ export function createPostgresPaymentsRepository(
            SET provider_reference = ?, updated_at = ?
            WHERE ${clauses.join(" AND ")}
              AND (provider_reference IS NULL OR provider_reference = ?)
+             AND EXISTS (
+               SELECT 1 FROM projects p
+               WHERE p.id = payment_transfers.project_id AND p.environment = ?
+             )
            RETURNING *
            )
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
-        .bind(input.providerReference, input.updatedAt, ...values, input.providerReference)
+        .bind(
+          input.providerReference,
+          input.updatedAt,
+          ...values,
+          input.providerReference,
+          input.environment
+        )
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;

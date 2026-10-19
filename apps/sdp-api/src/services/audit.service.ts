@@ -10,9 +10,10 @@ import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
 import type { KVStore } from "@/runtime/kv";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "./audit-ledger-timeout";
 
 // Runtime list is the source of truth for the AuditAction type so callers can
 // validate arbitrary input (e.g. an ?action= query filter) at runtime.
@@ -151,6 +152,106 @@ export interface CriticalAuditOutcome {
 export const AUDIT_LEDGER_CHECKPOINT_KEY = "audit-ledger:checkpoint:v1";
 export const AUDIT_LEDGER_SESSION_LOCK_KEY = "sdp:audit-ledger:external-checkpoint";
 
+/** The checkpoint operations the ledger uses. */
+type AuditCheckpointStore = Pick<KVStore, "compareAndSet" | "compareAndDelete"> & {
+  get(key: string): Promise<string | null>;
+};
+
+/**
+ * The checkpoint store with each call bounded by
+ * {@link AUDIT_LEDGER_REDIS_TIMEOUT_MS}. A call that times out may still run
+ * on Redis later, and not as one command: `RedisKVStore.compareAndSet` sends
+ * EVALSHA, then EVAL on NOSCRIPT. So nothing may assume a later call runs
+ * after it; the witness write waits for its own call to settle before the
+ * restore ({@link recoverFailedWitness}). The Redis client bounds each command
+ * on its own (`createAuditLedgerCheckpointStore`); this bound also covers an
+ * injected store.
+ */
+function boundedAuditCheckpointStore(store: AuditCheckpointStore): AuditCheckpointStore {
+  return {
+    get: (key) => withAuditRedisTimeout(store.get(key)),
+    compareAndSet: (...args) => withAuditRedisTimeout(store.compareAndSet(...args)),
+    compareAndDelete: (...args) => withAuditRedisTimeout(store.compareAndDelete(...args)),
+  };
+}
+
+function withAuditRedisTimeout<T>(call: Promise<T>): Promise<T> {
+  const timeoutMs = AUDIT_LEDGER_REDIS_TIMEOUT_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Audit-ledger Redis call timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    );
+  });
+  return Promise.race([call, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * The longest the writer waits for a timed-out witness call to settle. The
+ * ledger's Redis client bounds every command by
+ * {@link AUDIT_LEDGER_REDIS_TIMEOUT_MS} (`createAuditLedgerCheckpointStore`),
+ * so a compare-and-set settles within two of them (EVALSHA, then the NOSCRIPT
+ * fallback EVAL); this backstop only fires for a store without that bound.
+ */
+const WITNESS_SETTLE_BACKSTOP_FACTOR = 3;
+
+/**
+ * Restores the predecessor checkpoint after this writer's pending-witness
+ * write failed (HOO-2089). The transaction never reaches COMMIT, so a witness
+ * that lands late would lock every later write. The restore is sent only once
+ * the witness call itself has settled: its EVALSHA and any NOSCRIPT fallback
+ * EVAL are then already sent, and the ledger's client never sends a settled
+ * command later, so Redis runs the restore after them. If the witness never
+ * landed the restore is a no-op. What it cannot repair is never silent: a
+ * witness still unsettled after the backstop (no restore is sent then, since
+ * it could run ahead of the witness), or a restore that did not put the
+ * predecessor back, is logged as the event that locks audit writes until an
+ * operator restores the checkpoint.
+ */
+async function recoverFailedWitness(
+  witnessCall: Promise<boolean>,
+  checkpointStore: AuditCheckpointStore,
+  expectedCheckpoint: string | null,
+  pendingCheckpoint: string
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const backstop = new Promise<false>((resolve) => {
+    timer = setTimeout(
+      () => resolve(false),
+      AUDIT_LEDGER_REDIS_TIMEOUT_MS * WITNESS_SETTLE_BACKSTOP_FACTOR
+    );
+  });
+  const witnessSettled = await Promise.race([
+    witnessCall.then(
+      () => true,
+      () => true
+    ),
+    backstop,
+  ]).finally(() => clearTimeout(timer));
+  if (!witnessSettled) {
+    getLogger().error(
+      { event: "audit_ledger_witness_unsettled", pendingCheckpoint },
+      "Audit-ledger pending witness did not settle, so it was not restored; if it lands, audit writes stay locked until an operator restores the checkpoint"
+    );
+    return;
+  }
+  const restored = await restorePendingWitness(
+    checkpointStore,
+    expectedCheckpoint,
+    pendingCheckpoint
+  ).catch((restoreError: unknown) => {
+    getLogger().error({ error: restoreError }, "Audit-ledger witness restore failed");
+    return false;
+  });
+  if (!restored) {
+    getLogger().error(
+      { event: "audit_ledger_witness_restore_failed", pendingCheckpoint },
+      "Audit-ledger pending witness was not restored after a failed witness write; audit writes are locked until an operator restores the checkpoint"
+    );
+  }
+}
+
 interface AuditLedgerCheckpoint {
   sequence: number;
   headHash: string;
@@ -263,7 +364,7 @@ function assertValidCurrentHead(head: AuditLedgerHead | null): void {
 
 async function reconcileExternalCheckpoint(
   head: AuditLedgerHead | null,
-  checkpointStore: KVStore
+  checkpointStore: AuditCheckpointStore
 ): Promise<string | null> {
   assertValidCurrentHead(head);
   const expectedCheckpoint = checkpointForHead(head);
@@ -317,6 +418,30 @@ async function reconcileExternalCheckpoint(
   }
 
   throw new Error("External audit-ledger checkpoint diverged; writes are locked");
+}
+
+/**
+ * Puts the predecessor checkpoint back in place of this writer's pending
+ * witness. True when the checkpoint now holds the predecessor, whether this
+ * call restored it or the witness never landed. Only safe while the writer
+ * holds the audit lock and its transaction cannot commit.
+ */
+async function restorePendingWitness(
+  checkpointStore: AuditCheckpointStore,
+  expectedCheckpoint: string | null,
+  pendingCheckpoint: string
+): Promise<boolean> {
+  const restored =
+    expectedCheckpoint === null
+      ? await checkpointStore.compareAndDelete(AUDIT_LEDGER_CHECKPOINT_KEY, pendingCheckpoint)
+      : await checkpointStore.compareAndSet(
+          AUDIT_LEDGER_CHECKPOINT_KEY,
+          pendingCheckpoint,
+          expectedCheckpoint
+        );
+  return (
+    restored || (await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY)) === expectedCheckpoint
+  );
 }
 
 /**
@@ -402,7 +527,7 @@ export class AuditService {
         userAgent,
         requestId,
       },
-      this.checkpointStore ?? createKVStoreSet(c.env).cache
+      this.checkpointStore ?? createAuditLedgerCheckpointStore(c.env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
     );
   }
 
@@ -692,10 +817,11 @@ export class AuditService {
       userAgent: string | null;
       requestId: string | null;
     },
-    checkpointStore: KVStore,
+    unboundedCheckpointStore: KVStore,
     id: string,
     metadata: Record<string, unknown> | null
   ): Promise<void> {
+    const checkpointStore = boundedAuditCheckpointStore(unboundedCheckpointStore);
     try {
       const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(
         this.db
@@ -800,11 +926,24 @@ export class AuditService {
           // with the predecessor checkpoint. A confirmed rollback restores this
           // exact witness while the session lock remains held; an ambiguous crash
           // or lost commit outcome remains locked for operator investigation.
-          const witnessed = await checkpointStore.compareAndSet(
+          // Sent unbounded so the recovery can wait for this exact call.
+          const witnessCall = unboundedCheckpointStore.compareAndSet(
             AUDIT_LEDGER_CHECKPOINT_KEY,
             expectedCheckpoint,
             pendingCheckpoint
           );
+          let witnessed: boolean;
+          try {
+            witnessed = await withAuditRedisTimeout(witnessCall);
+          } catch (witnessError) {
+            await recoverFailedWitness(
+              witnessCall,
+              checkpointStore,
+              expectedCheckpoint,
+              pendingCheckpoint
+            );
+            throw witnessError;
+          }
           if (!witnessed) {
             throw new Error("External audit-ledger pending witness was not established");
           }
@@ -824,20 +963,8 @@ export class AuditService {
           }
         },
         async ({ expectedCheckpoint, pendingCheckpoint }) => {
-          const restored =
-            expectedCheckpoint === null
-              ? await checkpointStore.compareAndDelete(
-                  AUDIT_LEDGER_CHECKPOINT_KEY,
-                  pendingCheckpoint
-                )
-              : await checkpointStore.compareAndSet(
-                  AUDIT_LEDGER_CHECKPOINT_KEY,
-                  pendingCheckpoint,
-                  expectedCheckpoint
-                );
           if (
-            !restored &&
-            (await checkpointStore.get(AUDIT_LEDGER_CHECKPOINT_KEY)) !== expectedCheckpoint
+            !(await restorePendingWitness(checkpointStore, expectedCheckpoint, pendingCheckpoint))
           ) {
             throw new Error(
               "External audit-ledger pending witness was not restored after rollback; writes are locked"

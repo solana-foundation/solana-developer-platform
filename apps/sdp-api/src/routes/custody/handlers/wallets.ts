@@ -1,5 +1,6 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
@@ -205,7 +206,7 @@ async function getBalancesByWalletId(
   const [tokenLabelsByMint, observedBalances] = await Promise.all([
     resolveIssuedTokenLabelsByMint(c),
     readWalletBalances(
-      solanaRpc.createRpc(c.env),
+      createClusterRpc(),
       buildWalletBalanceCacheScope(c),
       walletPublicKeys,
       c.get("requestId")
@@ -218,7 +219,7 @@ async function getBalancesByWalletId(
     ])
   );
 
-  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, labeledBalances);
+  const balancesMap = await attachTokenSymbolsToBalanceMap(labeledBalances);
 
   if (options.includeUsdValues === false) {
     return balancesMap;
@@ -666,10 +667,9 @@ export const getWalletById = async (c: AppContext) => {
     return success(c, response);
   }
 
-  let lamports = 0n;
-
+  let lamports: bigint;
   try {
-    const rpc = solanaRpc.createRpc(c.env);
+    const rpc = createClusterRpc();
     const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
@@ -683,6 +683,7 @@ export const getWalletById = async (c: AppContext) => {
       // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
       "getWalletById: failed to fetch wallet balance"
     );
+    throw providerUnavailable("Wallet balance is temporarily unavailable. Try again.");
   }
 
   const solBalance = {

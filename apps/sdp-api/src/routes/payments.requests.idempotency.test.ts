@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
+  seedProductionPrivyWallet,
   TEST_API_KEY,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { required } from "@/test/helpers/required";
 
 function postPaymentRequest(body: Record<string, unknown>, idempotencyKey: string) {
   return app.request(
@@ -70,6 +74,41 @@ describe("Payments routes — payment request access before the key", () => {
 
     expect(response.status).toBe(201);
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
+  });
+});
+
+describe("Payments routes — payment request token cluster", () => {
+  installPaymentsRouteTestHooks();
+
+  it("refuses the devnet USDC mint on a Production project and stores no request", async () => {
+    await seedProductionPrivyWallet({
+      custodyWalletId: "cwlt_payment_request_production",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+    const productionWallet = required(
+      await getDb(env)
+        .prepare("SELECT wallet_id FROM custody_wallets WHERE id = ?")
+        .bind("cwlt_payment_request_production")
+        .first<{ wallet_id: string }>()
+    );
+
+    const response = await postPaymentRequest(
+      { walletId: productionWallet.wallet_id, token: DEVNET_USDC_MINT, amount: "1" },
+      "payreq-devnet-mint-on-production"
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: `USDC mint ${DEVNET_USDC_MINT} is not available on mainnet-beta`,
+      },
+    });
+    const stored = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE project_id = ?")
+      .bind(TEST_PRODUCTION_PROJECT_ID)
+      .first<{ count: number }>();
+    expect(stored).toEqual({ count: 0 });
   });
 });
 

@@ -6,10 +6,12 @@ import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   GENESIS_HASH_BY_CLUSTER,
   SDP_ENVIRONMENTS,
+  type SdpEnvironment,
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
 import { type Commitment, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND } from "@solana/kit";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
 import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
@@ -79,13 +81,21 @@ function clusterForUrl(endpointUrl: string): SolanaCluster {
   return cluster;
 }
 
+/** Each environment with the cluster its projects' chain reads and sends must land on. */
+export const ENVIRONMENT_CLUSTER_CASES = [
+  { environment: "sandbox", cluster: "devnet" },
+  { environment: "production", cluster: "mainnet-beta" },
+] as const satisfies readonly { environment: SdpEnvironment; cluster: SolanaCluster }[];
+
 /**
- * The cluster and parsed body of a JSON-RPC fetch the stub intercepts.
+ * The cluster and parsed body of a JSON-RPC fetch the stub intercepts. Like `fetch`, a request
+ * whose signal is already aborted is refused before it reaches the endpoint or is recorded.
  *
  * @param input - The fetch target kit passed.
  * @param init - The fetch options kit passed.
  * @returns The cluster whose endpoint was hit and the request's parsed JSON body.
  * @throws Error when kit did not fetch a string URL with a string body.
+ * @throws The signal's abort reason when the request was aborted before it was sent.
  */
 function readJsonRpcFetch(
   input: Parameters<typeof fetch>[0],
@@ -97,6 +107,7 @@ function readJsonRpcFetch(
   if (init === undefined || typeof init.body !== "string") {
     throw new Error(`Expected a JSON-RPC body on the fetch to ${input}`);
   }
+  init.signal?.throwIfAborted();
   return { cluster: clusterForUrl(input), body: JSON.parse(init.body) };
 }
 
@@ -324,7 +335,7 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
 }
 
 /** A jsonParsed SPL token account a stubbed `getTokenAccountsByOwner` answers with. */
-interface StubTokenAccount {
+export interface StubTokenAccount {
   pubkey: string;
   mint: string;
   amount: string;
@@ -362,6 +373,27 @@ export function tokenAccountsByOwnerResult(
         },
       },
     })),
+  };
+}
+
+/**
+ * A base64 `getAccountInfo` result for a data-less System account holding `lamports`.
+ *
+ * @param slot - The context slot the answer claims.
+ * @param lamports - The account's balance, a safe integer; kit decodes it as a bigint.
+ * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
+ */
+export function systemAccountInfoResult(slot: number, lamports: number): JsonRpcResult {
+  return {
+    context: { slot },
+    value: {
+      data: ["", "base64"],
+      executable: false,
+      lamports,
+      owner: SYSTEM_PROGRAM_ADDRESS,
+      rentEpoch: 0,
+      space: 0,
+    },
   };
 }
 

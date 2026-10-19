@@ -1,8 +1,12 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import * as solanaRpc from "@sdp/rpc/solana";
 import {
   isCollectableRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
+  type PaymentRecurringPaymentAttemptStatus,
+  type PaymentRecurringPaymentLifecycleAttemptStage,
+  type PaymentRecurringPaymentLifecycleOperation,
+  type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
@@ -17,11 +21,13 @@ import {
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
+  lamports,
+  type MaybeAccount,
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
@@ -40,6 +46,7 @@ import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
+import * as recurringShared from "@/services/payments/recurring-payments/shared";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -89,6 +96,70 @@ import { required } from "@/test/helpers/required";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
+
+/**
+ * Resumed recurring steps look saved signatures up in transaction history
+ * (HOO-2044). By default history knows none of them; a test sets what it saw.
+ */
+const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
+
+/** A subscription delegation on chain; `expiresAtTs` 0 is active, set is canceled. */
+function delegation(
+  expiresAtTs: bigint
+): MaybeAccount<subscriptionsProgram.SubscriptionDelegation> {
+  return {
+    exists: true,
+    address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    executable: false,
+    lamports: lamports(2_000_000n),
+    programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+    space: BigInt(subscriptionsProgram.SUBSCRIPTION_SIZE),
+    data: {
+      header: {
+        discriminator: 0,
+        version: subscriptionsProgram.CURRENT_PROGRAM_VERSION,
+        bump: 255,
+        delegator: address(TEST_SOLANA_ADDRESSES.wallet1),
+        delegatee: address(TEST_SOLANA_ADDRESSES.wallet2),
+        payer: address(TEST_SOLANA_ADDRESSES.wallet1),
+        initId: 1n,
+      },
+      terms: { amount: 25_000_000n, periodHours: 24n, createdAt: 1_770_000_000n },
+      amountPulledInPeriod: 0n,
+      currentPeriodStartTs: 1_770_000_000n,
+      expiresAtTs,
+    },
+  };
+}
+
+/** A plan on chain; `metadataUri` is stored NUL-padded to its fixed 128 bytes. */
+function planAccount(metadataUri = ""): MaybeAccount<subscriptionsProgram.Plan> {
+  return {
+    exists: true,
+    address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    executable: false,
+    lamports: lamports(2_000_000n),
+    programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+    space: BigInt(subscriptionsProgram.PLAN_SIZE),
+    data: {
+      discriminator: 0,
+      owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+      bump: 255,
+      status: subscriptionsProgram.PlanStatus.Active,
+      data: {
+        planId: 1001n,
+        mint: address(DEVNET_USDC_MINT),
+        terms: { amount: 25_000_000n, periodHours: 24n, createdAt: 1_770_000_000n },
+        endTs: 0n,
+        destinations: [address(TEST_SOLANA_ADDRESSES.wallet2)],
+        pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
+        metadataUri: metadataUri.padEnd(128, "\0"),
+      },
+    },
+  };
+}
+
+const noAccount = { exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) } as const;
 
 /** Leaves a subscription's collection attempts unkeyed, as the cron's claim is (HOO-1918). */
 async function clearCollectionAttemptKeys(subscriptionId: string): Promise<void> {
@@ -534,6 +605,11 @@ const unboundWalletCases: Array<{
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
   const recurringExecution = installRecurringExecutionHooks();
+  beforeEach(() => {
+    getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
+      signatures.map(() => null)
+    );
+  });
 
   it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
     await getDb(env).batch([
@@ -1688,6 +1764,8 @@ describe("Payments routes — recurring", () => {
         staleAt
       )
       .run();
+    // The saved plan update landed: the plan holds the new URI, NUL-padded to its fixed width.
+    vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue(planAccount(metadataUri));
 
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
@@ -1964,6 +2042,11 @@ describe("Payments routes — recurring", () => {
           staleUpdatedAt
         )
         .run();
+      // The submitted operation landed: a cancel sets the expiry, a resume clears it.
+      fetchMaybeSubscriptionDelegationMock.mockResolvedValue(
+        delegation(operation === "cancel" ? 1_800_000_000n : 0n)
+      );
+      confirmTransactionMock.mockClear();
 
       const response = await app.request(
         `/v1/payments/recurring-payments/${activated.id}/${operation}`,
@@ -1975,10 +2058,12 @@ describe("Payments routes — recurring", () => {
       const body = await parseRecurringResponse(response);
       expect(body.data.recurringPayment.status).toBe(transition.finalStatus);
       expect(signAndSendMock).toHaveBeenCalledTimes(operation === "cancel" ? 2 : 3);
-      expect(confirmTransactionMock).toHaveBeenCalledWith(
+      // Recovery runs long after the status cache dropped the signature, so the
+      // account settles it (HOO-2044); the saved signature is never polled.
+      expect(confirmTransactionMock).not.toHaveBeenCalledWith(
         expect.anything(),
         submittedSignature,
-        expect.objectContaining({ commitment: "confirmed" })
+        expect.anything()
       );
       const recoveredAttempt = await getDb(env)
         .prepare(
@@ -3748,6 +3833,10 @@ describe("Payments routes — recurring", () => {
             staleUpdatedAt
           )
           .run();
+        // The submitted operation landed: a cancel sets the expiry, a resume clears it.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(
+          delegation(operation === "cancel" ? 1_800_000_000n : 0n)
+        );
         await deleteTestOrganization();
 
         expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
@@ -4411,6 +4500,10 @@ describe("Payments routes — recurring", () => {
       stage: "create_plan",
       error: "Recurring payment activation failed on-chain",
     });
+    // The failed plan never landed, so the retry finds no plan at either commitment.
+    vi.mocked(subscriptionsProgram.fetchMaybePlan)
+      .mockResolvedValueOnce(noAccount)
+      .mockResolvedValueOnce(noAccount);
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -4478,6 +4571,10 @@ describe("Payments routes — recurring", () => {
       stage: "finalize",
       error: "Subscription authorization was not found on-chain",
     });
+    // The subscription never landed, so the retry finds none at either commitment.
+    fetchMaybeSubscriptionDelegationMock
+      .mockResolvedValueOnce(noAccount)
+      .mockResolvedValueOnce(noAccount);
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -5781,6 +5878,8 @@ describe("Payments routes — recurring", () => {
       expect(await answeredAttempts()).toEqual([]);
       expect((await patch(crypto.randomUUID(), later)).status).toBe(409);
       repositorySpy.mockRestore();
+      // The failed request's plan update landed: the plan holds the recovered URI.
+      vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue(planAccount(recovered));
 
       // Once stale again, the retry finishes the update and records its answer with it.
       await backdate();
@@ -5867,6 +5966,771 @@ describe("Payments routes — recurring", () => {
       expect(retry.status).toBe(200);
       expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("canceled");
       expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    describe("a resumed attempt reads the chain before it sends a step again (HOO-2044)", () => {
+      /** Every subscription send, whichever fee-payment path it takes. */
+      const sends = () => {
+        const spy = vi.spyOn(recurringShared, "sendSubscriptionInstructions");
+        onTestFinished(() => spy.mockRestore());
+        return spy;
+      };
+      /** How many of a fetch's calls read at `finalized`, the resumed-step commitment. */
+      const finalizedReads = (
+        calls: ReadonlyArray<Parameters<typeof subscriptionsProgram.fetchMaybePlan>>
+      ) => calls.filter(([, , config]) => config?.commitment === "finalized").length;
+
+      /** A plan row for a schedule the test puts mid-activation. */
+      async function seedPlanRow(planId: string, status: "draft" | "active", at: string) {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_subscription_plans (
+               id, organization_id, project_id, owner_wallet_id, owner_address, token,
+               amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, '25.00', 24, '1001', ?, ?, ?, ?)`
+          )
+          .bind(
+            planId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            TEST_WALLET_ID,
+            recurringExecution.sourceSigner().address,
+            DEVNET_USDC_MINT,
+            status,
+            TEST_USER.id,
+            at,
+            at
+          )
+          .run();
+      }
+
+      /**
+       * Puts a finished lifecycle operation back to the moment after its send
+       * returned and before its signature was saved, long enough ago to recover.
+       * The attempt keeps no key, so a request under a new key adopts it.
+       */
+      async function leaveUnsavedSend(input: {
+        recurringPaymentId: string;
+        operation: PaymentRecurringPaymentLifecycleOperation;
+        key: string;
+      }) {
+        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+        await getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
+          .bind(
+            input.operation === "cancel" ? "canceling" : "resuming",
+            staleAt,
+            input.recurringPaymentId
+          )
+          .run();
+        const updated = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_lifecycle_attempts
+                SET status = 'processing', stage = 'submit', signature = NULL,
+                    idempotency_key = NULL, updated_at = ?
+              WHERE idempotency_key = ?`
+          )
+          .bind(staleAt, recordKey(input.key))
+          .run();
+        expect(updated).toBe(1);
+      }
+
+      const lifecycleAttempts = (
+        recurringPaymentId: string,
+        operation: PaymentRecurringPaymentLifecycleOperation
+      ) =>
+        getDb(env)
+          .prepare(
+            `SELECT status, stage, signature
+               FROM payment_recurring_payment_lifecycle_attempts
+              WHERE recurring_payment_id = ? AND operation = ?`
+          )
+          .bind(recurringPaymentId, operation)
+          .all<{
+            status: PaymentRecurringPaymentAttemptStatus;
+            stage: PaymentRecurringPaymentLifecycleAttemptStage;
+            signature: string | null;
+          }>();
+
+      it("finishes a cancel whose send landed without sending it again", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        expect(
+          (
+            await app.request(
+              actionPath(activated.id, "cancel"),
+              { method: "POST", headers: keyed(key), body: "{}" },
+              env
+            )
+          ).status
+        ).toBe(200);
+        // A fresh attempt has sent nothing, so it reads nothing extra.
+        expect(finalizedReads(fetchMaybeSubscriptionDelegationMock.mock.calls)).toBe(0);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        // The chain shows the cancel: the period's end is set.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("canceled");
+        expect(sent).not.toHaveBeenCalled();
+        expect(finalizedReads(fetchMaybeSubscriptionDelegationMock.mock.calls)).toBe(1);
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "confirmed", stage: "finalize", signature: null },
+        ]);
+      });
+
+      it("keeps a cancel recoverable when the chain read fails", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        const cancel = (requestKey: string) =>
+          app.request(
+            actionPath(activated.id, "cancel"),
+            { method: "POST", headers: keyed(requestKey), body: "{}" },
+            env
+          );
+        expect((await cancel(key)).status).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        fetchMaybeSubscriptionDelegationMock.mockRejectedValueOnce(new Error("RPC unavailable"));
+        const sent = sends();
+
+        const failed = await cancel(crypto.randomUUID());
+
+        expect(failed.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        // Neither failed nor reset: the attempt waits at `submit` for the chain to answer.
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "processing", stage: "submit", signature: null },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
+      });
+
+      it("never finishes a resume from a delegation that does not exist", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const lifecycle = (action: PaymentRecurringPaymentLifecycleOperation, key: string) =>
+          app.request(
+            actionPath(activated.id, action),
+            { method: "POST", headers: keyed(key), body: "{}" },
+            env
+          );
+        expect((await lifecycle("cancel", crypto.randomUUID())).status).toBe(200);
+        const key = crypto.randomUUID();
+        expect((await lifecycle("resume", key)).status).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "resume", key });
+        // No delegation at all: its expiry reads as cleared, but nothing was resumed.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
+          exists: false,
+          address: address(TEST_SOLANA_ADDRESSES.wallet3),
+        });
+        const sent = sends();
+
+        const retry = await lifecycle("resume", crypto.randomUUID());
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        expect((await recurringPaymentDueAt(activated.id)).status).not.toBe("active");
+      });
+
+      it("keeps a resumed metadata update in flight when the chain read fails", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        const metadataUri = "https://example.com/recurring/unsettled.json";
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ metadataUri }) },
+            env
+          );
+        // The plan update is sent and the process dies before its signature is saved.
+        recurringExecution
+          .signAndSendMock()
+          .mockRejectedValueOnce(new Error("process died after broadcast"));
+        expect((await request()).status).toBe(500);
+        await leaveUpdateCrashedAt(activated.id, key);
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_update_attempts SET stage = 'update_plan'
+              WHERE recurring_payment_id = ?`
+          )
+          .bind(activated.id)
+          .run();
+        vi.mocked(subscriptionsProgram.fetchMaybePlan).mockRejectedValueOnce(
+          new Error("RPC unavailable")
+        );
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        // The new URI may have landed: neither failed nor reset to the old metadata.
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+        const attempt = await getDb(env)
+          .prepare(
+            "SELECT status FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+          )
+          .bind(activated.id)
+          .first<{ status: PaymentRecurringPaymentAttemptStatus }>();
+        expect(attempt?.status).toBe("processing");
+      });
+
+      it("keeps a stale cancel in flight when only a lagging `confirmed` view shows it", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        expect(
+          (
+            await app.request(
+              actionPath(activated.id, "cancel"),
+              { method: "POST", headers: keyed(key), body: "{}" },
+              env
+            )
+          ).status
+        ).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        // Finality stalled: the cancel shows at `confirmed`, not yet at `finalized`.
+        fetchMaybeSubscriptionDelegationMock.mockImplementation(async (_rpc, _pda, config) =>
+          delegation(config?.commitment === "confirmed" ? 1_800_000_000n : 0n)
+        );
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "processing", stage: "submit", signature: null },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
+      });
+
+      it("sends a cancel the chain does not show", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        expect(
+          (
+            await app.request(
+              actionPath(activated.id, "cancel"),
+              { method: "POST", headers: keyed(key), body: "{}" },
+              env
+            )
+          ).status
+        ).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(0n));
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(200);
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "confirmed", stage: "finalize", signature: testSignature(3) },
+        ]);
+      });
+
+      it("finishes a resume whose send landed without sending it again", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const lifecycle = (action: "cancel" | "resume", key: string) =>
+          app.request(
+            actionPath(activated.id, action),
+            { method: "POST", headers: keyed(key), body: "{}" },
+            env
+          );
+        expect((await lifecycle("cancel", crypto.randomUUID())).status).toBe(200);
+        const key = crypto.randomUUID();
+        expect((await lifecycle("resume", key)).status).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "resume", key });
+        // The chain shows the resume: the cancellation's end is cleared.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(0n));
+        const sent = sends();
+
+        const retry = await lifecycle("resume", crypto.randomUUID());
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("active");
+        expect(sent).not.toHaveBeenCalled();
+        expect((await lifecycleAttempts(activated.id, "resume")).results).toEqual([
+          { status: "confirmed", stage: "finalize", signature: null },
+        ]);
+      });
+
+      it("finishes an activation whose plan landed before its signature was saved, sending only the subscription", async () => {
+        const sourceSigner = recurringExecution.sourceSigner();
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const planId = `psp_${crypto.randomUUID()}`;
+        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_subscription_plans (
+               id, organization_id, project_id, owner_wallet_id, owner_address, token,
+               amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            planId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            TEST_WALLET_ID,
+            sourceSigner.address,
+            DEVNET_USDC_MINT,
+            "25.00",
+            24,
+            "1001",
+            "draft",
+            TEST_USER.id,
+            staleAt,
+            staleAt
+          )
+          .run();
+        // The earlier run recorded the plan's address, sent the plan, and died
+        // before it saved the signature.
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payments
+                SET status = 'activating', plan_id = ?, plan_pda = ?, updated_at = ?
+              WHERE id = ?`
+          )
+          .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, staleAt, created.id)
+          .run();
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_recurring_payment_activation_attempts (
+               id, organization_id, project_id, recurring_payment_id, status, stage,
+               plan_creation_signature, authorization_signature, error, metadata,
+               created_at, updated_at
+             ) VALUES (?, ?, ?, ?, 'processing', 'create_plan', NULL, NULL, NULL, '{}'::jsonb, ?, ?)`
+          )
+          .bind(
+            `prpa_${crypto.randomUUID()}`,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            created.id,
+            staleAt,
+            staleAt
+          )
+          .run();
+        const fetchMaybePlanMock = vi.mocked(subscriptionsProgram.fetchMaybePlan);
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(created.id, "activate"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          planCreationSignature: null,
+        });
+        expect(finalizedReads(fetchMaybePlanMock.mock.calls)).toBe(1);
+        expect(sent).toHaveBeenCalledTimes(1);
+      });
+
+      it("finishes an update whose old-subscription cancel went out with no answer, without sending it again", async () => {
+        const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        // The plan and the subscription land; the old subscription's cancel is
+        // sent and its answer is lost.
+        send
+          .mockResolvedValueOnce(testSignature(4))
+          .mockResolvedValueOnce(testSignature(5))
+          .mockRejectedValueOnce(new Error("sponsor timed out after broadcast"));
+        const key = crypto.randomUUID();
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await request()).status).toBe(500);
+        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+        await getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+          .bind(staleAt, activated.id)
+          .run();
+        const left = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_update_attempts SET updated_at = ?
+              WHERE recurring_payment_id = ? AND status = 'processing'
+                AND stage = 'cancel_old_subscription' AND old_cancel_signature IS NULL`
+          )
+          .bind(staleAt, activated.id)
+          .run();
+        expect(left).toBe(1);
+        await crashIdempotencyKey(key);
+        // The chain shows the old subscription canceled.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          authorizationSignature: testSignature(5),
+        });
+        expect(sent).not.toHaveBeenCalled();
+        const attempt = await getDb(env)
+          .prepare(
+            `SELECT status, stage, old_cancel_signature
+               FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?`
+          )
+          .bind(activated.id)
+          .first<{
+            status: PaymentRecurringPaymentAttemptStatus;
+            stage: PaymentRecurringPaymentUpdateAttemptStage;
+            old_cancel_signature: string | null;
+          }>();
+        expect(attempt).toEqual({
+          status: "confirmed",
+          stage: "finalize",
+          old_cancel_signature: null,
+        });
+      });
+
+      /**
+       * Puts an update that failed at a send back to the moment its process
+       * died there: the attempt in flight at that stage and the schedule
+       * `updating`, both long enough ago to recover.
+       */
+      async function leaveUpdateCrashedAt(recurringPaymentId: string, key: string) {
+        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+        await getDb(env)
+          .prepare(
+            "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+          )
+          .bind(staleAt, recurringPaymentId)
+          .run();
+        const updated = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_update_attempts
+                SET status = 'processing', error = NULL, updated_at = ?
+              WHERE recurring_payment_id = ?`
+          )
+          .bind(staleAt, recurringPaymentId)
+          .run();
+        expect(updated).toBe(1);
+        await crashIdempotencyKey(key);
+      }
+
+      /** Delegations by address: the old subscription active, any other as given. */
+      function delegationsBesideActiveOld(
+        oldSubscriptionPda: string,
+        other: MaybeAccount<subscriptionsProgram.SubscriptionDelegation>
+      ) {
+        fetchMaybeSubscriptionDelegationMock.mockImplementation(async (_rpc, pda) =>
+          pda === oldSubscriptionPda ? { ...delegation(0n), address: pda } : other
+        );
+      }
+
+      it("finishes an update whose replacement plan landed without sending it again", async () => {
+        const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        send.mockRejectedValueOnce(new Error("process died after broadcast"));
+        const key = crypto.randomUUID();
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await request()).status).toBe(500);
+        await leaveUpdateCrashedAt(activated.id, key);
+        // The plan is on chain (the default plan read); no replacement subscription yet.
+        delegationsBesideActiveOld(required(activated.subscriptionPda), {
+          exists: false,
+          address: address(TEST_SOLANA_ADDRESSES.wallet2),
+        });
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          planCreationSignature: null,
+        });
+        // Subscribe and the old subscription's cancel; the plan is not sent again.
+        expect(sent).toHaveBeenCalledTimes(2);
+      });
+
+      it("finishes an update whose replacement subscription landed without sending it again", async () => {
+        const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        send
+          .mockResolvedValueOnce(testSignature(4))
+          .mockRejectedValueOnce(new Error("process died after broadcast"));
+        const key = crypto.randomUUID();
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await request()).status).toBe(500);
+        await leaveUpdateCrashedAt(activated.id, key);
+        // The replacement subscription is on chain and active; the old one still active.
+        delegationsBesideActiveOld(required(activated.subscriptionPda), delegation(0n));
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          planCreationSignature: testSignature(4),
+          authorizationSignature: null,
+        });
+        // Only the old subscription's cancel.
+        expect(sent).toHaveBeenCalledTimes(1);
+      });
+
+      it("finishes a stale activation whose subscription landed without sending it again", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const planId = `psp_${crypto.randomUUID()}`;
+        const subscriptionId = `psub_${crypto.randomUUID()}`;
+        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+        await seedPlanRow(planId, "active", staleAt);
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_subscriptions (
+               id, organization_id, project_id, plan_id, counterparty_id, subscriber_address,
+               status, created_by, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, 'pending_authorization', ?, ?, ?)`
+          )
+          .bind(
+            subscriptionId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            planId,
+            created.counterpartyId,
+            recurringExecution.sourceSigner().address,
+            TEST_USER.id,
+            staleAt,
+            staleAt
+          )
+          .run();
+        // The earlier run sent the subscription after recording its address, and died.
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payments
+                SET status = 'activating', plan_id = ?, subscription_id = ?, plan_pda = ?,
+                    plan_created_at = '1770000000', plan_creation_signature = ?,
+                    subscription_pda = ?, updated_at = ?
+              WHERE id = ?`
+          )
+          .bind(
+            planId,
+            subscriptionId,
+            TEST_SOLANA_ADDRESSES.wallet3,
+            testSignature(1),
+            TEST_SOLANA_ADDRESSES.wallet3,
+            staleAt,
+            created.id
+          )
+          .run();
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_recurring_payment_activation_attempts (
+               id, organization_id, project_id, recurring_payment_id, status, stage,
+               plan_creation_signature, authorization_signature, error, metadata,
+               created_at, updated_at
+             ) VALUES (?, ?, ?, ?, 'processing', 'authorize_subscription', ?, NULL, NULL,
+               '{}'::jsonb, ?, ?)`
+          )
+          .bind(
+            `prpa_${crypto.randomUUID()}`,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            created.id,
+            testSignature(1),
+            staleAt,
+            staleAt
+          )
+          .run();
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(created.id, "activate"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          planCreationSignature: testSignature(1),
+          authorizationSignature: null,
+        });
+        expect(sent).not.toHaveBeenCalled();
+      });
+
+      it("fails a cancel whose saved send never landed, instead of polling a dropped signature", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        expect(
+          (
+            await app.request(
+              actionPath(activated.id, "cancel"),
+              { method: "POST", headers: keyed(key), body: "{}" },
+              env
+            )
+          ).status
+        ).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_lifecycle_attempts SET signature = ?
+              WHERE recurring_payment_id = ? AND operation = 'cancel'`
+          )
+          .bind(testSignature(7), activated.id)
+          .run();
+        // Not canceled on chain, and history does not know the saved signature.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(0n));
+        confirmTransactionMock.mockClear();
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(400);
+        expect(sent).not.toHaveBeenCalled();
+        expect(confirmTransactionMock).not.toHaveBeenCalled();
+        expect(getSignatureStatusesMock).toHaveBeenCalledWith(
+          expect.anything(),
+          [testSignature(7)],
+          {
+            searchTransactionHistory: true,
+          }
+        );
+        // The attempt failed and the schedule is back to `active`, so a new cancel sends.
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "failed", stage: "submit", signature: testSignature(7) },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+      });
+
+      it("keeps a cancel recoverable when its saved send landed but the account does not show it yet", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        expect(
+          (
+            await app.request(
+              actionPath(activated.id, "cancel"),
+              { method: "POST", headers: keyed(key), body: "{}" },
+              env
+            )
+          ).status
+        ).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_lifecycle_attempts SET signature = ?
+              WHERE recurring_payment_id = ? AND operation = 'cancel'`
+          )
+          .bind(testSignature(7), activated.id)
+          .run();
+        // History has the signature succeeding; this node's account read lags behind it.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(0n));
+        getSignatureStatusesMock.mockResolvedValueOnce([
+          { slot: 100n, confirmations: null, confirmationStatus: "finalized", err: null },
+        ]);
+        const sent = sends();
+
+        const retry = await app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "processing", stage: "submit", signature: testSignature(7) },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
+      });
+
+      it("refuses a reset activation retry while its plan is still landing, instead of sending it again", async () => {
+        recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const planId = `psp_${crypto.randomUUID()}`;
+        const now = new Date().toISOString();
+        await seedPlanRow(planId, "draft", now);
+        // Seconds ago a run recorded the plan's address and sent it, its save
+        // failed, and the activation was reset: it can be retried at once.
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payments
+                SET status = 'pending_activation', plan_id = ?, plan_pda = ?, updated_at = ?
+              WHERE id = ?`
+          )
+          .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, now, created.id)
+          .run();
+        // The plan has landed at `confirmed` but is not final yet.
+        vi.mocked(subscriptionsProgram.fetchMaybePlan)
+          .mockResolvedValueOnce(noAccount)
+          .mockResolvedValueOnce(planAccount());
+        const sent = sends();
+        const activate = () =>
+          app.request(
+            actionPath(created.id, "activate"),
+            { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+            env
+          );
+
+        const landing = await activate();
+
+        expect(landing.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        // The plan may be on chain: the schedule stays `activating` for recovery,
+        // not reset to `pending_activation`, where the cron would never pick it up.
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
+
+        // Once stale and final, the cron takes the plan as landed and sends only the subscription.
+        await getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+          .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), created.id)
+          .run();
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
+          recovered: 1,
+        });
+
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("active");
+        expect(sent).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

@@ -1,4 +1,10 @@
-import { type IdempotencyRequiredRoute, isBodylessHttpStatus } from "@sdp/types";
+import {
+  type IdempotencyRequiredRoute,
+  isBodylessHttpStatus,
+  isMoneyMovementStatus,
+  type MoneyMovementStatus,
+} from "@sdp/types";
+import { z } from "zod";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
 import {
@@ -6,7 +12,9 @@ import {
   answerRetiresKey,
   apiErrorCode,
   IDEMPOTENCY_KEY_HEADER,
+  isMovementInFlight,
   moneyAnswerRetiresKey,
+  movementStatusOf,
   storageFingerprint,
 } from "./idempotency";
 import {
@@ -145,12 +153,21 @@ function answerOf(response: Response, text: string): ApiAnswer | null {
   if (isBodylessHttpStatus(response.status)) {
     return { status: response.status, replayed, code: null };
   }
+  let json: unknown;
   try {
-    JSON.parse(text);
+    json = JSON.parse(text);
   } catch {
     return null;
   }
-  return { status: response.status, replayed, code: response.ok ? null : apiErrorCode(text) };
+  if (response.ok) {
+    return {
+      status: response.status,
+      replayed,
+      code: null,
+      movementStatus: movementStatusOf(json),
+    };
+  }
+  return { status: response.status, replayed, code: apiErrorCode(text) };
 }
 
 /**
@@ -162,6 +179,34 @@ function retiresKey(response: Response, body: ArrayBuffer, movesMoney: boolean):
   const answer = answerOf(response, new TextDecoder().decode(body));
   if (answer === null) return false;
   return movesMoney ? moneyAnswerRetiresKey(answer) : answerRetiresKey(answer);
+}
+
+/**
+ * The GET path that shows when a kept money answer's movement is final, or
+ * `null` for none. The only money routes keyed here are recurring (transfers
+ * and batches keep their own keys). A collect is final when its collection's
+ * own transfer is, so it reads that transfer (`transfer.id`, else the
+ * attempt's `transferId`); with neither, nothing the dashboard can read shows
+ * the attempt's status, so the key simply stays kept. Any other recurring
+ * answer reads its schedule.
+ */
+function inFlightMovementReadPath(body: ArrayBuffer): string | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return null;
+  }
+  const parsed = keptMovementBodySchema.safeParse(json);
+  if (!parsed.success || !isMovementInFlight(movementStatusOf(json))) return null;
+  const { transfer, collectionAttempt, recurringPayment } = parsed.data.data;
+  if (collectionAttempt !== undefined) {
+    const transferId = transfer?.id ?? collectionAttempt.transferId;
+    return transferId ? MOVEMENT_READ_PATHS.transfer(transferId) : null;
+  }
+  return recurringPayment === undefined
+    ? null
+    : MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
 }
 
 function sendWithProject(
@@ -253,8 +298,14 @@ async function sendUnderActionKey(
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      if (retiresKey(response, body, requiresPersistedKey(init.method ?? "GET", path))) {
+      const movesMoney = requiresPersistedKey(init.method ?? "GET", path);
+      if (retiresKey(response, body, movesMoney)) {
         keys.release(fingerprint, key);
+      } else if (movesMoney && response.ok) {
+        const readPath = inFlightMovementReadPath(body);
+        if (readPath !== null) {
+          settleWhenMovementFinal(readPath, () => keys.release(fingerprint, key));
+        }
       }
       return new Response(isBodylessHttpStatus(response.status) ? null : body, {
         status: response.status,
@@ -377,6 +428,92 @@ export async function dashboardRequestUnderOwnKey(
   headers.set(IDEMPOTENCY_KEY_HEADER, key.value);
   return sendWithProject(path, init, headers);
 }
+
+/** Where the dashboard reads a money movement's current state, by its record kind. */
+export const MOVEMENT_READ_PATHS = {
+  transfer: (id: string) => `/api/dashboard/payments/transfers/${encodeURIComponent(id)}`,
+  batch: (id: string) => `/api/dashboard/payments/transfers/batch/${encodeURIComponent(id)}`,
+  recurringPayment: (id: string) =>
+    `/api/dashboard/payments/recurring-payments/${encodeURIComponent(id)}`,
+  privateChannelTransfer: (id: string) =>
+    `/api/dashboard/private-channels/transfers/${encodeURIComponent(id)}`,
+} as const;
+
+/** A private-channel transfer read answers with the transfer itself as `data`. */
+const privateChannelTransferReadSchema = z.object({ data: z.object({ status: z.string() }) });
+
+/**
+ * The status a private-channel transfer read shows, for
+ * {@link settleWhenMovementFinal}: that GET answers with the transfer as
+ * `data`, not under `data.transfer`.
+ */
+export function privateChannelTransferStatusOf(json: unknown): MoneyMovementStatus | null {
+  const parsed = privateChannelTransferReadSchema.safeParse(json);
+  return parsed.success && isMoneyMovementStatus(parsed.data.data.status)
+    ? parsed.data.data.status
+    : null;
+}
+
+export const MOVEMENT_POLL_INTERVAL_MS = 3_000;
+export const MOVEMENT_POLL_ATTEMPTS = 40;
+const watchedMovements = new Set<string>();
+
+/** @internal Test-only: forget every running movement watch. */
+export function resetMovementWatchesForTests(): void {
+  watchedMovements.clear();
+}
+
+/**
+ * Settles a money key that was kept because its answer showed the movement
+ * still under way (APE-461). sdp-api replays a key's first 2xx verbatim, so a
+ * same-key retry repeats that `processing` snapshot and can never settle the
+ * key; the resource's current state can. Reads `readPath` with GET every
+ * {@link MOVEMENT_POLL_INTERVAL_MS} until it shows a final status, then calls
+ * `settle`. After {@link MOVEMENT_POLL_ATTEMPTS} reads it stops and the key
+ * stays kept; the next send under it starts a new watch. One watch per path.
+ *
+ * @param readPath - The movement's GET path ({@link MOVEMENT_READ_PATHS}).
+ * @param settle - Retires the kept key.
+ * @param statusOf - Reads the movement's status from the GET body.
+ */
+export function settleWhenMovementFinal(
+  readPath: string,
+  settle: () => void,
+  statusOf: (json: unknown) => MoneyMovementStatus | null = movementStatusOf
+): void {
+  if (watchedMovements.has(readPath)) return;
+  watchedMovements.add(readPath);
+  let attempts = 0;
+  const read = async () => {
+    attempts += 1;
+    try {
+      const response = await dashboardRequest(readPath, { method: "GET", cache: "no-store" });
+      const status = response.ok ? statusOf(await response.json()) : null;
+      if (status !== null && !isMovementInFlight(status)) {
+        watchedMovements.delete(readPath);
+        settle();
+        return;
+      }
+    } catch {
+      // A failed read says nothing about the movement: read again next tick.
+    }
+    if (attempts >= MOVEMENT_POLL_ATTEMPTS) {
+      watchedMovements.delete(readPath);
+      return;
+    }
+    setTimeout(read, MOVEMENT_POLL_INTERVAL_MS);
+  };
+  setTimeout(read, MOVEMENT_POLL_INTERVAL_MS);
+}
+
+/** The records a kept recurring answer names, as far as their ids go. */
+const keptMovementBodySchema = z.object({
+  data: z.object({
+    transfer: z.object({ id: z.string() }).optional(),
+    collectionAttempt: z.object({ transferId: z.string().nullish() }).optional(),
+    recurringPayment: z.object({ id: z.string() }).optional(),
+  }),
+});
 
 export async function dashboardFetch<T = unknown>(
   path: string,

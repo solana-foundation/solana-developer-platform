@@ -270,6 +270,11 @@ export function defineDashboardFlags({
     "the rest of Payments (the overview and its API playground, Transactions, Requests, Schedules)"
   );
 
+  const newDesignIssuance = newDesignModuleFlag(
+    "issuance",
+    "Issuance (the token list and its API playground, the draft flow, one token's page)"
+  );
+
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
@@ -289,6 +294,7 @@ export function defineDashboardFlags({
     newDesignContacts,
     newDesignPayDeposit,
     newDesignActivity,
+    newDesignIssuance,
     rampProviderMoonpay,
     rampProviderStripe,
   };

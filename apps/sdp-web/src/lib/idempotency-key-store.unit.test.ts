@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 
+import type { MoneyMovementStatus } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { floorToReplay } from "../app/dashboard/[projectId]/markets/earn/earn-vault-slippage";
+import { movementStatusOf } from "./idempotency";
 import {
   createActionMemo,
   createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
   setIdempotencyKeyScope,
+  settleMoneyIdempotencyKey,
 } from "./idempotency-key-store";
 
 describe("claim", () => {
@@ -54,6 +57,61 @@ describe("claim", () => {
     const first = store.claim(fingerprint);
     expect(first.persisted).toBe(false);
     expect(store.claim(fingerprint).key).toBe(first.key);
+  });
+});
+
+// APE-461: a 2xx retired a money key while the movement was still under way,
+// so the next identical press minted a new key and paid again.
+describe("settleMoneyIdempotencyKey on a movement still under way", () => {
+  const store = createIdempotencyKeyStore("test:money-in-flight:v1");
+  const fingerprint = "payment-fingerprint";
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  it.each([
+    ["a transfer pending", "pending", false],
+    ["a transfer processing", "processing", false],
+    ["a ramp transfer settling", "settling", false],
+    ["a recurring schedule activating", "activating", false],
+    ["a recurring schedule updating", "updating", false],
+    ["a private-channel transfer submitted", "submitted", false],
+    ["a transfer finalized", "finalized", true],
+    ["a batch partially failed", "partially_failed", true],
+    ["a recurring schedule active", "active", true],
+    ["an answer naming no movement", null, true],
+  ] as const satisfies readonly (readonly [string, MoneyMovementStatus | null, boolean])[])(
+    "%s (%s): retired %s",
+    (_label, movementStatus, retired) => {
+      const { key } = store.claim(fingerprint);
+      for (const replayed of [false, true]) {
+        expect(
+          settleMoneyIdempotencyKey(store, fingerprint, key, {
+            status: 201,
+            replayed,
+            code: null,
+            movementStatus,
+          })
+        ).toBe(retired);
+      }
+      expect(store.claim(fingerprint).key === key).toBe(!retired);
+    }
+  );
+
+  it("reads the in-flight record from a success body", () => {
+    expect(movementStatusOf({ data: { transfer: { status: "processing" } } })).toBe("processing");
+    expect(
+      movementStatusOf({
+        data: {
+          recurringPayment: { status: "active" },
+          collectionAttempt: { status: "processing" },
+        },
+      })
+    ).toBe("processing");
+    expect(movementStatusOf({ data: { batch: { status: "confirmed" } } })).toBe("confirmed");
+    expect(movementStatusOf({ data: { id: "x" } })).toBeNull();
   });
 });
 

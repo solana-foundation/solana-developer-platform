@@ -998,8 +998,12 @@ describe("MoonPay ramp webhook", () => {
   it("refuses a completed transaction that does not name its crypto", async () => {
     const { currency: _currency, ...withoutCrypto } = completedPayload.data;
     const res = await sendMoonpayWebhook({ ...completedPayload, data: withoutCrypto });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+    const row = await getDb(env)
+      .prepare("SELECT status, apply_outcome FROM ramp_webhook_events WHERE provider = 'moonpay'")
+      .first<{ status: string; apply_outcome: string }>();
+    expect(row).toEqual({ status: "discharged", apply_outcome: "discarded" });
   });
   it("does not complete a transfer when MoonPay delivered another crypto", async () => {
     const res = await sendMoonpayWebhook({
@@ -1019,8 +1023,12 @@ describe("MoonPay ramp webhook", () => {
         quoteCurrencyAmount: 16.31,
       },
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+    const row = await getDb(env)
+      .prepare("SELECT status, apply_outcome FROM ramp_webhook_events WHERE provider = 'moonpay'")
+      .first<{ status: string; apply_outcome: string }>();
+    expect(row).toEqual({ status: "discharged", apply_outcome: "discarded" });
   });
   it("does not complete a sale of another crypto", async () => {
     await getDb(env)

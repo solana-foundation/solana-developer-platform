@@ -22,13 +22,13 @@ export const dashboardWorkspaceOverviewPanelClassName =
 
 /**
  * The standard playground/chrome panel: absolutely positioned to fill the
- * shell, column flex, with no padding of its own. A refresh surface keeps the same 36px
- * between the tabs and the playground as the overview keeps between the tabs and its content,
+ * shell, column flex, with no padding of its own. A refresh surface keeps the same 36px (28 on
+ * a phone) between the tabs and the playground as the overview keeps between the tabs and its content,
  * and scrolls the playground the way the overview panel scrolls: edge to edge of the work area,
  * padded back to the column (its layout has no scroll region of its own).
  */
 export const dashboardWorkspacePlaygroundPanelClassName =
-  "sdp-quiet-scroll absolute inset-0 flex min-h-0 flex-col refresh:mx-[calc((100%-100cqw)/2)] refresh:overflow-y-auto refresh:px-[calc((100cqw-100%)/2)] refresh:pt-9";
+  "sdp-quiet-scroll absolute inset-0 flex min-h-0 flex-col refresh:mx-[calc((100%-100cqw)/2)] refresh:overflow-y-auto refresh:px-[calc((100cqw-100%)/2)] refresh:pt-7 md:refresh:pt-9";
 
 export function DashboardWorkspaceOverviewPanel({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn(dashboardWorkspaceOverviewPanelClassName, className)} {...props} />;

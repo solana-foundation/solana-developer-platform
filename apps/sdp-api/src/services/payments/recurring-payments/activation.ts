@@ -55,10 +55,12 @@ import {
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
+  ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
   sendSubscriptionInstructions,
+  settleStepIfResumed,
   subscriptionProgramMetadataUri,
 } from "./shared";
 
@@ -200,6 +202,24 @@ async function recordActivationFailure(input: {
   error: Error;
   failedAt: string;
 }): Promise<void> {
+  // A step the chain cannot settle yet may be on chain: the attempt stays in
+  // flight and the schedule `activating`, so the cron recovers it once stale.
+  if (input.error instanceof ResumedStepUnsettledError) {
+    const recurringRepo = createPaymentRecurringPaymentsRepository(
+      input.env,
+      createTenantScope(input)
+    );
+    requireUpdatedAttempt(
+      await recurringRepo.updateActivationAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        error: recurringPaymentErrorMessage(input.error),
+        updatedAt: input.failedAt,
+      })
+    );
+    return;
+  }
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     requireUpdatedAttempt(
@@ -470,67 +490,25 @@ async function settleActiveActivationAttempt(input: {
   }
 }
 
-async function fetchConfirmedActivationPlan(input: {
+const ACTIVATION_FAILED_ON_CHAIN = "Recurring payment activation failed on-chain";
+
+/** Confirms the plan this run sent, then reads it. */
+async function confirmActivationPlan(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   planPda: Address;
   planCreationSignature: Signature;
-  createdPlanThisRun: boolean;
 }) {
-  if (input.createdPlanThisRun) {
-    await confirmSubscriptionSignature(
-      input.planCreationSignature,
-      "Recurring payment activation failed on-chain"
-    );
-    return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
-      commitment: "confirmed",
-    });
-  }
-
-  const existingPlan = await subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
-    commitment: "confirmed",
-  });
-  if (existingPlan.exists) {
-    return existingPlan;
-  }
-
-  await confirmSubscriptionSignature(
-    input.planCreationSignature,
-    "Recurring payment activation failed on-chain"
-  );
-  return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
-    commitment: "confirmed",
-  });
+  await confirmSubscriptionSignature(input.planCreationSignature, ACTIVATION_FAILED_ON_CHAIN);
+  return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, { commitment: "confirmed" });
 }
 
-async function fetchConfirmedSubscriptionDelegation(input: {
+/** Confirms the subscription this run sent, then reads it. */
+async function confirmActivationSubscription(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   subscriptionPda: Address;
   authorizationSignature: Signature;
-  authorizedThisRun: boolean;
 }) {
-  if (input.authorizedThisRun) {
-    await confirmSubscriptionSignature(
-      input.authorizationSignature,
-      "Recurring payment activation failed on-chain"
-    );
-    return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
-      commitment: "confirmed",
-    });
-  }
-
-  const existingSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
-    input.rpc,
-    input.subscriptionPda,
-    { commitment: "confirmed" }
-  );
-  if (existingSubscription.exists) {
-    return existingSubscription;
-  }
-
-  await confirmSubscriptionSignature(
-    input.authorizationSignature,
-    "Recurring payment activation failed on-chain"
-  );
+  await confirmSubscriptionSignature(input.authorizationSignature, ACTIVATION_FAILED_ON_CHAIN);
   return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
     commitment: "confirmed",
   });
@@ -772,8 +750,27 @@ export async function activateRecurringPayment(input: {
       stage: currentStage,
       updatedAt: new Date().toISOString(),
     });
-    let createdPlanThisRun = false;
-    if (!planCreationSignature) {
+    // A step's address is recorded before its send and its signature after, so
+    // either one is a send that may have landed, whether that run died or failed
+    // to save and was reset (HOO-2044). A reset activation can be retried at
+    // once: it is stale only when recovered from `activating`.
+    let onChainPlan = await settleStepIfResumed(
+      claimed.plan_pda !== null || planCreationSignature !== null,
+      {
+        rpc,
+        read: (commitment) => subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment }),
+        landed: (onChain) => onChain.exists,
+        savedSignature: planCreationSignature,
+        stale: recoveringStaleActivation,
+        failureMessage: ACTIVATION_FAILED_ON_CHAIN,
+        logContext: {
+          recurring_payment_id: claimed.id,
+          attempt_id: attempt.id,
+          step: "create_plan",
+        },
+      }
+    );
+    if (!onChainPlan) {
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
           amount: amountBaseUnits,
@@ -820,15 +817,8 @@ export async function activateRecurringPayment(input: {
           })
         );
       });
-      createdPlanThisRun = true;
+      onChainPlan = await confirmActivationPlan({ rpc, planPda, planCreationSignature });
     }
-
-    const onChainPlan = await fetchConfirmedActivationPlan({
-      rpc,
-      planPda,
-      planCreationSignature,
-      createdPlanThisRun,
-    });
     if (!onChainPlan.exists) {
       throw transactionFailed("Subscription plan was not found on-chain");
     }
@@ -897,8 +887,26 @@ export async function activateRecurringPayment(input: {
       updatedAt: authorizationUpdatedAt,
     });
 
-    let authorizedThisRun = false;
-    if (!authorizationSignature) {
+    let onChainSubscription = await settleStepIfResumed(
+      claimed.subscription_pda !== null || authorizationSignature !== null,
+      {
+        rpc,
+        read: (commitment) =>
+          subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, {
+            commitment,
+          }),
+        landed: (onChain) => onChain.exists,
+        savedSignature: authorizationSignature,
+        stale: recoveringStaleActivation,
+        failureMessage: ACTIVATION_FAILED_ON_CHAIN,
+        logContext: {
+          recurring_payment_id: claimed.id,
+          attempt_id: attempt.id,
+          step: "authorize_subscription",
+        },
+      }
+    );
+    if (!onChainSubscription) {
       let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,
         subscriptionAuthorityAddress,
@@ -981,16 +989,14 @@ export async function activateRecurringPayment(input: {
           })
         );
       });
-      authorizedThisRun = true;
+      currentStage = "finalize";
+      onChainSubscription = await confirmActivationSubscription({
+        rpc,
+        subscriptionPda,
+        authorizationSignature,
+      });
     }
-
     currentStage = "finalize";
-    const onChainSubscription = await fetchConfirmedSubscriptionDelegation({
-      rpc,
-      subscriptionPda,
-      authorizationSignature,
-      authorizedThisRun,
-    });
     if (!onChainSubscription.exists) {
       throw transactionFailed("Subscription authorization was not found on-chain");
     }

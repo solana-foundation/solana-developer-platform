@@ -8,6 +8,11 @@ import type {
 } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
+import {
+  isPrivateChannelDepositTerminal,
+  PRIVATE_CHANNEL_TRANSACTION_STATUSES,
+  type PrivateChannelTransferStatus,
+} from "./private-channels";
 import type { PersistedRampProviderId, RampProviderId } from "./provider-access";
 import type { PaymentTransactionKind } from "./unified-transactions";
 
@@ -75,12 +80,50 @@ export function isRampTransferType(type: PaymentTransferType): type is RampTrans
 
 /**
  * Lifecycle of a persisted ramp webhook event: `pending` until the background
- * apply or the replay job settles it (applied rows are deleted, not kept), and
- * `failed` once replay attempts are exhausted and an operator has to look.
+ * apply or the replay job settles it, `discharged` while the outcome is
+ * retained, `archived` after retention, and `failed` once an operator has to
+ * look.
  */
-export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed"] as const;
+export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed", "discharged", "archived"] as const;
 
 export type RampWebhookEventStatus = (typeof RAMP_WEBHOOK_EVENT_STATUSES)[number];
+
+export const RAMP_WEBHOOK_BUSINESS_OUTCOMES = [
+  "applied",
+  "ignored",
+  "unmatched",
+  "refused",
+] as const;
+export type RampWebhookBusinessOutcome = (typeof RAMP_WEBHOOK_BUSINESS_OUTCOMES)[number];
+
+export const RAMP_WEBHOOK_REFUSAL_REASONS = [
+  "environment_mismatch",
+  "provider_mismatch",
+  "transfer_type_mismatch",
+  "asset_mismatch",
+  "settled_after_cancel",
+] as const;
+export type RampWebhookRefusalReason = (typeof RAMP_WEBHOOK_REFUSAL_REASONS)[number];
+
+export type RampWebhookProcessResult =
+  | { outcome: Exclude<RampWebhookBusinessOutcome, "refused">; reason?: never }
+  | { outcome: "refused"; reason: RampWebhookRefusalReason };
+
+export const RAMP_WEBHOOK_APPLY_OUTCOMES = [
+  ...RAMP_WEBHOOK_BUSINESS_OUTCOMES,
+  "discarded",
+  "invalid",
+  "retryable_error",
+] as const;
+export type RampWebhookApplyOutcome = (typeof RAMP_WEBHOOK_APPLY_OUTCOMES)[number];
+export type RampWebhookDischargeOutcome = Extract<
+  RampWebhookApplyOutcome,
+  "applied" | "ignored" | "discarded"
+>;
+export type RampWebhookFailureOutcome = Exclude<
+  RampWebhookApplyOutcome,
+  RampWebhookDischargeOutcome
+>;
 
 export const PAYMENT_TRANSFER_STATUSES = [
   "pending",
@@ -371,13 +414,15 @@ export interface PaymentTransferEnvelope {
   };
 }
 
-export type PaymentTransferBatchStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "partially_failed"
-  | "archived";
+export const PAYMENT_TRANSFER_BATCH_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "partially_failed",
+  "archived",
+] as const;
+export type PaymentTransferBatchStatus = (typeof PAYMENT_TRANSFER_BATCH_STATUSES)[number];
 
 export type PaymentTransferBatchRecipientStatus =
   | "pending"
@@ -751,6 +796,58 @@ export const RECURRING_PAYMENT_UPDATE_TRANSITION = {
   processingStatus: PaymentRecurringPaymentStatus;
   claimableStatuses: readonly PaymentRecurringPaymentStatus[];
 };
+
+/**
+ * Every status a money route's answer can show for the movement it made: a
+ * transfer, a batch, a recurring schedule, a collection attempt, or a
+ * private-channel transfer.
+ */
+export type MoneyMovementStatus =
+  | PaymentTransferStatus
+  | PaymentTransferBatchStatus
+  | PaymentRecurringPaymentStatus
+  | PaymentSubscriptionCollectionAttemptStatus
+  | PrivateChannelTransferStatus;
+
+const MONEY_MOVEMENT_STATUSES: ReadonlySet<string> = new Set<MoneyMovementStatus>([
+  ...PAYMENT_TRANSFER_STATUSES,
+  ...PAYMENT_TRANSFER_BATCH_STATUSES,
+  ...PAYMENT_RECURRING_PAYMENT_STATUSES,
+  ...PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  ...PRIVATE_CHANNEL_TRANSACTION_STATUSES,
+]);
+
+/** Whether a status a response carries is one of {@link MoneyMovementStatus}. */
+export function isMoneyMovementStatus(status: string): status is MoneyMovementStatus {
+  return MONEY_MOVEMENT_STATUSES.has(status);
+}
+
+/**
+ * Statuses that mean a money movement is still under way (APE-461): a
+ * transfer not yet in a terminal or successful status (pending, processing,
+ * awaiting payment, settling; a batch and a collection attempt use the same
+ * in-flight names), a recurring schedule mid-transition (the statuses the cron
+ * recovers, plus the update's processing status), and a private-channel
+ * transfer without a verdict (APE-593). While an answer shows one, a client
+ * keeps the request's Idempotency-Key.
+ */
+export const NON_FINAL_MONEY_MOVEMENT_STATUSES: readonly MoneyMovementStatus[] = [
+  ...new Set<MoneyMovementStatus>([
+    ...NON_TERMINAL_RAMP_TRANSFER_STATUSES.filter(
+      (status) => !isSuccessfulPaymentTransferStatus(status)
+    ),
+    ...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+    RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
+    ...PRIVATE_CHANNEL_TRANSACTION_STATUSES.filter(
+      (status) => !isPrivateChannelDepositTerminal(status)
+    ),
+  ]),
+];
+
+/** Whether a money movement in this status is still under way ({@link NON_FINAL_MONEY_MOVEMENT_STATUSES}). */
+export function isMoneyMovementInFlight(status: MoneyMovementStatus): boolean {
+  return NON_FINAL_MONEY_MOVEMENT_STATUSES.includes(status);
+}
 
 export function isCanceledRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
   return status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus;

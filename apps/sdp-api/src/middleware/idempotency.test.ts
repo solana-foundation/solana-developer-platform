@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import * as idempotencyKeysRepository from "@/db/repositories/idempotency-keys.repository";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
+import type { JsonValue } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -863,5 +864,25 @@ describe("idempotent()", () => {
     const reordered = await post(app, "/v1/other", { recipients: ["a", "b"] }, KEY);
     expect(reordered.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays a key saved under the route's previous canonical form", async () => {
+    // Before: the fingerprint kept an option sent at its default.
+    const before = buildApp({ key: "required" }, created);
+    await post(before.app, "/v1/other", { amount: "1", preflight: true }, KEY);
+
+    // After: the option is dropped at its default, so the new fingerprint differs.
+    const dropDefault = (body: JsonValue) => {
+      // SAFETY: the test always sends an object body.
+      const { preflight, ...rest } = body as { preflight?: boolean };
+      return preflight === true ? rest : body;
+    };
+    const after = buildApp(
+      { key: "required", canonicalize: dropDefault, previousCanonicalize: (body) => body },
+      created
+    );
+    const retried = await post(after.app, "/v1/other", { amount: "1", preflight: true }, KEY);
+    expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(after.create).not.toHaveBeenCalled();
   });
 });

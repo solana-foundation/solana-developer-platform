@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildDraftPayload, type DraftState, draftSchema } from "./draft-model";
+import {
+  buildDraftPayload,
+  type DraftState,
+  draftSchema,
+  isDraftAuthorityInUse,
+} from "./draft-model";
 
 const draft: DraftState = {
   assetClass: "stablecoin",
@@ -75,5 +80,60 @@ describe("draft creation contract", () => {
     expect(
       draftSchema.safeParse({ ...draft, assetClass: "digital-asset", decimals: "19" }).success
     ).toBe(false);
+  });
+});
+
+describe("the new design's draft fields", () => {
+  const token: DraftState = {
+    ...draft,
+    assetClass: "digital-asset",
+    decimals: "9",
+    authorities: {
+      "mint-authority": "wallet-a",
+      "metadata-authority": "wallet-b",
+      "freeze-authority": "wallet-c",
+      "permanent-delegate": "wallet-d",
+    },
+  };
+
+  it("leaves a token without the new fields as the previous form sends it", () => {
+    const payload = buildDraftPayload(token);
+    expect(payload).toMatchObject({ isFreezable: false });
+    expect(payload).toMatchObject({
+      issuanceMetadata: {
+        custom: {
+          customer: {
+            authorityWalletIds: { "mint-authority": "wallet-a", "metadata-authority": "wallet-b" },
+          },
+        },
+      },
+    });
+  });
+
+  it("asks for a freeze authority and a permanent delegate when the token wants them", () => {
+    const payload = buildDraftPayload({ ...token, freezeAccounts: true, permanentDelegate: true });
+    expect(payload).toMatchObject({
+      isFreezable: true,
+      issuanceMetadata: {
+        settings: { selected: { pauseTransfers: {}, freezeAccounts: {}, permanentDelegate: {} } },
+        custom: { customer: { authorityWalletIds: token.authorities } },
+      },
+    });
+  });
+
+  it("records the issuer and the currency in the asset metadata", () => {
+    const payload = buildDraftPayload({ ...draft, issuerName: " Acme ", pegCurrency: "EUR" });
+    expect(payload).toMatchObject({
+      issuanceMetadata: { asset: { issuerName: "Acme", pegCurrency: "EUR" } },
+    });
+  });
+
+  it("knows which authorities a draft's token has", () => {
+    expect(isDraftAuthorityInUse(draft, "permanent-delegate")).toBe(true);
+    expect(isDraftAuthorityInUse(token, "freeze-authority")).toBe(false);
+    expect(isDraftAuthorityInUse({ ...token, freezeAccounts: true }, "freeze-authority")).toBe(
+      true
+    );
+    expect(isDraftAuthorityInUse(token, "metadata-authority")).toBe(true);
   });
 });

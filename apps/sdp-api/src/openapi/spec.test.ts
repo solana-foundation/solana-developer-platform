@@ -688,6 +688,7 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/public-key"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("503");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.patch?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/payments/wallets/{walletId}/balances"]?.get?.responses).toHaveProperty(
       "409"

@@ -29,7 +29,7 @@ import {
   resolveDefaultCluster,
   resolveSolanaRpcProviderUrls,
 } from "./config";
-import { solanaRpcError } from "./errors";
+import { RpcTimeoutError, solanaRpcError } from "./errors";
 import { withReadSocketRetry } from "./socket-retry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
@@ -107,8 +107,7 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
       return await transport<TResponse>({ ...config, signal: controller.signal });
     } catch (error) {
       if (controller.signal.aborted) {
-        // Deterministic, transient-classified message (see transient.ts).
-        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
+        throw new RpcTimeoutError(timeoutMs);
       }
       throw error;
     } finally {

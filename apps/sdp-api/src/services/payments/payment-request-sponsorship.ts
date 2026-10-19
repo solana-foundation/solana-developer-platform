@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -59,7 +60,8 @@ export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransac
  * because a signed transaction is a bearer instrument until its blockhash expires, and two live
  * ones would double the sponsor's exposure.
  *
- * @param c - The request context, for the bindings and the sponsor-signature audit entry.
+ * @param c - The request context, under the payment request's cluster scope (it builds and reads
+ *   on that cluster), for the bindings and the sponsor-signature audit entry.
  * @param params - The payable request and the parties to the transfer.
  * @param params.request - The reconciled, payable payment request; its Project sponsors.
  * @param params.payer - The account that pays and signs client-side.
@@ -81,7 +83,7 @@ export async function issuePaymentRequestTransaction(
 ): Promise<SponsoredPaymentTransaction> {
   const { request, payer } = params;
   const repository = createSystemPaymentRequestsRepository(c.env);
-  const rpc = solanaRpc.createRpc(c.env);
+  const rpc = createClusterRpc();
   const currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
 
   const serveLiveClaim = async (): Promise<SponsoredPaymentTransaction | null> => {

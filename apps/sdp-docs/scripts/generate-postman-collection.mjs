@@ -1,12 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  isSuccessfulPaymentTransferStatus,
-  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
-  RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
-  RECURRING_PAYMENT_UPDATE_TRANSITION,
-} from "@sdp/types";
+import { NON_FINAL_MONEY_MOVEMENT_STATUSES } from "@sdp/types";
 import {
   getPrimaryTagName,
   isPublicOperation,
@@ -223,22 +218,12 @@ const SAVED_KEY_VARIABLE = [
 
 /**
  * Statuses that mean the movement a money route answered with is still under
- * way, derived from `@sdp/types` so they never drift from the API's own: a
- * transfer not yet in a terminal or successful status (pending, processing,
- * awaiting payment, settling; a batch and a collection attempt use the same
- * in-flight names), and a recurring schedule mid-transition (the statuses the
- * cron recovers, plus the update's processing status). While a response shows
- * one, the saved key is kept. Embedded into the script text at generation.
+ * way: `NON_FINAL_MONEY_MOVEMENT_STATUSES` from `@sdp/types`, the set the
+ * dashboard's money rule uses too, so neither drifts from the API's own. While
+ * a response shows one, the saved key is kept. Embedded into the script text
+ * at generation.
  */
-const NON_FINAL_STATUSES = [
-  ...new Set([
-    ...NON_TERMINAL_RAMP_TRANSFER_STATUSES.filter(
-      (status) => !isSuccessfulPaymentTransferStatus(status)
-    ),
-    ...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
-    RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
-  ]),
-];
+const NON_FINAL_STATUSES = NON_FINAL_MONEY_MOVEMENT_STATUSES;
 
 /**
  * Collection-level scripts for the saved Idempotency-Key. Each operation keeps

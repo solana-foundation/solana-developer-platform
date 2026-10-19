@@ -28,9 +28,12 @@ import {
 } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
 import { ProjectService } from "@/services/project.service";
+import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
+import {
+  parseRampWebhookProvider,
+  RAMP_PROVIDER_WEBHOOK_PROCESSOR,
+} from "@/services/ramps/webhooks/registry";
 import type { Env } from "@/types/env";
-import type { WebhookProcessor } from "./ramps/processor";
-import { parseRampWebhookProvider, RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "./ramps/registry";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -428,25 +431,22 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
-  const processor: WebhookProcessor<unknown, unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];
+  const processor: WebhookProcessor<unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];
 
-  const payload = await processor.verify({
+  await processor.verify({
     env: c.env as unknown as Record<string, string | undefined>,
     environment,
     headers: c.req.raw.headers,
     rawBody,
     requestUrl: c.req.url,
   });
-  processor.parse(payload);
-
-  // Signature and shape are verified, so the event is durable before the 200
-  // the provider expects: a crash or DB blip in the background apply can no
-  // longer lose the only settlement signal the provider will send — the
-  // replay job picks the row back up.
-  const stored = await createPostgresRampWebhookEventsRepository(getDb(c.env)).insertEvent({
+  const { row: stored, inserted } = await createPostgresRampWebhookEventsRepository(
+    getDb(c.env)
+  ).insertVerifiedEvent({
     provider: processor.provider,
     environment,
-    payload,
+    rawBody,
+    providerEventId: processor.eventId(rawBody),
   });
 
   // Ack immediately and apply in the background: a slow settlement write must
@@ -455,18 +455,19 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
   // The apply records its own failures on the row; this catch is only for the
   // recording itself failing (the DB going away mid-pass). The row is still
   // pending then, so the replay job picks it up — log and move on.
-  c.executionCtx.waitUntil(
-    applyStoredRampWebhookEvent(c.env, stored, stored.attempts + 1).catch((error) =>
-      getLogger().error(
-        {
-          provider: processor.provider,
-          webhook_event_id: stored.id,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        "[ramp webhook] background apply failed to record its outcome"
+  if (inserted)
+    c.executionCtx.waitUntil(
+      applyStoredRampWebhookEvent(c.env, stored, stored.attempts + 1).catch((error) =>
+        getLogger().error(
+          {
+            provider: processor.provider,
+            webhook_event_id: stored.id,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          "[ramp webhook] background apply failed to record its outcome"
+        )
       )
-    )
-  );
+    );
 
   return success(c, {
     received: true,

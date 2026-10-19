@@ -30,6 +30,7 @@ import {
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { isMovementInFlight } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { BulkImportRow } from "../bulk-import";
 import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
@@ -355,7 +356,10 @@ export function useBatchSendWizard({
       } else {
         toast.success(t("DashboardPayments.batchSend.resultSubmitted"), {
           id: toastId,
-          description: t("DashboardPayments.batchSend.status", { status }),
+          // Still processing: the key is kept, so a resend returns this batch (APE-461).
+          description: isMovementInFlight(status)
+            ? t("Shared.idempotency.processingCheckStatus")
+            : t("DashboardPayments.batchSend.status", { status }),
           position: "bottom-right",
         });
       }

@@ -11,11 +11,12 @@ import { useAssetProfileForm } from "./use-asset-profile-form";
 
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
+  replace: vi.fn(),
   updateAssetProfile: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mocks.refresh }),
+  useRouter: () => ({ refresh: mocks.refresh, replace: mocks.replace }),
 }));
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -103,6 +104,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   mocks.refresh.mockReset();
+  mocks.replace.mockReset();
   mocks.updateAssetProfile.mockReset();
   mocks.updateAssetProfile.mockResolvedValue({
     state: "success",

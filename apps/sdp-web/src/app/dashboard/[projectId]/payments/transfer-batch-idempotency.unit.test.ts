@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import type { PaymentTransferBatchRequest } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import type { Translate } from "./payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
@@ -30,6 +31,7 @@ function batchRequest(
 beforeEach(() => {
   window.sessionStorage.clear();
   resetTransferBatchIdempotencyStateForTests();
+  resetMovementWatchesForTests();
 });
 
 afterEach(() => {
@@ -134,6 +136,44 @@ describe("sendTransferBatchUnderKey", () => {
     const [first, second] = sentKeys(fetchMock);
     expect(first).toMatch(/^[0-9a-f-]{36}$/);
     expect(second).not.toBe(first);
+  });
+
+  // APE-461: the same rule as a single transfer, on a batch still processing:
+  // the stale replay keeps the key, and a GET showing the batch final retires it.
+  it("keeps the key through a stale replay and retires it once a GET shows the batch final", async () => {
+    vi.useFakeTimers();
+    let posts = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.method === "GET") {
+        return Response.json({ data: { batch: { id: "batch_1", status: "confirmed" } } });
+      }
+      posts += 1;
+      return Response.json(
+        {
+          data: {
+            batch: { id: "batch_1", status: "processing" },
+            recipients: [],
+            transfers: [],
+          },
+        },
+        posts > 1 ? { headers: { "Idempotent-Replayed": "true" } } : undefined
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const posted = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+    const [first, replay, next] = posted.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+    expect(replay).toBe(first);
+    expect(next).not.toBe(first);
+    const read = fetchMock.mock.calls.find(([, init]) => init?.method === "GET");
+    expect(read?.[0]).toBe("/api/dashboard/payments/transfers/batch/batch_1");
   });
 
   it("retires a fresh key on a first-attempt refusal", async () => {

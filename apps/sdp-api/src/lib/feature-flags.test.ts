@@ -105,11 +105,32 @@ describe("isCustodyProviderAvailable", () => {
   const nonByokCustodyProviders = CUSTODY_PROVIDERS.filter(
     (provider) => !isByokCustodyProvider(provider)
   );
+  const nonPrivyCustodyProviders = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy");
+  const releaseChannelsBelowStable = SDP_RELEASE_CHANNEL_NAMES.filter(
+    (releaseChannel) => releaseChannel !== "stable"
+  );
 
-  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
-    it.each(CUSTODY_PROVIDERS)("offers Managed %s", (provider) => {
+  describe.each(releaseChannelsBelowStable)("on the %s release channel", (releaseChannel) => {
+    it.each(nonPrivyCustodyProviders)("offers Managed %s", (provider) => {
       expect(
         isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "managed")
+      ).toBe(true);
+    });
+  });
+
+  it.each(nonPrivyCustodyProviders)(
+    "refuses Managed %s on the stable release channel",
+    (provider) => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: "stable" }, provider, "managed")
+      ).toBe(false);
+    }
+  );
+
+  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
+    it("offers Managed privy", () => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, "privy", "managed")
       ).toBe(true);
     });
 
@@ -270,16 +291,16 @@ describe("release channels", () => {
 
   it("pins each custody (provider, mode) pair's stage", () => {
     expect(SDP_MANAGED_CUSTODY_PROVIDER_STAGES).toEqual({
-      local: "stable",
-      fireblocks: "stable",
+      local: "beta",
+      fireblocks: "beta",
       privy: "stable",
-      coinbase_cdp: "stable",
-      para: "stable",
-      turnkey: "stable",
-      dfns: "stable",
-      ibm_haven: "stable",
-      anchorage: "stable",
-      utila: "stable",
+      coinbase_cdp: "beta",
+      para: "beta",
+      turnkey: "beta",
+      dfns: "beta",
+      ibm_haven: "beta",
+      anchorage: "beta",
+      utila: "beta",
     });
     expect(SDP_BYOK_CUSTODY_PROVIDER_STAGES).toEqual({ privy: "stable" });
   });

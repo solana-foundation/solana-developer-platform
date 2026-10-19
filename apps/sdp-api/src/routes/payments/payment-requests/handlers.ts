@@ -7,6 +7,7 @@ import { badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
@@ -91,7 +92,7 @@ export async function createPaymentRequest(
     custodyWalletId: wallet.id,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
-    token: body.token,
+    token: normalizePaymentToken(body.token),
     amount: body.amount,
     expiresAt: body.expiresAt,
     createdBy: await resolveCreatorUserId(c),

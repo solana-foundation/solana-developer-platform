@@ -248,6 +248,9 @@ export type ValidateCounterpartyOptions =
 export interface RampProvider {
   id: RampProviderId;
   declaredRailSupport: ProviderDeclaredRailSupport;
+  /** Optional webhook contract. Ingress verifies signed bytes before persisting;
+   * parsing is pure and runs from the durable inbox after acknowledgement. */
+  webhook?: RampProviderWebhook;
   /**
    * Support-matrix generation hook (ramp-support script only, never runtime):
    * fetches the provider's raw support dumps via `context.fetchJson` and
@@ -275,4 +278,15 @@ export interface RampProvider {
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements;
+}
+
+export interface RampProviderWebhook<Event = unknown> {
+  readonly signature: {
+    readonly header: string;
+    readonly encoding: "hex" | "base64";
+    readonly signedPayload: "timestamp-prefixed" | "raw-body";
+  };
+  /** A provider-issued delivery id only; null when the provider supplies none. */
+  eventId(rawBody: string): string | null;
+  parse(rawBody: string, environment?: SdpEnvironment): Event;
 }

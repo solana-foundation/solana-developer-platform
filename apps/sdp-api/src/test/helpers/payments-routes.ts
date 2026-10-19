@@ -48,8 +48,6 @@ export const sendTransactionMock = vi.spyOn(solanaRpc, "sendTransaction");
 
 export const getSignaturesForAddressMock = vi.spyOn(solanaRpc, "getSignaturesForAddress");
 
-export const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
-
 export const getSplTokenAccountAddressesMock = vi.spyOn(
   tokenAccounts,
   "getSplTokenAccountAddresses"
@@ -278,7 +276,7 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
  * @param tenant.createdBy - The user recorded as the connection's creator.
  * @param tenant.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
  * @param tenant.publicKey - The address the wallet's signer signs as.
- * @returns Resolves once the wallet and its connection are seeded.
+ * @returns The wallet's provider wallet id, once the wallet and its connection are seeded.
  */
 export async function seedProjectPrivyWallet(tenant: {
   organizationId: string;
@@ -286,7 +284,8 @@ export async function seedProjectPrivyWallet(tenant: {
   createdBy: string;
   custodyWalletId: string;
   publicKey: string;
-}): Promise<void> {
+}): Promise<string> {
+  const walletId = `privy_${tenant.custodyWalletId}`;
   const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
   env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
   onTestFinished(() => {
@@ -308,7 +307,7 @@ export async function seedProjectPrivyWallet(tenant: {
     wallets: [
       {
         id: tenant.custodyWalletId,
-        walletId: `privy_${tenant.custodyWalletId}`,
+        walletId,
         publicKey: tenant.publicKey,
         label: "Production Payments Wallet",
         purpose: "transfer",
@@ -318,6 +317,7 @@ export async function seedProjectPrivyWallet(tenant: {
     lastCheckStatus: "success",
     defaultCustodyWalletId: tenant.custodyWalletId,
   });
+  return walletId;
 }
 
 /**
@@ -327,13 +327,14 @@ export async function seedProjectPrivyWallet(tenant: {
  * @param wallet - The Production wallet to seed.
  * @param wallet.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
  * @param wallet.publicKey - The address the wallet's signer signs as.
- * @returns Resolves once the wallet, its connection and the re-homed key are seeded.
+ * @returns The wallet's provider wallet id, once the wallet, its connection and the re-homed key
+ *   are seeded.
  */
 export async function seedProductionPrivyWallet(wallet: {
   custodyWalletId: string;
   publicKey: string;
-}): Promise<void> {
-  await seedProjectPrivyWallet({
+}): Promise<string> {
+  const walletId = await seedProjectPrivyWallet({
     organizationId: TEST_ORG.id,
     projectId: TEST_PRODUCTION_PROJECT_ID,
     createdBy: TEST_USER.id,
@@ -345,6 +346,7 @@ export async function seedProductionPrivyWallet(wallet: {
     .bind(TEST_PRODUCTION_PROJECT_ID, TEST_API_KEY.id)
     .run();
   await seedCachedKey({ projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production" });
+  return walletId;
 }
 
 /**
@@ -546,7 +548,6 @@ export function installPaymentsRouteTestHooks(): void {
       getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
     );
     getSignaturesForAddressMock.mockResolvedValue([]);
-    getSplTokenBalancesMock.mockResolvedValue([]);
     getSplTokenAccountAddressesMock.mockResolvedValue([]);
     fetchMaybePlanMock.mockResolvedValue({
       exists: true,

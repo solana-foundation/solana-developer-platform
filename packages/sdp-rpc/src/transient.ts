@@ -9,7 +9,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
-import { RpcHttpStatusError } from "./errors";
+import { RpcHttpStatusError, RpcTimeoutError } from "./errors";
 
 // Overloaded-gateway / timeout HTTP statuses worth retrying.
 const TRANSIENT_HTTP_STATUS_CODES: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
@@ -37,9 +37,15 @@ const TRANSIENT_SOLANA_RPC_CODES = [
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
 ] as const;
 
+// NOTE: the checks below overlap. Kit drops its error messages under NODE_ENV=production, so
+// `TRANSIENT_ERROR_TEXT` never matches a kit error in prod but does in dev and tests; it also
+// matches every `RpcTimeoutError`. Its only prod job is untyped errors (raw fetch/socket
+// failures, other libraries). Cleanup: typed checks first with early returns, then replace the
+// regex with fetch `cause.code` checks once each caller's error sources are traced.
 export function isTransientRpcError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return (
+    error instanceof RpcTimeoutError ||
     (isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
       TRANSIENT_HTTP_STATUS_CODES.has(error.context.statusCode)) ||
     (error instanceof RpcHttpStatusError && TRANSIENT_HTTP_STATUS_CODES.has(error.httpStatus)) ||

@@ -1,6 +1,7 @@
 "use client";
 
 import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
+import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
   createIdempotencyKeyStore,
@@ -96,9 +97,22 @@ async function performTransferUnderKey(
     throw error;
   }
   if (!providerSession) {
-    // The transfer row exists, so the key is spent: the next identical send is a
-    // new payment rather than a retry of this one.
-    releaseTransferIdempotencyKey(fingerprint, key);
+    // The transfer row exists, so once it is final the key is spent and the
+    // next identical send is a new payment. While it is still processing the
+    // key is kept, so that send is answered by the replay (APE-461).
+    const settled = settleMoneyIdempotencyKey(store, fingerprint, key, {
+      status: 200,
+      replayed: false,
+      code: null,
+      movementStatus: transfer.status,
+    });
+    // A replay repeats the first answer verbatim, so only a read of the
+    // transfer's current state can show it final and settle the key.
+    if (!settled) {
+      settleWhenMovementFinal(MOVEMENT_READ_PATHS.transfer(transfer.id), () =>
+        store.release(fingerprint, key)
+      );
+    }
   }
   return { transfer, fingerprint };
 }
