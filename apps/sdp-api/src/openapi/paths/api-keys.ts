@@ -168,7 +168,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
             }),
             cancelRecurringPayments: z.boolean().optional().openapi({
               description:
-                "Also cancel every active recurring payment this key activated or last resumed. Use it for a compromised key.",
+                "Also cancel every active recurring payment this key activated, last resumed, or last changed the source wallet, recipient, token, amount or period of. Use it for a compromised key.",
               example: true,
             }),
           })
