@@ -1,4 +1,4 @@
-import { type Action, expandStoredGrants } from "@sdp/types/actions";
+import type { Action } from "@sdp/types/actions";
 import type { ApiKeyEnvironment, RateLimitTier } from "@sdp/types/api-keys";
 import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
 import { projectStatusMayAuthenticate } from "@sdp/types/projects";
@@ -11,6 +11,7 @@ import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rot
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
+import { parseGrantsColumn } from "@/services/api-key.service";
 import {
   resolveApiKeyWalletAuthorization,
   warnUnresolvedApiKeyWalletBindings,
@@ -117,9 +118,6 @@ const walletBindingCandidatesSchema = z.array(
     candidates: z.array(z.object({ id: z.string(), status: z.string() })),
   })
 );
-
-/** `api_keys.grants`, a `text[]` the driver returns as an array. */
-const storedGrantsSchema = z.array(z.string());
 
 /** The `api_keys` row and its joins, as the authoritative read returns them. */
 type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
@@ -283,7 +281,7 @@ export async function authorizeApiKey(
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    grants: expandStoredGrants(storedGrantsSchema.parse(row.grants)),
+    grants: parseGrantsColumn(row.grants),
     environment: row.environment,
     rateLimitTier: row.rate_limit_tier,
     settings: row.settings,
