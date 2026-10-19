@@ -856,7 +856,6 @@ describe("OpenAPI spec", () => {
       "Wallets",
       "Projects",
       "Payments",
-      "Compliance",
       "Counterparties",
     ]);
     expect(stable.paths?.["/v1/payments/recurring-payments"]?.post).toBeDefined();

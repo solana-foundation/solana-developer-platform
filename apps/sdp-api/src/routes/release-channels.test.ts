@@ -24,7 +24,7 @@ const MODULE_PROBES = {
     ["POST", "/v1/counterparties/cp_1/requirements"],
     ["GET", "/v1/counterparties/cp_1/provider-accounts"],
   ],
-  compliance: [["GET", "/v1/compliance"]],
+  compliance: [["POST", "/v1/compliance/address-screenings"]],
   issuance: [
     ["GET", "/v1/issuance/templates"],
     ["GET", "/v1/issuance/asset-profiles"],

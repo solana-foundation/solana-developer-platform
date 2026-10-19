@@ -392,6 +392,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/places", places);
   v1.route("/private-channels", privateChannels);
   v1.route("/helius-rings", heliusRings);
+  v1.use("/compliance/*", requireModule("compliance"));
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();
