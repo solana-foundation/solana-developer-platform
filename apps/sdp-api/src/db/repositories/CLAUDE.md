@@ -131,8 +131,8 @@ types (HOO-2033).
   re-read and refused as `settled_after_cancel`.
 - **No terminal status is a source except `expired`**, which a provider
   observation revives.
-- **Only the settlement core writes through it so far.** Cancel, MoonPay quote
-  fill and failure, and the off-ramp deposit claim and outcome still set the
+- **Settlement and MoonPay failed-buy recovery write through it.** Cancel,
+  MoonPay quote fill, and the off-ramp deposit claim and outcome still set the
   status themselves. The retired provider's writers were removed in HOO-2037.
   The inventory is in
   `../../services/payments/ramp-transfer-transitions.test.ts`; it counts guarded
@@ -144,12 +144,18 @@ types (HOO-2033).
 ## Ramps: webhook environment boundary
 
 The verified webhook endpoint supplies the environment for settlement. Stripe
-and MoonPay match the globally unique provider reference, then compare the
-transfer's project environment before applying an event. MoonPay's first
-reference claim checks that environment inside its UPDATE (HOO-2039 PR A).
-Cross-environment events and settlement after cancellation are `refused` with
-specific inbox reasons. Production parks them for review; sandbox discards
-them. Stale and final events remain `ignored`.
+matches the globally unique provider reference. MoonPay first locks the
+transfer named by `externalTransactionId`, checks its direction and project
+environment, then claims the transaction id and applies settlement in one
+transaction. Its first claim also checks the environment inside the UPDATE
+(HOO-2039). `provider_observed_at` orders MoonPay events only within the
+bound transaction id; equal or older observations are ignored. A failed buy
+without recorded payment activity releases its reference for retry and records
+that id
+in `moonpay_failed_transactions`, so a later webhook cannot reclaim it.
+Competing ids, conflicting terminal state, unsafe failures, cross-environment
+events, and settlement after cancellation are `refused`. Production parks them
+for review; sandbox discards them.
 
 ## Ramps: retired provider ids
 
