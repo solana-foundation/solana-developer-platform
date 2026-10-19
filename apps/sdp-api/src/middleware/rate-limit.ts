@@ -1,5 +1,6 @@
 import type { RateLimitTier } from "@sdp/types";
 import type { Context, Next } from "hono";
+import { z } from "zod";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
@@ -82,6 +83,65 @@ export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIM
  * anyone should meet while using the product.
  */
 export const CLERK_USER_MAX_REQUESTS = 600;
+
+/**
+ * The two dashboard (Clerk) ceilings, by profile. `standard` is today's limits and applies
+ * whenever `SDP_DASHBOARD_RATE_LIMIT_PROFILE` is unset. `e2e` exists for the local browser
+ * E2E stack only, where one scripted user loads hundreds of pages a minute; Cloud Run (every
+ * deployed environment) refuses it, see dashboardRateLimits.
+ */
+const DASHBOARD_RATE_LIMIT_PROFILE_NAMES = ["standard", "e2e"] as const;
+
+type DashboardRateLimitProfile = (typeof DASHBOARD_RATE_LIMIT_PROFILE_NAMES)[number];
+
+interface DashboardRateLimits {
+  /** Pre-auth ceiling per verified Clerk user (skipRateLimitPaths). */
+  userMax: number;
+  /** Post-auth ceiling per user per organization (clerk-auth). */
+  actorMax: number;
+}
+
+export const DASHBOARD_RATE_LIMIT_PROFILES = {
+  standard: { userMax: CLERK_USER_MAX_REQUESTS, actorMax: DASHBOARD_ACTOR_MAX_REQUESTS },
+  e2e: { userMax: 10_000, actorMax: 10_000 },
+} as const satisfies Record<DashboardRateLimitProfile, DashboardRateLimits>;
+
+const dashboardRateLimitProfileSchema = z
+  .enum(DASHBOARD_RATE_LIMIT_PROFILE_NAMES)
+  .default("standard");
+
+/**
+ * The dashboard ceilings this process enforces. Read per request, where the limit is decided;
+ * also called at boot so a bad value stops the server before it serves anything.
+ *
+ * @param env - Environment providing SDP_DASHBOARD_RATE_LIMIT_PROFILE and the Cloud Run markers.
+ * @returns The profile's per-user and per-user-per-org ceilings.
+ * @throws Error when the value is not a known profile, or when a profile other than `standard`
+ *   is set on Cloud Run (K_SERVICE or CLOUD_RUN_JOB present).
+ */
+export function dashboardRateLimits(
+  env: Pick<Env, "SDP_DASHBOARD_RATE_LIMIT_PROFILE" | "K_SERVICE" | "CLOUD_RUN_JOB">
+): DashboardRateLimits {
+  const parsed = dashboardRateLimitProfileSchema.safeParse(env.SDP_DASHBOARD_RATE_LIMIT_PROFILE);
+  if (!parsed.success) {
+    throw new Error(
+      `Invalid SDP_DASHBOARD_RATE_LIMIT_PROFILE: ${JSON.stringify(env.SDP_DASHBOARD_RATE_LIMIT_PROFILE)} (expected "standard" or "e2e")`
+    );
+  }
+  if (parsed.data !== "standard" && (env.K_SERVICE || env.CLOUD_RUN_JOB)) {
+    throw new Error(
+      `SDP_DASHBOARD_RATE_LIMIT_PROFILE=${parsed.data} is for the local E2E stack and is refused on Cloud Run`
+    );
+  }
+  return DASHBOARD_RATE_LIMIT_PROFILES[parsed.data];
+}
+
+/** Boot check: stops the server on a bad or Cloud Run-refused SDP_DASHBOARD_RATE_LIMIT_PROFILE. */
+export function assertDashboardRateLimitProfile(
+  env: Pick<Env, "SDP_DASHBOARD_RATE_LIMIT_PROFILE" | "K_SERVICE" | "CLOUD_RUN_JOB">
+): void {
+  dashboardRateLimits(env);
+}
 
 /**
  * Builds the KV key for one identifier's counter in one window bucket.
@@ -358,7 +418,7 @@ export function skipRateLimitPaths(...paths: string[]) {
       if (clerkUserId) {
         // Per user, not per IP: an office behind one NAT address is many people, and
         // the dashboard's own background polling would otherwise pool against them.
-        await enforceRateLimit(c, `clerk:${clerkUserId}`, CLERK_USER_MAX_REQUESTS);
+        await enforceRateLimit(c, `clerk:${clerkUserId}`, dashboardRateLimits(c.env).userMax);
         await next();
         return;
       }

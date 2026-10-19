@@ -22,4 +22,13 @@ describe("server boot checks", () => {
       /SDP_RELEASE_CHANNEL is required/
     );
   });
+
+  it("refuses the e2e dashboard rate limit profile on Cloud Run", () => {
+    expect(() =>
+      assertRequiredEnv(makeEnv({ SDP_DASHBOARD_RATE_LIMIT_PROFILE: "e2e" }))
+    ).not.toThrow();
+    expect(() =>
+      assertRequiredEnv(makeEnv({ SDP_DASHBOARD_RATE_LIMIT_PROFILE: "e2e", K_SERVICE: "sdp-api" }))
+    ).toThrow(/refused on Cloud Run/);
+  });
 });

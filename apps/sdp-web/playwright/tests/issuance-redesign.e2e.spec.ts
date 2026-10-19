@@ -1,4 +1,4 @@
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { clearIssuanceFixtures, type IssuanceFixtures } from "../support/issuance-fixtures";
 import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
@@ -12,27 +12,12 @@ import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootst
 
 type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" | "permissions";
 
-// The API admits 300 dashboard requests a minute per user, and one page load costs about 20
-// (every server render and dashboard route also reads /v1/projects). The suite runs in one
-// job, so it never polls by reloading: an operation refreshes the page itself once it lands,
-// and a wait reloads once at most, when the in-place refresh did not show the change.
-// Back-to-back tests still add up, so each test also starts on a fresh budget (see
-// waitForFreshRateWindow).
-const RATE_WINDOW_MS = 60_000;
-
-/**
- * Waits until the API's rate limit no longer counts any request made before `lastActivity`.
- * The limit adds the current minute's count to a fading share of the previous minute's, so
- * old requests stop counting once a whole minute bucket has passed after theirs: 60 to 120
- * seconds of quiet. The wait is added to the test's timeout.
- */
-async function waitForFreshRateWindow(lastActivity: number, testInfo: TestInfo): Promise<void> {
-  const freshFrom = Math.floor(lastActivity / RATE_WINDOW_MS) * RATE_WINDOW_MS + 2 * RATE_WINDOW_MS;
-  const wait = freshFrom - Date.now();
-  if (wait <= 0) return;
-  testInfo.setTimeout(testInfo.timeout + wait);
-  await new Promise((resolve) => setTimeout(resolve, wait));
-}
+// One page load costs about 20 dashboard requests (every server render and dashboard route
+// also reads /v1/projects), past the API's standard per-user limits over a whole suite. The CI
+// job runs the local API with SDP_DASHBOARD_RATE_LIMIT_PROFILE=e2e, which lifts them. A run
+// against an API on the standard profile can still meet a 429.
+// It never polls by reloading: an operation refreshes the page itself once it lands, and a
+// wait reloads once at most, when the in-place refresh did not show the change.
 
 async function eventually(reopen: () => Promise<void>, check: () => Promise<void>) {
   await check().catch(async () => {
@@ -151,9 +136,6 @@ test.describe
     );
 
     let fixtures: IssuanceFixtures;
-    // When this worker last used the API: the end of the bootstrap, then of each test. A retry
-    // runs in a new worker, so its bootstrap also outwaits the failed attempt's requests.
-    let lastActivity = Date.now();
 
     test.beforeAll(async ({ browser }) => {
       clearIssuanceFixtures();
@@ -163,15 +145,6 @@ test.describe
           bearerToken: session.getBearerToken,
         })
       );
-      lastActivity = Date.now();
-    });
-
-    test.beforeEach(async ({ page: _page }, testInfo) => {
-      await waitForFreshRateWindow(lastActivity, testInfo);
-    });
-
-    test.afterEach(() => {
-      lastActivity = Date.now();
     });
 
     test("R1. user sees every seeded token on the Issuance list", async ({ page }) => {

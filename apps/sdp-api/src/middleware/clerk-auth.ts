@@ -36,7 +36,7 @@ import {
 } from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
-import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
+import { dashboardRateLimits, enforceRateLimit } from "./rate-limit";
 
 /**
  * The stored identity for a Clerk user, with both copies of the email.
@@ -593,7 +593,7 @@ export function clerkAuthMiddleware() {
       await enforceRateLimit(
         c,
         `user:${context.userId}:org:${context.organizationId}`,
-        DASHBOARD_ACTOR_MAX_REQUESTS
+        dashboardRateLimits(c.env).actorMax
       );
 
       c.set("clerk", context);
@@ -622,7 +622,7 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
         await enforceRateLimit(
           c,
           `user:${clerkContext.userId}:org:${clerkContext.organizationId}`,
-          DASHBOARD_ACTOR_MAX_REQUESTS
+          dashboardRateLimits(c.env).actorMax
         );
         c.set("clerk", clerkContext);
       });
