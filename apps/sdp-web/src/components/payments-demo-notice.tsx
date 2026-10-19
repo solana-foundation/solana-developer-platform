@@ -5,10 +5,13 @@ import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 
 const NOTICE_TOAST_ID = "payments-demo-notice";
+const NOTICE_DURATION_MS = 6000;
 
 /**
- * Demo mode's disclaimer, a toast in the app's stack that stays until closed. Turning demo mode
- * off or leaving Payments takes it away; turning demo mode on again or reloading brings it back.
+ * Demo mode's disclaimer, a toast in the app's stack. It shows on entering demo mode and clears
+ * itself after a few seconds, so it doesn't cover the content it sits over; closing it, turning
+ * demo mode off or leaving Payments also takes it away. Turning demo mode on again or reloading
+ * brings it back.
  */
 export function PaymentsDemoNotice() {
   const t = useTranslations();
@@ -18,7 +21,7 @@ export function PaymentsDemoNotice() {
     toast.info(title, {
       id: NOTICE_TOAST_ID,
       description: body,
-      duration: Number.POSITIVE_INFINITY,
+      duration: NOTICE_DURATION_MS,
     });
     return () => {
       toast.dismiss(NOTICE_TOAST_ID);

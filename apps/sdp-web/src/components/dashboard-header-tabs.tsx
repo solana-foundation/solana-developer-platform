@@ -118,6 +118,23 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTab]);
 
+  // While the tabs overflow, the list marks itself so its right edge fades: the hidden tabs read
+  // as scrollable. Runs after every render so it follows the strip mounting on a resize from
+  // mobile, and the sidebar opening, which changes the room the tabs have.
+  useEffect(() => {
+    const strip = stripRef.current;
+    const list = strip?.querySelector<HTMLElement>('[role="tablist"]');
+    if (!strip || !list) return;
+    const measure = () => {
+      list.dataset.overflowing = String(list.scrollWidth > list.clientWidth + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    observer.observe(list);
+    return () => observer.disconnect();
+  });
+
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");
     const updateIsMobile = () => setIsMobile(mediaQuery.matches);
@@ -152,7 +169,7 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
         {/* From md, 14px under a refresh label to its underline, 3px more than above it, as drawn;
           a phone draws 8px above and 11px under. The tab sets its padding inline, hence the
           important. */}
-        <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6.5 refresh:[&>*]:whitespace-nowrap max-md:refresh:[&_[role=tab]]:!pt-2 md:refresh:[&_[role=tab]]:!pb-3.5">
+        <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6.5 refresh:[&>*]:whitespace-nowrap max-md:refresh:[&_[role=tab]]:!pt-2 md:refresh:[&_[role=tab]]:!pb-3.5 data-[overflowing=true]:[mask-image:linear-gradient(to_right,black_calc(100%_-_2.5rem),transparent)]">
           {tabs.map((tab) => (
             <Tab key={tab.id} value={tab.id}>
               {tab.id in headerTabCountByTabId
