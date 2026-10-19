@@ -1,1 +1,1 @@
-export { default } from "../embedded-yield/page";
+export { default } from "@/app/dashboard/[projectId]/markets/embedded-yield/page";

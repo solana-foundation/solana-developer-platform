@@ -1,5 +1,5 @@
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   address,
   addSignersToTransactionMessage,

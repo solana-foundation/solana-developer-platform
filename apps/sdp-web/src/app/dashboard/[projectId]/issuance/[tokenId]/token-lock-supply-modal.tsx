@@ -1,9 +1,10 @@
 "use client";
 
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token } from "@sdp/types/tokens";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import {
   getSignerWalletUnavailableReason,

@@ -1,18 +1,18 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
-import { getSdpDocsOrigin } from "@sdp/types";
+import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
 import { badRequest, rateLimited } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveTokenLabel } from "@/routes/payments/token-accounts";
 import { issuePaymentRequestTransaction } from "@/services/payments/payment-request-sponsorship";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
-import { resolveTokenLabel } from "../payments/token-accounts";
 import { findPaymentRequest } from "./context";
 import type { transactionRequestBodySchema } from "./schemas";
 

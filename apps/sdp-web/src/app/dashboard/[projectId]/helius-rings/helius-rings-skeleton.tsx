@@ -1,14 +1,8 @@
-import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { Card, CardAction, CardContent, CardHeader } from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 
 // Mirrors the configured workspace with one private wallet selected, which is
 // the page most visits settle into. Built on the same Card and Table parts as

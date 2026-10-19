@@ -4,7 +4,7 @@ import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   createRingsProjectRing,
   createRingsWallet,
@@ -27,7 +27,7 @@ import {
   voidRingsOperation,
 } from "./handlers";
 
-const heliusRings = new Hono<{ Bindings: Env }>();
+export const heliusRings = new Hono<{ Bindings: Env }>();
 
 async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isHeliusRingsEnabled(c.env)) {
@@ -94,5 +94,3 @@ heliusRings.post(
   requireAction("helius_rings.manage"),
   voidRingsOperation
 );
-
-export default heliusRings;

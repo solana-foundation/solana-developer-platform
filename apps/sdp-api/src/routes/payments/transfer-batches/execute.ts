@@ -1,8 +1,7 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { simulateTransaction } from "@sdp/rpc/solana";
 import { getBase64EncodedWireTransaction, getTransactionEncoder } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { getDb } from "@/db";
-import { asTransactionalClient } from "@/db/client";
+import { asTransactionalClient, getDb } from "@/db/client";
 import type {
   PaymentTransferBatchesRepository,
   PaymentTransferRecipientRow,
@@ -12,6 +11,7 @@ import { generatePaymentTransferId } from "@/db/repositories/payments.repository
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -19,7 +19,6 @@ import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
-import { type AppContext, getPaymentsRepository } from "../context";
 import type { TransactionChunk } from "./transaction";
 import type { ResolvedBatchRequest } from "./types";
 
@@ -204,7 +203,7 @@ export async function executeChunk(params: {
 
   if (params.preflight) {
     try {
-      const simulated = await solanaRpc.simulateTransaction(resolved.rpc, txBytes);
+      const simulated = await simulateTransaction(resolved.rpc, txBytes);
       if (!simulated.success) {
         throw transactionFailed(
           `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,

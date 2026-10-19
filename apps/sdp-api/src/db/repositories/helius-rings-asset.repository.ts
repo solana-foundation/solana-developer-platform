@@ -1,4 +1,4 @@
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /** One row of the platform-level Rings mint allowlist. */
 export interface HeliusRingsAssetAllowlistRow {

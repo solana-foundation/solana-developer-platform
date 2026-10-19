@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { rootLogger } from "@/runtime/logger";
 import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";

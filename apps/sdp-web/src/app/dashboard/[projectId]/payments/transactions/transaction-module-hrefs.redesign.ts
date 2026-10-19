@@ -1,4 +1,4 @@
-import type { UnifiedTransactionModule } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
 import { transactionHref } from "@/lib/payments-routes";
 
 export const TRANSACTION_MODULE_HREFS = {

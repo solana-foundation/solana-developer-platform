@@ -21,9 +21,6 @@ export function projectStatusMayAuthenticate(status: string): boolean {
   return PROJECT_STATUSES_THAT_MAY_AUTHENTICATE.some((allowed) => allowed === status);
 }
 
-// Re-export ProjectRole for convenience
-export type { ProjectRole } from "./permissions";
-
 export interface ProjectSettings {
   webhookUrl?: string;
   metadata?: Record<string, string>;

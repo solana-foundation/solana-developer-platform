@@ -5,7 +5,7 @@
  * Extracted from ApiKeyService for testability.
  */
 
-import type { ApiKeyEnvironment } from "@sdp/types";
+import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 
 /**
  * Generate a cryptographically random base64url string.

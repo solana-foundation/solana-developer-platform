@@ -1,5 +1,5 @@
-import type { RingsGatewayPort } from "@sdp/helius-rings";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type { RingsGatewayPort } from "@sdp/helius-rings/port";
 import { describe, expect, it } from "vitest";
 import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import type { Env } from "@/types/env";

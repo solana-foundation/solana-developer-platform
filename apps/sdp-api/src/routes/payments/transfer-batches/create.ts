@@ -1,5 +1,5 @@
-import * as solanaRpc from "@sdp/rpc/solana";
-import { getDb } from "@/db";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentTransferBatchRow,
@@ -18,13 +18,16 @@ import {
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import * as solanaServices from "@/services/solana";
+import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
+import {
+  admitPaymentWalletRuntimeExecution,
+  authorizeCustodyPaymentWallet,
+} from "@/routes/payments/wallets";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
-import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
@@ -152,7 +155,7 @@ export async function createTransferBatch(
     "payments.transfer_batch"
   );
   const [signer, feePayer, lifetime] = await Promise.all([
-    solanaServices.createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet(
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,
@@ -160,7 +163,7 @@ export async function createTransferBatch(
       "payments.transfer_batch"
     ),
     feePayment.getFeePayer(),
-    solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
+    getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");

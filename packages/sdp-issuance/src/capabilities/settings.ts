@@ -2,7 +2,8 @@
 // CODE not table (no migrations). i18n keys in dashboard-issuance.json under `config`.
 // See docs/decisions/0002-asset-advanced-settings.md.
 
-import type { AdvancedSetting, TokenExtensionName } from "@sdp/types";
+import type { AdvancedSetting } from "@sdp/types/advanced-settings";
+import type { TokenExtensionName } from "@sdp/types/tokens";
 
 const config = (leaf: string): string => `DashboardIssuance.config.${leaf}`;
 const desc = (leaf: string): string => config(`${leaf}Description`);

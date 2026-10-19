@@ -3,7 +3,7 @@ import {
   getAssetTypeRegistryEntry,
   type IssuanceMetadata,
   type PublicTokenMetadata,
-} from "@sdp/types";
+} from "@sdp/types/asset-profiles";
 
 function getByPath(source: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {

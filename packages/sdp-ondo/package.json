@@ -4,20 +4,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
     },
     "./types": {
       "types": "./src/types.ts",
       "import": "./src/types.ts",
       "default": "./src/types.ts"
-    },
-    "./errors": {
-      "types": "./src/errors.ts",
-      "import": "./src/errors.ts",
-      "default": "./src/errors.ts"
     }
   },
   "scripts": {
@@ -34,7 +29,6 @@
   "devDependencies": {
     "@solana/kit": "catalog:",
     "@types/node": "26.6.2",
-    "tsx": "4.23.15",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   }

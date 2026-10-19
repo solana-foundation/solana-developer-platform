@@ -1,11 +1,11 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-
+import { z } from "zod";
+import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import {
   createPrivateChannelBodySchema,
   createPrivateChannelDepositBodySchema,
   createPrivateChannelTransferBodySchema,
   createPrivateChannelWithdrawalBodySchema,
-  errorResponseSchema,
   privateChannelBalanceQuerySchema,
   privateChannelBalanceSchema,
   privateChannelDeleteWalletParamSchema,
@@ -40,9 +40,7 @@ import {
   privateChannelWithdrawalIdParamSchema,
   privateChannelWithdrawalListSchema,
   privateChannelWithdrawalSchema,
-  successResponseSchema,
-  z,
-} from "../schemas";
+} from "@/openapi/schemas/private-channels";
 import {
   errorResponses,
   jsonContent,

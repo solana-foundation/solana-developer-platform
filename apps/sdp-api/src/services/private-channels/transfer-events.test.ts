@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PrivateChannelTransferRow } from "@/db/repositories";
+import type { PrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
 import * as eventService from "@/services/private-channels/event.service";
 import type { Env } from "@/types/env";
 import { emitTransferEvent } from "./transfer-events";

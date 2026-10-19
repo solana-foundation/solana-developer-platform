@@ -1,5 +1,5 @@
-import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { internalError, providerNotConfigured } from "./errors";
 import { providerFetchJson } from "./fetch";
 import type { EarnRuntimeEnvironment } from "./types";

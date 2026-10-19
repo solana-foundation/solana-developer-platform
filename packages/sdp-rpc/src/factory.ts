@@ -1,4 +1,4 @@
-import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,

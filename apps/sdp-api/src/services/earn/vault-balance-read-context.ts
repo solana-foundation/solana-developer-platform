@@ -1,11 +1,12 @@
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Signature } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { notFound, providerUnavailable } from "@/lib/errors";
+import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
-import { assertClusterEndpoint, earnClusterFor, resolveClusterRpcUrl } from "./execution-registry";
 
 /** How long a finalized signature's status is reused before it is read again. */
 export const FINALIZED_SIGNATURE_STATUS_TTL_MS = 600_000;

@@ -1,5 +1,5 @@
-import type { EarnPortfolioWithdrawal } from "@sdp/types";
-import { isTerminalEarnMovementStatus } from "@sdp/types";
+import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
+import { isTerminalEarnMovementStatus } from "@sdp/types/earn";
 import type {
   EarnMovementRow,
   EarnMovementsRepository,

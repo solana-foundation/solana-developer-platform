@@ -1,5 +1,5 @@
 import { Hono, type Next } from "hono";
-import { runWithSystemDatabaseIdentity } from "@/db";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
@@ -8,7 +8,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
 import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   addAllowlistEntry,
   listAllowlist,
@@ -68,7 +68,7 @@ import {
 export const ISSUANCE_SUPPLY_QUOTA = { name: "issuance-supply", actorMax: 10, orgMax: 40 };
 export const ISSUANCE_PREPARE_QUOTA = { name: "issuance-prepare", actorMax: 30, orgMax: 120 };
 
-const issuance = new Hono<{ Bindings: Env }>();
+export const issuance = new Hono<{ Bindings: Env }>();
 
 // Public: SDP-hosted token metadata JSON. Registered BEFORE the auth middleware
 // below so wallets and explorers can fetch it without credentials (Hono applies
@@ -312,5 +312,3 @@ issuance.post(
   validateBody(enrollHolderSchema),
   enrollHolder
 );
-
-export default issuance;

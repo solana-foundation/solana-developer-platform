@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import {
   address,
   blockhash,

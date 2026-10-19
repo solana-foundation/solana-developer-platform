@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import app from "@/index";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";

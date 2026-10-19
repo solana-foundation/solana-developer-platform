@@ -32,12 +32,12 @@ import type {
 } from "@sdp/earn/types";
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import {
   type HastraDeployment,
   hastraDeployment,
   hastraDepositMints,
 } from "@sdp/types/hastra-programs";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { SdpHastraError, type SdpHastraErrorCode } from "./errors";
 import type {

@@ -1,11 +1,11 @@
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
-  type RampProviderId,
   type SdpModule,
   type SdpRampProviderStages,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import type { Adapter, Identify } from "flags";
 import { flag } from "flags/next";
 import { capAdapterToReleaseChannel } from "./release-channel";
@@ -270,6 +270,11 @@ export function defineDashboardFlags({
     "the rest of Payments (the overview and its API playground, Transactions, Requests, Schedules)"
   );
 
+  const newDesignIssuance = newDesignModuleFlag(
+    "issuance",
+    "Issuance (the token list and its API playground, the draft flow, one token's page)"
+  );
+
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
@@ -289,6 +294,7 @@ export function defineDashboardFlags({
     newDesignContacts,
     newDesignPayDeposit,
     newDesignActivity,
+    newDesignIssuance,
     rampProviderMoonpay,
     rampProviderStripe,
   };

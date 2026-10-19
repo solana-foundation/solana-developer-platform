@@ -1,4 +1,5 @@
-import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, RAMP_PROVIDERS, type RampProviderId } from "@sdp/types";
+import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp.generated";
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildWorld, DEMO_TOKENS, demoPathParts } from "./demo-fixtures";
 import { demoFlowRead, demoWrite } from "./demo-handlers";

@@ -11,8 +11,9 @@
  * (never `process.env`), the same discipline as `config.ts`.
  */
 
-import { isForbiddenRpcError, type RpcEnv } from "@sdp/rpc";
 import { createRpc, getAccountInfo, type RpcRequestHeaders, type SolanaRpc } from "@sdp/rpc/solana";
+import { isForbiddenRpcError } from "@sdp/rpc/transient";
+import type { RpcEnv } from "@sdp/rpc/types";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 

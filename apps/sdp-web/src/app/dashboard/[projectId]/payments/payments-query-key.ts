@@ -1,7 +1,7 @@
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { RampDirection } from "@sdp/types/ramp-requirements";
 import type { Arguments } from "swr";
 
 export interface CounterpartyRequirementsParams {

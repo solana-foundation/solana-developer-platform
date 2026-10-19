@@ -1,6 +1,6 @@
+import { RecurringPaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import { DesignSwitch } from "@/components/new-design";
-import { RecurringPaymentsPageSkeleton } from "../payments-route-skeletons";
-import RedesignRecurringPaymentsLoading from "./loading.redesign";
+import { RecurringPaymentsLoading as RedesignRecurringPaymentsLoading } from "./loading.redesign";
 
 export function PreviousRecurringPaymentsLoading() {
   return <RecurringPaymentsPageSkeleton />;

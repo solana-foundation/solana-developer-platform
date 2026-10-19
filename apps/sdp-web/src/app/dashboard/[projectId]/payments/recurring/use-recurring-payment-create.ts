@@ -1,32 +1,38 @@
 "use client";
 
 import { compareDecimalAmounts, decimalScale, isDecimalString } from "@sdp/solana/amount";
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
-  Counterparty,
-  CounterpartyAccount,
   PaymentRecurringPaymentSchedulePreset,
   PaymentsDashboardWallet,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { BadgeVariant } from "@sdp/ui/badge";
+import type { ComboboxOption } from "@sdp/ui/combobox";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { preload } from "swr";
+import {
+  isSolBalance,
+  resolveTokenByMint,
+  resolveTotalBalance,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import type { BadgeVariant } from "@/components/ui/badge";
-import type { ComboboxOption } from "@/components/ui/combobox";
-import { useTranslations } from "@/i18n/provider";
-import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
-import { useProjectHref } from "@/lib/use-dashboard-project";
-import { isSolBalance, resolveTokenByMint, resolveTotalBalance } from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import {
   type CounterpartiesResult,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
-} from "../payments-workspace.data";
-import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
-import { walletBalanceAssetOptions, walletComboboxOptions } from "../ramps/wallet-options";
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import {
+  walletBalanceAssetOptions,
+  walletComboboxOptions,
+} from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import { useTranslations } from "@/i18n/provider";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createRecurringPayment } from "./recurring-payments.data.redesign";
 import {
   accountAddress,

@@ -1,26 +1,26 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
-import {
-  type BuildOperationInput,
-  type BuildOperationResult,
-  type EnsureMergingEnabledInput,
-  type EnsureMergingEnabledResult,
-  HeliusRingsError,
-  type ProvisionIdentityInput,
-  type ProvisionIdentityResult,
-  type ProvisionRingInput,
-  type ProvisionRingResult,
-  type ReadIdentityInput,
-  type ReadIdentityResult,
-  type RekeyIdentityInput,
-  type RingsGatewayPort,
-  type RuntimeHealth,
-  type SyncPhotonInput,
-  type SyncPhotonResult,
-  type VerifyIndexedResult,
-} from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type {
+  BuildOperationInput,
+  BuildOperationResult,
+  EnsureMergingEnabledInput,
+  EnsureMergingEnabledResult,
+  ProvisionIdentityInput,
+  ProvisionIdentityResult,
+  ProvisionRingInput,
+  ProvisionRingResult,
+  ReadIdentityInput,
+  ReadIdentityResult,
+  RekeyIdentityInput,
+  RingsGatewayPort,
+  SyncPhotonInput,
+  SyncPhotonResult,
+  VerifyIndexedResult,
+} from "@sdp/helius-rings/port";
+import type { RuntimeHealth } from "@sdp/helius-rings/types";
 import { buildRingsOperation } from "./build.js";
 import { createRingsClient } from "./client.js";
-import { createCustodyMaterialSource } from "./custody-ka/index.js";
+import { createCustodyMaterialSource } from "./custody-ka/derivation";
 import { withZolanaErrorBridge } from "./error-bridge.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
 import { readRingsIdentityStatus } from "./identity.js";

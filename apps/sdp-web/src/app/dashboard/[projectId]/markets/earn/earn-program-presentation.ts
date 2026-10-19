@@ -3,9 +3,10 @@ import {
   type EarnPortfolioToken,
   type EarnStrategy,
   earnCuratorLabel,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+} from "@sdp/types/earn";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 /**
  * Shared strategy presentation helpers for every Earn surface (overview,

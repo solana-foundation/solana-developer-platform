@@ -16,12 +16,12 @@
  *    devnet release).
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import { confirmTransaction } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import type {
   PrivateChannelWithdrawalRepository,
   PrivateChannelWithdrawalRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-withdrawal.repository";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 
@@ -47,8 +47,7 @@ export async function confirmAndPersistWithdrawal(
       env,
       input.gatewayUrl,
       input.gatewayAuth,
-      (gatewayRpc) =>
-        solanaRpc.confirmTransaction(gatewayRpc, input.signature, { commitment: "confirmed" })
+      (gatewayRpc) => confirmTransaction(gatewayRpc, input.signature, { commitment: "confirmed" })
     );
     if (confirmation.err) {
       return repo.updateWithdrawal({

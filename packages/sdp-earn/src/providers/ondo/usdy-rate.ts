@@ -1,6 +1,6 @@
-import { internalError } from "../../errors";
-import { providerFetchJson } from "../../fetch";
-import { CATALOGUE_RPC_TIMEOUT_MS } from "../../solana-rpc";
+import { internalError } from "#/errors";
+import { providerFetchJson } from "#/fetch";
+import { CATALOGUE_RPC_TIMEOUT_MS } from "#/solana-rpc";
 
 /**
  * USDY's published rate and size, from Ondo's public assets API (PRO-1833).

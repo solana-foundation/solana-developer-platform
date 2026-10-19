@@ -3,7 +3,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import {
   EarnTransactionModalLoading,
   TreasurySolutionsWorkspace,
@@ -217,7 +217,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   }),
 }));
 
-vi.mock("../earn/deposit/earn-funding-wallets", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets", () => ({
   useEarnFundingWallets: () => ({
     error: mocks.walletsError ? new Error("wallets unavailable") : undefined,
     isLoading: false,
@@ -260,12 +260,14 @@ vi.mock("../earn/deposit/earn-funding-wallets", () => ({
   }),
 }));
 
-vi.mock("../earn/earn-program-data", async (importOriginal) => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-program-data", async (importOriginal) => ({
   // Everything not overridden below stays REAL — most importantly the
   // in-flight predicates the recovery filter reads. Hand-copying them here
   // went stale the moment the provider-order settlement fork (#1959) changed
   // the withdrawal rule, while this file kept passing against the snapshot.
-  ...(await importOriginal<typeof import("../earn/earn-program-data")>()),
+  ...(await importOriginal<
+    typeof import("@/app/dashboard/[projectId]/markets/earn/earn-program-data")
+  >()),
   useEarnStrategies: (options?: { cluster?: "devnet" | "mainnet-beta" }) => {
     mocks.strategiesClusterRequests.push(options?.cluster);
     // The mirrored mainnet shelf (PRO-1742) is the sandbox catalogue's base
@@ -603,7 +605,7 @@ vi.mock("../earn/earn-program-data", async (importOriginal) => ({
   }),
 }));
 
-vi.mock("../earn/earn-vault-withdraw-modal", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-vault-withdraw-modal", () => ({
   EarnVaultWithdrawModal: (props: {
     onWithdrawn?: (
       withdrawal: {
@@ -629,7 +631,7 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
   },
 }));
 
-vi.mock("../earn/earn-outcome-trackers", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-outcome-trackers", () => ({
   EarnVaultWithdrawalOutcomeTracker: (props: {
     movementId: string;
     onSettled?: (withdrawal: {
@@ -679,7 +681,7 @@ vi.mock("../earn/earn-outcome-trackers", () => ({
   }) => <output data-testid="withdrawal-outcome-tracker">{`${programId}:${withdrawalRef}`}</output>,
 }));
 
-vi.mock("../earn/earn-vault-exit-modal", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-vault-exit-modal", () => ({
   EarnVaultExitModal: (props: {
     parSource?: "shares" | "intermediate";
     onWithdrawn?: (
@@ -710,11 +712,11 @@ vi.mock("../earn/earn-vault-exit-modal", () => ({
   },
 }));
 
-vi.mock("../earn/earn-vault-withdrawal-requests-card", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card", () => ({
   EarnVaultWithdrawalRequestsCard: () => null,
 }));
 
-vi.mock("../earn/earn-vault-deposit-modal", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-vault-deposit-modal", () => ({
   EarnVaultDepositModal: (props: {
     onDeposited?: (
       deposit: {
@@ -744,7 +746,7 @@ vi.mock("../earn/earn-vault-deposit-modal", () => ({
   },
 }));
 
-vi.mock("../earn/earn-withdraw-modal", () => ({
+vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-withdraw-modal", () => ({
   EarnWithdrawModal: ({ programId }: { programId: string }) => (
     <div role="dialog">Withdraw from {programId}</div>
   ),

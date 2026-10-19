@@ -8,7 +8,7 @@ import type {
   EarnVaultPosition,
   EarnVaultWithdrawal,
   EarnVaultWithdrawalRequestRecord,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {

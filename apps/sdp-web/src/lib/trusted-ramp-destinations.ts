@@ -1,9 +1,4 @@
-import {
-  isTrustedRampDestination,
-  MOONPAY_HOSTED_APPROVED_HOSTS,
-} from "@sdp/types/ramp-destinations";
-
-export { isTrustedRampDestination, MOONPAY_HOSTED_APPROVED_HOSTS };
+import { isTrustedRampDestination } from "@sdp/types/ramp-destinations";
 
 /**
  * Opens a provider-supplied link (KYC/verification/terms pages) in a new tab

@@ -1,12 +1,12 @@
 import { type ApiTestCustodyWallet, apiTestSupport } from "@sdp/api/test-support";
-import { resolveDefaultCluster } from "@sdp/rpc";
+import { resolveDefaultCluster } from "@sdp/rpc/config";
 import {
   confirmTransaction,
   createRpc,
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
 } from "@sdp/rpc/solana";
-import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -808,7 +808,6 @@ async function createFundedLocalWallet(input: {
 export {
   app,
   createMosaicService,
-  env,
   INTEGRATION_CUSTODY_PROVIDER,
   KORA_CONFIGURED,
   PRIVY_CONFIGURED,

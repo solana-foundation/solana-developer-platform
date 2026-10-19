@@ -1,5 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { SDP_ENVIRONMENTS } from "@sdp/types";
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
@@ -22,7 +22,7 @@ import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   describeCronFailure,
   getManagedMonitorSlug,

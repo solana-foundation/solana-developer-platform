@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { sentryScrubbingHooks } from "@sdp/redaction";
+import { sentryScrubbingHooks } from "@sdp/redaction/sentry";
 import { describe, expect, it } from "vitest";
 
 const APP_ROOT = path.resolve(__dirname, "../..");

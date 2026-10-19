@@ -1,4 +1,4 @@
-import type { PaymentTransferStatus } from "@sdp/types";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 import { getRampTransferState } from "./ramp-transfer-state";
 

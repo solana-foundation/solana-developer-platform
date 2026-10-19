@@ -1,7 +1,9 @@
 import { SigningError } from "@sdp/custody/signing";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
-import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
+import type { SignerCheckResponse } from "@sdp/types/custody";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
@@ -17,25 +19,24 @@ import {
   verifySignature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { signerCheckSchema } from "@/routes/custody/schemas";
 import {
   assertApiKeyCustodyWalletAccess,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { FeePaymentError } from "@/services/ports";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
-import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
 /**

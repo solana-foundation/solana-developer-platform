@@ -1,4 +1,4 @@
-import { CUSTODY_PROVIDERS } from "@sdp/types";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "./dashboard-cache-scope";
 import {

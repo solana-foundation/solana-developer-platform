@@ -1,6 +1,16 @@
 "use client";
 
-import type { Counterparty, CounterpartyAccount, PaymentTransferSummary } from "@sdp/types";
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import {
   CalendarIcon,
   ChevronDownIcon,
@@ -17,22 +27,13 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
 import { WalletAddressCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { formatCreatedDate } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
-import { toTitleCase } from "../../activity-format-utils";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts";
 import { CounterpartyTransactions } from "./counterparty-transactions";

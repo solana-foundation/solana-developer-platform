@@ -1,8 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CustodyMode } from "@sdp/types";
+import type { CustodyMode } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { clerkAdminHeaders } from "@/test/helpers/clerk-member";

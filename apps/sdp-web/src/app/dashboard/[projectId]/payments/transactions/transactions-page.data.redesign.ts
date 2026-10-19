@@ -1,4 +1,4 @@
-import type { UnifiedTransactionsListResponse } from "@sdp/types";
+import type { UnifiedTransactionsListResponse } from "@sdp/types/unified-transactions";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import type { TransactionFilters } from "./transactions-query.redesign";

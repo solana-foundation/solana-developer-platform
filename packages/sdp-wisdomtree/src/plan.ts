@@ -1,4 +1,4 @@
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import type { WisdomTreeFund } from "@sdp/types/wisdomtree-programs";
 import { WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS } from "@sdp/types/wisdomtree-programs";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";

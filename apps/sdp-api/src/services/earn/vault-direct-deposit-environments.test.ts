@@ -4,7 +4,7 @@ import {
   earnDepositFloorSupport,
   earnDepositSlippagePolicy,
   isVaultDirectDepositEnabled,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 
 /**

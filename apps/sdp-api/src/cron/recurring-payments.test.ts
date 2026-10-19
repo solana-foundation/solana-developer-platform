@@ -1,5 +1,5 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundRunner } from "@/runtime/background";
 import * as collectRecurringPaymentsModule from "@/services/jobs/collect-recurring-payments";

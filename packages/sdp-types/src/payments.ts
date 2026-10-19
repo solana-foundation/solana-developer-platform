@@ -96,6 +96,19 @@ export const RAMP_WEBHOOK_BUSINESS_OUTCOMES = [
 ] as const;
 export type RampWebhookBusinessOutcome = (typeof RAMP_WEBHOOK_BUSINESS_OUTCOMES)[number];
 
+export const RAMP_WEBHOOK_REFUSAL_REASONS = [
+  "environment_mismatch",
+  "provider_mismatch",
+  "transfer_type_mismatch",
+  "asset_mismatch",
+  "settled_after_cancel",
+] as const;
+export type RampWebhookRefusalReason = (typeof RAMP_WEBHOOK_REFUSAL_REASONS)[number];
+
+export type RampWebhookProcessResult =
+  | { outcome: Exclude<RampWebhookBusinessOutcome, "refused">; reason?: never }
+  | { outcome: "refused"; reason: RampWebhookRefusalReason };
+
 export const RAMP_WEBHOOK_APPLY_OUTCOMES = [
   ...RAMP_WEBHOOK_BUSINESS_OUTCOMES,
   "discarded",

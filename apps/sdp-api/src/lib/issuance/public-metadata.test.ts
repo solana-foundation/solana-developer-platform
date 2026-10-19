@@ -1,4 +1,4 @@
-import type { IssuanceMetadata } from "@sdp/types";
+import type { IssuanceMetadata } from "@sdp/types/asset-profiles";
 import { describe, expect, it } from "vitest";
 import { projectPublicMetadata } from "./public-metadata";
 

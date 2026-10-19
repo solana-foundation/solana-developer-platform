@@ -1,9 +1,5 @@
-import {
-  EARN_APY_TYPES,
-  EARN_LIQUIDITY_TERMS,
-  EARN_STRATEGY_SOURCE_KINDS,
-  SOLANA_CLUSTERS,
-} from "@sdp/types";
+import { EARN_APY_TYPES, EARN_LIQUIDITY_TERMS, EARN_STRATEGY_SOURCE_KINDS } from "@sdp/types/earn";
+import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 const SOURCE_KINDS = new Set<string>(EARN_STRATEGY_SOURCE_KINDS);

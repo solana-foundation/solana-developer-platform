@@ -1,10 +1,6 @@
-import type {
-  MovementOf,
-  PaymentTransferType,
-  PersistedRampProviderId,
-  RampDirection,
-  RampProviderId,
-} from "@sdp/types";
+import type { MovementOf } from "@sdp/types/movements";
+import type { PaymentTransferType, RampDirection } from "@sdp/types/payments";
+import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
@@ -12,6 +8,8 @@ import {
   assertRampProviderInChannel,
   assertTransferRampProviderInChannel,
 } from "@/middleware/require-module";
+import type { AppContext } from "@/routes/payments/context";
+import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
 import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import {
   assertProviderAvailable,
@@ -19,8 +17,6 @@ import {
   type ProjectProviderDecision,
   refuseProjectProvider,
 } from "@/services/provider-availability.service";
-import type { AppContext } from "../context";
-import { assertPaymentWalletExactAccess } from "../wallets";
 
 export type RampAdmission =
   | { need: "read"; provider: RampProviderId }

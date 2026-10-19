@@ -9,6 +9,7 @@ vi.mock("@/flags", () => ({
   newDesignPayDeposit: async () => true,
   newDesignActivity: async () => true,
   newDesignWallets: async () => true,
+  newDesignIssuance: async () => true,
   newDesignOverview: async () => true,
 }));
 
@@ -53,6 +54,7 @@ describe("getDesignModuleFlags", () => {
     await expect(getDesignModuleFlags()).resolves.toEqual({
       overview: true,
       wallets: true,
+      issuance: true,
       contacts: false,
       payDeposit: true,
       activity: true,

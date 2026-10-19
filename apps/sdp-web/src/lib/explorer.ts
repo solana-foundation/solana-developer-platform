@@ -1,4 +1,4 @@
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
 const EXPLORER_ORIGIN = "https://explorer.solana.com";
 

@@ -1,17 +1,18 @@
 "use client";
 
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import {
-  type CounterpartyAccount,
   PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
   type PaymentRecurringPaymentSchedulePreset,
   type PaymentRecurringPaymentStatus,
   type PaymentsDashboardWallet,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { shortenAddress } from "../payments-overview.utils";
-import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { ONCHAIN_AMOUNT_PATTERN } from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 export const STATUS_TRANSLATION_KEYS = {
   pending_activation: "DashboardPayments.recurring.pendingActivation",

@@ -1,6 +1,6 @@
 import { prepareRpcRead, withMinimumRpcSlot } from "@sdp/rpc/read-context";
-import { wellKnownMint } from "@sdp/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { type Address, address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {

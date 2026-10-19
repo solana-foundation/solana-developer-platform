@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";

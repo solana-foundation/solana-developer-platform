@@ -1,4 +1,5 @@
-import { type PaymentRequest, wellKnownMint } from "@sdp/types";
+import type { PaymentRequest } from "@sdp/types/payments";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import {
   fetchPaymentRequestDetail,

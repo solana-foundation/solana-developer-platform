@@ -1,14 +1,8 @@
-import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES } from "@sdp/types";
+import { createRpc } from "@sdp/rpc/solana";
+import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES, type DvpTradeSide } from "@sdp/types/dvp";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import {
-  createCounterpartyAccountsRepository,
-  createDvpTradeRepository,
-  type DvpTradeRow,
-  type DvpTradeSide,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
 import {
   createPostgresDvpLegFundingClaimRepository,
   type DvpLegFundingClaim,
@@ -17,6 +11,11 @@ import {
   createPostgresDvpLegTransferRepository,
   type DvpTradeLegTransfers,
 } from "@/db/repositories/dvp-leg-transfer.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import {
+  createCounterpartyAccountsRepository,
+  createDvpTradeRepository,
+} from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -31,8 +30,11 @@ import {
 import { createDvpTrade } from "@/services/dvp/create";
 import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
-import type { DvpCallerWallet } from "@/services/dvp/inbound";
-import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
+import {
+  callerPartyAddresses,
+  type DvpCallerWallet,
+  listInboundDvpTrades,
+} from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import {
   type DvpLegActionResult,
@@ -49,7 +51,7 @@ import {
 import { reclaimDvpTradeLeg } from "@/services/dvp/reclaim";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
 import { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { resolveCloseAction, resolveLegAction } from "./action-context";
 import { type DvpActionWallet, readDvpActionWallets } from "./action-wallets";
 import {
@@ -1023,7 +1025,7 @@ export const inspectMint = async (c: AppContext) => {
 
   let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
   try {
-    inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
+    inspection = await inspectDvpMint(createRpc(c.env), parsed);
   } catch {
     // The read failed, so nothing is known about the mint: retryable, never "not found".
     throw solanaRpcError("Could not read the mint from Solana. Try again.");

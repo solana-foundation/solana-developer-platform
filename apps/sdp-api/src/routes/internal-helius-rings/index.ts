@@ -13,7 +13,7 @@ import {
   makeDefaultRingsConnection,
   testRingsConnection,
 } from "@/services/helius-rings/connection.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 const connectionInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(100),
@@ -25,16 +25,16 @@ const connectionInputSchema = z.strictObject({
 });
 const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().min(1) });
 
-const routes = new Hono<{ Bindings: Env }>();
-routes.use("*", requireModule("helius_rings"));
-routes.use("*", organizationCredentialAdminAuthMiddleware());
-routes.use("*", projectContextMiddleware());
+export const internalHeliusRings = new Hono<{ Bindings: Env }>();
+internalHeliusRings.use("*", requireModule("helius_rings"));
+internalHeliusRings.use("*", organizationCredentialAdminAuthMiddleware());
+internalHeliusRings.use("*", projectContextMiddleware());
 
-routes.get("/connections", requireAction("helius_rings.configure"), async (c) =>
+internalHeliusRings.get("/connections", requireAction("helius_rings.configure"), async (c) =>
   success(c, await listRingsConnections(c))
 );
 
-routes.post("/connections", requireAction("helius_rings.configure"), async (c) => {
+internalHeliusRings.post("/connections", requireAction("helius_rings.configure"), async (c) => {
   const parsed = connectionInputSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     throw badRequest("Invalid request body", { errors: z.flattenError(parsed.error).fieldErrors });
@@ -42,7 +42,7 @@ routes.post("/connections", requireAction("helius_rings.configure"), async (c) =
   return created(c, await createRingsConnection(c, parsed.data));
 });
 
-routes.post(
+internalHeliusRings.post(
   "/connections/:connectionId/test",
   requireAction("helius_rings.configure"),
   async (c) => {
@@ -51,7 +51,7 @@ routes.post(
   }
 );
 
-routes.post(
+internalHeliusRings.post(
   "/connections/:connectionId/make-default",
   requireAction("helius_rings.configure"),
   async (c) => {
@@ -60,7 +60,7 @@ routes.post(
   }
 );
 
-routes.post(
+internalHeliusRings.post(
   "/connections/:connectionId/deactivate",
   requireAction("helius_rings.configure"),
   async (c) => {
@@ -76,5 +76,3 @@ function parseParams(value: unknown) {
   }
   return parsed.data;
 }
-
-export default routes;

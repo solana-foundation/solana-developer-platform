@@ -3,7 +3,7 @@ import type { ClerkAuthContext } from "@/lib/auth";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 export async function testClerkContext(env: Env): Promise<ClerkAuthContext> {
   await ensureTestClerkIssuer(env);

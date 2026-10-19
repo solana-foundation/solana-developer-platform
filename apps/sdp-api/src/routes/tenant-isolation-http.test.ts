@@ -1,16 +1,8 @@
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-/**
- * Cross-tenant access through the full HTTP stack under the plain
- * NOSUPERUSER/NOBYPASSRLS runtime role: API-key resolution runs under the
- * system database identity, the request narrows to the key's organization,
- * and row-level security (migration 0079) keeps one tenant's key from
- * reading another tenant's records even if a handler forgot its scoping.
- */
-
 import { hashString } from "@sdp/payments/hash";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";

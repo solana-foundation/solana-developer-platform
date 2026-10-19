@@ -16,21 +16,12 @@ import path from "node:path";
 import * as readline from "node:readline/promises";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import {
-  autoSecretKeys,
-  defaultValues,
-  type EnvField,
-  FIELDS,
-  generateEnv,
-  generateLocalSignerKeypair,
-  generateSecret,
-  isFieldVisible,
-  parseList,
-  SECTIONS,
-  type SelectOption,
-  type Values,
-  validateValues,
-} from "@sdp/env-config";
+import { FIELDS, isFieldVisible, parseList, SECTIONS } from "@sdp/env-config/fields";
+import { defaultValues, generateEnv } from "@sdp/env-config/generate";
+import { generateLocalSignerKeypair } from "@sdp/env-config/local-keypair";
+import { autoSecretKeys, generateSecret } from "@sdp/env-config/secrets";
+import type { EnvField, SelectOption, Values } from "@sdp/env-config/types";
+import { validateValues } from "@sdp/env-config/validate";
 
 /**
  * Build values from the process environment (non-interactive path).

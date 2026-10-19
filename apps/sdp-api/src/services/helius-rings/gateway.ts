@@ -1,11 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { RingsGatewayPort, RuntimeHealth } from "@sdp/helius-rings";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type { RingsGatewayPort } from "@sdp/helius-rings/port";
+import type { RuntimeHealth } from "@sdp/helius-rings/types";
+import { createRingsGateway } from "@sdp/helius-rings-sdk/gateway";
 import {
-  createRingsGateway,
   type OuterTransactionPolicyInput,
   validateOuterTransaction as validateSdkOuterTransaction,
-} from "@sdp/helius-rings-sdk";
+} from "@sdp/helius-rings-sdk/outer-tx-policy";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import { createGuardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";

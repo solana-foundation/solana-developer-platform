@@ -1,23 +1,20 @@
 "use client";
 
-import type {
-  Counterparty,
-  CounterpartyEntityType,
-  PaymentsDashboardWallet,
-  RampProviderId,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { Counterparty, CounterpartyEntityType } from "@sdp/types/counterparties";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { ProviderAvailabilityEntry } from "@sdp/types/provider-access";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
+import { Modal } from "@sdp/ui/modal";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
-import { Modal } from "@/components/ui/modal";
+import { useRampEstimate } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
@@ -33,7 +30,6 @@ import {
   type SelectedRampPair,
   surfacedRampProviderOptions,
 } from "@/lib/ramps";
-import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
 import { ProviderCard } from "./provider-card";
 import { RampSelectionProvider } from "./ramp-selection-context";

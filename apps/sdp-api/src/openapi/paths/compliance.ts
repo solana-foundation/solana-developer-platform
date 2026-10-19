@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-
-import { addressScreeningRequestSchema, errorResponseSchema } from "../schemas";
+import { errorResponseSchema } from "@/openapi/schemas/base";
+import { addressScreeningRequestSchema } from "@/openapi/schemas/compliance";
 import { errorResponses, jsonContent, projectScopeWithDeclaredIdempotencyHeaders } from "./helpers";
 import { addressScreeningResponse } from "./responses";
 

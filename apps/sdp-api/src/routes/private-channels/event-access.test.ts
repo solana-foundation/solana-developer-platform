@@ -1,4 +1,4 @@
-import type { OrganizationRole } from "@sdp/types";
+import type { OrganizationRole } from "@sdp/types/permissions";
 import { describe, expect, it, vi } from "vitest";
 import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
 import { resolveEventViewerForAuth } from "./event-access";

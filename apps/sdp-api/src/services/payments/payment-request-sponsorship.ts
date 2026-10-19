@@ -1,9 +1,9 @@
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS } from "@sdp/types";
+import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
   AccountRole,
@@ -26,11 +26,11 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, rateLimited } from "@/lib/errors";
-import { buildSplTransferInstructions, SOL_MINT } from "@/routes/payments/token-accounts";
+import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import {
   createSponsorshipFeePayment,
@@ -169,7 +169,7 @@ export async function issuePaymentRequestTransaction(
   const feePayment = await getFeePayment();
   const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
     feePayment.getFeePayer(),
-    solanaRpc.getRecentBlockhash(rpc, "confirmed"),
+    getRecentBlockhash(rpc, "confirmed"),
   ]);
   const unsignedBase64 = await buildPaymentTransaction(rpc, {
     ...params,
@@ -213,7 +213,7 @@ export async function issuePaymentRequestTransaction(
  * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
  */
 async function buildPaymentTransaction(
-  rpc: solanaRpc.SolanaRpc,
+  rpc: SolanaRpc,
   params: {
     request: PaymentRequestRow;
     payer: Address;

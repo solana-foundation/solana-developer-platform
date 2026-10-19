@@ -1,17 +1,17 @@
 "use client";
 
 import { FIAT_PEG_CURRENCIES } from "@sdp/types/payment-rails";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { Combobox } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { ToggleSwitch } from "@sdp/ui/toggle-switch";
 import { type LucideIcon, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useId } from "react";
-import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
-import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useTranslations } from "@/i18n/provider";
 import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
-import { cn } from "@/lib/utils";
 import { type FieldDescriptor, fieldOptionLabel } from "./asset-details-config";
 import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
 

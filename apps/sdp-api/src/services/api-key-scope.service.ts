@@ -1,17 +1,17 @@
 import {
   type Action,
-  type ApiKeyWalletBinding,
-  type ApiKeyWalletScope,
   actionOwnerOf,
   isApiKeyGrantableAction,
-  isModuleInReleaseChannel,
-  type OrganizationRole,
   organizationRoleMayPerform,
-  type Permission,
+} from "@sdp/types/actions";
+import type { ApiKeyWalletBinding, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { OrganizationRole, Permission } from "@sdp/types/permissions";
+import {
+  isModuleInReleaseChannel,
   resolveSdpReleaseChannel,
   type SdpRampProviderStages,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import type { Context } from "hono";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
@@ -19,7 +19,7 @@ import {
   type ExactApiKeyWalletBinding,
   normalizeApiKeyWalletPermissions,
 } from "@/services/api-key-wallets.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 type WalletBindingInput = {
   walletId: string;

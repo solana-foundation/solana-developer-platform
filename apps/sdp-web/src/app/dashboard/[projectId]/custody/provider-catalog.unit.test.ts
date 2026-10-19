@@ -1,7 +1,7 @@
+import { CUSTODY_PROVIDER_DISPLAY_STATUSES } from "@sdp/types/custody";
 import { describe, expect, it } from "vitest";
 import {
   CUSTODY_PROVIDER_CATALOG,
-  CUSTODY_PROVIDER_DISPLAY_STATUSES,
   getCustodyProviderEntry,
   providerSupportsStoredCredentialSetup,
 } from "./provider-catalog";

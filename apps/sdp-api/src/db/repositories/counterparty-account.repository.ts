@@ -3,8 +3,8 @@ import type {
   CounterpartyAccountKind,
   CounterpartyAccountProviderData,
   CounterpartyAccountStatus,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/types/counterparties";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateCounterpartyAccountId(): string {
   return `counterparty_account_${crypto.randomUUID()}`;

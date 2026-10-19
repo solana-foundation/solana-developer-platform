@@ -1,16 +1,17 @@
-import { API_KEY_GRANTABLE_ACTIONS, PERMISSIONS } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
+import { PERMISSIONS } from "@sdp/types/permissions";
+import { z } from "zod";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
-} from "../../routes/api-keys/schemas";
+} from "@/routes/api-keys/schemas";
 import {
   apiKeyIdParamSchema,
   apiKeyPrefixSchema,
   isoDateTimeSchema,
   projectIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 import { custodyWalletOwnerRequestSchema } from "./custody";
 

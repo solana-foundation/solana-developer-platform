@@ -3,26 +3,23 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ASSET_TYPES } from "@sdp/types";
-
+import { ASSET_TYPES } from "@sdp/types/asset-profiles";
+import { ASSET_CAPABILITIES } from "./capabilities";
 import {
-  ADVANCED_SETTINGS,
   ADVANCED_SETTINGS_VERSION,
-  ASSET_CAPABILITIES,
-  expandLegacySettingKeys,
   getConflictingSettingKeys,
   getLockedSettings,
   getRecommendedSettings,
   isSettingAllowed,
   listSettingsForType,
   pruneIncompatibleSettings,
-  renderSupportMatrixMarkdown,
   resolveAssetCapability,
-  resolveSettingsToExtensions,
-  SETTING_KEYS,
   validateSelectedSettings,
   validateSettingParams,
 } from "./index";
+import { resolveSettingsToExtensions } from "./resolver";
+import { ADVANCED_SETTINGS, expandLegacySettingKeys, SETTING_KEYS } from "./settings";
+import { renderSupportMatrixMarkdown } from "./support-matrix";
 
 describe("advanced settings capability registry", () => {
   it("loads without throwing the dev-time completeness assertion", () => {

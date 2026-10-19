@@ -2,12 +2,9 @@ import type { ShieldedAddress } from "@heliuslabs/zolana";
 import type { WalletKeys, ZolanaClient } from "@heliuslabs/zolana/client";
 import { checkedTransactionSize } from "@heliuslabs/zolana/interface";
 import { fetchUserRecord, resolvedAddressFromRecord } from "@heliuslabs/zolana/wallet";
-import {
-  type BuildOperationInput,
-  type BuildOperationResult,
-  HeliusRingsError,
-  SecretRef,
-} from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type { BuildOperationInput, BuildOperationResult } from "@sdp/helius-rings/port";
+import { SecretRef } from "@sdp/helius-rings/secrets";
 import {
   address,
   appendTransactionMessageInstructions,

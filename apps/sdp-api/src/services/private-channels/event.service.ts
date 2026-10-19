@@ -1,17 +1,17 @@
-import { redactCredentialSecrets } from "@sdp/redaction";
+import { redactCredentialSecrets } from "@sdp/redaction/credentials";
 import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   type PrivateChannelEventFamily,
   type PrivateChannelEventStatus,
   type PrivateChannelEventType,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import {
-  createPrivateChannelEventRepository,
   generatePrivateChannelEventId,
   type PrivateChannelEventRepository,
   type PrivateChannelEventWriteInput,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-event.repository";
+import { createPrivateChannelEventRepository } from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { createDbEventSink } from "./sinks/db-sink";

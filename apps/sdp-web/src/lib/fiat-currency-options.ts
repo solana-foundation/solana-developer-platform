@@ -3,7 +3,7 @@ import {
   fiatCurrencyDisplayName,
   fiatCurrencyFlagEmoji,
 } from "@sdp/types/payment-rails";
-import type { ComboboxOption } from "@/components/ui/combobox";
+import type { ComboboxOption } from "@sdp/ui/combobox";
 
 /** Combobox options for fiat currencies: flag + ISO code as the label, CLDR name as the description. */
 export function fiatCurrencyOptions(codes: readonly FiatCurrencyCode[]): ComboboxOption[] {

@@ -2,7 +2,7 @@ import type {
   CounterpartyEntityType,
   CounterpartyProviderData,
   CounterpartyStatus,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
 
 /**
  * Persisted counterparty row shape shared between the API's counterparty

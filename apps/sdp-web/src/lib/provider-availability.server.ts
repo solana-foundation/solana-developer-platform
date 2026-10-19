@@ -1,6 +1,7 @@
-import "server-only";
-
-import { type ProjectProviderAvailability, projectProviderAvailabilitySchema } from "@sdp/types";
+import {
+  type ProjectProviderAvailability,
+  projectProviderAvailabilitySchema,
+} from "@sdp/types/provider-access";
 import { requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
 
 /**

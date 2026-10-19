@@ -32,14 +32,17 @@
  * sync down with it, every tick, for as long as the provider stayed slow.
  */
 
-import { EARN_PROVIDER_CLIENTS, SdpEarnError, supportsLiveMetrics } from "@sdp/earn";
+import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
+import { supportsLiveMetrics } from "@sdp/earn/capabilities";
+import { SdpEarnError } from "@sdp/earn/errors";
 import type {
   EarnLiveMetricsProvider,
   EarnRuntimeContext,
   ProviderStrategyMetrics,
 } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types";
-import { createEarnRepository, type EarnRepository } from "@/db/repositories";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnRepository } from "@/db/repositories/earn.repository";
+import { createEarnRepository } from "@/db/repositories/repository-factory";
 import type { BackgroundRunner } from "@/runtime/background";
 import { getLogger } from "@/runtime/logger";
 import type { Observability } from "@/runtime/observability";

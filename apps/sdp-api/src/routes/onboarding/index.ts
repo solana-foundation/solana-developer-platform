@@ -10,11 +10,11 @@ import { Hono } from "hono";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
 import { publicRoute } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { completeOnboarding, getOnboardingStatus } from "./handlers";
 import { completeOnboardingSchema } from "./schemas";
 
-const onboarding = new Hono<{ Bindings: Env }>();
+export const onboarding = new Hono<{ Bindings: Env }>();
 
 onboarding.use("*", clerkOnboardingMiddleware());
 onboarding.get(
@@ -28,5 +28,3 @@ onboarding.post(
   validateBody(completeOnboardingSchema),
   completeOnboarding
 );
-
-export default onboarding;

@@ -1,11 +1,12 @@
 "use client";
 
-import type { CryptoRailId, RampProviderId } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { RampDirection } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
-  RampDirection,
   RequirementField,
 } from "@sdp/types/ramp-requirements";
 import {
@@ -15,19 +16,17 @@ import {
 } from "@sdp/types/ramp-requirements";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
+import { getPaymentApiError as getApiError } from "@/app/dashboard/[projectId]/payments/payment-api-errors";
 import {
   buildCounterpartyRequirementsKey,
   type CounterpartyRequirementsParams,
   paymentsQueryKeys,
 } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-
-export type { CounterpartyRequirementsParams };
-
-import { getApiError } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { requirementFieldError } from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
-import { requirementFieldError } from "../schema";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 

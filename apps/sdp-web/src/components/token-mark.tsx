@@ -1,10 +1,10 @@
 "use client";
 
-import { WELL_KNOWN_TOKEN_BY_MINT, type WellKnownTokenSymbol } from "@sdp/types";
+import { WELL_KNOWN_TOKEN_BY_MINT, type WellKnownTokenSymbol } from "@sdp/types/well-known-tokens";
+import { cn } from "@sdp/ui/cn";
 import Image from "next/image";
 import { useState } from "react";
 import { isRenderableLogoUrl } from "@/lib/token-logo-url";
-import { cn } from "@/lib/utils";
 
 /**
  * Locally bundled marks for the tokens whose logos come from a stable, first

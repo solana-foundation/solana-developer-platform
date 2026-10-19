@@ -5,7 +5,14 @@
  * Handles DB-backed config resolution and Kit signer access for exact custody wallets.
  */
 
-import type { CustodyProvider } from "@sdp/custody";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  IBM_HAVEN_PROVIDER_LABEL,
+  normalizeDfnsWalletId,
+  resolveDfnsNetwork,
+} from "@sdp/custody/dfns/client";
+import { KeychainFireblocksAdapter } from "@sdp/custody/keychain/keychain-fireblocks.adapter";
 import {
   normalizeAnchorageWalletId,
   normalizeCoinbaseCdpWalletId,
@@ -14,25 +21,19 @@ import {
   normalizePrivyWalletId,
   normalizeTurnkeyWalletId,
   normalizeUtilaWalletId,
-} from "@sdp/custody";
-import {
-  createDfnsApiClient,
-  createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
-  normalizeDfnsWalletId,
-  resolveDfnsNetwork,
-} from "@sdp/custody/dfns";
+} from "@sdp/custody/provider-wallet-ids";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
-import type { MovementId } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import type { MovementId } from "@sdp/types/movements";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
-import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";

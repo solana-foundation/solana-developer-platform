@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
-import {
-  IDEMPOTENCY_REQUIRED_ROUTES,
-  SDP_RELEASE_CHANNEL_NAMES,
-  SDP_RELEASE_CHANNELS,
-} from "@sdp/types";
+import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
+import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";

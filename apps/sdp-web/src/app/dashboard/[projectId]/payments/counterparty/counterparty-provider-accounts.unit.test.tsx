@@ -1,4 +1,4 @@
-import type { CounterpartyProviderAccount } from "@sdp/types";
+import type { CounterpartyProviderAccount } from "@sdp/types/counterparties";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";

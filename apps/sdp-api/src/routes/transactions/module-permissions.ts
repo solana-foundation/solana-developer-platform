@@ -1,11 +1,11 @@
+import type { Action } from "@sdp/types/actions";
+import type { Permission } from "@sdp/types/permissions";
 import {
-  type Action,
   PAYMENT_TRANSACTION_KINDS,
   type PaymentTransactionKind,
-  type Permission,
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 
 /**
  * The action that shows each module's rows in the unified list. Payments rows

@@ -1,5 +1,5 @@
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { getBase58Encoder, signature } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { kaminoClusterConfig } from "./programs";

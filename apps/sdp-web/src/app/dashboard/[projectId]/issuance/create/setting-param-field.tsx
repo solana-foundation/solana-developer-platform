@@ -1,9 +1,9 @@
 "use client";
 
-import type { ParamFieldSpec } from "@sdp/types";
+import type { ParamFieldSpec } from "@sdp/types/advanced-settings";
+import { cn } from "@sdp/ui/cn";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 export function SettingParamField({
   param,

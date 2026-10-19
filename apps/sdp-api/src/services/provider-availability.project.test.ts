@@ -1,6 +1,6 @@
-import type { OrganizationProviderOverrides } from "@sdp/types";
+import type { OrganizationProviderOverrides } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
 import {
   assertProjectProviderAdmitted,
@@ -21,14 +21,21 @@ import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
-  return mockCustodyReleaseChannels(
-    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelStages(
+    mockCustodyReleaseChannels(
+      await importOriginal<typeof import("@sdp/types/release-channels")>()
+    ),
+    RAMP_PROVIDERS
   );
 });
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-stages");
+  return mockEarnProviderSurfacing(
+    await importOriginal<typeof import("@sdp/types/provider-access")>()
+  );
 });
 
 const ORGANIZATION_ID = "org_project_provider_rule";

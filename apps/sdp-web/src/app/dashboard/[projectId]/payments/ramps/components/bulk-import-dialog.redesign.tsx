@@ -1,10 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { PlusIcon, XIcon } from "lucide-react";
 import { type ClipboardEvent, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
-import { useTranslations } from "@/i18n/provider";
 import {
   type BulkImportRow,
   bulkRowErrorMessage,
@@ -12,7 +11,8 @@ import {
   isEmptyBulkRow,
   splitPastedRows,
   validateBulkRows,
-} from "../bulk-import.redesign";
+} from "@/app/dashboard/[projectId]/payments/ramps/bulk-import.redesign";
+import { useTranslations } from "@/i18n/provider";
 
 interface BulkImportDialogProps {
   open: boolean;

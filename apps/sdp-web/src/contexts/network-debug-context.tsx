@@ -24,8 +24,6 @@ import {
   toNetworkDebugRequestState,
 } from "@/lib/network-debug";
 
-export type { NetworkDebugEntry, NetworkDebugRequestState } from "@/lib/network-debug";
-
 interface NetworkDebugContextValue {
   available: boolean;
   enabled: boolean;

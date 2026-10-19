@@ -1,11 +1,11 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type InviteMemberResult, inviteMember } from "@/app/members/actions";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 
 type InviteState = InviteMemberResult | null;

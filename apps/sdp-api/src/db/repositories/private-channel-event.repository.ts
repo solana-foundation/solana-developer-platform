@@ -2,8 +2,8 @@ import type {
   PrivateChannelEventFamily,
   PrivateChannelEventStatus,
   PrivateChannelEventType,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/types/private-channels";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelEventId(): string {
   return `pce_${crypto.randomUUID()}`;

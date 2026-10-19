@@ -1,7 +1,7 @@
 "use client";
 
+import { Card, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { useEffect, useState } from "react";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { API_KEYS_FLASH_PATH, type ApiKeyFlash } from "./api-key-flash";

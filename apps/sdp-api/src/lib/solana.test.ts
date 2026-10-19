@@ -1,4 +1,4 @@
-import { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "@sdp/rpc";
+import { getSolanaConfig, resolveDefaultSolanaRpcUrl } from "@sdp/rpc/config";
 import { createRpc } from "@sdp/rpc/solana";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";

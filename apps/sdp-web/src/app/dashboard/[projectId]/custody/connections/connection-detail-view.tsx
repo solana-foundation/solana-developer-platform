@@ -1,6 +1,9 @@
 "use client";
 
-import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types";
+import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -9,9 +12,6 @@ import { formatCustodyProviderName } from "@/app/dashboard/[projectId]/custody/p
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { formatCreatedDate } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { AddWalletDialog } from "./add-wallet-dialog";
 import { CancelSetupDialog } from "./cancel-setup-dialog";

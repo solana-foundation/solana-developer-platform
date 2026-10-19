@@ -47,6 +47,7 @@ A change that triggers one of these must handle it.
 - Never a plain `string` where an `@sdp/types` constant set exists. Scripts import canonical types from `@sdp/types`. ISO codes are uppercase.
 - Three or more branches use a `switch` with an exhaustive `never` default, not nested ternaries.
 - No conditional empty-object spreads (`...(cond ? { x } : {})`), no parameters typed as bare `object`, and no "shape" in symbol names.
+- **Imports name the defining file** (`docs/decisions/0010-module-boundaries.md`). No barrels or re-exports (`export … from`, or importing a symbol only to export it again); a package's public surface is its `package.json` `exports` list. No default exports outside framework-read files. No `../` imports: `@/` in an app, `#/` inside a package, `@sdp/<pkg>/<subpath>` across workspaces; same-folder `./` is fine.
 - Token mints and labels come only from `@sdp/types/well-known-tokens` (`WELL_KNOWN_TOKENS`, `WELL_KNOWN_TOKEN_BY_MINT`, `SOL_MINT`, `wellKnownMint`, `CLUSTER_BY_SDP_ENVIRONMENT`). Never hardcode a mint address or a symbol mapping elsewhere.
 
 ## Tests

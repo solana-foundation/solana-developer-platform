@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import type { CustodyWalletTokenBalance, PaymentsDashboardWallet } from "@sdp/types";
-import { wellKnownMint } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { SWRResponse } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

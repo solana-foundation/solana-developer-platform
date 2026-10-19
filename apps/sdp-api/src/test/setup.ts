@@ -1,5 +1,5 @@
 import { afterAll, beforeEach } from "vitest";
-import { closeDatabasePools } from "@/db";
+import { closeDatabasePools } from "@/db/client";
 import { setDefaultDatabaseIdentityForTesting } from "@/db/identity";
 import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
 import { closeAllRedisClients } from "@/runtime/kv-redis";

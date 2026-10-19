@@ -5,7 +5,7 @@
  * Clerk has its own allowlist for signups; this service is intentionally local and testable.
  */
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { Env } from "@/types/env";
 
 export interface AllowlistEntry {

@@ -1,20 +1,18 @@
 /** Environment variables consumed by the Node API runtime. */
 
-import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import type {
-  Action,
-  ApiKeyEnvironment,
-  EgressReadiness,
-  OrganizationEntitlements,
-  OrganizationRole,
-  OrganizationRpcProvider,
-  Permission,
-  SdpRampProviderStages,
-} from "@sdp/types";
-import type { ManagedRpcEnv } from "@sdp/rpc";
-import type { RequestGateContext } from "@/middleware/request-gate";
-import type { KVStoreSet } from "@/runtime/kv";
-import type { Observability } from "@/runtime/observability";
+import { type ClerkJwtPayload } from "@/lib/clerk-token";
+import { type RequestGateContext } from "@/middleware/request-gate";
+import { type KVStoreSet } from "@/runtime/kv";
+import { type Observability } from "@/runtime/observability";
+import { type ManagedRpcEnv } from "@sdp/rpc/types";
+import { type Action } from "@sdp/types/actions";
+import { type OrganizationRole } from "@sdp/types/permissions";
+import { type ApiKeyEnvironment } from "@sdp/types/api-keys";
+import { type EgressReadiness } from "@sdp/types/health";
+import { type OrganizationEntitlements } from "@sdp/types/organization-entitlements";
+import { type OrganizationRpcProvider } from "@sdp/types/organizations";
+import { type Permission } from "@sdp/types/permissions";
+import { type SdpRampProviderStages } from "@sdp/types/release-channels";
 
 export interface Env extends ManagedRpcEnv {
   // Runtime data services
@@ -400,5 +398,5 @@ declare module "hono" {
 }
 
 declare global {
-  type DatabaseClient = import("@/db").DatabaseClient;
+  type DatabaseClient = import("@/db/client").DatabaseClient;
 }

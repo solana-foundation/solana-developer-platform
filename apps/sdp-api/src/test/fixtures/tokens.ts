@@ -2,8 +2,8 @@
  * Token test fixtures
  */
 
-import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
-import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
 import type { SeededApiKey } from "@/test/mocks/kv";
 import { TEST_ORG, TEST_USER } from "./organizations";
 

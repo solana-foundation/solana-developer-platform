@@ -1,18 +1,16 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   PAYMENT_TRANSFER_STATUSES,
-  type RampProviderId,
-  SOL_MINT,
-  type SolanaCluster,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import { SOL_MINT, type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { Signature } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";

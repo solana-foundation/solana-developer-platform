@@ -1,5 +1,6 @@
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KeychainPrivyAdapter, type SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   createAdapterFromEncryptedConfig,
@@ -41,7 +42,7 @@ function createEnv(): Env {
   return {
     ENVIRONMENT: "development",
     API_VERSION: "v1",
-    SDP_RELEASE_CHANNEL: "stable",
+    SDP_RELEASE_CHANNEL: "beta",
   } as Env;
 }
 

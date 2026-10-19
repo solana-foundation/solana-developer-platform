@@ -1,4 +1,4 @@
-import type { TokenTransaction } from "@sdp/types";
+import type { TokenTransaction } from "@sdp/types/tokens";
 import { getLogger } from "@/runtime/logger";
 import {
   type AuditAction,

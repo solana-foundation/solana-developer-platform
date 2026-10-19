@@ -1,4 +1,5 @@
-import type { OrganizationTier, Token } from "@sdp/types";
+import type { OrganizationTier } from "@sdp/types/organizations";
+import type { Token } from "@sdp/types/tokens";
 import { generateKeyPairSigner } from "@solana/kit";
 import type { ClerkTestIdentity } from "./clerk-admin";
 import {
@@ -17,7 +18,6 @@ import {
   getBootstrapApiBaseUrl,
   getPlaywrightCustodyProvider,
   type PlaywrightWalletFixture,
-  seedLocalClerkOrganizationMapping,
 } from "./local-dashboard-bootstrap";
 
 interface BootstrapOptions {
@@ -274,5 +274,3 @@ export async function bootstrapLocalPaymentFixtures({
     token: toFixtureToken(openToken),
   };
 }
-
-export { getBootstrapApiBaseUrl, seedLocalClerkOrganizationMapping };
