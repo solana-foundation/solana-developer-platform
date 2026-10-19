@@ -4936,6 +4936,25 @@ describe("Payments routes — recurring", () => {
       expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [activated.id], failed: [] });
     });
 
+    it("gives the payment back to its activator when the change fails before taking effect", async () => {
+      const activated = await activatedByAnotherKey();
+      recurringExecution.signAndSendMock().mockRejectedValueOnce(new Error("signer unavailable"));
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.00" }) },
+        env
+      );
+
+      expect(update.status).toBeGreaterThanOrEqual(400);
+      expect(await statusOf(activated.id)).toBe("active");
+      expect(await activatorOf(activated.id)).toBe("key_recurring_original_activator");
+      expect(await cancelFor("key_recurring_original_activator")).toEqual({
+        canceled: [activated.id],
+        failed: [],
+      });
+    });
+
     it("leaves the activator in place on a metadata-only update", async () => {
       const activated = await activatedByAnotherKey();
 

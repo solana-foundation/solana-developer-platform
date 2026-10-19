@@ -37,6 +37,7 @@ import type {
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptRow,
   RecurringPaymentActivator,
+  StoredRecurringPaymentActivator,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type {
@@ -614,6 +615,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   nowIso: string;
   recoveringStaleUpdate: boolean;
   idempotency: RecurringPaymentUpdateIdempotency | null;
+  previousActivator: StoredRecurringPaymentActivator | null;
 }): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
   // A stale claim resumes the in-flight attempt under its original key, or
   // records this request's key and fingerprint on it when it has none.
@@ -677,6 +679,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     updatedAt: input.nowIso,
     idempotencyKey: input.idempotency?.key ?? null,
     idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
+    previousActivator: input.previousActivator,
   });
 
   if (!attempt) {
@@ -1805,6 +1808,15 @@ async function recordRecurringPaymentUpdateFailure(input: {
       });
       if (updatedRecurringPayment === null)
         throw conflict("Recurring payment update changed concurrently");
+      // The new terms never took effect, so neither does the hand-over.
+      if (input.attempt.previous_activator) {
+        await recurringRepo.restoreRecurringPaymentActivator({
+          recurringPaymentId: input.claimed.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          activator: input.attempt.previous_activator,
+        });
+      }
     }
   });
 }
@@ -1941,6 +1953,15 @@ async function claimActiveRecurringPaymentUpdate(input: {
       recurringPaymentId: input.recurringPayment.id,
     });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    // Kept on the attempt, so an attempt abandoned before its terms take
+    // effect hands the payment back to the activator it had.
+    const previousActivator = activatedBy
+      ? await transactionRepo.lockRecurringPaymentActivator({
+          recurringPaymentId: input.recurringPayment.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+        })
+      : null;
     const claimed = input.newSourceCustodyWalletId
       ? await claimSourceChangingRecurringPaymentUpdate({
           db: tx,
@@ -1975,6 +1996,7 @@ async function claimActiveRecurringPaymentUpdate(input: {
       nowIso: input.nowIso,
       recoveringStaleUpdate: input.recoveringStaleUpdate,
       idempotency: input.idempotency,
+      previousActivator,
     });
     return { claimed, attempt };
   });
