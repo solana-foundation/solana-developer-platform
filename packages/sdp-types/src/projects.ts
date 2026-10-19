@@ -10,9 +10,6 @@ export type ProjectEnvironment = "sandbox" | "production";
 
 export type ProjectStatus = "active" | "archived";
 
-// Re-export ProjectRole for convenience
-export type { ProjectRole } from "./permissions";
-
 export interface ProjectSettings {
   webhookUrl?: string;
   metadata?: Record<string, string>;

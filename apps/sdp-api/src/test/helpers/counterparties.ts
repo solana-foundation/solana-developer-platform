@@ -1,4 +1,4 @@
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 
 /**
  * Seed a counterparty with one active Solana crypto-wallet account in a project, the shape a

@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import {
-  type Base64EncodedWireTransaction,
+  address,
+  blockhash,
+  compileTransaction,
+  createTransactionMessage,
+  getBase64EncodedWireTransaction,
   isSolanaError,
+  pipe,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { createClusterRpc } from "./factory";
+import { createClusterHistoryRpc, createClusterRpc } from "./factory";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import type { ManagedRpcEnv } from "./types";
@@ -24,6 +31,21 @@ type RpcCall = { url: string; method: string };
 type JsonRpcBody = { result: unknown } | { error: { code: number; message: string } };
 
 const SLOT = 7;
+
+const WIRE_TRANSACTION = getBase64EncodedWireTransaction(
+  compileTransaction(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) =>
+        setTransactionMessageFeePayer(address("11111111111111111111111111111111"), message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          { blockhash: blockhash("11111111111111111111111111111111"), lastValidBlockHeight: 0n },
+          message
+        )
+    )
+  )
+);
 
 const SERVES_DEVNET: Endpoint = {
   genesis: { kind: "hash", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
@@ -178,20 +200,24 @@ function slotRead(url: string): RpcCall {
   return { url, method: "getSlot" };
 }
 
-describe("createClusterRpc", () => {
-  beforeEach(() => {
-    ambientPool = Object.fromEntries(
-      Object.entries(process.env).filter(([envKey]) => MANAGED_POOL_ENV_KEY.test(envKey))
-    );
-    clearManagedPool();
-  });
+function isolateManagedPool(): void {
+  ambientPool = Object.fromEntries(
+    Object.entries(process.env).filter(([envKey]) => MANAGED_POOL_ENV_KEY.test(envKey))
+  );
+  clearManagedPool();
+}
 
-  afterEach(() => {
-    mock.timers.reset();
-    globalThis.fetch = originalFetch;
-    clearManagedPool();
-    Object.assign(process.env, ambientPool);
-  });
+function restoreManagedPool(): void {
+  mock.timers.reset();
+  globalThis.fetch = originalFetch;
+  clearManagedPool();
+  Object.assign(process.env, ambientPool);
+}
+
+describe("createClusterRpc", () => {
+  beforeEach(isolateManagedPool);
+
+  afterEach(restoreManagedPool);
 
   it("refuses to build a client outside a cluster scope", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-unscoped.example.test" });
@@ -483,6 +509,137 @@ describe("createClusterRpc", () => {
     ]);
   });
 
+  it("fails a read behind the caller's slot over without cooling the endpoint down", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-behind-preferred.example.test";
+    const fallback = "https://devnet-behind-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const behindCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(
+        SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
+      ),
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(behindCalls, [
+      genesisProbe(preferred),
+      slotRead(preferred),
+      genesisProbe(fallback),
+      slotRead(fallback),
+    ]);
+
+    const caughtUpCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    await rpc.sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send();
+    assert.deepEqual(caughtUpCalls, [
+      slotRead(preferred),
+      { url: preferred, method: "sendTransaction" },
+    ]);
+  });
+
+  it("cools an endpoint down when it answers a read as unhealthy", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-unhealthy-read-preferred.example.test";
+    const fallback = "https://devnet-unhealthy-read-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const unhealthyCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY),
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(unhealthyCalls, [
+      genesisProbe(preferred),
+      slotRead(preferred),
+      genesisProbe(fallback),
+      slotRead(fallback),
+    ]);
+
+    const recoveredCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [slotRead(fallback)]);
+  });
+
+  it("returns an unhealthy sendTransaction answer without failing over and cools the endpoint down", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-unhealthy-send-preferred.example.test";
+    const fallback = "https://devnet-unhealthy-send-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const unhealthyCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY),
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    await assert.rejects(
+      rpc.sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send(),
+      (error) => isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY)
+    );
+    assert.deepEqual(unhealthyCalls, [
+      genesisProbe(preferred),
+      { url: preferred, method: "sendTransaction" },
+    ]);
+
+    const recoveredCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [genesisProbe(fallback), slotRead(fallback)]);
+  });
+
+  it("keeps the last endpoint cooling down when it answers a read as unhealthy", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-last-unhealthy-preferred.example.test";
+    const fallback = "https://devnet-last-unhealthy-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const outageCalls = stubEndpoints({
+      [preferred]: DEVNET_FETCH_FAILS,
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(outageCalls, [
+      genesisProbe(preferred),
+      slotRead(preferred),
+      genesisProbe(fallback),
+      slotRead(fallback),
+    ]);
+
+    const unhealthyCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY),
+      [fallback]: devnetJsonRpcError(
+        SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
+      ),
+    });
+    mock.timers.tick(29_999);
+    await assert.rejects(rpc.getSlot().send(), (error) =>
+      isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY)
+    );
+    assert.deepEqual(unhealthyCalls, [slotRead(fallback), slotRead(preferred)]);
+
+    const recoveredCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [genesisProbe(fallback), slotRead(fallback)]);
+  });
+
   it("stops failing over once the caller aborts", async () => {
     const stalled = "https://devnet-abandoned.example.test";
     const healthy = "https://devnet-never-asked.example.test";
@@ -519,7 +676,7 @@ describe("createClusterRpc", () => {
 
     await assert.rejects(
       runInClusterScope(SANDBOX, createClusterRpc)
-        .sendTransaction("AQ==" as Base64EncodedWireTransaction, { encoding: "base64" })
+        .sendTransaction(WIRE_TRANSACTION, { encoding: "base64" })
         .send(),
       { name: "TypeError", message: "fetch failed" }
     );
@@ -536,13 +693,108 @@ describe("createClusterRpc", () => {
     const calls = stubEndpoints({ [unproven]: GENESIS_PROBE_FETCH_FAILS, [proven]: SERVES_DEVNET });
 
     await runInClusterScope(SANDBOX, createClusterRpc)
-      .sendTransaction("AQ==" as Base64EncodedWireTransaction, { encoding: "base64" })
+      .sendTransaction(WIRE_TRANSACTION, { encoding: "base64" })
       .send();
 
     assert.deepEqual(calls, [
       genesisProbe(unproven),
       genesisProbe(proven),
       { url: proven, method: "sendTransaction" },
+    ]);
+  });
+});
+
+describe("createClusterHistoryRpc", () => {
+  beforeEach(isolateManagedPool);
+
+  afterEach(restoreManagedPool);
+
+  it("tries the scope's own cluster Helius endpoint first, on a client apart from the plain pool", async () => {
+    const devnetTriton = "https://devnet-history-triton.example.test";
+    const devnetHelius = "https://devnet-history-helius.example.test";
+    const devnetAlchemy = "https://devnet-history-alchemy.example.test";
+    const mainnetTriton = "https://mainnet-history-triton.example.test";
+    const mainnetHelius = "https://mainnet-history-helius.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnetTriton,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: devnetHelius,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: devnetAlchemy,
+      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: mainnetTriton,
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: mainnetHelius,
+    });
+    const calls = stubEndpoints({
+      [devnetTriton]: SERVES_DEVNET,
+      [devnetHelius]: SERVES_DEVNET,
+      [devnetAlchemy]: SERVES_DEVNET,
+      [mainnetTriton]: SERVES_MAINNET,
+      [mainnetHelius]: SERVES_MAINNET,
+    });
+    const sandboxHistoryRpc = runInClusterScope(SANDBOX, createClusterHistoryRpc);
+    const sandboxRpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.notEqual(sandboxHistoryRpc, sandboxRpc);
+    assert.equal(
+      runInClusterScope(
+        { projectId: "proj_factory_other", environment: "sandbox" },
+        createClusterHistoryRpc
+      ),
+      sandboxHistoryRpc
+    );
+
+    assert.equal(await sandboxHistoryRpc.getSlot().send(), BigInt(SLOT));
+    assert.equal(await sandboxRpc.getSlot().send(), BigInt(SLOT));
+    assert.equal(
+      await runInClusterScope(PRODUCTION, createClusterHistoryRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
+    assert.deepEqual(calls, [
+      genesisProbe(devnetHelius),
+      slotRead(devnetHelius),
+      genesisProbe(devnetTriton),
+      slotRead(devnetTriton),
+      genesisProbe(mainnetHelius),
+      slotRead(mainnetHelius),
+    ]);
+  });
+
+  it("is the plain pool when the scope's cluster has no Helius endpoint, whatever another cluster has", async () => {
+    const devnetTriton = "https://devnet-no-helius-triton.example.test";
+    const devnetAlchemy = "https://devnet-no-helius-alchemy.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnetTriton,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: devnetAlchemy,
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet-only-helius.example.test",
+    });
+    const calls = stubEndpoints({
+      [devnetTriton]: SERVES_DEVNET,
+      [devnetAlchemy]: SERVES_DEVNET,
+    });
+    const historyRpc = runInClusterScope(SANDBOX, createClusterHistoryRpc);
+
+    assert.equal(historyRpc, runInClusterScope(SANDBOX, createClusterRpc));
+    assert.equal(await historyRpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(calls, [genesisProbe(devnetTriton), slotRead(devnetTriton)]);
+  });
+
+  it("fails over from Helius to the rest of the pool without retrying Helius under another provider's key", async () => {
+    const helius = "https://devnet-history-down-helius.example.test";
+    const alchemy = "https://devnet-history-up-alchemy.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: helius,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: helius,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: alchemy,
+    });
+    const calls = stubEndpoints({ [helius]: DEVNET_FETCH_FAILS, [alchemy]: SERVES_DEVNET });
+
+    assert.equal(
+      await runInClusterScope(SANDBOX, createClusterHistoryRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
+    assert.deepEqual(calls, [
+      genesisProbe(helius),
+      slotRead(helius),
+      genesisProbe(alchemy),
+      slotRead(alchemy),
     ]);
   });
 });

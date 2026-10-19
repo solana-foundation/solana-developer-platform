@@ -1,5 +1,5 @@
 import { RingRpc } from "@heliuslabs/zolana/ring";
-import type { RuntimeHealth, RuntimeHealthStatus } from "@sdp/helius-rings";
+import type { RuntimeHealth, RuntimeHealthStatus } from "@sdp/helius-rings/types";
 
 /** A slow answer is a red answer: the caller is a dashboard waiting on it. */
 const DEFAULT_TIMEOUT_MS = 2_000;

@@ -8,11 +8,9 @@ import { getNetworkSnapshot } from "./handlers";
  * of the API. Not metered: every request reads the cache, which reads data.solana.com about every
  * 3 hours whatever the traffic.
  */
-const internalNetwork = new Hono<{ Bindings: Env }>();
+export const internalNetwork = new Hono<{ Bindings: Env }>();
 
 internalNetwork.use("*", unifiedAuthMiddleware());
 internalNetwork.use("*", requireClerkSession());
 
 internalNetwork.get("/", getNetworkSnapshot);
-
-export default internalNetwork;

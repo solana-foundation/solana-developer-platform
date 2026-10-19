@@ -9,9 +9,10 @@ import {
   getPermissionsForOrgRole,
   normalizeOrganizationRole,
   type OrganizationRole,
-} from "@sdp/types";
+} from "@sdp/types/permissions";
 import type { Context, Next } from "hono";
-import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,

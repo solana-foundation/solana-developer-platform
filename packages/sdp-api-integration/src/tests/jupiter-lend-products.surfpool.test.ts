@@ -6,7 +6,7 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDeposit,
   EarnVaultWithdrawalResponse,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   generateKeyPair,
@@ -19,13 +19,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
-  env,
   initIntegrationSuite,
   requestWithApiKey,
   TEST_ORG,
   TEST_PROJECT,
   TEST_PROJECT_CACHED_KEY,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const {
   createKVStoreSet,

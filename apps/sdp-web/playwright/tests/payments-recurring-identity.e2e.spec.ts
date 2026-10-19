@@ -1,11 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
-import {
-  type CounterpartyResponse,
-  type PaymentRecurringPayment,
-  type PaymentRecurringPaymentResponse,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+import type { CounterpartyResponse } from "@sdp/types/counterparties";
+import type { PaymentRecurringPayment, PaymentRecurringPaymentResponse } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { gotoProjectPage } from "../support/local-dashboard-bootstrap";

@@ -1,4 +1,4 @@
-import type { DvpSettlementAvailability, DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { DvpSettlementAvailability, DvpTradeSide, DvpTradeStatus } from "@sdp/types/dvp";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { type DvpPartyRef, type DvpTrade, dvpActionWalletSchema } from "./dvp-trade";

@@ -1,4 +1,5 @@
-import type { CustodyWalletsResponse, ListApiKeysResponse } from "@sdp/types";
+import type { ListApiKeysResponse } from "@sdp/types/api-keys";
+import type { CustodyWalletsResponse } from "@sdp/types/custody";
 import { cache } from "react";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import type { QuickStartStep } from "./dashboard-quick-start";

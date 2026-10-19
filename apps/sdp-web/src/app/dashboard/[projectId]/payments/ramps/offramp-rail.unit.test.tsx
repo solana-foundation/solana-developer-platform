@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
-import type { PaymentRampQuote, PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types";
+import type {
+  PaymentRampQuote,
+  PaymentTransferStatus,
+  PaymentTransferSummary,
+} from "@sdp/types/payments";
 import { address } from "@solana/kit";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -26,28 +30,12 @@ vi.mock("./hooks/use-offramp-wizard", () => ({
 
 const DEPOSIT_ADDRESS = address("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
 
-type BvnkManualQuote = Extract<
-  PaymentRampQuote,
-  { provider: "bvnk"; deliveryMode: "manual_instructions" }
->;
-
-const quote: BvnkManualQuote = {
-  id: "quote_bvnk",
-  provider: "bvnk",
+const quote: PaymentRampQuote = {
+  id: "quote_moonpay",
+  provider: "moonpay",
   status: "pending",
-  deliveryMode: "manual_instructions",
-  paymentInstructions: [
-    {
-      provider: "bvnk",
-      kind: "crypto_deposit",
-      destinationAddress: DEPOSIT_ADDRESS,
-      cryptoCurrency: "USDC",
-      network: "SOLANA",
-      fiatCurrency: "USD",
-      reference: "ref_bvnk",
-      instructionsNotes: "Send only USDC on Solana.",
-    },
-  ],
+  deliveryMode: "hosted",
+  hostedUrl: "https://sell-sandbox.moonpay.com/",
 };
 
 function transfer(status: PaymentTransferStatus): PaymentTransferSummary {
@@ -59,7 +47,7 @@ function transfer(status: PaymentTransferStatus): PaymentTransferSummary {
     signature: null,
     rampsMemo: {},
     type: "offramp",
-    provider: "bvnk",
+    provider: "moonpay",
   };
 }
 
@@ -69,10 +57,7 @@ const asyncNoop = async (): Promise<undefined> => undefined;
 function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
   return {
     sourceWalletHint: null,
-    pendingAgreements: null,
-    acceptedAgreements: [],
-    toggleAgreement: noop,
-    enabledRampProviders: ["bvnk"],
+    enabledRampProviders: ["moonpay"],
     rampProviderAccess: null,
     selectedCounterparty: null,
     stepIndex: 0,
@@ -91,7 +76,12 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     liveWalletsError: null,
     selectedWallet: null,
     selectedRampPair: DEFAULT_RAMP_PAIR,
-    fields: { amount: "250", provider: "bvnk", walletId: "cwlt_treasury", counterpartyId: "cpty" },
+    fields: {
+      amount: "250",
+      provider: "moonpay",
+      walletId: "cwlt_treasury",
+      counterpartyId: "cpty",
+    },
     setField: noop,
     selectProvider: noop,
     quote,
@@ -118,7 +108,7 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     transferStatusLoading: false,
     sourceTokenMint: "mint_usdc",
     depositTarget: { destinationAddress: DEPOSIT_ADDRESS, amount: "250" },
-    hasCryptoDepositInstruction: true,
+    hasCryptoDepositInstruction: false,
     canSendOnchain: true,
     onchainSendLoading: false,
     onchainSendResult: null,
@@ -131,7 +121,7 @@ const railProps: RailProps = {
   wallets: [],
   walletsError: null,
   issuedTokenSymbolsByMint: {},
-  enabledRampProviders: ["bvnk"],
+  enabledRampProviders: ["moonpay"],
   rampProviderAccess: null,
   counterpartiesResult: { ok: true, data: [] },
   selectedCounterparty: null,
@@ -165,8 +155,9 @@ describe("OfframpRail final step", () => {
     const { container } = renderRail(offrampWizard({}));
 
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Complete your payout");
-    expect(screen.queryByText("Waiting to send")).not.toBeNull();
-    expect(screen.queryByText(/before the quote expires/)).not.toBeNull();
+    expect(
+      container.querySelector('iframe[src="https://sell-sandbox.moonpay.com/"]')
+    ).not.toBeNull();
     expect(screen.getByRole("button", { name: "Send 250 USDC" })).toHaveProperty("disabled", false);
     expect(container.querySelector(".animate-spin")).not.toBeNull();
   });

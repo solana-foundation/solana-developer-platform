@@ -1,9 +1,9 @@
 "use client";
 
-import type { CustodyProvider } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cancelSetupAction } from "./connection-actions";

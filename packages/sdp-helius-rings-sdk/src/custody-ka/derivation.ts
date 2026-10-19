@@ -1,7 +1,4 @@
-import {
-  createShieldedMaterialFromDerivationSeed,
-  type ShieldedMaterialSource,
-} from "../material.js";
+import { createShieldedMaterialFromDerivationSeed, type ShieldedMaterialSource } from "#/material";
 import { fetchDerivationSeed, type SignMessage } from "./seed.js";
 
 export interface CustodyMaterialSourceConfig {

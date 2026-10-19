@@ -4,10 +4,35 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./constants": {
+      "types": "./src/constants.ts",
+      "import": "./src/constants.ts",
+      "default": "./src/constants.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
+    "./port": {
+      "types": "./src/port.ts",
+      "import": "./src/port.ts",
+      "default": "./src/port.ts"
+    },
+    "./secrets": {
+      "types": "./src/secrets.ts",
+      "import": "./src/secrets.ts",
+      "default": "./src/secrets.ts"
+    },
+    "./state-machine": {
+      "types": "./src/state-machine.ts",
+      "import": "./src/state-machine.ts",
+      "default": "./src/state-machine.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
     }
   },
   "scripts": {

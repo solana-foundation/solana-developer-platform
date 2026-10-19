@@ -6,7 +6,7 @@
  * only get one line to store in `failure_reason`, so we compose it here.
  */
 
-import { safeStringify } from "@sdp/solana";
+import { safeStringify } from "@sdp/solana/token-2022.utils";
 
 interface SolanaErrorLike {
   message?: unknown;

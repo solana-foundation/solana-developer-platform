@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createOrgSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
+import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { getSdpAuth } from "@/lib/sdp-auth";
 import { resolveWorkspaceReadiness } from "@/lib/workspace-readiness";
 
 export async function GET() {

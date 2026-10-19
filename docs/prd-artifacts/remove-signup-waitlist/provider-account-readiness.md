@@ -30,8 +30,6 @@ actual vendor consoles and contracts before rollout.
 | P0 | Google Places/Maps | Platform dependency | Autocomplete Requests: first 10k/month free, then usage pricing; quotas are per method/project | Verify billing project, daily budget, API restrictions, and quota alerts | TBD |
 | P0 | GCP Secret Manager | Platform dependency | Usage priced by active secret versions and access operations | Verify project billing, access quota, secret-version growth, IAM, and alerts | TBD |
 | P0 | MoonPay | General | REST: 350 requests/10s for quote/price routes, 30 RPS otherwise; partner subscription is required | Confirm sandbox and live partner plan, supported Solana test environment, domains, and higher-limit path | TBD |
-| P0 | BVNK | General | Sandbox is separate and production access is requested through the portal; public quota not found | Confirm sandbox customer/wallet/rule caps, Sumsub/KYC behavior, supported Solana rails, pricing, and production approval | TBD |
-| P0 | Coinbase Onramp | General | Trial mode is limited; full access requires onboarding; quote APIs are 10 RPS per app ID | Complete onboarding, record trial limits, guest-checkout limits, fees, and full-access owner | TBD |
 | P0 | Stripe crypto onramp | General | Onramp requires an approved application even for sandbox; currently public preview | Confirm account approval, sandbox access, country/network coverage, API limits, and pricing | TBD |
 | P1 | Kora fee payment | Manual pending review | SDP points at a hosted devnet Kora by default; sponsored fees consume the operator fee-payer balance | Confirm operator/contract, authentication, RPS, max spend, refill owner; enable per-wallet usage limits | TBD |
 | P1 | MagicBlock Private Payments | Manual pending review | Public pricing lists 0.002 SOL plus 0.1% per Solana-mainnet private payment; no public API quota | Confirm devnet/private-ER allowance, auth-token sharing, rate limit, and contract | TBD |
@@ -76,7 +74,7 @@ These do not need manual-provider cards, but their shared quotas can still block
 - Google Cloud project for Places and Secret Manager
 - Cloudflare account, Worker deployment, Hyperdrive configuration, and KV namespaces
 - backing Postgres and Redis accounts
-- ramp webhook configurations for MoonPay, BVNK, Coinbase, and Stripe
+- ramp webhook configurations for MoonPay and Stripe
 
 ## Per-account data to collect
 
@@ -121,5 +119,3 @@ For every row, record:
 - [Alchemy pricing](https://www.alchemy.com/docs/reference/pricing-plans)
 - [QuickNode pricing](https://www.quicknode.com/pricing)
 - [Validation Cloud Solana pricing](https://www.validationcloud.io/solana)
-- [BVNK sandbox API](https://docs.bvnk.com/bvnk/api-explorer/api-overview/overview/)
-- [Coinbase Onramp overview](https://docs.cdp.coinbase.com/onramp/onramp-overview)

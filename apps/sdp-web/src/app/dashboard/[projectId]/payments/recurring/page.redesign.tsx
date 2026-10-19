@@ -1,10 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import {
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchCounterparty } from "../counterparty/counterparty-page.data";
-import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../payments-page.data";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,
@@ -15,7 +18,7 @@ interface RecurringPaymentsPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
+export async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -101,5 +104,3 @@ async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProp
     }
   );
 }
-
-export default RecurringPaymentsPage;

@@ -1,4 +1,4 @@
-import type { PublicToken, PublicTokenTransaction } from "@sdp/types";
+import type { PublicToken, PublicTokenTransaction } from "@sdp/types/tokens";
 
 export interface ApiResponse<T> {
   data: T;

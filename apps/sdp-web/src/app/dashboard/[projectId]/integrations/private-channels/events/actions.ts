@@ -4,7 +4,7 @@ import type {
   PrivateChannelEventFamily,
   PrivateChannelEventListEnvelope,
   PrivateChannelEventStatus,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { fetchPrivateChannelEvents } from "@/lib/private-channels";
 import { createSdpApiClient } from "@/lib/sdp-api";
 

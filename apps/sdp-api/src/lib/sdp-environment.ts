@@ -1,4 +1,4 @@
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context } from "hono";
 import { internalError } from "@/lib/errors";
 import type { Env } from "@/types/env";

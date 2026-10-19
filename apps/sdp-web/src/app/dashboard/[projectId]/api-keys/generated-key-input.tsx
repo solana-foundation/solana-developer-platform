@@ -1,6 +1,6 @@
 "use client";
 
-import { Input } from "@/components/ui/input";
+import { Input } from "@sdp/ui/input";
 
 function GeneratedApiKeyInput({ value }: { value: string }) {
   return (

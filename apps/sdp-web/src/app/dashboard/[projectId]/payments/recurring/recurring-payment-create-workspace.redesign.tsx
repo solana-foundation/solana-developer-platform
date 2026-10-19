@@ -1,27 +1,30 @@
 "use client";
 
 import { isDecimalString } from "@sdp/solana/amount";
-import { PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS } from "@sdp/types";
+import { PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS } from "@sdp/types/payments";
+import { cn } from "@sdp/ui/cn";
+import { Combobox } from "@sdp/ui/combobox";
+import { DateField } from "@sdp/ui/date-field";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { startOfTomorrow } from "date-fns";
 import { PlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { z } from "zod";
-import { Combobox } from "@/components/ui/combobox";
-import { DateField } from "@/components/ui/date-field";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
-import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
+import { NewSolanaAddressForm } from "@/app/dashboard/[projectId]/payments/counterparty/new-solana-address-form";
 import {
   formatCurrencyAmount,
   formatTokenAmount,
   shortenAddress,
-} from "../payments-overview.utils";
-import { formatDate } from "../payments-presentation";
-import { ContactCombobox } from "../ramps/components/contact-combobox";
-import { AmountFields, SourceWalletField } from "../ramps/components/payment-form-fields";
-import { RampWizardShell } from "../ramps/components/ramp-wizard-shell.redesign";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDate } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { ContactCombobox } from "@/app/dashboard/[projectId]/payments/ramps/components/contact-combobox";
+import {
+  AmountFields,
+  SourceWalletField,
+} from "@/app/dashboard/[projectId]/payments/ramps/components/payment-form-fields";
+import { RampWizardShell } from "@/app/dashboard/[projectId]/payments/ramps/components/ramp-wizard-shell.redesign";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   accountAddress,
   parsePeriodHours,

@@ -3,6 +3,7 @@
 
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import type { Translate } from "./payments-workspace.data";
 import {
   claimTransferIdempotencyKey,
@@ -21,10 +22,12 @@ const SUBMISSION = {
 beforeEach(() => {
   window.sessionStorage.clear();
   resetTransferIdempotencyStateForTests();
+  resetMovementWatchesForTests();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("sendTransferUnderKey", () => {
@@ -47,6 +50,39 @@ describe("sendTransferUnderKey", () => {
     expect(transfer.id).toBe("xfr_1");
     // Retired: the next send of the same payment is a new payment.
     expect(claimTransferIdempotencyKey(fingerprint)).not.toBe(sentKey(fetchMock));
+  });
+
+  // APE-461: a 2xx retired the key while the transfer was still processing,
+  // so the next identical press was a new payment under a new key. The API
+  // replays the first answer verbatim, so the replay still says `processing`;
+  // only a GET of the transfer can show it final and retire the key.
+  it("keeps the key through a stale replay and retires it once a GET shows the transfer final", async () => {
+    vi.useFakeTimers();
+    let posts = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.method === "GET") {
+        return Response.json({ data: { transfer: { id: "xfr_1", status: "finalized" } } });
+      }
+      posts += 1;
+      return Response.json(
+        { data: { transfer: { id: "xfr_1", status: "processing" } } },
+        posts > 1 ? { headers: { "Idempotent-Replayed": "true" } } : undefined
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const keyOf = (call: number) =>
+      new Headers(fetchMock.mock.calls[call]?.[1]?.headers).get("Idempotency-Key");
+
+    await sendTransferUnderKey(SUBMISSION, t);
+    await sendTransferUnderKey(SUBMISSION, t);
+    expect(keyOf(1)).toBe(keyOf(0));
+
+    await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+    const read = fetchMock.mock.calls.find(([, init]) => init?.method === "GET");
+    expect(read?.[0]).toBe("/api/dashboard/payments/transfers/xfr_1");
+
+    await sendTransferUnderKey(SUBMISSION, t);
+    expect(keyOf(fetchMock.mock.calls.length - 1)).not.toBe(keyOf(0));
   });
 
   // A refusal moved nothing, so the key is free. A lost answer may have

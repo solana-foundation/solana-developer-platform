@@ -2,12 +2,13 @@ import {
   type ProjectProviderAvailabilityEntry,
   projectProviderAvailabilityEntrySchema,
   projectProviderAvailabilitySchema,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
+import { z } from "zod";
 import {
   addMemberSchema as addMemberSchemaBase,
   updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
-} from "../../routes/projects/schemas";
+} from "@/routes/projects/schemas";
 import { apiKeyListItemSchema } from "./api-keys";
 import {
   isoDateTimeSchema,
@@ -16,7 +17,6 @@ import {
   projectMemberIdSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 import { userSchema } from "./organizations";
 

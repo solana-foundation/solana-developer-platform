@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isCollectableRecurringPaymentStatus } from "@sdp/types";
+import { isCollectableRecurringPaymentStatus } from "@sdp/types/payments";
 import {
   decideRecurringPaymentActivationTransition,
   decideRecurringPaymentLifecycleTransition,

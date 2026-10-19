@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import packageJson from "../package.json" with { type: "json" };
 
 const SRC = dirname(fileURLToPath(import.meta.url));
 const sourceFiles = readdirSync(SRC).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
@@ -15,9 +16,11 @@ const read = (file: string) => readFileSync(join(SRC, file), "utf8");
  * failure that is silent in production. A source grep is the honest tool.
  */
 /**
- * Match a real module IMPORT, not a mention. The doc comments in `index.ts` and
- * `types.ts` name klend-sdk deliberately — explaining the boundary is the point
- * — so a naive substring scan flags exactly the files that document the rule.
+ * Match a real module IMPORT, not a mention. The doc comments in `amounts.ts`,
+ * `client.ts`, `errors.ts`, `guards.ts`, `quotes.ts`, `rpc.ts`, `types.ts` and
+ * `withdraw-instructions.ts` name klend-sdk deliberately — explaining the
+ * boundary is the point — so a naive substring scan flags exactly the files that
+ * document the rule.
  */
 function importsModule(body: string, moduleName: string): boolean {
   const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -36,8 +39,10 @@ describe("the klend-sdk firewall", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("keeps the SDK out of the package's public entry point", () => {
-    expect(importsModule(read("index.ts"), "@kamino-finance/klend-sdk")).toBe(false);
+  it("keeps sdk.ts out of the package's exports list", () => {
+    const exportedFiles = Object.values(packageJson.exports).map((entry) => entry.import);
+    expect(exportedFiles.length).toBeGreaterThan(0);
+    expect(exportedFiles).not.toContain("./src/sdk.ts");
   });
 
   it("still detects a real import — the guard is not vacuous", () => {

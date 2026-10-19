@@ -1,4 +1,4 @@
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface SecretRetirementRow {
   id: string;

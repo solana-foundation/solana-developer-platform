@@ -5,7 +5,7 @@
  * These map SDP's domain types to Mosaic SDK concepts.
  */
 
-import type { TokenExtensionsConfig, TokenTemplate } from "@sdp/types";
+import type { TokenExtensionsConfig, TokenTemplate } from "@sdp/types/tokens";
 import type { Address, TransactionSigner } from "@solana/kit";
 
 // ═══════════════════════════════════════════════════════════════════════════

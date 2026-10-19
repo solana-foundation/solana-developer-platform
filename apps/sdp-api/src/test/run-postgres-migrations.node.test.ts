@@ -4,12 +4,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { adminDatabaseUrl } from "@/test/helpers/env";
 import {
   applyPostgresMigration,
   applyRepeatableMigration,
   getPostgresMigrationMode,
-} from "../../scripts/lib/run-postgres-migrations.mjs";
+} from "@/scripts/lib/run-postgres-migrations.mjs";
+import { adminDatabaseUrl } from "@/test/helpers/env";
 
 const SET_LOCK_TIMEOUT = "SELECT set_config('lock_timeout', $1, true)";
 const RECORD_MIGRATION = "INSERT INTO schema_migrations (version) VALUES ($1)";

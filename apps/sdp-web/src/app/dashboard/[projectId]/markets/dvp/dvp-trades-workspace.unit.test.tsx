@@ -20,8 +20,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ChangeEvent, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
-import { EnglishTestI18n } from "../test-i18n";
 import {
   OTHER_ADDRESS,
   OWN_WALLET_ID,
@@ -39,7 +39,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 // The select's popup positioning is integration-tested with the shared UI
 // primitive. This workspace suite needs only its value-change contract.
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@sdp/ui/select", () => ({
   Select: ({
     ariaLabel,
     children,

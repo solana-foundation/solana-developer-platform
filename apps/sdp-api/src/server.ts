@@ -9,7 +9,7 @@
 
 import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 
 import { createApp } from "@/app";
 import {

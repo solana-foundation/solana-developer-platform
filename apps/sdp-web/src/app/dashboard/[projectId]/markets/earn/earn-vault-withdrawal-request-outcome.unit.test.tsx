@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types";
+import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types/earn";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

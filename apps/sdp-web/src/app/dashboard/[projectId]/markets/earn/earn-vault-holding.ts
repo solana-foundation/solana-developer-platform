@@ -1,4 +1,4 @@
-import type { EarnVaultPositionIntermediate } from "@sdp/types";
+import type { EarnVaultPositionIntermediate } from "@sdp/types/earn";
 import { sumDecimalStrings } from "./earn-market-presentation";
 
 /**

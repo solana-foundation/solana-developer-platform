@@ -1,3 +1,9 @@
+import { cn } from "@sdp/ui/cn";
+import {
+  providerSelectionCardIconClassName,
+  providerSelectionCardTitleClassName,
+  providerSelectionCardTitleUnderlineClassName,
+} from "@sdp/ui/provider-selection-card";
 import {
   ArrowLeftRightIcon,
   ArrowRightIcon,
@@ -7,16 +13,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import {
-  providerSelectionCardIconClassName,
-  providerSelectionCardTitleClassName,
-  providerSelectionCardTitleUnderlineClassName,
-} from "@/components/ui/provider-selection-card";
 import { dvp, earn } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { cn } from "@/lib/utils";
 
 function MarketsPathCard({
   audience,

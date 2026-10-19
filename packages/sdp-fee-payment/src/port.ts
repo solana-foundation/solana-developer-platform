@@ -10,7 +10,7 @@
  * - NativeAdapter: Direct SOL fee payment (fallback/testing)
  */
 
-import type { RpcEnv } from "@sdp/rpc";
+import type { RpcEnv } from "@sdp/rpc/types";
 import type { Address, Signature } from "@solana/kit";
 
 // ═══════════════════════════════════════════════════════════════════════════

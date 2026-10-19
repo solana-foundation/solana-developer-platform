@@ -1,5 +1,5 @@
-import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
-import type { PrivateChannelInstance } from "@sdp/types";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";

@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresIdempotencyKeyRepository,
   type IdempotencyKeyRepository,

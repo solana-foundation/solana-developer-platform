@@ -3,21 +3,26 @@
 import type {
   PaymentSubscriptionCollectionAttempt,
   PaymentSubscriptionCollectionAttemptStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableRow } from "@solana/design-system/table";
 import { ArrowUpRightIcon } from "lucide-react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  formatDate,
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
+import { PaymentsTableHeader } from "@/app/dashboard/[projectId]/payments/payments-table-header";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
-import { shortenAddress } from "../payments-overview.utils";
-import { formatDate, formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL } from "../payments-table";
-import { PaymentsTableHeader } from "../payments-table-header";
 
 /** How each run reads: collected, still moving, waiting, went wrong, or passed over. */
 const RUN_STATUS_TONES = {

@@ -1,8 +1,8 @@
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
-import app from "@/index";
+import { app } from "@/index";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { counterpartyResponseSchema } from "@/openapi/schemas/counterparties";
 import {
@@ -23,6 +23,7 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
+  fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
@@ -847,6 +848,10 @@ describe("Payments routes — subscriptions", () => {
     );
 
     expect(preparePlanRes.status).toBe(200);
+    expect(rpc.calls.filter((call) => call.method === "getTokenSupply")).toHaveLength(1);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(1);
+    expect(fetchMaybeSubscriptionDelegationMock).toHaveBeenCalledTimes(0);
     const preparePlanBody = successResponseSchema(
       preparePaymentSubscriptionPlanResponseSchema
     ).parse(await preparePlanRes.json());
@@ -958,6 +963,10 @@ describe("Payments routes — subscriptions", () => {
     );
 
     expect(prepareAuthorizationRes.status).toBe(200);
+    expect(rpc.calls.filter((call) => call.method === "getTokenSupply")).toHaveLength(2);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(2);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(2);
+    expect(fetchMaybeSubscriptionDelegationMock).toHaveBeenCalledTimes(0);
     const prepareAuthorizationBody = successResponseSchema(
       preparePaymentSubscriptionAuthorizationResponseSchema
     ).parse(await prepareAuthorizationRes.json());
@@ -999,6 +1008,10 @@ describe("Payments routes — subscriptions", () => {
     );
 
     expect(prepareCancelRes.status).toBe(200);
+    expect(rpc.calls.filter((call) => call.method === "getTokenSupply")).toHaveLength(2);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(2);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(3);
+    expect(fetchMaybeSubscriptionDelegationMock).toHaveBeenCalledTimes(0);
     const prepareCancelBody = successResponseSchema(
       preparePaymentSubscriptionLifecycleResponseSchema
     ).parse(await prepareCancelRes.json());
@@ -1018,6 +1031,10 @@ describe("Payments routes — subscriptions", () => {
     );
 
     expect(prepareResumeRes.status).toBe(200);
+    expect(rpc.calls.filter((call) => call.method === "getTokenSupply")).toHaveLength(2);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(2);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(4);
+    expect(fetchMaybeSubscriptionDelegationMock).toHaveBeenCalledTimes(1);
     const prepareResumeBody = successResponseSchema(
       preparePaymentSubscriptionLifecycleResponseSchema
     ).parse(await prepareResumeRes.json());
@@ -1057,6 +1074,10 @@ describe("Payments routes — subscriptions", () => {
     );
 
     expect(prepareCollectionRes.status).toBe(200);
+    expect(rpc.calls.filter((call) => call.method === "getTokenSupply")).toHaveLength(3);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(3);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(5);
+    expect(fetchMaybeSubscriptionDelegationMock).toHaveBeenCalledTimes(1);
     const prepareCollectionBody = successResponseSchema(
       preparePaymentSubscriptionCollectionResponseSchema
     ).parse(await prepareCollectionRes.json());

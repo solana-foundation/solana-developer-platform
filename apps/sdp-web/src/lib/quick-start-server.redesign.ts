@@ -1,4 +1,4 @@
-import { CUSTODY_PROVIDERS } from "@sdp/types";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { cache } from "react";
 import { z } from "zod";
 import type { QuickStartStatus } from "./dashboard-quick-start.redesign";

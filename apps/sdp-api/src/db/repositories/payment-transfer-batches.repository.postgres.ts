@@ -1,4 +1,4 @@
-import type { AppDb, DatabaseExecutor } from "@/db";
+import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {

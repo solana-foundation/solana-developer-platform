@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@sdp/ui/button";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
 
 export type FundManagementModalAction = "mint" | "burn";

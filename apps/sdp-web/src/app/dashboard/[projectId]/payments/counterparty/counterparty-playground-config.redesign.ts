@@ -1,9 +1,10 @@
-import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
 } from "@/components/api-playground-shell";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 
 export interface CounterpartyPlaygroundView {

@@ -9,7 +9,7 @@ import {
 } from "@heliuslabs/zolana/ring";
 import type { Wallet } from "@heliuslabs/zolana/transaction";
 import { type Address, address, type Transaction } from "@solana/kit";
-import { withConfiguredAddressErrorBridge } from "../error-bridge.js";
+import { withConfiguredAddressErrorBridge } from "#/error-bridge";
 import {
   isProtocolNativeMint,
   protocolMint,

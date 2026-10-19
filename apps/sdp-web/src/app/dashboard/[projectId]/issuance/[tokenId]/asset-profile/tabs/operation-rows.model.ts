@@ -1,4 +1,4 @@
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import {
   ArrowRightLeft,
   Coins,
@@ -10,9 +10,8 @@ import {
   ShieldCheck,
   Snowflake,
 } from "lucide-react";
-
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
 import type { useTranslations } from "@/i18n/provider";
-import type { TokenOperations } from "../use-token-operations";
 
 export type OperationAction = "allowlist" | "freeze" | "seize" | "force-burn";
 export interface OperationRow {

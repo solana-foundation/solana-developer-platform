@@ -1,5 +1,5 @@
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
-  CustodyWalletSummary,
   PrivateChannelDto,
   PrivateChannelEventListEnvelope,
   PrivateChannelInstance,
@@ -7,7 +7,7 @@ import type {
   PrivateChannelPrincipalDto,
   PrivateChannelTokenEligibility,
   PrivateChannelVerifiedWalletDto,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import {
   fetchCustodyWallets,
   fetchPrivateChannelBalance,

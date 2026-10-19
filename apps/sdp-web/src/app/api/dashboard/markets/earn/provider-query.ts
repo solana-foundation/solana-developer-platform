@@ -1,4 +1,4 @@
-import { EARN_PROVIDERS } from "@sdp/types";
+import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { NextResponse } from "next/server";
 
 const PROVIDERS = new Set<string>(EARN_PROVIDERS);

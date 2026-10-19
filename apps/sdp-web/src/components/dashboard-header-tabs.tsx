@@ -1,7 +1,14 @@
 "use client";
 
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { type ReactNode, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  type ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import {
@@ -100,6 +107,16 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
   const urlTab = useDashboardTab();
   const defaultTabId = tabs[0].id;
   const activeTab = selectActiveDashboardTab(tabs, urlTab).id;
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // The strip scrolls when its tabs do not fit (a tablet beside the open sidebar), so the
+  // selected tab is brought into view: a link to the last tab must not open on a strip that
+  // hides which tab it is on.
+  useEffect(() => {
+    stripRef.current
+      ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeTab]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -122,25 +139,30 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
   }
 
   return (
-    <Tabs
-      bordered={false}
-      value={activeTab}
-      onValueChange={(value) => {
-        replaceSearchParams({ tab: value === defaultTabId ? null : value, page: null });
-      }}
-    >
-      {/* A refresh tab never wraps: the design's phone keeps "Card or bank through a provider"
+    <div ref={stripRef} className="contents">
+      <Tabs
+        bordered={false}
+        value={activeTab}
+        onValueChange={(value) => {
+          replaceSearchParams({ tab: value === defaultTabId ? null : value, page: null });
+        }}
+      >
+        {/* A refresh tab never wraps: the design's phone keeps "Card or bank through a provider"
           on one line and lets the strip scroll if it must. */}
-      <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6 refresh:[&>*]:whitespace-nowrap">
-        {tabs.map((tab) => (
-          <Tab key={tab.id} value={tab.id}>
-            {tab.id in headerTabCountByTabId
-              ? `${tab.label} (${headerTabCountByTabId[tab.id]})`
-              : tab.label}
-          </Tab>
-        ))}
-      </TabList>
-    </Tabs>
+        {/* From md, 14px under a refresh label to its underline, 3px more than above it, as drawn;
+          a phone draws 8px above and 11px under. The tab sets its padding inline, hence the
+          important. */}
+        <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6.5 refresh:[&>*]:whitespace-nowrap max-md:refresh:[&_[role=tab]]:!pt-2 md:refresh:[&_[role=tab]]:!pb-3.5">
+          {tabs.map((tab) => (
+            <Tab key={tab.id} value={tab.id}>
+              {tab.id in headerTabCountByTabId
+                ? `${tab.label} (${headerTabCountByTabId[tab.id]})`
+                : tab.label}
+            </Tab>
+          ))}
+        </TabList>
+      </Tabs>
+    </div>
   );
 }
 

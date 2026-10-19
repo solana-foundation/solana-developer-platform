@@ -1,6 +1,6 @@
+import { PaymentTransactionDetailSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
+import { PreviousTransactionsLoading as LegacyListLoading } from "@/app/dashboard/[projectId]/payments/transactions/loading";
 import { DesignSwitch } from "@/components/new-design";
-import { PaymentTransactionDetailSkeleton } from "../../payments-route-skeletons.redesign";
-import { PreviousTransactionsLoading as LegacyListLoading } from "../loading";
 
 function CurrentTransactionDetailLoading() {
   return <PaymentTransactionDetailSkeleton />;

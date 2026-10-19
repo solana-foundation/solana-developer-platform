@@ -1,6 +1,7 @@
-import { type UnifiedTransactionModule, wellKnownMint } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

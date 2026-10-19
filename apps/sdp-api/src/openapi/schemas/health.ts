@@ -1,5 +1,7 @@
-import { EGRESS_READINESS_STATES, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types";
-import { isoDateTimeSchema, z } from "./base";
+import { EGRESS_READINESS_STATES } from "@sdp/types/health";
+import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
+import { z } from "zod";
+import { isoDateTimeSchema } from "@/openapi/schemas/base";
 
 export const healthResponseSchema = z
   .object({
@@ -29,6 +31,11 @@ export const healthReadyResponseSchema = z
     revision: z.string().openapi({
       description: "Cloud Run revision serving the request, or `local` outside Cloud Run.",
       example: "sdp-prod-api-public-00042-abc",
+    }),
+    commit: z.string().openapi({
+      description:
+        "Git commit the serving image was built from, or `local` when the image carries none.",
+      example: "0123456789abcdef0123456789abcdef01234567",
     }),
     checks: z
       .object({

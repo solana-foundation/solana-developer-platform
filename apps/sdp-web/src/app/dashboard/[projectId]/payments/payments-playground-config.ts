@@ -3,7 +3,8 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 
 export interface PaymentsPlaygroundWalletView {
@@ -48,10 +49,7 @@ function buildTransferOptions(
 function buildRampProviderOptions(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundFieldOption[] {
-  return [
-    { label: t("DashboardPayments.playground.moonPay"), value: "moonpay" },
-    { label: t("DashboardPayments.playground.bvnk"), value: "bvnk" },
-  ];
+  return [{ label: t("DashboardPayments.playground.moonPay"), value: "moonpay" }];
 }
 
 function buildSelectBackedField(

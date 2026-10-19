@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getPermissionsForOrgRole } from "@sdp/types";
+import { getPermissionsForOrgRole } from "@sdp/types/permissions";
 import type { ClerkAuthContext } from "@/lib/auth";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

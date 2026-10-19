@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { isBlockedAddress } from "@sdp/rpc/blocked-address";
 import { describe, expect, it } from "vitest";
 import {
   createGuardedFetch,
@@ -8,7 +9,6 @@ import {
   guardedFetch,
   guardedLookup,
   headersForRedirect,
-  isBlockedAddress,
   nextRedirectStep,
 } from "@/services/guarded-egress";
 

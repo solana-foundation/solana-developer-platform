@@ -5,9 +5,9 @@ import type {
   EarnVaultQueuedWithdrawalQuote,
   EarnVaultWithdrawalOptions,
 } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {
@@ -23,9 +23,25 @@ import {
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/earn/context";
+import {
+  type earnExternalWalletQueuedWithdrawalPreviewSchema,
+  type earnExternalWalletSubmitSchema,
+  type earnExternalWalletWithdrawalOptionsSchema,
+  type earnExternalWalletWithdrawalRequestCancelTransactionSchema,
+  earnExternalWalletWithdrawalRequestsQuerySchema,
+  type earnExternalWalletWithdrawalRequestTransactionSchema,
+  type earnVaultQueuedWithdrawalPreviewSchema,
+  type earnVaultWithdrawalOptionsSchema,
+  type earnVaultWithdrawalRequestCancelSchema,
+  earnVaultWithdrawalRequestParamsSchema,
+  type earnVaultWithdrawalRequestSchema,
+  earnVaultWithdrawalRequestsQuerySchema,
+} from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
@@ -53,22 +69,6 @@ import {
   submitExternalQueuedWithdrawalAction,
 } from "@/services/earn/vault-queued-withdraw.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import type { AppContext } from "../context";
-import { resolveSdpEnvironment } from "../context";
-import {
-  type earnExternalWalletQueuedWithdrawalPreviewSchema,
-  type earnExternalWalletSubmitSchema,
-  type earnExternalWalletWithdrawalOptionsSchema,
-  type earnExternalWalletWithdrawalRequestCancelTransactionSchema,
-  earnExternalWalletWithdrawalRequestsQuerySchema,
-  type earnExternalWalletWithdrawalRequestTransactionSchema,
-  type earnVaultQueuedWithdrawalPreviewSchema,
-  type earnVaultWithdrawalOptionsSchema,
-  type earnVaultWithdrawalRequestCancelSchema,
-  earnVaultWithdrawalRequestParamsSchema,
-  type earnVaultWithdrawalRequestSchema,
-  earnVaultWithdrawalRequestsQuerySchema,
-} from "../schemas";
 import { resolveExternalWalletExit } from "./external-wallet";
 import { parseParams, parseQuery } from "./shared";
 import {

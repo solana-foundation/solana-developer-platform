@@ -104,7 +104,7 @@ SELECT
     AS requests_without_exact_wallet;
 
 -- BEGIN recurring exact identity
--- Fill plan roles when 0138 is already recorded or evidence becomes resolvable.
+-- Fill plan roles when 0142 is already recorded or evidence becomes resolvable.
 -- Retained inactive/archived matches prove identity, not operational eligibility.
 BEGIN;
 

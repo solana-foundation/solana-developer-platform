@@ -13,10 +13,8 @@ import type { Env } from "@/types/env";
 import { completeOnboarding, getOnboardingStatus } from "./handlers";
 import { completeOnboardingSchema } from "./schemas";
 
-const onboarding = new Hono<{ Bindings: Env }>();
+export const onboarding = new Hono<{ Bindings: Env }>();
 
 onboarding.use("*", clerkOnboardingMiddleware());
 onboarding.get("/status", getOnboardingStatus);
 onboarding.post("/complete", validateBody(completeOnboardingSchema), completeOnboarding);
-
-export default onboarding;

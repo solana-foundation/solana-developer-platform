@@ -1,3 +1,4 @@
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
@@ -8,7 +9,7 @@ import type {
   PreparePaymentSubscriptionAuthorizationResponse,
   PreparePaymentSubscriptionCollectionResponse,
   PreparePaymentSubscriptionLifecycleResponse,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
 import {
@@ -22,7 +23,6 @@ import {
   getTransferSubscriptionOverlayInstructionAsync,
 } from "@solana/subscriptions";
 import { z } from "zod";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
@@ -33,6 +33,13 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
+import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
+import {
+  hasSubscriptionPlanPuller,
+  resolveSubscriptionPlanRole,
+} from "@/routes/payments/subscription-plans/wallets";
+import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -44,13 +51,6 @@ import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
-import { mapCollectionAttemptRow } from "../mappers";
-import {
-  hasSubscriptionPlanPuller,
-  resolveSubscriptionPlanRole,
-} from "../subscription-plans/wallets";
-import { assertPaymentWalletExactAccess } from "../wallets";
 import {
   type createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,

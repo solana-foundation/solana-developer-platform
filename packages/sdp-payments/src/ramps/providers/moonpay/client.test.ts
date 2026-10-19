@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
-import type { PaymentRampQuote } from "@sdp/types";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails";
-import { addDecimalAmounts, subtractDecimalAmounts } from "../../../decimal";
-import { SdpPaymentsError } from "../../../errors";
-import { RAMP_PROVIDER_CLIENTS } from "../../index";
-import { replayExchanges } from "../../test-kit";
-import type { RampOfframpQuoteInput, RampOnrampQuoteInput, RampRuntimeContext } from "../../types";
+import type { PaymentRampQuote } from "@sdp/types/payments";
+import { addDecimalAmounts, subtractDecimalAmounts } from "#/decimal";
+import { SdpPaymentsError } from "#/errors";
+import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
+import { replayExchanges } from "#/ramps/test-kit";
+import type {
+  RampOfframpQuoteInput,
+  RampOnrampQuoteInput,
+  RampRuntimeContext,
+} from "#/ramps/types";
 import { distillMoonpayRailSupport, MoonpayRampClient } from "./client";
 import { MOONPAY_TEST_KIT } from "./test-kit";
 

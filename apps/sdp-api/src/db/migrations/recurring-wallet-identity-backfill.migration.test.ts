@@ -8,6 +8,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptRow,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
+import { runPostgresMigrations } from "@/scripts/lib/run-postgres-migrations.mjs";
 import { adminDatabaseUrl, env } from "@/test/helpers/env";
 import {
   RAISE_EXCEPTION,
@@ -16,10 +17,9 @@ import {
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
-const migration = "0138_recurring_wallet_roles_and_sponsorship.sql";
+const migration = "0142_recurring_wallet_roles_and_sponsorship.sql";
 const databaseUrl = env.DATABASE_URL;
 if (!databaseUrl) throw new Error("Migration tests require DATABASE_URL");
 

@@ -1,4 +1,4 @@
-import * as spc from "@sdp/private-channels";
+import * as spcGateway from "@sdp/private-channels/gateway";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
 import {
@@ -8,13 +8,11 @@ import {
   getTransactionDecoder,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import {
-  createPrivateChannelTransferRepository,
-  mapPrivateChannelDepositRow,
-  mapPrivateChannelTransferRow,
-  mapPrivateChannelWithdrawalRow,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { mapPrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
+import { mapPrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
+import { mapPrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";
+import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { env } from "@/test/helpers/env";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
@@ -113,7 +111,7 @@ beforeEach(async () => {
       VALUES ('pcvw_execution', ?, ?, 'pcu_recipient', ?, 'wallet_recipient', ?)`)
       .bind(scope.organizationId, scope.projectId, instanceId, recipient),
   ]);
-  vi.spyOn(spc, "getChannelTokenBalance").mockResolvedValue({
+  vi.spyOn(spcGateway, "getChannelTokenBalance").mockResolvedValue({
     tokenAccount: signer.address,
     balance: { amount: "10000000", decimals: 6, uiAmountString: "10" },
   });

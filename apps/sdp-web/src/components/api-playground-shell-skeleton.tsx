@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 const FIELD_SKELETON_IDS = [
   "playground-field-skeleton-1",

@@ -6,11 +6,11 @@ import {
   EGRESS_READINESS_SERVES_TRAFFIC,
   EGRESS_READINESS_STATES,
   type EgressReadiness,
-  SDP_RAMP_PROVIDER_STAGES,
-} from "@sdp/types";
+} from "@sdp/types/health";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
-import app from "@/index";
+import { app } from "@/index";
 import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 
@@ -53,12 +53,21 @@ describe("Health routes", () => {
       const body = (await res.json()) as {
         status: string;
         revision: string;
+        commit: string;
         checks: { database: string; redis: string };
       };
       expect(body.status).toBe("ready");
       expect(body.revision).toBe("local");
+      expect(body.commit).toBe("local");
       expect(body.checks.database).toBe("ok");
       expect(body.checks.redis).toBe("ok");
+    });
+
+    it("reports the commit the serving image was built from", async () => {
+      const commit = "0123456789abcdef0123456789abcdef01234567";
+      const res = await app.request("/health/ready", {}, { ...env, SDP_BUILD_SHA: `${commit}\n` });
+
+      await expect(res.json()).resolves.toMatchObject({ commit });
     });
 
     it("returns not ready when Redis is unavailable", async () => {

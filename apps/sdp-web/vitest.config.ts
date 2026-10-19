@@ -21,8 +21,14 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
-    },
+    // tsconfig's `@/*` tries `src/` then the app root; Vite 7 aliases cannot fall back, so the
+    // root-level names `@/` reaches are listed ahead of the `src/` alias.
+    alias: [
+      {
+        find: /^@\/(messages|next\.config|sentry\.(?:edge|server)\.config)(?=\/|$)/,
+        replacement: `${__dirname}/$1`,
+      },
+      { find: "@", replacement: path.resolve(__dirname, "src") },
+    ],
   },
 });

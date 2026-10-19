@@ -1,4 +1,7 @@
-import type { PrivateChannelTransfer, PrivateChannelTransferRecipientDto } from "@sdp/types";
+import type {
+  PrivateChannelTransfer,
+  PrivateChannelTransferRecipientDto,
+} from "@sdp/types/private-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({

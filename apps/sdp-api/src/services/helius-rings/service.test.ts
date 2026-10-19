@@ -1,9 +1,6 @@
-import type { BuildOperationInput } from "@sdp/helius-rings";
-import {
-  HeliusRingsError,
-  type PrivateOperationInput,
-  RINGS_IDENTITY_MISMATCH,
-} from "@sdp/helius-rings";
+import { HeliusRingsError, RINGS_IDENTITY_MISMATCH } from "@sdp/helius-rings/errors";
+import type { BuildOperationInput } from "@sdp/helius-rings/port";
+import type { PrivateOperationInput } from "@sdp/helius-rings/types";
 import {
   AccountRole,
   type Address,
@@ -28,13 +25,13 @@ import {
   signBytes,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
+import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import {
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
-} from "@/db/repositories";
-import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
-import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
+} from "@/db/repositories/repository-factory";
 import { AppError } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";

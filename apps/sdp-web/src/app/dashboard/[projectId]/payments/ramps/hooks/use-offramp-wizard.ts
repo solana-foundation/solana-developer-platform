@@ -1,12 +1,11 @@
 "use client";
 
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type {
   PaymentOfframpQuoteRequest,
-  PaymentRampInstruction,
   PaymentTransferSummary,
   RampCryptoDeposit,
-} from "@sdp/types";
-import { getCryptoRailAssetLabel } from "@sdp/types";
+} from "@sdp/types/payments";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useMemo } from "react";
@@ -18,29 +17,26 @@ import {
   createTransfer,
   fetchTransferById,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { offrampPairs } from "@/lib/ramps";
-import type { WizardSummaryDetail } from "../../wizard-summary-list";
-import { submitOfframpDeposit } from "../offramp-deposit";
-import { getRampTransferState } from "../ramp-transfer-state";
-import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
+import { submitOfframpDeposit } from "@/app/dashboard/[projectId]/payments/ramps/offramp-deposit";
+import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import {
+  sourceWalletSchema,
+  withdrawAmountSchema,
+  withdrawSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import {
   memoSummaryDetails,
   optionalDetail,
   providerSummaryDetail,
   summaryAmount,
-} from "../wizard-summary";
+} from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
+import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
+import { offrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
-
-type CryptoDepositInstruction = Extract<PaymentRampInstruction, { kind: "crypto_deposit" }>;
-
-function isCryptoDepositInstruction(
-  instruction: PaymentRampInstruction
-): instruction is CryptoDepositInstruction {
-  return instruction.kind === "crypto_deposit";
-}
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type OfframpStepId = "WALLET" | "WITHDRAW" | "MEMO" | "COMPLETE" | "REQUIREMENTS";
@@ -143,29 +139,14 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     }
   );
 
-  // Where the crypto must be sent: the manual provider's deposit instruction,
-  // or the deposit wallet a hosted provider reported while the sale awaits
-  // payment (the provider can rebind it, so the polled transfer always wins).
+  // The hosted provider can report a deposit address while payment is pending.
   const depositTarget = useMemo((): RampCryptoDeposit | null => {
     const quote = wizard.quote;
-    if (quote?.deliveryMode === "manual_instructions") {
-      const instruction = quote.paymentInstructions.find(isCryptoDepositInstruction);
-      return instruction
-        ? {
-            destinationAddress: instruction.destinationAddress,
-            amount: wizard.fields.amount.trim(),
-          }
-        : null;
-    }
-    if (
-      quote?.deliveryMode === "hosted" &&
-      transferStatus?.status === "awaiting_payment" &&
-      transferStatus.cryptoDeposit
-    ) {
-      return transferStatus.cryptoDeposit;
+    if (quote?.deliveryMode === "hosted" && transferStatus?.status === "awaiting_payment") {
+      return transferStatus.cryptoDeposit ?? null;
     }
     return null;
-  }, [wizard.quote, wizard.fields.amount, transferStatus]);
+  }, [wizard.quote, transferStatus]);
 
   const offrampCryptoToken = getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail);
   // The transfers API requires the mint address, not the token symbol.

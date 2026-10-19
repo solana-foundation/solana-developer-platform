@@ -2,7 +2,7 @@ import { Wallet } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import type { SyncReport as SdkSyncReport, ShieldedKeys } from "@heliuslabs/zolana/transaction";
 import { syncWallet } from "@heliuslabs/zolana/wallet";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { canonicalShieldedIdentity } from "./material.js";
 import { getCachedWallet, setCachedWallet } from "./wallet-cache.js";
 

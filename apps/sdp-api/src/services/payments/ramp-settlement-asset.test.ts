@@ -1,6 +1,6 @@
-import { wellKnownMint } from "@sdp/types";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import * as events from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -76,7 +76,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
   it("completes a transfer when the provider delivered its asset", async () => {
     await seedStripeOnramp("xfr_asset_match", "cos_asset_match");
 
-    const result = await applyRampSettlementEvent(env, {
+    const result = await applyRampSettlementEvent(env, "sandbox", {
       provider: "stripe",
       kind: "settled",
       reference: "cos_asset_match",
@@ -84,7 +84,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
       deliveredAssetRail: "usdc.solana",
     });
 
-    expect(result).toEqual({ applied: true });
+    expect(result).toEqual({ applied: true, outcome: "applied" });
     expect(await readRow("xfr_asset_match")).toEqual({ status: "completed", amount: "96.5" });
   });
 
@@ -92,7 +92,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
     const logEvent = vi.spyOn(events, "logEvent").mockImplementation(() => {});
     await seedStripeOnramp("xfr_asset_mismatch", "cos_asset_mismatch");
 
-    const result = await applyRampSettlementEvent(env, {
+    const result = await applyRampSettlementEvent(env, "sandbox", {
       provider: "stripe",
       kind: "settled",
       reference: "cos_asset_mismatch",
@@ -100,7 +100,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
       deliveredAssetRail: "sol.solana",
     });
 
-    expect(result).toEqual({ applied: false });
+    expect(result).toEqual({ applied: false, outcome: "refused", reason: "asset_mismatch" });
     expect(await readRow("xfr_asset_mismatch")).toEqual({ status: "settling", amount: null });
     expect(logEvent).toHaveBeenCalledWith(
       "error",
@@ -116,7 +116,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
     vi.spyOn(events, "logEvent").mockImplementation(() => {});
     await seedStripeOnramp("xfr_asset_unknown", "cos_asset_unknown");
 
-    const result = await applyRampSettlementEvent(env, {
+    const result = await applyRampSettlementEvent(env, "sandbox", {
       provider: "stripe",
       kind: "settled",
       reference: "cos_asset_unknown",
@@ -124,7 +124,26 @@ describe("applyRampSettlementEvent delivered asset", () => {
       deliveredAssetRail: null,
     });
 
-    expect(result).toEqual({ applied: false });
+    expect(result).toEqual({ applied: false, outcome: "refused", reason: "asset_mismatch" });
     expect(await readRow("xfr_asset_unknown")).toEqual({ status: "settling", amount: null });
+  });
+
+  it("still refuses an asset mismatch after another event finalized the transfer", async () => {
+    vi.spyOn(events, "logEvent").mockImplementation(() => {});
+    await seedStripeOnramp("xfr_asset_final", "cos_asset_final");
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET status = 'completed' WHERE id = ?")
+      .bind("xfr_asset_final")
+      .run();
+
+    const result = await applyRampSettlementEvent(env, "sandbox", {
+      provider: "stripe",
+      kind: "settled",
+      reference: "cos_asset_final",
+      deliveredAssetRail: "sol.solana",
+    });
+
+    expect(result).toEqual({ applied: false, outcome: "refused", reason: "asset_mismatch" });
+    expect(await readRow("xfr_asset_final")).toEqual({ status: "completed", amount: null });
   });
 });

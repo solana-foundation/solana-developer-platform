@@ -1,8 +1,8 @@
-import type { CustodyProvider } from "@sdp/custody";
 import { hashString } from "@sdp/payments/hash";
+import type { CustodyProvider } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import {

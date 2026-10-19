@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { EARN_PROVIDERS } from "@sdp/types";
+import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 
 /**

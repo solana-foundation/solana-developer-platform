@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEncryptionService } from "../encryption.service";
+import { createEncryptionService } from "@/services/encryption.service";
 import { CustodyCipherRouter } from "./cipher-router";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
 import { migrateNestedCustodySecrets } from "./nested-secret-migration";

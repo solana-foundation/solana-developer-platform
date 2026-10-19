@@ -1,4 +1,4 @@
-import type { TokenTransaction } from "@sdp/types";
+import type { TokenTransaction } from "@sdp/types/tokens";
 import { describe, expect, it, vi } from "vitest";
 import type { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";

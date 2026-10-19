@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveTransactionCounterpartyReference } from "../payments-overview.utils";
+import { resolveTransactionCounterpartyReference } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 
 describe("resolveTransactionCounterpartyReference", () => {
   it("prefers a non-blank counterparty ID", () => {

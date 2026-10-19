@@ -5,7 +5,7 @@ import type {
   PaymentSubscriptionPlan,
   PaymentSubscriptionPlanResponse,
   PreparePaymentSubscriptionPlanResponse,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
 import { getCreatePlanOverlayInstructionAsync } from "@solana/subscriptions";
@@ -17,6 +17,8 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
+import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
   buildPreparedSubscriptionTransaction,
@@ -27,8 +29,6 @@ import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
-import { assertPaymentWalletExactAccess } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
   listSubscriptionPlansQuerySchema,

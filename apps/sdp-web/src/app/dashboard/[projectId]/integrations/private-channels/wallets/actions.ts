@@ -1,6 +1,6 @@
 "use server";
 
-import type { PrivateChannelVerifiedWalletDto } from "@sdp/types";
+import type { PrivateChannelVerifiedWalletDto } from "@sdp/types/private-channels";
 import { revalidatePath } from "next/cache";
 import {
   deletePrivateChannelVerifiedWallet,

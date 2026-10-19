@@ -1,13 +1,10 @@
 "use client";
 
-import type {
-  Counterparty,
-  CryptoRailId,
-  PaymentRampQuote,
-  PaymentsDashboardWallet,
-  RampProviderId,
-} from "@sdp/types";
-import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { PaymentRampQuote, PaymentsDashboardWallet, RampDirection } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { isCollectStageStatus } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -19,8 +16,16 @@ import {
   type CounterpartiesResult,
   cancelRampTransfer,
   fetchAllCounterparties,
-  simulateDemoVerification,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import {
+  type MemoRow,
+  memoRowsToRecord,
+  validateMemoRows,
+} from "@/app/dashboard/[projectId]/payments/ramps/memo";
+import {
+  type RampFields,
+  rampSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import { useTranslations } from "@/i18n/provider";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -28,9 +33,6 @@ import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import { hasOnboardingLifecycle } from "../components/providers";
-import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
-import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import { useRampQuote } from "./use-ramp-quote";
@@ -287,14 +289,11 @@ export function useRampWizard<TId extends string>(
       position: "bottom-right",
     });
     try {
-      const result = await requirements.submitRequirements(
-        {
-          assetRail: selectedRampPair.assetRail,
-          destinationCustodyWalletId: selectedWallet.id,
-          fiatCurrency: selectedRampPair.fiatCurrency,
-        },
-        requirements.pendingAgreements !== null ? "consent" : "collected"
-      );
+      const result = await requirements.submitRequirements({
+        assetRail: selectedRampPair.assetRail,
+        destinationCustodyWalletId: selectedWallet.id,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+      });
       setHostedQuoteLoading(false);
       if (result.status === "unsupported") {
         toast.error(result.reason, { id: toastId, position: "bottom-right" });
@@ -306,19 +305,6 @@ export function useRampWizard<TId extends string>(
         toast.dismiss(toastId);
         return;
       }
-      if (
-        hasOnboardingLifecycle(result.provider) &&
-        result.status !== "ready" &&
-        isRequirementsStep
-      ) {
-        // The requirements step shows the onboarding panel in place and waits there.
-        toast.dismiss(toastId);
-        return;
-      }
-      // From the memo step (a provider with no fields to collect) an unfinished onboarding
-      // moves on too: the memo step has nowhere to show the verification link, so staying
-      // would strand the user. The last step shows the onboarding and the readiness effect
-      // quotes once it reaches ready.
       // Reaching the transaction stage with derived readiness fires the quote
       // through the single readiness effect above.
       setStepIndex((current) => current + 1);
@@ -420,25 +406,6 @@ export function useRampWizard<TId extends string>(
     }
   };
 
-  // Demo mode's stand-in for the provider's hosted identity check: the provider approves the
-  // contact, and the status poll carries the flow through the provider's review from there.
-  const [verificationSimulating, setVerificationSimulating] = useState(false);
-  const simulateVerification = async () => {
-    const counterpartyId = fields.counterpartyId;
-    if (!demo || fields.provider !== "bvnk" || !counterpartyId) return;
-    setVerificationSimulating(true);
-    try {
-      await simulateDemoVerification({ provider: "bvnk", counterpartyId }, t);
-      await requirements.refreshOnboarding();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t("DashboardPayments.demo.verification.failed")
-      );
-    } finally {
-      setVerificationSimulating(false);
-    }
-  };
-
   const handleCounterpartyCreated = (created: Counterparty) => {
     setField("counterpartyId", created.id);
     void mutateCounterparties(
@@ -482,13 +449,6 @@ export function useRampWizard<TId extends string>(
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
     retryOnboarding: requirements.retryOnboarding,
-    pendingAgreements: requirements.pendingAgreements,
-    acceptedAgreements: requirements.acceptedAgreements,
-    toggleAgreement: requirements.toggleAgreement,
-    /** Demo mode stands in for the provider's hosted identity check (BVNK's is the one it runs). */
-    verificationSimulationAvailable: demo && fields.provider === "bvnk",
-    verificationSimulating,
-    simulateVerification,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

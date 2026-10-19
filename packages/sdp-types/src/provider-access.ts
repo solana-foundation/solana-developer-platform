@@ -22,7 +22,7 @@ import {
 export const COMPLIANCE_PROVIDERS = ["range", "elliptic", "trm", "chainalysis"] as const;
 export type ComplianceProviderId = (typeof COMPLIANCE_PROVIDERS)[number];
 
-export const RAMP_PROVIDERS = ["moonpay", "bvnk", "stripe"] as const;
+export const RAMP_PROVIDERS = ["moonpay", "stripe"] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
 /**
@@ -36,6 +36,7 @@ export const RETIRED_RAMP_PROVIDERS = [
   "moneygram",
   "lightspark",
   "coinbase",
+  "bvnk",
 ] as const;
 export type RetiredRampProviderId = (typeof RETIRED_RAMP_PROVIDERS)[number];
 
@@ -559,7 +560,6 @@ export type RampProviderSurfacing = boolean | "sandbox";
 
 export const RAMP_PROVIDER_SURFACING: Readonly<Record<RampProviderId, RampProviderSurfacing>> = {
   moonpay: true,
-  bvnk: true,
   stripe: true,
 };
 

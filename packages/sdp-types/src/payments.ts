@@ -8,6 +8,11 @@ import type {
 } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
+import {
+  isPrivateChannelDepositTerminal,
+  PRIVATE_CHANNEL_TRANSACTION_STATUSES,
+  type PrivateChannelTransferStatus,
+} from "./private-channels";
 import type { PersistedRampProviderId, RampProviderId } from "./provider-access";
 import type { PaymentTransactionKind } from "./unified-transactions";
 
@@ -75,12 +80,50 @@ export function isRampTransferType(type: PaymentTransferType): type is RampTrans
 
 /**
  * Lifecycle of a persisted ramp webhook event: `pending` until the background
- * apply or the replay job settles it (applied rows are deleted, not kept), and
- * `failed` once replay attempts are exhausted and an operator has to look.
+ * apply or the replay job settles it, `discharged` while the outcome is
+ * retained, `archived` after retention, and `failed` once an operator has to
+ * look.
  */
-export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed"] as const;
+export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed", "discharged", "archived"] as const;
 
 export type RampWebhookEventStatus = (typeof RAMP_WEBHOOK_EVENT_STATUSES)[number];
+
+export const RAMP_WEBHOOK_BUSINESS_OUTCOMES = [
+  "applied",
+  "ignored",
+  "unmatched",
+  "refused",
+] as const;
+export type RampWebhookBusinessOutcome = (typeof RAMP_WEBHOOK_BUSINESS_OUTCOMES)[number];
+
+export const RAMP_WEBHOOK_REFUSAL_REASONS = [
+  "environment_mismatch",
+  "provider_mismatch",
+  "transfer_type_mismatch",
+  "asset_mismatch",
+  "settled_after_cancel",
+] as const;
+export type RampWebhookRefusalReason = (typeof RAMP_WEBHOOK_REFUSAL_REASONS)[number];
+
+export type RampWebhookProcessResult =
+  | { outcome: Exclude<RampWebhookBusinessOutcome, "refused">; reason?: never }
+  | { outcome: "refused"; reason: RampWebhookRefusalReason };
+
+export const RAMP_WEBHOOK_APPLY_OUTCOMES = [
+  ...RAMP_WEBHOOK_BUSINESS_OUTCOMES,
+  "discarded",
+  "invalid",
+  "retryable_error",
+] as const;
+export type RampWebhookApplyOutcome = (typeof RAMP_WEBHOOK_APPLY_OUTCOMES)[number];
+export type RampWebhookDischargeOutcome = Extract<
+  RampWebhookApplyOutcome,
+  "applied" | "ignored" | "discarded"
+>;
+export type RampWebhookFailureOutcome = Exclude<
+  RampWebhookApplyOutcome,
+  RampWebhookDischargeOutcome
+>;
 
 export const PAYMENT_TRANSFER_STATUSES = [
   "pending",
@@ -303,89 +346,7 @@ export interface MoonpayRampSettlement {
   failureReason?: string;
 }
 
-/**
- * BVNK on-ramp settlement economics, from the payout CREATE response
- * (PROCESSING) until the COMPLETE crypto payout webhook or poll replaces it
- * with the delivery facts. The processing variant stores the create-time
- * estimate: the fiat wallet debit, the crypto to receive, the fee legs, the
- * receipt url BVNK provides at create, and `exchangeRate.rate`. The complete
- * variant keeps every create-time estimate (the dashboard shows them) and
- * adds the observed terminal facts separately: the on-chain hash, the actual
- * settled crypto/fiat, the actual fee/network-fee legs with their currencies,
- * and the actual exchange rate. Amounts are decimal strings.
- */
-export const bvnkRampProcessingSettlementSchema = z.object({
-  provider: z.literal("bvnk"),
-  status: z.literal("PROCESSING"),
-  payinId: z.string(),
-  payoutId: z.string(),
-  receiptUrl: z.string(),
-  fiatCurrency: z.string(),
-  fiatAmount: z.string(),
-  cryptoCurrency: z.string(),
-  cryptoAmount: z.string(),
-  feeCurrency: z.string(),
-  feeAmount: z.string(),
-  networkFeeCurrency: z.string(),
-  networkFeeAmount: z.string(),
-  exchangeRate: z.string(),
-});
-
-export const bvnkRampCompleteSettlementSchema = bvnkRampProcessingSettlementSchema.extend({
-  status: z.literal("COMPLETE"),
-  txHash: z.string(),
-  cryptoAmountActual: z.string(),
-  fiatAmountActual: z.string(),
-  feeAmountActual: z.string(),
-  feeCurrencyActual: z.string(),
-  networkFeeAmountActual: z.string(),
-  networkFeeCurrencyActual: z.string(),
-  exchangeRateActual: z.string(),
-});
-
-export const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
-  bvnkRampProcessingSettlementSchema,
-  bvnkRampCompleteSettlementSchema,
-]);
-
-export type BvnkRampSettlement = z.infer<typeof bvnkRampSettlementSchema>;
-
-/**
- * BVNK off-ramp channel settlement economics, recorded once when the
- * confirmed channel-transaction webhook settles the transfer: the crypto
- * received (`paidAmount`), the fiat credited to the funding wallet
- * (`walletAmount`), the fee and network-fee legs, the exchange rate, the
- * deposit transaction hash, and the source wallet addresses that paid the channel.
- * Amounts are decimal strings.
- */
-export const bvnkOfframpChannelSettlementSchema = z.object({
-  provider: z.literal("bvnk"),
-  kind: z.literal("offramp_channel"),
-  status: z.literal("COMPLETE"),
-  channelId: z.string(),
-  transactionId: z.string(),
-  txHash: z.string(),
-  depositAddress: z.string(),
-  cryptoCurrency: z.string(),
-  cryptoAmount: z.string(),
-  fiatCurrency: z.string(),
-  fiatAmount: z.string(),
-  displayCurrency: z.string(),
-  displayAmount: z.string(),
-  feeCurrency: z.string(),
-  feeAmount: z.string(),
-  networkFeeCurrency: z.string(),
-  networkFeeAmount: z.string(),
-  exchangeRate: z.string(),
-  sources: z.array(z.string()),
-});
-
-export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSettlementSchema>;
-
-export type RampTransferSettlement =
-  | MoonpayRampSettlement
-  | BvnkRampSettlement
-  | BvnkOfframpChannelSettlement;
+export type RampTransferSettlement = MoonpayRampSettlement;
 
 /** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
 export interface RampCryptoDeposit {
@@ -453,13 +414,15 @@ export interface PaymentTransferEnvelope {
   };
 }
 
-export type PaymentTransferBatchStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "partially_failed"
-  | "archived";
+export const PAYMENT_TRANSFER_BATCH_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "partially_failed",
+  "archived",
+] as const;
+export type PaymentTransferBatchStatus = (typeof PAYMENT_TRANSFER_BATCH_STATUSES)[number];
 
 export type PaymentTransferBatchRecipientStatus =
   | "pending"
@@ -834,6 +797,58 @@ export const RECURRING_PAYMENT_UPDATE_TRANSITION = {
   claimableStatuses: readonly PaymentRecurringPaymentStatus[];
 };
 
+/**
+ * Every status a money route's answer can show for the movement it made: a
+ * transfer, a batch, a recurring schedule, a collection attempt, or a
+ * private-channel transfer.
+ */
+export type MoneyMovementStatus =
+  | PaymentTransferStatus
+  | PaymentTransferBatchStatus
+  | PaymentRecurringPaymentStatus
+  | PaymentSubscriptionCollectionAttemptStatus
+  | PrivateChannelTransferStatus;
+
+const MONEY_MOVEMENT_STATUSES: ReadonlySet<string> = new Set<MoneyMovementStatus>([
+  ...PAYMENT_TRANSFER_STATUSES,
+  ...PAYMENT_TRANSFER_BATCH_STATUSES,
+  ...PAYMENT_RECURRING_PAYMENT_STATUSES,
+  ...PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  ...PRIVATE_CHANNEL_TRANSACTION_STATUSES,
+]);
+
+/** Whether a status a response carries is one of {@link MoneyMovementStatus}. */
+export function isMoneyMovementStatus(status: string): status is MoneyMovementStatus {
+  return MONEY_MOVEMENT_STATUSES.has(status);
+}
+
+/**
+ * Statuses that mean a money movement is still under way (APE-461): a
+ * transfer not yet in a terminal or successful status (pending, processing,
+ * awaiting payment, settling; a batch and a collection attempt use the same
+ * in-flight names), a recurring schedule mid-transition (the statuses the cron
+ * recovers, plus the update's processing status), and a private-channel
+ * transfer without a verdict (APE-593). While an answer shows one, a client
+ * keeps the request's Idempotency-Key.
+ */
+export const NON_FINAL_MONEY_MOVEMENT_STATUSES: readonly MoneyMovementStatus[] = [
+  ...new Set<MoneyMovementStatus>([
+    ...NON_TERMINAL_RAMP_TRANSFER_STATUSES.filter(
+      (status) => !isSuccessfulPaymentTransferStatus(status)
+    ),
+    ...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+    RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
+    ...PRIVATE_CHANNEL_TRANSACTION_STATUSES.filter(
+      (status) => !isPrivateChannelDepositTerminal(status)
+    ),
+  ]),
+];
+
+/** Whether a money movement in this status is still under way ({@link NON_FINAL_MONEY_MOVEMENT_STATUSES}). */
+export function isMoneyMovementInFlight(status: MoneyMovementStatus): boolean {
+  return NON_FINAL_MONEY_MOVEMENT_STATUSES.includes(status);
+}
+
 export function isCanceledRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
   return status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus;
 }
@@ -1145,59 +1160,7 @@ export interface CryptoDepositPaymentRampInstruction {
   instructionsNotes?: string;
 }
 
-export type BvnkOnboardingStatus =
-  | "verification_required"
-  | "verifying"
-  | "verification_failed"
-  | "ready";
-
-export interface BvnkBankFundingDetails {
-  accountNumber?: string;
-  code?: string;
-  accountNumberFormat?: string;
-  paymentReference?: string;
-  routingNumber?: string;
-  bankName?: string;
-}
-
-/** On-ramp: fund a fiat virtual account to receive crypto. */
-export interface BvnkFiatFundingInstruction {
-  provider: "bvnk";
-  kind: "fiat_funding";
-  onboardingStatus: BvnkOnboardingStatus;
-  verificationUrl?: string;
-  fundingWalletId?: string;
-  fiatCurrency: string;
-  beneficiaryAddress: string;
-  network: string;
-  bankAccount?: BvnkBankFundingDetails;
-  /**
-   * Remittance line the payer must include in the bank transfer reference so
-   * the pay-in webhook can attribute the deposit to this transfer. Set by the
-   * BVNK on-ramp quote via the shared reference formatter; absent only on
-   * instructions serialized before the field existed.
-   */
-  paymentReference?: string;
-  /**
-   * Instrument-scoped remittance prefix BVNK prepends to inbound references.
-   * Shown as its own instruction field, never concatenated into
-   * `paymentReference`.
-   */
-  remittanceInformationPrefix?: string;
-  instructionsNotes: string;
-}
-
-/** Off-ramp: send crypto to a deposit address; BVNK converts and pays out fiat. */
-export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampInstruction {
-  provider: "bvnk";
-  fiatCurrency: RampFiatCurrency;
-  reference: string;
-  instructionsNotes: string;
-}
-
-export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
-
-export type PaymentRampInstruction = BvnkPaymentRampInstruction;
+export type PaymentRampInstruction = never;
 
 export const RAMP_DIRECTIONS = ["onramp", "offramp"] as const;
 
@@ -1312,13 +1275,7 @@ interface BasePaymentRampQuote {
 
 export type PaymentRampQuote =
   | (BasePaymentRampQuote & {
-      provider: "bvnk";
-      deliveryMode: "manual_instructions";
-      /** BVNK fiat virtual-account funding instructions; fund these to receive crypto. */
-      paymentInstructions: BvnkPaymentRampInstruction[];
-    })
-  | (BasePaymentRampQuote & {
-      provider: "moonpay" | "bvnk";
+      provider: "moonpay";
       deliveryMode: "hosted";
       hostedUrl: string;
     })

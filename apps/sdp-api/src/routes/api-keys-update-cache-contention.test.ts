@@ -26,7 +26,7 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const kvContention = vi.hoisted(() => ({
@@ -89,8 +89,8 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { ApiKeyService } from "@/services/api-key.service";

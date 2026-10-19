@@ -38,6 +38,9 @@ describe("tenant data-access boundary", () => {
       "routes/issuance/handlers/metadata.ts",
       "routes/webhooks/",
       "services/jobs/",
+      // Provider webhook adapters run only after signed public ingress or a
+      // claimed inbox row; tenant resolution happens inside the adapter.
+      "services/ramps/webhooks/",
       // The provider-settlement path shared by webhooks and the ramp
       // reconciliation job: transfers are looked up by provider reference,
       // so no tenant scope exists yet.
@@ -45,7 +48,6 @@ describe("tenant data-access boundary", () => {
       // NOTE: the public `/pay` sponsored-transaction path: the payment request
       // is found by its public token, so no tenant scope exists.
       "services/payments/payment-request-sponsorship.ts",
-      "db/repositories/index.ts",
       "db/repositories/repository-factory.ts",
     ];
     const violations = sourceFiles(sourceRoot)
@@ -61,7 +63,7 @@ describe("tenant data-access boundary", () => {
     // which must only ever be reachable through the audited break-glass path.
     // The kind-specific wrappers and runWithOperatorDatabaseAccess are the
     // public surface; everything else imports those.
-    const allowed = ["db/identity.ts", "db/operator-access.ts", "db/client.ts", "db/index.ts"];
+    const allowed = ["db/identity.ts", "db/operator-access.ts", "db/client.ts"];
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("runWithDatabaseIdentity"))
       .map((path) => relative(sourceRoot, path))
@@ -76,7 +78,6 @@ describe("tenant data-access boundary", () => {
     // scripts. Granting the system identity anywhere else would silently
     // widen the database tenant boundary — extend this registry deliberately.
     const allowedPrefixes = [
-      "db/index.ts",
       "db/identity.ts",
       "db/operator-access.ts",
       "cron/runner.ts",

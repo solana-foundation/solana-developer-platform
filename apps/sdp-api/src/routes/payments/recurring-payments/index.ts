@@ -38,7 +38,7 @@ import {
   updateRecurringPaymentSchema,
 } from "./schemas";
 
-const recurringPayments = new Hono<{ Bindings: Env }>();
+export const recurringPayments = new Hono<{ Bindings: Env }>();
 
 /** "1.0" and "1" collect the same amount, so they fingerprint as one request. */
 const canonicalAmount = (body: JsonValue) => canonicalizeDecimalFields(body, ["amount"]);
@@ -122,5 +122,3 @@ recurringPayments.post(
   resumeRecurringPayment
 );
 recurringPayments.get("/:id", requirePermissions("payments:read"), getRecurringPayment);
-
-export default recurringPayments;

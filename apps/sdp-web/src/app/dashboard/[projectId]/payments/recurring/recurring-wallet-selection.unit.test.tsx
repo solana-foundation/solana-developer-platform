@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 
-import type {
-  Counterparty,
-  CounterpartyAccount,
-  PaymentRecurringPayment,
-  PaymentsDashboardWallet,
-} from "@sdp/types";
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
+import type { PaymentRecurringPayment, PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";

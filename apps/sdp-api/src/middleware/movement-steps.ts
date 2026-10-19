@@ -3,9 +3,9 @@ import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { type AuthorizeInput, getAuthorized, type RouteHandler, validatedInput } from "./authorize";
 import {
-  getIdempotencyFingerprint,
   getIdempotencyRecordKey,
   IDEMPOTENT_REPLAYED_HEADER,
+  idempotencyFingerprintMatches,
   markIdempotencyCommitted,
   markIdempotencyRecordMismatch,
 } from "./idempotency";
@@ -75,7 +75,7 @@ export function replayFromRecord<TAuthorized>(
     if (recordKey !== undefined) {
       const answer = await find(c, stepInput<TAuthorized>(c), recordKey);
       if (answer !== null) {
-        if (answer.fingerprint !== null && answer.fingerprint !== getIdempotencyFingerprint(c)) {
+        if (answer.fingerprint !== null && !idempotencyFingerprintMatches(c, answer.fingerprint)) {
           markIdempotencyRecordMismatch(c);
           throw new AppError("IDEMPOTENCY_KEY_REUSED");
         }

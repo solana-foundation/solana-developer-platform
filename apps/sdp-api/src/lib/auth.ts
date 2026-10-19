@@ -5,12 +5,9 @@
  * avoiding non-null assertions while adding defensive runtime checks.
  */
 
-import type {
-  AllowedOperation,
-  ApiKeyWalletAuthorizationBinding,
-  ApiKeyWalletScope,
-  Permission,
-} from "@sdp/types";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
+import type { ApiKeyWalletAuthorizationBinding, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { Permission } from "@sdp/types/permissions";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";

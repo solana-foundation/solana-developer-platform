@@ -1,5 +1,5 @@
 import { afterAll } from "vitest";
-import { closeDatabasePools } from "@/db";
+import { closeDatabasePools } from "@/db/client";
 import { setDefaultDatabaseIdentityForTesting } from "@/db/identity";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { MANAGED_POOL_ENV_KEYS } from "@/test/helpers/managed-pool-env";

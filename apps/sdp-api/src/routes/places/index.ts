@@ -15,7 +15,7 @@ import {
 // keystroke, so the actor ceiling stays interactive-typing friendly.
 const PLACES_QUOTA: MeteredQuotaConfig = { name: "places", actorMax: 120, orgMax: 600 };
 
-const places = new Hono<{ Bindings: Env }>();
+export const places = new Hono<{ Bindings: Env }>();
 
 places.use("*", unifiedAuthMiddleware());
 
@@ -43,5 +43,3 @@ places.get(
   meteredQuota(PLACES_QUOTA),
   getPlace
 );
-
-export default places;

@@ -7,7 +7,7 @@ import { adminDatabaseUrl } from "@/test/helpers/env";
 
 const migration = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  "postgres/0138_recurring_wallet_roles_and_sponsorship.sql"
+  "postgres/0142_recurring_wallet_roles_and_sponsorship.sql"
 );
 
 it("migrates exact plan roles independently of commission accounting and retains wallet relationships", async () => {

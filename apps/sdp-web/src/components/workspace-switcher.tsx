@@ -1,7 +1,17 @@
 "use client";
 
 import { useClerk, useOrganization, useOrganizationList } from "@clerk/nextjs";
-import type { Project } from "@sdp/types";
+import type { Project } from "@sdp/types/projects";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import {
   CheckIcon,
   ChevronsUpDownIcon,
@@ -10,20 +20,10 @@ import {
   Settings2Icon,
 } from "lucide-react";
 import { useState } from "react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
 import { useCopy } from "@/lib/use-copy";
-import { cn } from "@/lib/utils";
 
 function OrganizationHeaderAction({
   label,

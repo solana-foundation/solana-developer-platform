@@ -1,6 +1,6 @@
-import type { RampProviderId } from "@sdp/types";
-import { RAMP_PROVIDERS } from "@sdp/types";
-import { rampProviderBvnk, rampProviderMoonpay, rampProviderStripe } from "@/flags";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { rampProviderMoonpay, rampProviderStripe } from "@/flags";
 import { isModuleInDeploymentReleaseChannel } from "./release-channel";
 
 type FlagRead = () => Promise<boolean>;
@@ -12,7 +12,6 @@ const paymentsInChannel: FlagRead = async () => isModuleInDeploymentReleaseChann
 
 const RAMP_PROVIDER_FLAGS = {
   moonpay: rampProviderMoonpay,
-  bvnk: rampProviderBvnk,
   stripe: rampProviderStripe,
 } as const satisfies RampProviderFlagReads;
 

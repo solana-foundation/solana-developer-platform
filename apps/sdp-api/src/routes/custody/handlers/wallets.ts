@@ -1,10 +1,21 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getAccountInfo } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
+import type {
+  CustodyWalletAggregateResponse,
+  CustodyWalletByIdResponse,
+  CustodyWalletMetadataResponse,
+  CustodyWalletResponse,
+  CustodyWalletSummary,
+  CustodyWalletsResponse,
+  CustodyWalletTokenBalance,
+  DeleteWalletResponse,
+} from "@sdp/types/custody";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
@@ -21,7 +32,18 @@ import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getIdempotencyClaim, markIdempotencyRecordMismatch } from "@/middleware/idempotency";
 import type { RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { type AppContext, parseBooleanQueryParam, resolveActor } from "@/routes/custody/context";
+import type {
+  createWalletSchema,
+  deleteWalletSchema,
+  updateWalletSchema,
+} from "@/routes/custody/schemas";
+import {
+  clearWalletBalanceCache,
+  readWalletBalances,
+  type WalletBalanceTarget,
+} from "@/routes/custody/wallet-balances";
+import { withIssuedTokenLabels } from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
 import {
@@ -46,23 +68,6 @@ import {
 } from "@/services/helius-das.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
-import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
-import type {
-  CustodyWalletAggregateResponse,
-  CustodyWalletByIdResponse,
-  CustodyWalletMetadataResponse,
-  CustodyWalletResponse,
-  CustodyWalletsResponse,
-  createWalletSchema,
-  DeleteWalletResponse,
-  deleteWalletSchema,
-  updateWalletSchema,
-} from "../schemas";
-import {
-  clearWalletBalanceCache,
-  readWalletBalances,
-  type WalletBalanceTarget,
-} from "../wallet-balances";
 
 export function clearWalletCaches() {
   clearWalletBalanceCache();
@@ -205,7 +210,7 @@ async function getBalancesByWalletId(
   const [tokenLabelsByMint, observedBalances] = await Promise.all([
     resolveIssuedTokenLabelsByMint(c),
     readWalletBalances(
-      solanaRpc.createRpc(c.env),
+      createClusterRpc(),
       buildWalletBalanceCacheScope(c),
       walletPublicKeys,
       c.get("requestId")
@@ -214,11 +219,11 @@ async function getBalancesByWalletId(
   const labeledBalances = new Map(
     [...observedBalances].map(([walletId, balances]) => [
       walletId,
-      tokenAccounts.withIssuedTokenLabels(balances, tokenLabelsByMint),
+      withIssuedTokenLabels(balances, tokenLabelsByMint),
     ])
   );
 
-  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, labeledBalances);
+  const balancesMap = await attachTokenSymbolsToBalanceMap(labeledBalances);
 
   if (options.includeUsdValues === false) {
     return balancesMap;
@@ -666,11 +671,10 @@ export const getWalletById = async (c: AppContext) => {
     return success(c, response);
   }
 
-  let lamports = 0n;
-
+  let lamports: bigint;
   try {
-    const rpc = solanaRpc.createRpc(c.env);
-    const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
+    const rpc = createClusterRpc();
+    const accountInfo = await getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
     getLogger().error(
@@ -683,11 +687,12 @@ export const getWalletById = async (c: AppContext) => {
       // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
       "getWalletById: failed to fetch wallet balance"
     );
+    throw providerUnavailable("Wallet balance is temporarily unavailable. Try again.");
   }
 
   const solBalance = {
     token: "SOL" as const,
-    mint: tokenAccounts.SOL_MINT,
+    mint: SOL_MINT,
     amount: lamports.toString(),
     uiAmount: formatDecimalAmount(lamports, 9),
     decimals: 9 as const,

@@ -9,7 +9,7 @@
  */
 
 import { z } from "zod";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 const dvpLegFundingClaimRowSchema = z.object({
   trade_id: z.string(),

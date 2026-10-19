@@ -1,4 +1,4 @@
-import { type Browser, expect, type Page, test } from "@playwright/test";
+import { type Browser, expect, type Page, type Request, test } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
 import {
   bootstrapLocalWalletFixtures,
@@ -51,6 +51,38 @@ async function setThemePreference(page: Page, preference: ThemePreference) {
   await themeSegment(page, preference).click();
   await expect(themeSegment(page, preference)).toHaveAttribute("aria-pressed", "true");
   await closeAccountMenu(page);
+}
+
+/** A Clerk development instance keeps its dev-browser token in a cookie that clerk-js
+ *  deletes and sets again after every Frontend API response. A page load in another tab
+ *  that lands in that gap reads as `dev-browser-missing`, and the handshake that follows
+ *  mints a new dev browser and signs every tab out. Call before the page navigates; the
+ *  returned wait resolves once its Clerk has loaded and no Frontend API call has been in
+ *  flight for half a second, so another tab can then load safely. */
+function trackClerkTraffic(page: Page) {
+  let inFlight = 0;
+  let lastSettledAt = Date.now();
+  // clerk-js tags every Frontend API call with its version; its script and asset loads carry none.
+  const isFrontendApiCall = (request: Request) =>
+    new URL(request.url()).searchParams.has("_clerk_js_version");
+  const settle = (request: Request) => {
+    if (!isFrontendApiCall(request)) return;
+    inFlight -= 1;
+    lastSettledAt = Date.now();
+  };
+  page.on("request", (request) => {
+    if (isFrontendApiCall(request)) inFlight += 1;
+  });
+  page.on("requestfinished", settle);
+  page.on("requestfailed", settle);
+
+  return async () => {
+    // A string predicate runs in the page untyped, so `window.Clerk` needs no assertion here.
+    await page.waitForFunction("window.Clerk?.loaded === true");
+    await expect
+      .poll(() => inFlight === 0 && Date.now() - lastSettledAt >= 500, { intervals: [100] })
+      .toBe(true);
+  };
 }
 
 /** Only the toast test needs a wallet to copy an address from. Bootstrapping it for the
@@ -255,11 +287,14 @@ test.describe("dashboard theme e2e", () => {
   test("synchronizes an explicit preference across open tabs", async ({ page }) => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
-    await page.goto("/dashboard");
+    const waitForClerkIdle = trackClerkTraffic(page);
+    await page.goto(projectHref(projectId, "/dashboard"));
     await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+    await waitForClerkIdle();
 
+    // The Project URL itself, not bare /dashboard: one page load, not a redirect and a load.
     const secondPage = await page.context().newPage();
-    await secondPage.goto("/dashboard");
+    await secondPage.goto(projectHref(projectId, "/dashboard"));
     await expect(secondPage.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     await setThemePreference(page, "Dark");

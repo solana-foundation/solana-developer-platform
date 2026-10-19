@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { wellKnownMint } from "@sdp/types";
 import {
   HASTRA_DEPLOYMENTS,
   hastraDeployment,
@@ -19,7 +18,8 @@ import {
   EARN_PROVIDER_WITHDRAWAL_SETTLEMENT,
   earnDepositSlippagePolicy,
 } from "@sdp/types/provider-access";
-import { isStrategyWithinDeclaredSupport } from "../../support";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
+import { isStrategyWithinDeclaredSupport } from "#/support";
 import { HastraEarnClient } from "./client";
 
 const client = new HastraEarnClient();

@@ -18,7 +18,7 @@ export interface VerifyWebhookSignatureInput {
   signedPayload: string;
   algorithm: WebhookSignatureAlgorithm;
   /** Seconds since epoch from the provider's signed timestamp. Required — every provider
-   * signs one (MoonPay header, BVNK body), and a non-finite value (missing or
+   * signs one (for example, a MoonPay header), and a non-finite value (missing or
    * unparseable) is rejected rather than skipping the replay window. */
   timestampSeconds: number;
 }

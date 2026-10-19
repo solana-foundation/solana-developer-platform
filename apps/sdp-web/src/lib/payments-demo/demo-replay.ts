@@ -1,11 +1,10 @@
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
-  Counterparty,
-  CounterpartyAccount,
   PaymentRampQuoteDeliveryMode,
   PaymentRecurringPayment,
   PaymentTransferRecipient,
-  RampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   CREATED_BY,
   DEMO_TOKENS,
@@ -280,7 +279,6 @@ export const DEMO_RAMP_PROVIDERS: Record<
   RampProviderId,
   { deliveryMode: PaymentRampQuoteDeliveryMode; reference: string }
 > = {
-  bvnk: { deliveryMode: "manual_instructions", reference: "BVNK" },
   moonpay: { deliveryMode: "hosted", reference: "MP" },
   stripe: { deliveryMode: "session_widget", reference: "STR" },
 };
@@ -288,10 +286,6 @@ export const DEMO_RAMP_PROVIDERS: Record<
 /** The reference a provider shows for a demo quote. */
 export function rampReference(provider: RampProviderId, quoteId: string): string {
   return `${DEMO_RAMP_PROVIDERS[provider].reference}-${quoteId.slice(-10).toUpperCase()}`;
-}
-
-export function consentKey(provider: RampProviderId, counterpartyId: string): string {
-  return `${provider}:${counterpartyId}`;
 }
 
 function applyRamp(world: DemoWorld, op: DemoOpOf<"ramp">): void {
@@ -540,12 +534,6 @@ function applyOp(world: DemoWorld, op: DemoOp, now: number): void {
       return;
     case "ramp-cancel":
       applyRampCancel(world, op);
-      return;
-    case "consent":
-      if (contactById(world, op.id)) world.consents.push(consentKey(op.provider, op.id));
-      return;
-    case "verified":
-      if (contactById(world, op.id)) world.verifications[consentKey(op.provider, op.id)] = op.at;
       return;
     case "request":
       applyRequest(world, op);

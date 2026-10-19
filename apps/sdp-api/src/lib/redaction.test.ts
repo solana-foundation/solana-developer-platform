@@ -1,4 +1,4 @@
-import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import { describe, expect, it } from "vitest";
 
 describe("credential redaction", () => {
@@ -67,11 +67,11 @@ describe("credential redaction", () => {
     // The prefix group must not swallow keys that are not credentials, and must
     // not run past the `:` into a neighbouring field's value.
     const message = redactCredentialString(
-      '{"tokenName":"USD Coin","providerName":"bvnk","walletId":"wal_01HZY"}'
+      '{"tokenName":"USD Coin","providerName":"moonpay","walletId":"wal_01HZY"}'
     );
 
     expect(message).toContain('"tokenName":"USD Coin"');
-    expect(message).toContain('"providerName":"bvnk"');
+    expect(message).toContain('"providerName":"moonpay"');
     expect(message).toContain('"walletId":"wal_01HZY"');
   });
 

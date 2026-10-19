@@ -7,16 +7,14 @@ import type {
   Wallet,
 } from "@heliuslabs/zolana/transaction";
 import { getPrivateTransactions } from "@heliuslabs/zolana/wallet";
+import type { KnownAsset, SyncPhotonInput, SyncPhotonResult } from "@sdp/helius-rings/port";
 import type {
   AssetBalance,
-  KnownAsset,
   PrivateHistoryDirection,
   PrivateHistoryEntry,
   PrivateHistoryKind,
-  SyncPhotonInput,
-  SyncPhotonResult,
   SyncReport,
-} from "@sdp/helius-rings";
+} from "@sdp/helius-rings/types";
 import { sdpMint } from "./flows/mint.js";
 import { readKeys } from "./keys.js";
 import { assertProvisionedIdentity, type ShieldedMaterialSource } from "./material.js";

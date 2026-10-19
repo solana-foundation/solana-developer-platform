@@ -1,7 +1,7 @@
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
 import { AppError } from "@/lib/errors";
-import type { AppContext } from "../context";
-import { resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
+import type { AppContext } from "@/routes/payments/context";
+import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 
 export async function resolveSubscriptionPlanWalletSelector(
   c: AppContext,

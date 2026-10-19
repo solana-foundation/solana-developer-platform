@@ -1,12 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -26,10 +26,13 @@ const { assertClusterEndpoint, resolveClusterRpcUrl } = vi.hoisted(() => ({
   assertClusterEndpoint: vi.fn(async () => {}),
   resolveClusterRpcUrl: vi.fn(() => "http://127.0.0.1:8899"),
 }));
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
+  resolveClusterRpcUrl,
+}));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   assertClusterEndpoint,
-  resolveClusterRpcUrl,
 }));
 
 // Lets one test shrink the pass budget to prove the deadline posture; null

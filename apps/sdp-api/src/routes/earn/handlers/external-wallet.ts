@@ -1,12 +1,13 @@
-import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { isEarnProviderId } from "@sdp/earn";
 import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
-import { notImplemented } from "@sdp/earn/errors";
+import { notImplemented, providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import {
   addDecimalAmounts,
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnDepositSwap,
   EarnExternalWalletDepositResponse,
@@ -26,12 +27,15 @@ import type {
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
-  SdpEnvironment,
-} from "@sdp/types";
-import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
-import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
+} from "@sdp/types/earn";
+import {
+  earnDepositStyle,
+  earnProviderDepositSettlement,
+  earnProviderWithdrawalSettlement,
+  earnWithdrawSlippageFloor,
+} from "@sdp/types/provider-access";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -44,9 +48,23 @@ import { badRequest, internalError, notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/earn/context";
+import { requireEarnStrategyForCaller } from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
+import {
+  type earnExternalWalletDepositTransactionSchema,
+  earnExternalWalletEarningsQuerySchema,
+  earnExternalWalletMovementParamsSchema,
+  earnExternalWalletMovementsQuerySchema,
+  earnExternalWalletPositionSummaryQuerySchema,
+  earnExternalWalletPositionsQuerySchema,
+  type earnExternalWalletSubmitSchema,
+  type earnExternalWalletWithdrawalPreviewSchema,
+  type earnExternalWalletWithdrawalTransactionSchema,
+} from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
 import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
@@ -61,19 +79,6 @@ import {
 } from "@/services/earn/vault-external-wallet.service";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import type { AppContext } from "../context";
-import { requireEarnStrategyForCaller, resolveSdpEnvironment } from "../context";
-import {
-  type earnExternalWalletDepositTransactionSchema,
-  earnExternalWalletEarningsQuerySchema,
-  earnExternalWalletMovementParamsSchema,
-  earnExternalWalletMovementsQuerySchema,
-  earnExternalWalletPositionSummaryQuerySchema,
-  earnExternalWalletPositionsQuerySchema,
-  type earnExternalWalletSubmitSchema,
-  type earnExternalWalletWithdrawalPreviewSchema,
-  type earnExternalWalletWithdrawalTransactionSchema,
-} from "../schemas";
 import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,

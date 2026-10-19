@@ -1,9 +1,9 @@
 import type { Context } from "hono";
-import { type DatabaseClient, getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createMosaicService, type MosaicFeePayment } from "@/services/issuance/mosaic";
-import { createToken2022Service } from "@/services/solana";
+import { createToken2022Service } from "@/services/solana/factory";
 import { resolveRequestSponsorshipScope } from "@/services/sponsorship.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";

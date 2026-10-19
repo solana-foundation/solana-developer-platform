@@ -1,13 +1,12 @@
 import { SigningError } from "@sdp/custody/signing";
 import type {
-  ApiKeyRole,
   CreateApiKeyResponse,
   ListApiKeysResponse,
-  Permission,
   RotateApiKeyResponse,
-} from "@sdp/types";
+} from "@sdp/types/api-keys";
+import type { ApiKeyRole, Permission } from "@sdp/types/permissions";
 import type { Context } from "hono";
-import { asTransactionalClient, getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db/client";
 import {
   dropApiKeyCacheEntry,
   isApiKeyCacheWritable,

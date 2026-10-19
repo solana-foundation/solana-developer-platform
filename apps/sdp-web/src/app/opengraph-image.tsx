@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
-import { getMessages, translate } from "@/i18n/messages";
+import { getMessages } from "@/i18n/messages";
+import { translate } from "@/i18n/translate";
 
 // The card is a shared brand artifact: unfurlers cache one image per URL, so
 // it always renders the English catalog copy instead of the request locale.

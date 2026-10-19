@@ -1,4 +1,7 @@
-import type { UnifiedTransaction, UnifiedTransactionsListResponse } from "@sdp/types";
+import type {
+  UnifiedTransaction,
+  UnifiedTransactionsListResponse,
+} from "@sdp/types/unified-transactions";
 import { NextResponse } from "next/server";
 import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
 import {

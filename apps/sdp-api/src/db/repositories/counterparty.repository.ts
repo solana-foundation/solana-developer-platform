@@ -1,15 +1,8 @@
-import type { CounterpartyRow } from "@sdp/payments";
-import type {
-  CounterpartyEntityType,
-  CounterpartyProviderData,
-  RampProviderId,
-  SdpEnvironment,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
-import type { BvnkCustomerProviderAccountMetadata } from "./counterparty-provider-account.repository";
-
-export type { CounterpartyRow } from "@sdp/payments";
-export { generateCounterpartyId } from "@sdp/payments";
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { CounterpartyEntityType, CounterpartyProviderData } from "@sdp/types/counterparties";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface CreateCounterpartyInput {
   organizationId: string;
@@ -48,17 +41,6 @@ export interface ListCounterpartiesInput {
 export interface ListCounterpartiesResult {
   rows: CounterpartyRow[];
   total: number;
-}
-
-export interface UpsertBvnkCustomerProviderDataInput {
-  counterpartyId: string;
-  organizationId: string;
-  projectId: string;
-  customer: {
-    customerReference: string;
-    residenceCountryCode?: BvnkCustomerProviderAccountMetadata["residenceCountryCode"];
-    session?: BvnkCustomerProviderAccountMetadata["session"];
-  };
 }
 
 export interface MutateCounterpartyProviderDataInput {
@@ -102,6 +84,5 @@ export interface CounterpartiesRepository {
     environment: SdpEnvironment;
   }): Promise<CounterpartyRow | null>;
   mutateProviderData(params: MutateCounterpartyProviderDataInput): Promise<CounterpartyRow | null>;
-  upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;
   listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult>;
 }

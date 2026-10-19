@@ -3,11 +3,11 @@ import { requirePermissions } from "@/middleware/auth";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { cancelRampTransfer, simulateSandboxTransfer } from "./handlers";
-import offramp from "./offramp";
-import onramp from "./onramp";
+import { offramp } from "./offramp";
+import { onramp } from "./onramp";
 import { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
 
-const ramps = new Hono<{ Bindings: Env }>();
+export const ramps = new Hono<{ Bindings: Env }>();
 
 ramps.route("/onramp", onramp);
 ramps.route("/offramp", offramp);
@@ -23,5 +23,3 @@ ramps.post(
   validateBody(simulateSandboxTransferSchema),
   simulateSandboxTransfer
 );
-
-export default ramps;

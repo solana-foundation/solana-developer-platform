@@ -11,17 +11,16 @@
  */
 
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-
+import { z } from "zod";
+import { errorResponseSchema } from "@/openapi/schemas/base";
 import {
   createDvpTradeRequestSchema,
   dvpCloseRefusalErrorResponseSchema,
   dvpLegRefusalErrorResponseSchema,
   dvpTradeIdParamSchema,
-  errorResponseSchema,
   fundDvpTradeRequestSchema,
   listDvpTradesQuerySchema,
-  z,
-} from "../schemas";
+} from "@/openapi/schemas/dvp";
 import {
   errorResponses,
   jsonContent,

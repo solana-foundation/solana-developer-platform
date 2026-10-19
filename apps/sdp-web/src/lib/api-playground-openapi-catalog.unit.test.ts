@@ -5,7 +5,8 @@ import { buildIssuancePlaygroundEndpointConfigs } from "@/app/dashboard/[project
 import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
 import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/payments-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
-import { getMessages, translate } from "@/i18n/messages";
+import { getMessages } from "@/i18n/messages";
+import { translate } from "@/i18n/translate";
 import {
   filterPlaygroundEndpointsToReleaseChannel,
   getOpenApiPlaygroundEndpoints,
@@ -102,7 +103,7 @@ describe("API playground release channel", () => {
     );
     const batches = payments.find((endpoint) => endpoint.id === "create-payment-transfer-batch");
     expect(JSON.stringify(batches?.expectedResponse)).toMatch(/"transfers":\[\{/);
-    expect(JSON.stringify(batches?.expectedResponse)).not.toMatch(/moonpay|bvnk|stripe/);
+    expect(JSON.stringify(batches?.expectedResponse)).not.toMatch(/moonpay|stripe/);
 
     const transfers = payments.find((endpoint) => endpoint.id === "list-payment-transfers");
     expect(transfers?.pathFields.map((field) => field.key)).not.toContain("provider");

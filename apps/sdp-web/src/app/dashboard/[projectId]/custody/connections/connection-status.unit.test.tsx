@@ -1,4 +1,4 @@
-import type { CustodyConnectionLifecycle } from "@sdp/types";
+import type { CustodyConnectionLifecycle } from "@sdp/types/custody";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";

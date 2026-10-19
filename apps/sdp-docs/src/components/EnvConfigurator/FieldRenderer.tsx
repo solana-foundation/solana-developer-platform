@@ -1,6 +1,7 @@
 "use client";
 
-import { type EnvField, parseList, type Values } from "@sdp/env-config";
+import { parseList } from "@sdp/env-config/fields";
+import type { EnvField, Values } from "@sdp/env-config/types";
 
 export interface FieldRowProps {
   field: EnvField;

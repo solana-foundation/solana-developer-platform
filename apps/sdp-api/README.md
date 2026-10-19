@@ -10,7 +10,7 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 - **Token Issuance** — mint, freeze, and manage SPL tokens
 - **Payments** — send SOL and SPL token transfers with compliance screening
 - **Compliance** — AML/KYC screening via TRM, Chainalysis, Elliptic, or Range
-- **On/Off Ramps:** integrate fiat on/off-ramps via MoonPay, BVNK, or Stripe
+- **On/Off Ramps:** integrate fiat on/off-ramps via MoonPay or Stripe
 - **Earn:** discover yield strategies and build self-custodial deposit or withdrawal transactions
 - **Organizations & Projects** — multi-tenant project management with API key authentication
 
@@ -339,7 +339,9 @@ Migration-free merges deploy production without a stop. Because a rollback only 
 schema, CI (`pnpm check:migration-compat`) rejects migrations the previous
 image cannot run against. A migration that must break compatibility declares
 `-- sdp:migration-compat: breaking` and ships in a PR that touches nothing
-outside the migrations directory except test files.
+outside the migrations directory except test files. Production applies it only
+once it serves the commit before it, and never restores the previous image
+after it.
 
 Migrations run while the previous revision serves traffic, so the runner caps
 each lock wait at 5 s (`lock_timeout`) and retries the file a few times; locks
@@ -379,7 +381,8 @@ The hosted API is built as a container and deployed to Cloud Run through GitHub 
 Stage deploys and merge deploys to production update and execute the migration
 job before deploying the API. Production then verifies a no-traffic candidate
 revision before promoting the service and reconciliation cron job to the same
-immutable image. Releases and manual production redeploys leave the migration
+immutable image, and holds further deploys when the production canary fails,
+leaving the rollback to a person. Releases and manual production redeploys leave the migration
 job unchanged and refuse an image that adds migrations production has not
 applied. Runtime environment variables and secret references
 are managed on the GCP resources rather than written by the image deployment.

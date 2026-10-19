@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { conflict, providerUnavailable } from "@/lib/errors";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";

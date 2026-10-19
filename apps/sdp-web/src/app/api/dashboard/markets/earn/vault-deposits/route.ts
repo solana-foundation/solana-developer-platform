@@ -1,5 +1,8 @@
+import {
+  proxyQueryErrorResponse,
+  vaultDepositsProxyQuery,
+} from "@/app/api/dashboard/markets/earn/provider-query";
 import { proxyToSdpApi } from "@/lib/sdp-api";
-import { proxyQueryErrorResponse, vaultDepositsProxyQuery } from "../provider-query";
 
 export async function POST(request: Request) {
   return proxyToSdpApi({
