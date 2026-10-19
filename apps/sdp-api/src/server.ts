@@ -18,6 +18,7 @@ import {
   startCron,
   startEarnCatalogueBootSync,
 } from "@/cron/runner";
+import { resolvePoolMax } from "@/db/client";
 import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
@@ -130,6 +131,7 @@ async function main(): Promise<void> {
   // typo fails immediately instead of after a partial startup.
   const shutdownTimeoutMs = resolveShutdownTimeoutMs();
   const fatalOnUnhandledRejection = shouldShutdownOnUnhandledRejection();
+  resolvePoolMax();
   assertCronConfig(env);
 
   // Clerk's signing keys are the probe: the auth path needs them first, and

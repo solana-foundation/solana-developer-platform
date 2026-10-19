@@ -5,6 +5,7 @@
  */
 export const API_LOCAL_ENV_KEYS = [
   "DATABASE_URL",
+  "PG_POOL_MAX",
   "REDIS_URL",
   "PUBLIC_API_ORIGIN",
   "DISABLE_CRON",
