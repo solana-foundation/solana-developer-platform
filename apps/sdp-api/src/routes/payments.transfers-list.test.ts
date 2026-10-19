@@ -487,6 +487,7 @@ describe("Payments routes — list transfers", () => {
           amount: "25000000",
           decimals: 6,
           uiAmountString: "25",
+          state: "initialized",
         },
       ]);
       respondSignatureHistory(
@@ -556,6 +557,7 @@ describe("Payments routes — list transfers", () => {
           amount: "500000000",
           decimals: 6,
           uiAmountString: "500",
+          state: "initialized",
         },
       ]);
       respondSignatureHistory(
@@ -610,6 +612,7 @@ describe("Payments routes — list transfers", () => {
           amount: "0",
           decimals: 6,
           uiAmountString: "0",
+          state: "initialized",
         },
       ]);
 

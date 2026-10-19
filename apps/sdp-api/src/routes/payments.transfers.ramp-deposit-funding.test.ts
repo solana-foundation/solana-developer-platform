@@ -1,10 +1,15 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import {
+  installClusterRpcStub,
+  type StubTokenAccount,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
@@ -80,14 +85,15 @@ async function countAuditRows(transferId: string): Promise<number> {
     )
     .bind(transferId, transferId)
     .first<{ count: number }>();
-  return row?.count ?? 0;
+  if (row === null) throw new Error("Audit count query returned no row");
+  return row.count;
 }
 
 describe("Payments routes — funding an off-ramp token deposit", () => {
   installPaymentsRouteTestHooks();
   const rpc = installClusterRpcStub();
 
-  function answerSourceUsdc(baseUnits: string, state?: "initialized" | "frozen") {
+  function answerSourceUsdc(baseUnits: string, state: StubTokenAccount["state"]) {
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
@@ -96,7 +102,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
           mint: DEVNET_USDC_MINT,
           amount: baseUnits,
           decimals: 6,
-          uiAmountString: String(Number(baseUnits) / 1_000_000),
+          uiAmountString: formatDecimalAmount(BigInt(baseUnits), 6),
           state,
         },
       ])
@@ -112,7 +118,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     await seedUsdcOfframpDeposit(transferId);
     const quoted = await readTransferRow(transferId);
     const idempotencyKey = crypto.randomUUID();
-    answerSourceUsdc("5000000");
+    answerSourceUsdc("5000000", "initialized");
 
     const refused = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
 
@@ -127,7 +133,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     expect(await countAuditRows(transferId)).toBe(0);
 
     // The refusal stored nothing under the key, so the same key funds the sale.
-    answerSourceUsdc("25000000");
+    answerSourceUsdc("25000000", "initialized");
     const tokenAccountReadsBefore = tokenAccountReads();
     const mintReadsBefore = getAccountInfoMock.mock.calls.length;
     const funded = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
@@ -181,7 +187,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
   it("refuses a request that does not match the deposit before reading the chain", async () => {
     const transferId = generatePaymentTransferId();
     await seedUsdcOfframpDeposit(transferId);
-    answerSourceUsdc("5000000");
+    answerSourceUsdc("5000000", "initialized");
 
     const refused = await postTransfer(usdcDepositRequest(transferId, "24"), {});
 

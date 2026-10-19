@@ -112,6 +112,7 @@ describe("Payments routes — on-chain transfers", () => {
           amount: "1000000000",
           decimals: 6,
           uiAmountString: "1000",
+          state: "initialized",
         },
       ])
     );
