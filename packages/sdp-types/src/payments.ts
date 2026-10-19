@@ -248,6 +248,13 @@ export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
   "expired",
 ] as const satisfies readonly PaymentTransferStatus[];
 
+/** A MoonPay attempt with no SDP deposit claim can safely stop taking payment. */
+const MOONPAY_UNCLAIMED_TRANSFER_STATUSES = [
+  "pending",
+  "awaiting_payment",
+  "expired",
+] as const satisfies readonly PaymentTransferStatus[];
+
 /**
  * Legal ramp transfer status changes, by name. `transitionRampTransfer` reads
  * the source statuses from here, never from its caller, so an illegal
@@ -281,9 +288,16 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   // A failed MoonPay checkout attempt releases its transaction reference so
   // the same transfer can be retried. The caller separately guards funding.
   moonpay_attempt_failed: {
-    from: ["pending", "awaiting_payment", "expired"],
+    from: MOONPAY_UNCLAIMED_TRANSFER_STATUSES,
     to: "awaiting_payment",
     types: ["onramp"],
+  },
+  // A failed sale closes its deposit instruction before another deposit can
+  // claim it. A deposit already claimed stays open for reconciliation.
+  moonpay_sell_failed: {
+    from: MOONPAY_UNCLAIMED_TRANSFER_STATUSES,
+    to: "failed",
+    types: ["offramp"],
   },
   // Not from `settling`: a stale redelivered expiry must not undo a transfer
   // another event already revived.

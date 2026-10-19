@@ -158,6 +158,12 @@ the transaction id; a reference already bound to another transfer is refused.
 Competing ids, conflicting terminal state, unsafe failures, cross-environment
 events, and settlement after cancellation are `refused`. Production parks them
 for review; sandbox discards them.
+A failed MoonPay sale with no claimed deposit moves to `failed` and withdraws
+`cryptoDeposit` in the same guarded transition, but retains its reference and
+returns `refused` for review. A sale whose deposit was already claimed stays
+open for reconciliation and refuses the failure without regressing its state.
+If the failed event reports a deposit hash, the row moves to `settling`, holds
+the signature and reference, and withdraws the instruction for review.
 
 ## Ramps: retired provider ids
 

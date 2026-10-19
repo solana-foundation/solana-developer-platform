@@ -109,6 +109,11 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
       "expired",
       "pending",
     ]);
+    expect(sortedSources("moonpay_sell_failed")).toEqual([
+      "awaiting_payment",
+      "expired",
+      "pending",
+    ]);
   });
 
   it("lands each provider event on the status it names, for both ramp types", () => {
@@ -129,6 +134,8 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
     }
     expect(RAMP_TRANSFER_TRANSITIONS.moonpay_attempt_failed.types).toEqual(["onramp"]);
     expect(RAMP_TRANSFER_TRANSITIONS.moonpay_attempt_failed.to).toBe("awaiting_payment");
+    expect(RAMP_TRANSFER_TRANSITIONS.moonpay_sell_failed.types).toEqual(["offramp"]);
+    expect(RAMP_TRANSFER_TRANSITIONS.moonpay_sell_failed.to).toBe("failed");
   });
 
   it("keeps what SDP's own writers allowed before the table", () => {
@@ -210,6 +217,13 @@ describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
 
     expect(await transition("xfr_illegal", "provider_expired")).toBeNull();
     expect(await readStatus("xfr_illegal")).toBe("settling");
+  });
+
+  it("does not fail a MoonPay sale after its deposit was claimed", async () => {
+    await seedTransfer({ id: "xfr_claimed_sale", status: "processing", type: "offramp" });
+
+    expect(await transition("xfr_claimed_sale", "moonpay_sell_failed")).toBeNull();
+    expect(await readStatus("xfr_claimed_sale")).toBe("processing");
   });
 
   it("never moves a wallet transfer, even from a listed source status", async () => {

@@ -11,6 +11,7 @@ import { generatePaymentTransferId } from "@/db/repositories/payments.repository
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -325,6 +326,45 @@ describe("Payments routes — on-chain transfers", () => {
     expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
     expect(await countTransferRows()).toBe(1);
+  });
+
+  it("rejects a deposit after MoonPay fails the sale", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedSolOfframpDeposit(transferId);
+    expect(
+      await moonpayWebhook.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "offramp",
+        reference: "moonpay-ramp-deposit",
+        transferId,
+        providerObservedAt: "2026-08-31T11:01:00.000Z",
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
+
+    const staleClaim = await testProjectPaymentsRepository().updateOnchainTransferForRamp({
+      transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      token: SOL_MINT,
+      amount: "1",
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotency: null,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(staleClaim).toBeNull();
+
+    const response = await postTransfer(solOfframpDepositRequest(transferId), {});
+    expect(response.status).toBe(400);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const row = await readTransferRow(transferId);
+    expect(row.status).toBe("failed");
+    expect(row.provider_reference).toBe("moonpay-ramp-deposit");
+    expect(row.provider_data.cryptoDeposit).toBeNull();
   });
 
   it("fails a claimed off-ramp deposit when audit-ledger admission is refused", async () => {

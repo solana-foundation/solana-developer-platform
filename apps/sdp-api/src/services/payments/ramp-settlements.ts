@@ -38,6 +38,22 @@ function isSettlementFinalStatus(status: PaymentTransferStatus): boolean {
   return status !== "expired" && isTerminalRampTransferStatus(status);
 }
 
+function settlementTransition(
+  transfer: PaymentTransferRow,
+  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
+): RampTransferTransitionId {
+  if (event.kind !== "failed" || event.provider !== "moonpay" || transfer.type !== "offramp") {
+    return RAMP_SETTLEMENT_TRANSITION[event.kind];
+  }
+  // A deposit reported by either side still needs reconciliation after the
+  // provider fails the sale; do not make it terminal.
+  return event.onchain !== undefined ||
+    transfer.signature !== null ||
+    transfer.submission_started_at !== null
+    ? "provider_settling"
+    : "moonpay_sell_failed";
+}
+
 /**
  * Builds the guarded transfer update one settlement event produces.
  *
@@ -53,7 +69,7 @@ function buildRampSettlementUpdate(
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
-    transition: RAMP_SETTLEMENT_TRANSITION[event.kind],
+    transition: settlementTransition(transfer, event),
     updatedAt: new Date().toISOString(),
   };
   if (event.providerObservedAt !== undefined) {
@@ -84,6 +100,9 @@ function buildRampSettlementUpdate(
   }
   if ((event.kind === "failed" || event.kind === "expired") && event.error) {
     update.error = event.error;
+  }
+  if (event.kind === "failed" && transfer.type === "offramp") {
+    update.providerData = { cryptoDeposit: null };
   }
   // The provider's deposit instruction lets the dashboard send the crypto on
   // the customer's behalf; each event replaces the previous instruction, and

@@ -12,6 +12,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isRampTransferType,
   isTerminalRampTransferStatus,
+  RAMP_TRANSFER_TRANSITIONS,
   type RampWebhookProcessResult,
 } from "@sdp/types/payments";
 import { z } from "zod";
@@ -158,16 +159,11 @@ async function moonpayObservationPreflight(
   return null;
 }
 
-async function applyFailedMoonpayObservation(
+async function applyFailedMoonpayBuyObservation(
   repo: PaymentsRepository,
   transfer: PaymentTransferRow,
   event: Extract<MoonpaySettlementEvent, { kind: "failed" }>
 ): Promise<RampWebhookProcessResult> {
-  // A failed sale may still have an in-flight deposit or refund at MoonPay.
-  // Keep its reference and page an operator rather than opening another sale.
-  if (transfer.type === "offramp") {
-    return { outcome: "refused", reason: "moonpay_sell_failed" };
-  }
   // A buy card failure can retry before crypto delivery.
   if (
     transfer.status === "settling" ||
@@ -242,8 +238,20 @@ async function processMoonpayObservation(
       if (preflight) return preflight;
       if (!locked) throw new Error("MoonPay preflight accepted a missing transfer");
       const { transfer } = locked;
-      if (event.kind === "failed") {
-        return applyFailedMoonpayObservation(repo, transfer, event);
+      if (event.kind === "failed" && transfer.type === "onramp") {
+        return applyFailedMoonpayBuyObservation(repo, transfer, event);
+      }
+      if (transfer.type === "offramp" && transfer.status === "failed") {
+        return { outcome: "refused", reason: "moonpay_terminal_conflict" };
+      }
+      if (
+        event.kind === "failed" &&
+        !RAMP_TRANSFER_TRANSITIONS.moonpay_sell_failed.from.some(
+          (status) => status === transfer.status
+        )
+      ) {
+        // A deposit already claimed may still land. Keep its state for review.
+        return { outcome: "refused", reason: "moonpay_sell_failed" };
       }
 
       if (transfer.status !== "expired" && isTerminalRampTransferStatus(transfer.status)) {
@@ -262,7 +270,10 @@ async function processMoonpayObservation(
       if (!claimed) throw new Error("MoonPay reference claim changed while transfer was locked");
       const result = await applyRampSettlementEvent(env, environment, event, client);
       if (!result.applied) throw new RollBackMoonpayClaim(result);
-      return result;
+      // Keep the failed sale for operator review after withdrawing its deposit.
+      return event.kind === "failed"
+        ? { outcome: "refused", reason: "moonpay_sell_failed" }
+        : result;
     });
   } catch (error) {
     if (error instanceof RollBackMoonpayClaim) return error.result;
