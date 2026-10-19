@@ -3,7 +3,7 @@
 import { Button } from "@sdp/ui/button";
 import { Label } from "@sdp/ui/label";
 import { Textarea } from "@sdp/ui/textarea";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { saveOrganizationIpAllowlistAction } from "./organization-access-actions";
@@ -16,19 +16,20 @@ export function OrganizationIpAllowlistForm({
   const t = useTranslations();
   const [value, setValue] = useState(() => initialAllowedIps.join("\n"));
   // One key per edit: a retried save repeats it, a changed list gets a new one.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const idempotencyKey = useRef<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const save = () => {
     startTransition(async () => {
-      const result = await saveOrganizationIpAllowlistAction(value, idempotencyKey);
+      idempotencyKey.current ??= crypto.randomUUID();
+      const result = await saveOrganizationIpAllowlistAction(value, idempotencyKey.current);
       if (!result.ok) {
         toast.error(t("Shared.organizationAccess.saveFailed", { error: result.error }));
         return;
       }
       // Show the list as the API stored it: each entry in canonical form.
       setValue(result.allowedIps.join("\n"));
-      setIdempotencyKey(crypto.randomUUID());
+      idempotencyKey.current = null;
       toast.success(t("Shared.organizationAccess.saved"));
     });
   };
@@ -46,7 +47,7 @@ export function OrganizationIpAllowlistForm({
           value={value}
           onChange={(event) => {
             setValue(event.currentTarget.value);
-            setIdempotencyKey(crypto.randomUUID());
+            idempotencyKey.current = null;
           }}
           placeholder={"203.0.113.10\n198.51.100.0/24"}
           aria-describedby="organization-allowed-ips-helper"
