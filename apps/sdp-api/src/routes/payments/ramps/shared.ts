@@ -18,7 +18,6 @@ import type {
 import type {
   PaymentRampEstimate,
   PaymentRampQuote,
-  PaymentTransferStatus,
   RampProviderEstimateResult,
 } from "@sdp/types/payments";
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
@@ -195,10 +194,6 @@ export async function resolveRampQuoteRequest(
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }
 
-export function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
-  return quote.status;
-}
-
 export async function persistRampQuoteTransfer(
   c: AppContext,
   input: PersistRampQuoteTransferInput
@@ -249,7 +244,7 @@ export async function persistRampQuoteTransfer(
       memo: null,
       type: input.direction,
       direction: isOnramp ? "inbound" : "outbound",
-      status: rampQuoteTransferStatus(input.quote),
+      status: input.quote.status,
       provider: input.quote.provider,
       providerReference: input.quote.id,
       deliveryMode: input.quote.deliveryMode,

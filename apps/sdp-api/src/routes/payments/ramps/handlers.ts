@@ -1,9 +1,5 @@
 import { resolveRampProviderClient } from "@sdp/payments/ramps";
-import {
-  CANCELABLE_RAMP_TRANSFER_STATUSES,
-  isCancelableRampTransferStatus,
-  isRampTransferType,
-} from "@sdp/types/payments";
+import { isCancelableRampTransferStatus, isRampTransferType } from "@sdp/types/payments";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -38,12 +34,11 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
 
-  const updated = await repository.updateTransferStatusGuarded({
+  const updated = await repository.transitionRampTransfer({
     transferId: transfer.id,
     organizationId: scope.auth.organizationId,
     projectId,
-    fromStatuses: CANCELABLE_RAMP_TRANSFER_STATUSES,
-    toStatus: "canceled",
+    transition: "canceled",
     updatedAt: new Date().toISOString(),
   });
   if (!updated) {

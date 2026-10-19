@@ -19,7 +19,6 @@ import { createPostgresPaymentsRepository } from "./payments.repository.postgres
 const TEST_PROJECT_ID = "prj_payments_repo_test";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
-const CANCELABLE = ["pending", "awaiting_payment"] as const;
 
 async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
   const db = getDb(env);
@@ -114,7 +113,7 @@ function transferInput(overrides: {
   };
 }
 
-describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
+describe("PaymentsRepository transfer writes (postgres)", () => {
   let projects: SeededDefaultProjects;
   let repo: PaymentsRepository;
 
@@ -193,15 +192,14 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     return row?.status ?? null;
   }
 
-  it("transitions the status when the current status is in fromStatuses", async () => {
+  it("applies a transition from one of its source statuses", async () => {
     await seedTransfer({ id: "xfr_guard_ok", status: "awaiting_payment" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_ok",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -340,15 +338,14 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     ).resolves.toBeNull();
   });
 
-  it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
+  it("is a no-op returning null when the status left the sources (the race)", async () => {
     await seedTransfer({ id: "xfr_guard_race", status: "settling" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_race",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -357,12 +354,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   });
 
   it("returns null for a transfer that does not exist", async () => {
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_missing",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -372,12 +368,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("does not transition a transfer owned by a different organization", async () => {
     await seedTransfer({ id: "xfr_guard_org", status: "awaiting_payment" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_org",
       organizationId: "org_someone_else",
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -388,12 +383,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("does not transition a transfer scoped to another project", async () => {
     await seedTransfer({ id: "xfr_guard_project", status: "awaiting_payment" });
     const transition = (projectId: string) =>
-      repo.updateTransferStatusGuarded({
+      repo.transitionRampTransfer({
         transferId: "xfr_guard_project",
         organizationId: TEST_ORG.id,
         projectId,
-        fromStatuses: CANCELABLE,
-        toStatus: "canceled",
+        transition: "canceled",
         updatedAt: new Date().toISOString(),
       });
     await expectProjectScoped(
