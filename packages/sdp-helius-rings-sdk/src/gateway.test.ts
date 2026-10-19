@@ -1,4 +1,4 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { describe, expect, it } from "vitest";
 import { createRingsGateway, type RingsGatewayConfig } from "./gateway.js";
 import { TEST_OWNER, testMaterialSource } from "./test/shielded-identity-fixtures.js";

@@ -5,10 +5,11 @@ import type {
   EarnVaultQueuedWithdrawalLifecycleEvent,
   EarnVaultQueuedWithdrawalRequestLookup,
   EarnVaultQueuedWithdrawProvider,
-} from "@sdp/earn";
+} from "@sdp/earn/types";
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import { address, type Signature } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnVaultWithdrawalRequestActionRow,
@@ -19,7 +20,6 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import {
   earnClusterFor,
-  resolveClusterRpcUrl,
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "@/services/earn/execution-registry";

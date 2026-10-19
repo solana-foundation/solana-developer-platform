@@ -15,7 +15,7 @@ export const UNIFIED_TRANSACTIONS_QUOTA = {
   orgMax: 240,
 };
 
-const transactions = new Hono<{ Bindings: Env }>();
+export const transactions = new Hono<{ Bindings: Env }>();
 
 transactions.use("*", unifiedAuthMiddleware());
 transactions.use("*", projectContextMiddleware());
@@ -25,5 +25,3 @@ transactions.get(
   meteredQuota(UNIFIED_TRANSACTIONS_QUOTA),
   listUnifiedTransactions
 );
-
-export default transactions;

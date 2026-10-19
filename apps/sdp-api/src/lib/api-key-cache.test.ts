@@ -19,7 +19,7 @@
  * passing as success.
  */
 
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { describe, expect, it } from "vitest";
 import type { KVStore } from "@/runtime/kv";
 import { fillApiKeyCache, isTrustedCachedApiKey, refreshApiKeyCache } from "./api-key-cache";

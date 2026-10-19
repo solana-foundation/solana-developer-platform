@@ -1,8 +1,8 @@
-import { privateChannelInstanceInputSchema } from "@sdp/private-channels";
+import { privateChannelInstanceInputSchema } from "@sdp/private-channels/schema";
 import {
   PRIVATE_CHANNEL_EVENT_FAMILY_VALUES,
   PRIVATE_CHANNEL_EVENT_STATUS_VALUES,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { z } from "zod";
 import { privateChannelTransferAmountSchema } from "@/lib/private-channel-transfer-amount";
 

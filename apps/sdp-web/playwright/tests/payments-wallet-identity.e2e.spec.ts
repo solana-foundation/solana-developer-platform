@@ -140,17 +140,17 @@ test.describe
     test("canonicalizes an unambiguous provider-ID bookmark to its internal wallet URL", async ({
       page,
     }) => {
-      const { otherApi, otherProjectId, otherWallet } = fixture;
+      const { api, projectId, bookmarkWallet } = fixture;
       const walletBalances = parseWalletBalanceResponse(
         {
-          data: await otherApi.get<unknown>(
-            `/v1/payments/wallets/${encodeURIComponent(otherWallet.walletId)}/balances`
+          data: await api.get<unknown>(
+            `/v1/payments/wallets/${encodeURIComponent(bookmarkWallet.walletId)}/balances`
           ),
         },
-        otherWallet.id
+        bookmarkWallet.id
       );
-      expect(walletBalances.custodyWalletId).toBe(otherWallet.id);
-      expect(walletBalances.walletId).toBe(otherWallet.walletId);
+      expect(walletBalances.custodyWalletId).toBe(bookmarkWallet.id);
+      expect(walletBalances.walletId).toBe(bookmarkWallet.walletId);
       const newDesignWallets =
         process.env.SDP_FLAG_NEW_DESIGN === "true" &&
         process.env.SDP_FLAG_NEW_DESIGN_WALLETS === "true";
@@ -161,10 +161,10 @@ test.describe
       const bookmarkedQuery = `?${bookmarkParams}`;
       await gotoProjectPage(
         page,
-        otherProjectId,
-        `/dashboard/wallets/${encodeURIComponent(otherWallet.walletId)}${bookmarkedQuery}`
+        projectId,
+        `/dashboard/wallets/${encodeURIComponent(bookmarkWallet.walletId)}${bookmarkedQuery}`
       );
-      const canonicalPath = projectHref(otherProjectId, `/dashboard/wallets/${otherWallet.id}`);
+      const canonicalPath = projectHref(projectId, `/dashboard/wallets/${bookmarkWallet.id}`);
       const expectCanonicalBookmark = async () => {
         await expect(page).toHaveURL(
           (url) =>
@@ -187,7 +187,7 @@ test.describe
       };
       await expectCanonicalBookmark();
       await expect(
-        page.getByRole("heading", { name: "Wallet Identity Other Project", exact: true })
+        page.getByRole("heading", { name: "Wallet Identity Bookmark", exact: true })
       ).toBeVisible();
       await page.reload();
       await expectCanonicalBookmark();

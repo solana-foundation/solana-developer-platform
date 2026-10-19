@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, PrivateChannelInstanceEnvelope } from "@sdp/types";
+import type { CustodyConfigSummary } from "@sdp/types/custody";
+import type { PrivateChannelInstanceEnvelope } from "@sdp/types/private-channels";
 import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";

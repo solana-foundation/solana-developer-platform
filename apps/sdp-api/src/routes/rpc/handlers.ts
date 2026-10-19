@@ -3,7 +3,7 @@ import {
   resolveRoundRobinRpcTargets,
   resolveRpcTarget,
 } from "@sdp/rpc/relay";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";

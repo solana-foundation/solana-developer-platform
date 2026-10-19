@@ -1,4 +1,4 @@
-import { CUSTODY_PROVIDERS } from "@sdp/custody";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
 
 export const completeOnboardingSchema = z.strictObject({

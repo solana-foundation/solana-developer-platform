@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 /**
  * Mirrors the detail page's card stack — header, wallets, credentials — so the

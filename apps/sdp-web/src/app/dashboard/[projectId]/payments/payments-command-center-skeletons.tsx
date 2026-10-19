@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 const skeletonSectionClassName =
   "min-w-0 rounded-lg border border-border-default bg-surface-raised p-4";

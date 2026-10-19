@@ -1,21 +1,17 @@
 import { createHmac } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
-import { type PaymentTransferStatus, wellKnownMint } from "@sdp/types";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
-
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
-});
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
@@ -998,8 +994,12 @@ describe("MoonPay ramp webhook", () => {
   it("refuses a completed transaction that does not name its crypto", async () => {
     const { currency: _currency, ...withoutCrypto } = completedPayload.data;
     const res = await sendMoonpayWebhook({ ...completedPayload, data: withoutCrypto });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+    const row = await getDb(env)
+      .prepare("SELECT status, apply_outcome FROM ramp_webhook_events WHERE provider = 'moonpay'")
+      .first<{ status: string; apply_outcome: string }>();
+    expect(row).toEqual({ status: "discharged", apply_outcome: "discarded" });
   });
   it("does not complete a transfer when MoonPay delivered another crypto", async () => {
     const res = await sendMoonpayWebhook({
@@ -1019,8 +1019,12 @@ describe("MoonPay ramp webhook", () => {
         quoteCurrencyAmount: 16.31,
       },
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+    const row = await getDb(env)
+      .prepare("SELECT status, apply_outcome FROM ramp_webhook_events WHERE provider = 'moonpay'")
+      .first<{ status: string; apply_outcome: string }>();
+    expect(row).toEqual({ status: "discharged", apply_outcome: "discarded" });
   });
   it("does not complete a sale of another crypto", async () => {
     await getDb(env)

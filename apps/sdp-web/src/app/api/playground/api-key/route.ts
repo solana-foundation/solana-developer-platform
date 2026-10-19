@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
+import { getSdpAuth } from "@/lib/sdp-auth";
 
 /**
  * Resolves pasted key material to the key it is, so the playground can drop its

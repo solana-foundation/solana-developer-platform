@@ -5,13 +5,13 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import {
   type CounterpartyRequirementsParams,
-  useCounterpartyRequirements,
-} from "./use-counterparty-requirements";
+  paymentsQueryKeys,
+} from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
+import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 
 interface HeldRequest {
   url: string;

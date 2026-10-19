@@ -1,7 +1,7 @@
 "use client";
 
+import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
-import { WizardSummaryList } from "../wizard-summary-list";
 import { OnchainReceiveStepContent } from "./components/onchain-receive-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { useOnchainReceiveWizard } from "./hooks/use-onchain-receive-wizard";

@@ -1,4 +1,4 @@
-import type { PaymentRecurringPaymentResponse } from "@sdp/types";
+import type { PaymentRecurringPaymentResponse } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import { setWindowPathname } from "@/test/window-location";

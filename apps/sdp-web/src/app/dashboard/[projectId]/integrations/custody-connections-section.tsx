@@ -1,6 +1,8 @@
 "use client";
 
-import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types";
+import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { AddConnectionModal } from "@/app/dashboard/[projectId]/custody/connections/add-connection-modal";
@@ -11,8 +13,6 @@ import type {
 } from "@/app/dashboard/[projectId]/custody/connections/connections.data";
 import { ConnectionsList } from "@/app/dashboard/[projectId]/custody/connections/connections-list";
 import { useSelectedProjectName } from "@/app/dashboard/[projectId]/custody/connections/use-selected-project-name";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
 import { useTranslations } from "@/i18n/provider";
 
 /**

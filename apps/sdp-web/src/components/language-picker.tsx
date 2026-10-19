@@ -1,7 +1,6 @@
 "use client";
 
-import { LanguagesIcon } from "lucide-react";
-import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
+import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,10 +9,11 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@sdp/ui/dropdown-menu";
+import { LanguagesIcon } from "lucide-react";
+import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
 import { supportedLocales } from "@/i18n/config";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 /**
  * The language button: the landing page's, and the previous design's dashboard header's. On the

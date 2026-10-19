@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalizeTransferBatchBody } from "./idempotency";
+import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 
 describe("canonicalizeTransferBatchBody", () => {
   it("makes recipient order irrelevant and keeps everything else as sent", () => {
@@ -30,6 +30,46 @@ describe("canonicalizeTransferBatchBody", () => {
       ...body,
       options: { preflight: false },
     });
+  });
+
+  it("treats options sent at their default as omitted (APE-665)", () => {
+    const body = {
+      sourceCustodyWalletId: "cwlt_1",
+      token: "SOL",
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+    };
+
+    expect(
+      canonicalizeTransferBatchBody({
+        ...body,
+        options: { maxRecipientsPerTransaction: 20, preflight: true },
+      })
+    ).toEqual(canonicalizeTransferBatchBody(body));
+    expect(
+      canonicalizeTransferBatchBody({
+        ...body,
+        options: { maxRecipientsPerTransaction: 20, preflight: false },
+      })
+    ).toEqual({ ...body, options: { preflight: false } });
+    expect(
+      canonicalizeTransferBatchBody({ ...body, options: { maxRecipientsPerTransaction: 8 } })
+    ).toEqual({ ...body, options: { maxRecipientsPerTransaction: 8 } });
+  });
+
+  it("keeps the pre-APE-665 form, options as sent, for keys saved before it", () => {
+    const body = {
+      sourceCustodyWalletId: "cwlt_1",
+      token: "SOL",
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1.0" }],
+      options: { maxRecipientsPerTransaction: 20 },
+    };
+    expect(previousCanonicalTransferBatchBody(body)).toEqual({
+      ...body,
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+    });
+    expect(previousCanonicalTransferBatchBody(body)).not.toEqual(
+      canonicalizeTransferBatchBody(body)
+    );
   });
 
   it("leaves a body without a recipients array untouched for validation to refuse", () => {

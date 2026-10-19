@@ -1,6 +1,6 @@
 import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/connect";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types/well-known-tokens";
 import {
   WISDOMTREE_FUNDS,
   WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS,

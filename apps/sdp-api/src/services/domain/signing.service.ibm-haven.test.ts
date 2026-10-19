@@ -1,12 +1,16 @@
 import { Buffer } from "node:buffer";
-import { denormalizeIbmHavenWalletId, normalizeIbmHavenWalletId } from "@sdp/custody";
 import {
   type DfnsApiClient,
   IBM_HAVEN_PROVIDER_LABEL,
   resolveDfnsNetwork,
-} from "@sdp/custody/dfns";
+} from "@sdp/custody/dfns/client";
+import { KeychainIbmHavenAdapter } from "@sdp/custody/keychain/keychain-ibm-haven.adapter";
+import {
+  denormalizeIbmHavenWalletId,
+  normalizeIbmHavenWalletId,
+} from "@sdp/custody/provider-wallet-ids";
 import { describe, expect, it } from "vitest";
-import { KeychainIbmHavenAdapter, type SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";
@@ -108,7 +112,7 @@ function createTestEnv(overrides?: Partial<Env>): Env {
     IBM_HAVEN_PRIVATE_KEY: "ibm-haven-test-private-key",
     ENVIRONMENT: "development",
     API_VERSION: "v1",
-    SDP_RELEASE_CHANNEL: "stable",
+    SDP_RELEASE_CHANNEL: "beta",
     ...overrides,
   } as Env;
 }

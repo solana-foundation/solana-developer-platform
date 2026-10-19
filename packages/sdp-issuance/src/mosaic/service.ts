@@ -13,12 +13,12 @@
  */
 
 import type { FeePaymentPort } from "@sdp/fee-payment/port";
-import type { RpcEnv } from "@sdp/rpc";
 import {
   type ConfirmTransactionOptions,
   confirmTransaction,
   createRpcForSdk,
 } from "@sdp/rpc/solana";
+import type { RpcEnv } from "@sdp/rpc/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type Address,

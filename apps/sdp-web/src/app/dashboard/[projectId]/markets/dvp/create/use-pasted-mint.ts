@@ -16,7 +16,7 @@
  * every keystroke of a 44-character base58 string would otherwise be a request.
  */
 
-import { isAddress } from "@sdp/solana";
+import { isAddress } from "@solana/kit";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { dashboardRequest } from "@/lib/dashboard-fetch";

@@ -5,7 +5,7 @@
  * valid once a Redis-backed implementation lands (HOO-510).
  */
 
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";

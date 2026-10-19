@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_RUNTIME_PASSWORD, TEST_RUNTIME_ROLE } from "@/test/runtime-role";
 import type { Env } from "@/types/env";
 

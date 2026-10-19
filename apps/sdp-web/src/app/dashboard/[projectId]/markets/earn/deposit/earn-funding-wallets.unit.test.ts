@@ -1,4 +1,4 @@
-import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {

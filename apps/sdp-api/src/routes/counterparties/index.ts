@@ -5,9 +5,9 @@ import { idempotent } from "@/middleware/idempotency";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireModule } from "@/middleware/require-module";
 import { validateBody, validateParams } from "@/middleware/validate";
+import { counterpartyAccounts } from "@/routes/counterparty-accounts";
+import { counterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts";
 import type { Env } from "@/types/env";
-import counterpartyAccounts from "../counterparty-accounts";
-import counterpartyProviderAccounts from "../counterparty-provider-accounts";
 import { authorizeCounterparty } from "./access";
 import {
   archiveCounterparty,
@@ -27,7 +27,7 @@ import {
   updateCounterpartySchema,
 } from "./schemas";
 
-const counterparties = new Hono<{ Bindings: Env }>();
+export const counterparties = new Hono<{ Bindings: Env }>();
 
 /** Why counterparty create runs `authorizeNone` (route inventory pins it). */
 export const CREATES_IN_SCOPE =
@@ -91,5 +91,3 @@ counterparties.delete(
 
 counterparties.route("/:counterpartyId/accounts", counterpartyAccounts);
 counterparties.route("/:counterpartyId/provider-accounts", counterpartyProviderAccounts);
-
-export default counterparties;

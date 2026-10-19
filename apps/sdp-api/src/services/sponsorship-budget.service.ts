@@ -3,17 +3,16 @@ import {
   FeePaymentError,
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
-} from "@sdp/fee-payment";
+} from "@sdp/fee-payment/port";
 import { createRpc, getTransactionNetworkFee, type SolanaRpc } from "@sdp/rpc/solana";
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type SolanaCluster,
   SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES,
   SPONSORSHIP_RESERVATION_SIGNING_ACCOUNTED_STATUSES,
   SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES,
   SPONSORSHIP_RESERVATION_SUBMITTED_RESPONSE_STATUSES,
   type SponsorshipReservationStatus,
-} from "@sdp/types";
+} from "@sdp/types/sponsorship";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   assertIsFullySignedTransaction,
@@ -27,7 +26,7 @@ import {
   type Signature,
   type Transaction,
 } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   type CreateSponsorshipReservationInput,
   type SignaturePersistResult,

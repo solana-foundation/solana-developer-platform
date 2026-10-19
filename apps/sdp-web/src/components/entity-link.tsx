@@ -1,9 +1,9 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { MouseEventHandler, ReactNode } from "react";
-import { cn } from "@/lib/utils";
 
 /**
  * Internal link to an entity's dashboard page: a truncating label with an

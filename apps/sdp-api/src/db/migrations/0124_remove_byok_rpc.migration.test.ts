@@ -3,6 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  runPostgresMigrations,
+  splitSqlStatements,
+} from "@/scripts/lib/run-postgres-migrations.mjs";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
 import {
   seedHeliusRingsConnection,
@@ -10,10 +14,6 @@ import {
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  runPostgresMigrations,
-  splitSqlStatements,
-} from "../../../scripts/lib/run-postgres-migrations.mjs";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const migrationFile = "0124_remove_byok_rpc.sql";

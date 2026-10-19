@@ -1,4 +1,4 @@
-import type { SdpModule } from "@sdp/types";
+import type { SdpModule } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -31,6 +31,7 @@ vi.mock("@/flags", () => ({
   newDesignOverview: async () => true,
   newDesignPayDeposit: async () => true,
   newDesignWallets: async () => true,
+  newDesignIssuance: async () => true,
 }));
 // Custody has no flag of its own: the release channel alone decides (HOO-1956).
 vi.mock("@/flags/release-channel", () => ({

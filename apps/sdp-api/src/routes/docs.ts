@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import type { Env } from "@/types/env";
 
-const docs = new Hono<{ Bindings: Env }>();
+export const docs = new Hono<{ Bindings: Env }>();
 
 const html = `<!doctype html>
 <html lang="en">
@@ -41,5 +41,3 @@ docs.get("/", (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
   return c.body(html);
 });
-
-export default docs;

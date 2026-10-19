@@ -1,11 +1,11 @@
 "use client";
 
+import type { BadgeVariant } from "@sdp/ui/badge";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { Modal } from "@sdp/ui/modal";
 import { useCallback, useState } from "react";
-import type { BadgeVariant } from "@/components/ui/badge";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import {
   fetchRingsWalletIdentity,

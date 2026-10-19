@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { FeePaymentError } from "@sdp/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
   type Blockhash,
@@ -18,8 +18,8 @@ import { generateKeyPairSigner } from "@solana/signers";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import type { DvpTradeRow } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import type { AppError } from "@/lib/errors";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";

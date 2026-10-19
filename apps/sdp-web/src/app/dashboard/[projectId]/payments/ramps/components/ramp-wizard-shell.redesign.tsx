@@ -1,11 +1,11 @@
 "use client";
 
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import { Button } from "@sdp/ui/button";
+import { useThemeScope } from "@sdp/ui/theme-scope";
 import { domAnimation, LazyMotion, m } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-dialog.redesign";
-import { useThemeScope } from "@/components/theme-scope";
-import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { CancelTransactionDialog } from "./cancel-transaction-dialog";

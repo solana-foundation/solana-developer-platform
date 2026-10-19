@@ -1,9 +1,10 @@
-import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types";
+import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
+import { z } from "zod";
 import {
   acceptSchema as acceptSchemaBase,
   inviteSchema as inviteSchemaBase,
-} from "../../routes/members/schemas";
-import { updateOrgSchema as updateOrgSchemaBase } from "../../routes/organizations/schemas";
+} from "@/routes/members/schemas";
+import { updateOrgSchema as updateOrgSchemaBase } from "@/routes/organizations/schemas";
 import {
   invitationIdSchema,
   isoDateTimeSchema,
@@ -11,7 +12,6 @@ import {
   orgIdParamSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const organizationSettingsSchema = z

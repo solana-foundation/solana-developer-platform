@@ -1,5 +1,14 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@sdp/ui/dropdown-menu";
 import {
   ArrowUpRight,
   ChevronDown,
@@ -10,17 +19,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useWalletActions } from "@/app/dashboard/[projectId]/custody/use-wallet-actions";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 interface WalletActionsMenuProps {
   walletAddress: string;

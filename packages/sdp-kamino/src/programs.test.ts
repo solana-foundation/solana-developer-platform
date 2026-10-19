@@ -3,7 +3,7 @@ import {
   KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT,
   KAMINO_KVAULT_PROGRAM_IDS,
   KAMINO_SLOT_DURATION_MS,
-} from "@sdp/types";
+} from "@sdp/types/kamino-programs";
 import { describe, expect, it } from "vitest";
 import { foreignKvaultProgramId, kaminoClusterConfig, kaminoProgramAllowlist } from "./programs";
 

@@ -1,5 +1,5 @@
+import { cn } from "@sdp/ui/cn";
 import { describe, expect, it } from "vitest";
-import { cn } from "./utils";
 
 describe("cn", () => {
   it("keeps a token text size beside a text colour", () => {

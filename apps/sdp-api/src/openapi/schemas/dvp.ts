@@ -16,14 +16,15 @@ import {
   DVP_SETTLEMENT_AVAILABILITY,
   DVP_TRADE_SIDES,
   DVP_TRADE_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/dvp";
+import { z } from "zod";
+import { errorSchema, isoDateTimeSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
   createDvpTradeSchema as createDvpTradeSchemaBase,
   dvpTradeIdParamsSchema as dvpTradeIdParamsSchemaBase,
   fundDvpTradeSchema as fundDvpTradeSchemaBase,
   listDvpTradesQuerySchema as listDvpTradesQuerySchemaBase,
-} from "../../routes/dvp/schemas";
-import { errorSchema, isoDateTimeSchema, withOpenApi, z } from "./base";
+} from "@/routes/dvp/schemas";
 
 export const dvpTradeIdParamSchema = withOpenApi(dvpTradeIdParamsSchemaBase.shape.tradeId, {
   description: "DvP trade identifier.",

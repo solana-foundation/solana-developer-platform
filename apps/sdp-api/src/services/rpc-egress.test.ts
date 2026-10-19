@@ -1,5 +1,5 @@
-import { isTransientRpcError } from "@sdp/rpc";
 import { confirmTransaction, createRpcFromTransport } from "@sdp/rpc/solana";
+import { isTransientRpcError } from "@sdp/rpc/transient";
 import { signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as guardedEgress from "@/services/guarded-egress";

@@ -1,4 +1,4 @@
-import { loadEarnProviderAccess } from "../earn/earn-provider-access.server";
+import { loadEarnProviderAccess } from "@/app/dashboard/[projectId]/markets/earn/earn-provider-access.server";
 import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
 
 /** Provider access is organization-scoped and must be resolved per request. */

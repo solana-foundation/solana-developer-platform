@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   loadInstance: vi.fn(),
 }));
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/sdp-api", () => ({
   createOrgSdpApiClient: mocks.createOrgSdpApiClient,
   createSdpApiClient: mocks.createSdpApiClient,

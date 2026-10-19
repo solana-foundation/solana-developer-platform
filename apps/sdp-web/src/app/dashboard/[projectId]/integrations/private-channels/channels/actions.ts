@@ -1,6 +1,6 @@
 "use server";
 
-import type { PrivateChannelDto } from "@sdp/types";
+import type { PrivateChannelDto } from "@sdp/types/private-channels";
 import { revalidatePath } from "next/cache";
 import { createPrivateChannel, deletePrivateChannel } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";

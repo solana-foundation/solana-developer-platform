@@ -4,8 +4,8 @@ import {
   KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT,
   KAMINO_KVAULT_PROGRAM_IDS,
   KAMINO_SLOT_DURATION_MS,
-  type SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/kamino-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { type Address, address } from "@solana/kit";
 
 /**

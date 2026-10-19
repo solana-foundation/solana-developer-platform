@@ -6,7 +6,7 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { ParsedInstruction } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { type createRpc, getTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -19,7 +19,7 @@ import {
   type PaymentSubscriptionCollectionAttemptInitialStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import {
   AccountRole,
   type Address,
@@ -38,24 +38,28 @@ import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
 } from "@solana-program/token-2022";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db/client";
+import type {
+  CollectibleRecurringPaymentRow,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+  RecurringPaymentCollectionCycleRow,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type {
+  PaymentSubscriptionCollectionAttemptRow,
+  PaymentSubscriptionRow,
+  PaymentSubscriptionsRepository,
+} from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
+import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import {
-  type CollectibleRecurringPaymentRow,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
-  createPostgresPaymentRecurringPaymentsRepository,
-  createPostgresPaymentSubscriptionsRepository,
-  createPostgresPaymentsRepository,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  type PaymentSubscriptionCollectionAttemptRow,
-  type PaymentSubscriptionRow,
-  type PaymentSubscriptionsRepository,
-  type PaymentTransferRow,
-  type RecurringPaymentCollectionCycleRow,
-} from "@/db/repositories";
-import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+} from "@/db/repositories/repository-factory";
 import {
   AppError,
   badRequest,
@@ -76,7 +80,7 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
@@ -342,7 +346,7 @@ function subscriptionsInstructionFromRpc(parsed: ParsedInstruction): Instruction
 }
 
 async function matchesRecurringTransferInstruction(input: {
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: ReturnType<typeof createRpc>;
   instruction: Instruction;
   amountBaseUnits: bigint;
   sourceAddress: string;
@@ -491,7 +495,7 @@ async function verifyRecurringPaymentCollection(input: {
     resolveMintDecimals(rpc, mint),
   ]);
   const amountBaseUnits = parseDecimalAmount(input.recurringPayment.amount, decimals);
-  const confirmedTransaction = await solanaRpc.getTransaction(rpc, input.signature);
+  const confirmedTransaction = await getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {
     throw solanaRpcError(
       "Recurring payment collection is confirmed but not yet indexed; retry shortly"
@@ -1721,7 +1725,7 @@ export async function collectRecurringPayment(input: {
       "destinationAddress"
     );
     const mint = assertValidAddress(input.recurringPayment.token, "token");
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,

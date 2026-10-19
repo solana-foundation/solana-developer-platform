@@ -14,7 +14,7 @@ const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
 vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
 vi.mock("@sdp/rpc/solana", () => ({ createRpc: () => ({}) }));
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { conflict } from "@/lib/errors";
 import { env } from "@/test/helpers/env";

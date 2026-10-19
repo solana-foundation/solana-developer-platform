@@ -1,16 +1,26 @@
 // @vitest-environment jsdom
 
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
-  CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
   PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  privateChannelTransferIdempotencyKeyStore,
+  privateChannelTransferRequestFingerprint,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/value-movement-tracking";
+import {
+  MOVEMENT_POLL_INTERVAL_MS,
+  MOVEMENT_READ_PATHS,
+  resetMovementWatchesForTests,
+} from "@/lib/dashboard-fetch";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 
 const mocks = vi.hoisted(() => ({
   createTransferAction: vi.fn(),
@@ -18,32 +28,33 @@ const mocks = vi.hoisted(() => ({
   fetchWalletBalancesAction: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
 }));
 
 vi.mock("./actions", () => ({
   createTransferAction: mocks.createTransferAction,
   fetchTransferRecipientsAction: mocks.fetchTransferRecipientsAction,
 }));
-vi.mock("../wallet-balances", () => ({
+vi.mock("@/app/dashboard/[projectId]/integrations/private-channels/wallet-balances", () => ({
   fetchWalletBalancesAction: mocks.fetchWalletBalancesAction,
 }));
 vi.mock("sonner", () => ({
-  toast: { success: mocks.toastSuccess, error: mocks.toastError },
+  toast: { success: mocks.toastSuccess, error: mocks.toastError, warning: mocks.toastWarning },
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@sdp/ui/button", () => ({
   Button: (props: ComponentProps<"button">) => <button {...props} />,
 }));
-vi.mock("@/components/ui/input", () => ({
+vi.mock("@sdp/ui/input", () => ({
   Input: (props: ComponentProps<"input">) => <input {...props} />,
 }));
-vi.mock("@/components/ui/label", () => ({
+vi.mock("@sdp/ui/label", () => ({
   Label: (props: ComponentProps<"label">) => (
     // biome-ignore lint/a11y/noLabelWithoutControl: This test double forwards associations supplied by the component.
     <label {...props} />
   ),
 }));
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@sdp/ui/select", () => ({
   Select: ({
     ariaLabel,
     children,
@@ -234,6 +245,10 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // A transfer still `submitted` keeps its key (APE-593), so each spec starts clean.
+  resetIdempotencyKeyStoresForTests();
+  window.sessionStorage.clear();
+  resetMovementWatchesForTests();
   mocks.fetchWalletBalancesAction.mockResolvedValue({ channel: "10", onChain: "5" });
 });
 
@@ -434,6 +449,69 @@ describe("TransferForm", () => {
     await screen.findByText("Progress: failed");
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     expect(mocks.toastError).toHaveBeenCalledWith("Insufficient shared wallet balance.");
+  });
+
+  // APE-593: an HTTP-200 transfer still without a verdict retired its key, so
+  // the next identical press was a new transfer under a new key.
+  it.each([
+    ["keeps", "submitted", true],
+    ["keeps", "pending", true],
+    ["retires", "confirmed", false],
+  ] as const)("%s the key for a transfer answered %s", async (_verb, status, kept) => {
+    mocks.createTransferAction.mockResolvedValue({ ok: true, transfer: makeTransfer({ status }) });
+    const user = await renderReadyForm();
+
+    await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
+    await screen.findByText(`Progress: ${status}`);
+
+    const sent = mocks.createTransferAction.mock.calls[0]?.[0];
+    expect(
+      privateChannelTransferIdempotencyKeyStore.has(privateChannelTransferRequestFingerprint(sent))
+    ).toBe(kept);
+    if (kept) {
+      expect(mocks.toastWarning).toHaveBeenCalledWith(expect.any(String), {
+        description: expect.stringContaining("still processing"),
+      });
+    }
+  });
+
+  // Keegan (#2385): a kept key was never checked again, so once the transfer
+  // confirmed, an identical new transfer replayed the old one.
+  it("retires a pending transfer's key once a read shows it confirmed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mocks.createTransferAction.mockResolvedValue({
+        ok: true,
+        transfer: makeTransfer({ status: "pending" }),
+      });
+      const fetchMock = vi.fn(async () =>
+        Response.json({ data: makeTransfer({ status: "confirmed" }) })
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const user = await renderReadyForm();
+
+      await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
+      await screen.findByText("Progress: pending");
+      const sent = mocks.createTransferAction.mock.calls[0]?.[0];
+      const fingerprint = privateChannelTransferRequestFingerprint(sent);
+      expect(privateChannelTransferIdempotencyKeyStore.has(fingerprint)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        MOVEMENT_READ_PATHS.privateChannelTransfer("pct_test"),
+        expect.objectContaining({ method: "GET" })
+      );
+      expect(privateChannelTransferIdempotencyKeyStore.has(fingerprint)).toBe(false);
+      // An identical new transfer is a new payment under a fresh key.
+      expect(privateChannelTransferIdempotencyKeyStore.claim(fingerprint).key).not.toBe(
+        sent.idempotencyKey
+      );
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      resetMovementWatchesForTests();
+    }
   });
 
   it("refreshes the sender balance when starting a new transfer after confirmation", async () => {

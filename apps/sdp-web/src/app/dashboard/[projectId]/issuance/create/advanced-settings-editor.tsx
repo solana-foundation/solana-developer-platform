@@ -1,7 +1,7 @@
 "use client";
 
 import { type GroupedSetting, listSettingsForType } from "@sdp/issuance/capabilities";
-import type { AssetCategory } from "@sdp/types";
+import type { AssetCategory } from "@sdp/types/asset-profiles";
 import { ChevronDown } from "lucide-react";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";

@@ -1,12 +1,12 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import { ArrowUpRight, ListChecks, X } from "lucide-react";
 import Link from "next/link";
 import { AlertDialog, Dialog } from "radix-ui";
 import { type RefObject, useRef, useState, useSyncExternalStore } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {

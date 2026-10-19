@@ -1,4 +1,4 @@
-import type { Project } from "@sdp/types";
+import type { Project } from "@sdp/types/projects";
 
 export const DEFAULT_SANDBOX_PROJECT_SLUG = "default-sandbox";
 

@@ -1,8 +1,14 @@
 // The Wallets create flow as the 2026 design lays it out. It loads what the previous design's
 // page loads (page.tsx), and differs only in the flow it renders.
 import { auth } from "@clerk/nextjs/server";
-import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types";
+import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types/custody";
 import { redirect } from "next/navigation";
+import { fetchConnectionPickerOptions } from "@/app/dashboard/[projectId]/custody/connections/connections.data";
+import {
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -13,9 +19,6 @@ import {
   requestProjectHref,
   type SdpApiClient,
 } from "@/lib/sdp-api";
-import type { OnboardingStatusResponse } from "../../onboarding-status";
-import { fetchConnectionPickerOptions } from "../connections/connections.data";
-import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
 import { WalletSetupFlow } from "./wallet-setup-flow.redesign";
 
 interface CustodySetupPageProps {
@@ -56,7 +59,7 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) {
+export async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -130,5 +133,3 @@ async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) 
     />
   );
 }
-
-export default CurrentCustodySetupPage;

@@ -1,17 +1,17 @@
-import type { CustodyProvider } from "@sdp/custody";
-import { type FeePaymentEnv, isFeePaymentConfiguredForCluster } from "@sdp/fee-payment";
+import { isFeePaymentConfiguredForCluster } from "@sdp/fee-payment";
+import type { FeePaymentEnv } from "@sdp/fee-payment/port";
+import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
-  type CustodyMode,
+  isCustodyProviderInReleaseChannel,
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
-  type RampProviderId,
   resolveSdpReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
   type SdpRampProviderStages,
-  type SolanaCluster,
-} from "@sdp/types";
-import { isCustodyProviderInReleaseChannel } from "@sdp/types/release-channels";
+} from "@sdp/types/release-channels";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Env } from "@/types/env";
 import { isSelfHostedDeployment } from "./runtime-env";
 

@@ -1,5 +1,5 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { isRampProviderSurfaced, RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";

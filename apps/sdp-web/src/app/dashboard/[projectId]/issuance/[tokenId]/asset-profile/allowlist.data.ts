@@ -1,6 +1,6 @@
 "use client";
 
-import type { TokenAllowlistEntry } from "@sdp/types";
+import type { TokenAllowlistEntry } from "@sdp/types/tokens";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 
 export interface TokenAllowlistPage {

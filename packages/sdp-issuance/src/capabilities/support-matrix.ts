@@ -1,7 +1,8 @@
 // Support-matrix generator: derives human-readable matrix from ADVANCED_SETTINGS × ASSET_CAPABILITIES.
 // Regenerate with `pnpm --filter @sdp/issuance matrix:generate`.
 
-import type { AssetCategory, SettingAvailability } from "@sdp/types";
+import type { SettingAvailability } from "@sdp/types/advanced-settings";
+import type { AssetCategory } from "@sdp/types/asset-profiles";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import { ADVANCED_SETTINGS, SETTING_KEYS, type SettingKey } from "./settings";
 

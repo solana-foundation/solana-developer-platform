@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

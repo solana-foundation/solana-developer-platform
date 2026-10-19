@@ -13,9 +13,9 @@ import {
   solBalance,
   trackedBalances,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.fixtures";
+import { formatDisplayAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { formatDisplayAmount } from "../../payments/payments-overview.utils";
 import { WalletBalanceRows, WalletBalanceTotal } from "./wallet-detail-balances";
 
 function renderBalanceView(children: ReactNode) {

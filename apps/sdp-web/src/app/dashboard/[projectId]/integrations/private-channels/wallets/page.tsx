@@ -1,6 +1,9 @@
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import {
+  loadChannelBalances,
+  loadWalletVerification,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { loadChannelBalances, loadWalletVerification } from "../private-channels-page.data";
 import { WalletsTable } from "./wallets-table";
 
 export default async function PrivateChannelsWalletsPage() {

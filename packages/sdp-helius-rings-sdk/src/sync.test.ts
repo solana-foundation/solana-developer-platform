@@ -16,7 +16,7 @@ vi.mock("@heliuslabs/zolana", async (importOriginal) => ({
   },
 }));
 
-const { HeliusRingsError } = await import("@sdp/helius-rings");
+const { HeliusRingsError } = await import("@sdp/helius-rings/errors");
 const { syncRingsWallet } = await import("./sync.js");
 const { derivedIdentity, TEST_OWNER, testMaterialSource } = await import(
   "./test/shielded-identity-fixtures.js"

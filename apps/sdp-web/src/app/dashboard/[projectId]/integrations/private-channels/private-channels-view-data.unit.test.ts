@@ -1,4 +1,4 @@
-import type { PrivateChannelTokenEligibility } from "@sdp/types";
+import type { PrivateChannelTokenEligibility } from "@sdp/types/private-channels";
 import { describe, expect, it } from "vitest";
 import { enabledTokenSymbols, shortenAddress } from "./private-channels-view-data";
 

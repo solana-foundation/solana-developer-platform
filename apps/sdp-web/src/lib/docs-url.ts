@@ -1,4 +1,4 @@
-import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
+import { DEFAULT_SDP_DOCS_URL } from "@sdp/types/site";
 
 /**
  * Resolves the documentation origin, and optionally a path within it.

@@ -7,7 +7,7 @@ import {
   OPERATION_FAMILY_BY_TYPE,
   OPERATION_TYPES,
   upgradeStoredAllowedOperations,
-} from "@sdp/types";
+} from "@sdp/types/allowed-operations";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";

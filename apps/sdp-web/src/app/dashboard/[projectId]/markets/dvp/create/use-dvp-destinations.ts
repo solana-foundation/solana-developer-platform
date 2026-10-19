@@ -26,7 +26,7 @@
 
 import { useState } from "react";
 
-import { BASE58_ADDRESS_PATTERN } from "../../base58-address";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { type DvpPartySlot, resolvePartySlotAddress } from "./use-dvp-parties";
 

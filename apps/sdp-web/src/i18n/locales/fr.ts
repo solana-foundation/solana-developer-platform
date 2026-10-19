@@ -1,10 +1,10 @@
-import dashboardCustody from "../../../messages/fr/dashboard-custody.json";
-import dashboardIssuance from "../../../messages/fr/dashboard-issuance.json";
-import dashboardPayments from "../../../messages/fr/dashboard-payments.json";
-import frShared from "../../../messages/fr/shared.json";
-import fr from "../../../messages/fr.json";
-import type { Messages } from "../messages";
-import type { LocalizedMessages } from "../translate";
+import type { Messages } from "@/i18n/messages";
+import type { LocalizedMessages } from "@/i18n/translate";
+import dashboardCustody from "@/messages/fr/dashboard-custody.json";
+import dashboardIssuance from "@/messages/fr/dashboard-issuance.json";
+import dashboardPayments from "@/messages/fr/dashboard-payments.json";
+import frShared from "@/messages/fr/shared.json";
+import fr from "@/messages/fr.json";
 
 export const catalog = {
   ...fr,

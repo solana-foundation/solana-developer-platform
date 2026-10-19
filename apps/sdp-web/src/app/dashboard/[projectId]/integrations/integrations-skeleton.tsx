@@ -1,4 +1,4 @@
-import { COMPLIANCE_PROVIDERS } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
 import {

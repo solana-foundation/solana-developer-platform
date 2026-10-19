@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getClerkAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import * as organizationAccess from "@/lib/organization-access";

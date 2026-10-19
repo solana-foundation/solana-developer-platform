@@ -1,18 +1,19 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
 import {
-  DEFAULT_SDP_API_URL,
   OPERATION_FAMILIES,
   OPERATION_FAMILY_BY_TYPE,
   OPERATION_TYPES,
   type OperationFamily,
   type OperationType,
-  RAMP_PROVIDERS,
-  type RampProviderId,
+} from "@sdp/types/allowed-operations";
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
+import {
   SDP_MODULES,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
+import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { routeOwnerOf } from "@/routes/route-modules";

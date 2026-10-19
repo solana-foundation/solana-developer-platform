@@ -2,7 +2,7 @@ import {
   isCancelableRampTransferStatus,
   isTerminalRampTransferStatus,
   type PaymentTransferStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 
 export function getRampTransferState(status: PaymentTransferStatus) {
   return {

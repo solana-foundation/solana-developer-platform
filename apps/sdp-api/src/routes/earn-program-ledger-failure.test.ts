@@ -1,10 +1,12 @@
-import type { EarnPortfolioWalletProvider } from "@sdp/earn";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, EarnPortfolioWithdrawal } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createPostgresEarnRepository, type EarnProviderWalletRow } from "@/db/repositories";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import type { EarnProviderWalletRow } from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import { app } from "@/index";
 import { applyEarnWithdrawalObservationToRow } from "@/services/earn-withdrawal-ledger.service";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

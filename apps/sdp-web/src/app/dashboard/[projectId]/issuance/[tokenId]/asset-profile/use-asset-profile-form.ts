@@ -1,18 +1,23 @@
 "use client";
 
-import type { AssetProfile, Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useTranslations } from "@/i18n/provider";
-import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
-import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import {
   getSignerWalletUnavailableReason,
   isMaxSupplyBelowMintedSupply,
   isSupplyLockedOnChain,
   type SignerSelectionState,
-} from "../token-management-workspace.utils";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import {
+  buildIssuanceMetadata,
+  getAssetDetailsErrors,
+} from "@/app/dashboard/[projectId]/issuance/create/draft-mapping";
+import type { DraftState } from "@/app/dashboard/[projectId]/issuance/create/issuance-draft-wizard.types";
+import { useTranslations } from "@/i18n/provider";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { updateAssetProfileAction } from "./actions";
 import {
   areDraftsEquivalent,
@@ -199,7 +204,7 @@ export function useAssetProfileForm({
           })
         );
       }
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
       return true;
     } finally {
       setSaving(false);

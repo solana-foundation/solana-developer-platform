@@ -1,13 +1,13 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnApyType,
   EarnLiquidityTerm,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnStrategyStatus,
-  SdpEnvironment,
-  SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
 export function generateEarnStrategyId(): string {
   return `earn_strategy_${crypto.randomUUID()}`;

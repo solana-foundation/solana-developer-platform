@@ -1,4 +1,4 @@
-import type { FailureCode } from "@sdp/helius-rings";
+import type { FailureCode } from "@sdp/helius-rings/types";
 import { REDACTION_CENSOR } from "@/runtime/log-redaction";
 
 /**

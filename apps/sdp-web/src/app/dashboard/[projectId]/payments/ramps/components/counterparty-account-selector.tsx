@@ -1,9 +1,9 @@
 "use client";
 
-import type { CounterpartyAccount } from "@sdp/types";
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
+import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
-import { Combobox } from "@/components/ui/combobox";
 import { useTranslations } from "@/i18n/provider";
 
 interface CounterpartyAccountSelectorProps {

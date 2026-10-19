@@ -1,4 +1,4 @@
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 

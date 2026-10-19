@@ -3,8 +3,11 @@ import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { validateBody, validateParams } from "@/middleware/validate";
+import {
+  authorizeSubscriptionPlanCreate,
+  authorizeSubscriptionPlanUpdate,
+} from "@/routes/payments/access";
 import type { Env } from "@/types/env";
-import { authorizeSubscriptionPlanCreate, authorizeSubscriptionPlanUpdate } from "../access";
 import {
   createSubscriptionPlan,
   getSubscriptionPlan,
@@ -19,7 +22,7 @@ import {
   updateSubscriptionPlanSchema,
 } from "./schemas";
 
-const subscriptionPlans = new Hono<{ Bindings: Env }>();
+export const subscriptionPlans = new Hono<{ Bindings: Env }>();
 
 subscriptionPlans.post(
   "/",
@@ -46,5 +49,3 @@ subscriptionPlans.patch(
   idempotent({ key: "accepted", serverErrors: "store" }),
   updateSubscriptionPlan
 );
-
-export default subscriptionPlans;

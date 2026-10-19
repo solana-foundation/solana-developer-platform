@@ -12,6 +12,19 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { replayFromRecord } from "@/middleware/movement-steps";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
+import { getConfigs } from "@/routes/custody/handlers/configs";
+import { initializeSigning } from "@/routes/custody/handlers/provider";
+import { signerCheck } from "@/routes/custody/handlers/signer-check";
+import {
+  createWallet,
+  deleteWallet,
+  findCustodyWalletCreateReplay,
+  getPublicKey,
+  getWalletAggregate,
+  getWalletById,
+  listWallets,
+  updateWallet,
+} from "@/routes/custody/handlers/wallets";
 import type { Env } from "@/types/env";
 import {
   authorizeCreateWallet,
@@ -21,19 +34,6 @@ import {
   authorizeUpdateWallet,
 } from "./access";
 import {
-  createWallet,
-  deleteWallet,
-  findCustodyWalletCreateReplay,
-  getConfigs,
-  getPublicKey,
-  getWalletAggregate,
-  getWalletById,
-  initializeSigning,
-  listWallets,
-  signerCheck,
-  updateWallet,
-} from "./handlers";
-import {
   createWalletSchema,
   deleteWalletSchema,
   initializeSigningSchema,
@@ -41,7 +41,7 @@ import {
   updateWalletSchema,
 } from "./schemas";
 
-const wallets = new Hono<{ Bindings: Env }>();
+export const wallets = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 wallets.use("*", unifiedAuthMiddleware());
@@ -99,5 +99,3 @@ wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/aggregate", requirePermissions("wallets:read"), getWalletAggregate);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
 wallets.get("/:walletId", requirePermissions("wallets:read"), getWalletById);
-
-export default wallets;

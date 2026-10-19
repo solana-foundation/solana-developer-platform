@@ -1,5 +1,5 @@
 import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import type { EarnVaultPosition } from "@sdp/types";
+import type { EarnVaultPosition } from "@sdp/types/earn";
 import {
   compareUnsignedDecimals,
   isPositiveDecimal,

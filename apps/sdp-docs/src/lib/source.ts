@@ -2,7 +2,7 @@ import type { Node, Root } from "fumadocs-core/page-tree";
 import { loader, type VirtualFile } from "fumadocs-core/source";
 import { icons } from "lucide-react";
 import { createElement } from "react";
-import { docs } from "../../.source/server";
+import { docs } from "@/.source/server";
 import { isPagePublished, parsePageGateFields } from "./release-channel";
 
 type FumadocsSource = {

@@ -1,4 +1,4 @@
-import type { OperationFamily } from "@sdp/types";
+import type { OperationFamily } from "@sdp/types/allowed-operations";
 import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";

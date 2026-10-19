@@ -8,7 +8,7 @@ import { HOME_TOC } from "@/components/docs-shell/home-sections";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
-import { getMDXComponents } from "../../../../mdx-components";
+import { getMDXComponents } from "@/mdx-components";
 
 const mdxComponents = getMDXComponents({
   Tabs,

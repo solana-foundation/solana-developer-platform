@@ -24,14 +24,14 @@ const connectionInputSchema = z.strictObject({
 });
 const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().min(1) });
 
-const routes = new Hono<{ Bindings: Env }>();
-routes.use("*", requireModule("helius_rings"));
-routes.use("*", organizationCredentialAdminAuthMiddleware());
-routes.use("*", projectContextMiddleware());
+export const internalHeliusRings = new Hono<{ Bindings: Env }>();
+internalHeliusRings.use("*", requireModule("helius_rings"));
+internalHeliusRings.use("*", organizationCredentialAdminAuthMiddleware());
+internalHeliusRings.use("*", projectContextMiddleware());
 
-routes.get("/connections", async (c) => success(c, await listRingsConnections(c)));
+internalHeliusRings.get("/connections", async (c) => success(c, await listRingsConnections(c)));
 
-routes.post("/connections", async (c) => {
+internalHeliusRings.post("/connections", async (c) => {
   const parsed = connectionInputSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     throw badRequest("Invalid request body", { errors: z.flattenError(parsed.error).fieldErrors });
@@ -39,17 +39,17 @@ routes.post("/connections", async (c) => {
   return created(c, await createRingsConnection(c, parsed.data));
 });
 
-routes.post("/connections/:connectionId/test", async (c) => {
+internalHeliusRings.post("/connections/:connectionId/test", async (c) => {
   const params = parseParams(c.req.param());
   return success(c, await testRingsConnection(c, params.connectionId));
 });
 
-routes.post("/connections/:connectionId/make-default", async (c) => {
+internalHeliusRings.post("/connections/:connectionId/make-default", async (c) => {
   const params = parseParams(c.req.param());
   return success(c, await makeDefaultRingsConnection(c, params.connectionId));
 });
 
-routes.post("/connections/:connectionId/deactivate", async (c) => {
+internalHeliusRings.post("/connections/:connectionId/deactivate", async (c) => {
   const params = parseParams(c.req.param());
   return success(c, await deactivateRingsConnection(c, params.connectionId));
 });
@@ -61,5 +61,3 @@ function parseParams(value: unknown) {
   }
   return parsed.data;
 }
-
-export default routes;

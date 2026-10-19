@@ -2,15 +2,15 @@
 // validates at save time, injects real authorities at deploy time.
 // See docs/decisions/0002-asset-advanced-settings.md.
 
+import type { SelectedSetting } from "@sdp/types/advanced-settings";
+import type { AssetCategory } from "@sdp/types/asset-profiles";
 import type {
-  AssetCategory,
   ExtensionOverrides,
-  SelectedSetting,
   TokenExtensionName,
   TokenExtensionsConfig,
   TokenTemplate,
-} from "@sdp/types";
-import { resolveTemplateConfig, type TemplateOverrideError } from "../templates/definitions";
+} from "@sdp/types/tokens";
+import { resolveTemplateConfig, type TemplateOverrideError } from "#/templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import {
   ADVANCED_SETTINGS,

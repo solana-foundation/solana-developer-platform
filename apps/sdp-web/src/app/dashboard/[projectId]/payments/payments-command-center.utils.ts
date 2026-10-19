@@ -1,4 +1,4 @@
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
 import { resolveTransactionCounterpartyReference } from "./payments-overview.utils";
 
 export function resolveCommandCenterCounterparty(transfer: PaymentTransferSummary): string {

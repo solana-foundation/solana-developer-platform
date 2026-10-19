@@ -1,12 +1,11 @@
-import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment";
+import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment/port";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import {
-  SOLANA_CLUSTERS,
-  type SolanaCluster,
   SPONSORSHIP_RESERVATION_CONTINUITY_BLOCKED_STATUSES,
   SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/sponsorship";
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   assertIsSignature,
   type Blockhash,

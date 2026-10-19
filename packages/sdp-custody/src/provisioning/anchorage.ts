@@ -1,4 +1,4 @@
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl, parseJsonResponse, readErrorResponseText } from "./common";
 import type { CustodyProvisioningRuntime } from "./runtime";
 

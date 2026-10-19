@@ -1,5 +1,5 @@
-import { type CustodyConfigStatus, UNARCHIVED_CUSTODY_CONFIG_STATUSES } from "@sdp/types";
-import type { PreparedStatement } from "@/db";
+import { type CustodyConfigStatus, UNARCHIVED_CUSTODY_CONFIG_STATUSES } from "@sdp/types/custody";
+import type { PreparedStatement } from "@/db/client";
 import { buildInClause } from "@/db/postgres-utils";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
@@ -40,7 +40,7 @@ export interface CustodyWalletLookup extends CustodyConfigWallet {
  * purpose added to one of them silently failed to typecheck against the other —
  * which is what a duplicated union is for.
  */
-import type { CustodyWalletPurpose } from "@sdp/types";
+import type { CustodyWalletPurpose } from "@sdp/types/custody";
 
 export type WalletPurpose = CustodyWalletPurpose;
 

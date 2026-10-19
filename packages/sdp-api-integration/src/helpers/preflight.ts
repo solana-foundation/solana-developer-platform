@@ -1,5 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { probeGatewayHealth } from "@sdp/private-channels";
+import { probeGatewayHealth } from "@sdp/private-channels/health";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
 import { KORA_URL_ENV_KEY, koraEndpoint } from "./kora";

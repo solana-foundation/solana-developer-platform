@@ -5,7 +5,7 @@ import type {
   PlacesAutocompleteRequest,
   PlacesAutocompleteResponse,
   ResolvedPlace,
-} from "@sdp/types";
+} from "@sdp/types/places";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 export function newPlacesSessionToken(): string {

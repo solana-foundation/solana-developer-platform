@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 const SKELETON_ROWS = ["one", "two", "three"] as const;
 const SKELETON_COLUMNS = [

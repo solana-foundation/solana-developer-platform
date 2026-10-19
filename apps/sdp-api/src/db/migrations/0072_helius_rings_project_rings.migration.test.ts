@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_RING_NAME, RING_NAME_PATTERN } from "@sdp/helius-rings";
+import { DEFAULT_RING_NAME, RING_NAME_PATTERN } from "@sdp/helius-rings/constants";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";

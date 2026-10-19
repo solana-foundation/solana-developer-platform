@@ -1,4 +1,5 @@
-import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
+import type { EgressReadiness } from "@sdp/types/health";
+import type { SdpRampProviderStages } from "@sdp/types/release-channels";
 /**
  * SDP API — Hono application factory.
  *
@@ -10,13 +11,10 @@ import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
 
 import { SigningError } from "@sdp/custody/signing";
 import { SdpEarnError } from "@sdp/earn/errors";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
-import {
-  redactCredentialSecrets,
-  redactCredentialString,
-  scrubError,
-  scrubTelemetry,
-} from "@sdp/redaction";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
+import { scrubError, scrubTelemetry } from "@sdp/redaction/scrub";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -34,39 +32,38 @@ import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
 import { requireModule } from "@/middleware/require-module";
-import allowlist from "@/routes/allowlist";
-import apiKeys from "@/routes/api-keys";
-import assetProfiles from "@/routes/asset-profiles";
-import compliance from "@/routes/compliance";
-import counterparties from "@/routes/counterparties";
-import wallets from "@/routes/custody";
-import docs from "@/routes/docs";
-import dvp from "@/routes/dvp";
-import earn from "@/routes/earn";
-import health from "@/routes/health";
-import heliusRings from "@/routes/helius-rings";
-import internalCustody from "@/routes/internal-custody";
-import internalHeliusRings from "@/routes/internal-helius-rings";
-import internalNetwork from "@/routes/internal-network";
-import issuance from "@/routes/issuance";
-import llms from "@/routes/llms";
-import members from "@/routes/members";
-import onboarding from "@/routes/onboarding";
-import openapi from "@/routes/openapi";
-import organizations from "@/routes/organizations";
-import pay from "@/routes/pay";
-import payments from "@/routes/payments";
-import places from "@/routes/places";
-import playgroundInternal from "@/routes/playground-internal";
-import privateChannels from "@/routes/private-channels";
-import projects from "@/routes/projects";
-import rpc from "@/routes/rpc";
-import transactions from "@/routes/transactions";
-import webhooks from "@/routes/webhooks";
+import { allowlist } from "@/routes/allowlist";
+import { apiKeys } from "@/routes/api-keys";
+import { assetProfiles } from "@/routes/asset-profiles";
+import { compliance } from "@/routes/compliance";
+import { counterparties } from "@/routes/counterparties";
+import { wallets } from "@/routes/custody";
+import { docs } from "@/routes/docs";
+import { dvp } from "@/routes/dvp";
+import { earnRoutes as earn } from "@/routes/earn";
+import { health } from "@/routes/health";
+import { heliusRings } from "@/routes/helius-rings";
+import { internalCustody } from "@/routes/internal-custody";
+import { internalHeliusRings } from "@/routes/internal-helius-rings";
+import { internalNetwork } from "@/routes/internal-network";
+import { issuance } from "@/routes/issuance";
+import { llms } from "@/routes/llms";
+import { members } from "@/routes/members";
+import { onboarding } from "@/routes/onboarding";
+import { openapi } from "@/routes/openapi";
+import { organizations } from "@/routes/organizations";
+import { pay } from "@/routes/pay";
+import { payments } from "@/routes/payments";
+import { places } from "@/routes/places";
+import { playgroundInternal } from "@/routes/playground-internal";
+import { privateChannels } from "@/routes/private-channels";
+import { projects } from "@/routes/projects";
+import { rpc } from "@/routes/rpc";
+import { transactions } from "@/routes/transactions";
+import { webhooks } from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
-import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {

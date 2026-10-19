@@ -44,13 +44,9 @@
  * this paragraph first: the fences below are already that check.
  */
 
-import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
-import {
-  getPermissionsForApiKeyRole,
-  isAllowedOperation,
-  type Permission,
-  upgradeStoredAllowedOperations,
-} from "@sdp/types";
+import { isAllowedOperation, upgradeStoredAllowedOperations } from "@sdp/types/allowed-operations";
+import type { ApiKeyStatus, CachedApiKey } from "@sdp/types/api-keys";
+import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types/permissions";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { KVStore } from "@/runtime/kv";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";

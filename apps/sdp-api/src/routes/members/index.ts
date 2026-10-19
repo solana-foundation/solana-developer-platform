@@ -3,7 +3,7 @@
  */
 
 import { Hono } from "hono";
-import { runWithSystemDatabaseIdentity } from "@/db";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -17,7 +17,7 @@ import {
 } from "./handlers";
 import { acceptSchema, inviteSchema } from "./schemas";
 
-const members = new Hono<{ Bindings: Env }>();
+export const members = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication (API key or Clerk)
 members.use("*", unifiedAuthMiddleware());
@@ -38,5 +38,3 @@ members.post("/accept", validateBody(acceptSchema), (c) =>
 // Declared before /:memberId so "invitations" is not read as a member id.
 members.delete("/invitations/:invitationId", requirePermissions("org:write"), revokeInvitation);
 members.delete("/:memberId", requirePermissions("org:admin"), removeMember);
-
-export default members;

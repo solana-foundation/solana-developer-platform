@@ -1,13 +1,9 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   Counterparty,
+  CounterpartyEntityType,
   CounterpartyProviderData,
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  RampCryptoDeposit,
-  RampTransferSettlement,
-  SdpEnvironment,
-} from "@sdp/types";
-import type { CounterpartyEntityType } from "@sdp/types/counterparties";
+} from "@sdp/types/counterparties";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
@@ -15,12 +11,16 @@ import {
   type RampCurrencyLimit,
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
+import type {
+  PaymentRampEstimate,
+  PaymentRampQuote,
+  RampCryptoDeposit,
+  RampTransferSettlement,
+} from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
-
-export type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export interface ProviderDirectionSupportSnapshot {
   currencies: Readonly<Record<string, RampCurrencyLimit>>;
@@ -248,6 +248,9 @@ export type ValidateCounterpartyOptions =
 export interface RampProvider {
   id: RampProviderId;
   declaredRailSupport: ProviderDeclaredRailSupport;
+  /** Optional webhook contract. Ingress verifies signed bytes before persisting;
+   * parsing is pure and runs from the durable inbox after acknowledgement. */
+  webhook?: RampProviderWebhook;
   /**
    * Support-matrix generation hook (ramp-support script only, never runtime):
    * fetches the provider's raw support dumps via `context.fetchJson` and
@@ -275,4 +278,15 @@ export interface RampProvider {
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions
   ): CounterpartyRequirements;
+}
+
+export interface RampProviderWebhook<Event = unknown> {
+  readonly signature: {
+    readonly header: string;
+    readonly encoding: "hex" | "base64";
+    readonly signedPayload: "timestamp-prefixed" | "raw-body";
+  };
+  /** A provider-issued delivery id only; null when the provider supplies none. */
+  eventId(rawBody: string): string | null;
+  parse(rawBody: string, environment?: SdpEnvironment): Event;
 }

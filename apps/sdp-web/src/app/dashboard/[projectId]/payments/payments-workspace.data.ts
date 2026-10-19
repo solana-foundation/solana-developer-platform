@@ -3,10 +3,13 @@
 import type {
   Counterparty,
   CounterpartyAccount,
-  CryptoRailId,
-  CustodyWalletAggregate,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
+} from "@sdp/types/counterparties";
+import type { CustodyWalletAggregate } from "@sdp/types/custody";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type {
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
   PaymentRampEstimateEnvelope,
@@ -18,15 +21,15 @@ import type {
   PaymentTransferBatchRequest,
   PaymentTransferRecipient,
   RampDirection,
-  RampFiatCurrency,
   RampProviderEstimateResult,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import type { Address } from "@solana/kit";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import {
   type ComplianceIntent,
   type ComplianceProviderResult,
@@ -48,9 +51,6 @@ import {
   paymentApiErrorBodySchema,
 } from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
-
-export type { PaymentRampInstruction } from "@sdp/types";
-export { getPaymentApiError as getApiError } from "./payment-api-errors";
 
 export interface PaymentWalletBalance {
   token: string;
