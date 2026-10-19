@@ -229,7 +229,32 @@ function normalizeInsertConflictSyntax(query: string): string {
   return `${baseInsert} ON CONFLICT (${conflictTarget}) DO UPDATE SET ${updateClause}`;
 }
 
+/**
+ * The SQL each query text rewrites to is the same every time, and rewriting it
+ * scans the whole text character by character, so it is kept. Dynamic SQL
+ * (variable IN lists, optional filters) makes new texts, so the oldest is
+ * forgotten once the cap is reached.
+ */
+const MAX_REWRITTEN_QUERIES = 2_048;
+const rewrittenQueries = new Map<string, string>();
+
 function normalizeSql(query: string): string {
+  const known = rewrittenQueries.get(query);
+  if (known !== undefined) {
+    return known;
+  }
+  const rewritten = rewriteSql(query);
+  if (rewrittenQueries.size >= MAX_REWRITTEN_QUERIES) {
+    const oldest = rewrittenQueries.keys().next();
+    if (!oldest.done) {
+      rewrittenQueries.delete(oldest.value);
+    }
+  }
+  rewrittenQueries.set(query, rewritten);
+  return rewritten;
+}
+
+function rewriteSql(query: string): string {
   return (
     normalizeInsertConflictSyntax(replacePositionalPlaceholders(query))
       // biome-ignore lint/security/noSecrets: SQL datetime literal, not a secret.

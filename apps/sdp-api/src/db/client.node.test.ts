@@ -841,6 +841,23 @@ describe("database client connection management", () => {
     });
   });
 
+  it("rewrites placeholders the same way before and after a query text is remembered", async () => {
+    const db = createDatabaseClient("postgresql://node-rewrite-memo/sdp");
+    const firstText = "SELECT ? AS n0, ?";
+
+    await db.queryOne(firstText, [1, 2]);
+    // More distinct texts than the memo keeps, so the first one is forgotten.
+    for (let index = 1; index <= 2_100; index += 1) {
+      await db.queryOne(`SELECT ? AS n${index}, ?`, [1, 2]);
+    }
+    await db.queryOne(firstText, [1, 2]);
+    await db.queryOne(firstText, [1, 2]);
+
+    const sent = firstPool().queries.map((query) => query.text);
+    expect(sent[0]).toBe("SELECT $1 AS n0, $2");
+    expect(sent.slice(-2)).toEqual(["SELECT $1 AS n0, $2", "SELECT $1 AS n0, $2"]);
+  });
+
   it("waits for every pool to close before shutdown completes", async () => {
     let resolveEnd: (() => void) | undefined;
     pgMock.poolEnd = () =>
