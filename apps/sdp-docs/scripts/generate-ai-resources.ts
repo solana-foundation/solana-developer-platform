@@ -59,6 +59,7 @@ const FEATURE_SUMMARY = DOCS_MODULES.filter(
  * when the release channel runs its module.
  */
 const KEY_PAGE_MODULES: Record<string, SdpModule> = {
+  "reference/api/compliance": "compliance",
   "reference/api/issuance": "issuance",
   "reference/api/asset-profiles": "issuance",
 };
