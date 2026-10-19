@@ -1330,6 +1330,7 @@ export class HeliusRingsService {
         organizationId: this.tenant.organizationId,
         projectId: this.tenant.projectId,
         owner,
+        custodyWalletId: wallet.custody_wallet_id,
         unsignedTxBase64: built.outerUnsignedTxBase64,
         movement: HELIUS_RINGS_OPERATION_MOVEMENTS[current.op_type],
       });
