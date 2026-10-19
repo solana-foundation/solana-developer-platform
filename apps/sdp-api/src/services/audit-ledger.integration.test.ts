@@ -1,10 +1,18 @@
+import { Hono } from "hono";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import {
+  currentDatabaseIdentity,
+  type DatabaseIdentity,
+  runWithTenantDatabaseIdentity,
+} from "@/db/identity";
 import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
+import { TEST_ORG } from "@/test/fixtures/organizations";
 import { adminDatabaseUrl, env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
 import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
 
 // Every checkpoint call in this file answers at once unless a test stalls it,
@@ -165,6 +173,34 @@ describe("tamper-evident audit ledger", () => {
 
   afterEach(async () => {
     // Test databases have the migration's explicit TRUNCATE-only exemption.
+  });
+
+  // The ledger transaction opens under the system identity; the work inside it
+  // must still run as the request, so a query past its transaction keeps RLS.
+  it("runs audited work under the request's identity, not the ledger's system grant", async () => {
+    let identityInWork: DatabaseIdentity | undefined;
+    const app = new Hono<{ Bindings: Env }>();
+    app.post("/audited", async (c) => {
+      await runWithTenantDatabaseIdentity({ organizationId: TEST_ORG.id }, () =>
+        audit.logWithin(c, async () => {
+          identityInWork = currentDatabaseIdentity();
+          return {
+            entry: {
+              action: "update",
+              resourceType: "api_key",
+              resourceId: "key_audited_work",
+              organizationId: TEST_ORG.id,
+              status: "success",
+            },
+            result: null,
+          };
+        })
+      );
+      return c.body(null, 204);
+    });
+
+    expect((await app.request("/audited", { method: "POST" }, env)).status).toBe(204);
+    expect(identityInWork).toEqual({ kind: "tenant", organizationId: TEST_ORG.id });
   });
 
   it("serializes request-independent worker writes into a valid chain", async () => {
