@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { recordQuickStartStep } from "@/lib/dashboard-quick-start.redesign";
+import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
@@ -25,7 +26,6 @@ import {
   createApiKeyAuthoringDraft,
   defaultWalletScopeForGrants,
   isAuthoringStepComplete,
-  parseAllowedIps,
 } from "./api-key-authoring";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
 import { ApiKeyGrantPicker } from "./api-key-grant-picker";
@@ -207,7 +207,7 @@ function DetailsStep({
           <Label htmlFor="api-key-allowed-ips">{t("DashboardCustody.apiKeyAllowedIpsLabel")}</Label>
           <textarea
             id="api-key-allowed-ips"
-            className="mt-2 w-full rounded-[14px] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted focus:border-border-strong focus:ring-2 focus:ring-border-default"
+            className="mt-2 w-full rounded-[14px] border border-border-default bg-surface-raised px-4 py-3 text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted focus:border-border-strong focus:ring-2 focus:ring-border-default"
             rows={3}
             value={draft.allowedIps}
             onChange={(event) => update({ allowedIps: event.currentTarget.value })}

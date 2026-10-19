@@ -29,7 +29,7 @@ export const organizationSettingsSchema = z
       .optional()
       .openapi({
         description:
-          "IPv4/IPv6 addresses and CIDR ranges allowed to authenticate against this organization, on both API and dashboard requests. An empty or absent list places no restriction. Entries are stored in canonical form, so a range with host bits set is returned as the network it selects. A list that would exclude the origin of the request setting it is rejected, since the restriction also covers the endpoint that would undo it.",
+          "IPv4/IPv6 addresses and CIDR ranges the organization's API keys may be used from. It applies to every API-key request, intersected with each key's own `allowedIps`, and never to signed-in members. An empty or absent list places no restriction. Entries are stored in canonical form, so a range with host bits set is returned as the network it selects.",
         example: ["203.0.113.0/24"],
       }),
     legacyAllowedIpAddresses: z

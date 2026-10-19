@@ -174,35 +174,15 @@ describe("Organization access settings", () => {
       );
       expect(res.status).toBe(400);
     });
-    it("refuses an allowlist that excludes the caller's own origin", async () => {
+    // The dashboard calls from SDP's servers and is never filtered, so an
+    // allowlist that leaves out the admin's own address cannot lock them out.
+    it("accepts an allowlist that leaves out the caller's own origin", async () => {
       const res = await patch(
         { settings: { allowedIpAddresses: ["203.0.113.0/24"] } },
         "198.51.100.42"
       );
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as {
-        error: {
-          message: string;
-        };
-      };
-      expect(body.error.message).toContain("198.51.100.42");
-      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
-    });
-    it("refuses an allowlist when the caller's origin cannot be determined", async () => {
-      const res = await app.request(
-        `/v1/organizations/${ORGANIZATION_ID}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${adminToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ settings: { allowedIpAddresses: ["203.0.113.0/24"] } }),
-        },
-        env
-      );
-      expect(res.status).toBe(400);
-      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
+      expect(res.status).toBe(200);
+      expect(required(await readSettings()).allowedIpAddresses).toEqual(["203.0.113.0/24"]);
     });
     it("clears the restriction when given an empty list", async () => {
       expect(
@@ -371,11 +351,11 @@ describe("Organization access settings", () => {
       });
       expect(res.status).toBe(403);
     });
-    it("applies to a Clerk user as well as an API key", async () => {
+    it("never filters a signed-in member, only API keys", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await seedMemberWithProject();
       const token = await signSeededClerkMember(env, getDb(env), TEST_USER.id, ORGANIZATION_ID);
-      const denied = await app.request(
+      const outside = await app.request(
         "/v1/members",
         {
           headers: {
@@ -386,8 +366,8 @@ describe("Organization access settings", () => {
         },
         env
       );
-      expect(denied.status).toBe(403);
-      const allowed = await app.request(
+      expect(outside.status).toBe(200);
+      const inside = await app.request(
         "/v1/members",
         {
           headers: {
@@ -398,7 +378,7 @@ describe("Organization access settings", () => {
         },
         env
       );
-      expect(allowed.status).toBe(200);
+      expect(inside.status).toBe(200);
     });
     // A key is admitted against the highest tier before its rows are read, so
     // a flood is refused there; its own tier is judged after the read.

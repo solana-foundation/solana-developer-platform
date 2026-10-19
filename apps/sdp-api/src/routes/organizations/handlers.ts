@@ -10,9 +10,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
-import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, notFound } from "@/lib/errors";
-import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -105,28 +103,6 @@ export const getOrganization = async (c: AppContext) => {
   return success(c, response);
 };
 
-/**
- * Refuses an allowlist that would shut out the request installing it. The
- * restriction covers this endpoint and the dashboard, so such a list is
- * unrecoverable through the API — only database access could undo it. A
- * missing client IP is refused too: enforcement fails closed without one.
- */
-function assertAllowlistAdmitsCaller(c: AppContext, allowedIps: string[] | undefined): void {
-  if (allowedIps === undefined || allowedIps.length === 0) {
-    return;
-  }
-
-  const clientIp = getClientIp(c);
-
-  if (!isClientIpAllowed(clientIp, allowedIps)) {
-    throw badRequest(
-      clientIp
-        ? `The allowed IP list must include the address this request came from (${clientIp}), or it would lock the organization out.`
-        : "No client IP could be determined for this request, so an allowed IP list cannot be verified. It would lock the organization out."
-    );
-  }
-}
-
 export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOrgSchema>) => {
   const { orgId } = c.req.param();
   const auth = getAuth(c);
@@ -142,8 +118,6 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
   if (body.name === undefined && settingsPatch === undefined) {
     throw badRequest("No valid updates provided");
   }
-
-  assertAllowlistAdmitsCaller(c, settingsPatch?.allowedIpAddresses);
 
   // Settings are one JSON column patched by read-merge-write. Unsynchronized,
   // the second commit silently drops the first — an unrelated edit could revert

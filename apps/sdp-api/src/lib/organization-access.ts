@@ -33,7 +33,7 @@ import type { Env } from "@/types/env";
  * - for an API key, its wallet scope and the custody wallets a selected key
  *   lists (HOO-2099), which wallet list and detail reads filter by; signing
  *   re-checks the list itself, at the waist;
- * - the request's origin passes `settings.allowedIpAddresses`.
+ * - for an API key, the request's origin passes `settings.allowedIpAddresses`.
  *
  * Deliberately uncached: a cache would keep the previous answer for its TTL
  * after a revocation, a grant change or an allowlist change.
@@ -57,9 +57,10 @@ function readAllowedIpAddresses(settings: string | null): unknown {
 }
 
 /**
- * Apply `settings.allowedIpAddresses` to the current request. Runs on every
- * authenticated path — a restriction only one of three doors honors is not a
- * restriction; an API key's own `allowedIps` intersects on top.
+ * Apply `settings.allowedIpAddresses` to an API-key request. The allowlist
+ * restricts where the organization's keys may be used from; it never filters
+ * a signed-in member, whose dashboard requests reach the API from SDP's own
+ * servers. A key's own `allowedIps` intersects on top.
  *
  * A malformed restriction fails closed. The settings column is JSON the API
  * writes itself, so a blob that does not parse is a bug: it throws, and the
@@ -93,20 +94,6 @@ export async function readActiveOrganizationSettings(
     throw organizationNotActive();
   }
   return row.settings;
-}
-
-/**
- * Organization access for a session-based door (Clerk): the organization must
- * exist and be `active`, and the origin must pass its allowlist. Call it before
- * the door writes anything, so a refused request leaves no state behind.
- */
-export async function enforceOrganizationAccess(
-  c: Context<{ Bindings: Env }>,
-  organizationId: string
-): Promise<string | null> {
-  const settings = await readActiveOrganizationSettings(c.env, organizationId);
-  enforceIpAllowlist(c, settings);
-  return settings;
 }
 
 /** The key's active `api_key_signing_wallets`, aggregated to a `text[]`. */
