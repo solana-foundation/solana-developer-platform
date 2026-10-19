@@ -320,7 +320,9 @@
         "**/*.config.js",
         "**/*.config.mjs",
         "**/mdx-components.tsx",
-        "**/agents/sdp-translation-agent/**"
+        "**/agents/sdp-translation-agent/agent/agent.ts",
+        "**/agents/sdp-translation-agent/agent/channels/*.ts",
+        "**/agents/sdp-translation-agent/agent/tools/*.ts"
       ],
       "linter": {
         "rules": {
