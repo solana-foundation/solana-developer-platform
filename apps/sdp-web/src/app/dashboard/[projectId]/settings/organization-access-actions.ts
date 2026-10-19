@@ -1,13 +1,26 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
+import { z } from "zod";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createOrgSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
 
-interface OrganizationSettingsResponse {
-  settings?: { allowedIpAddresses?: string[] } | null;
+const onboardingOrganizationSchema = z.object({
+  linked: z.boolean(),
+  organization: z
+    .object({ id: z.string().min(1) })
+    .nullable()
+    .optional(),
+});
+
+/** The organization read; an absent allowlist is an unrestricted one. */
+const organizationAllowlistSchema = z.object({
+  settings: z.object({ allowedIpAddresses: z.array(z.string()).optional() }).nullable(),
+});
+
+function parseAllowlist(body: unknown): string[] {
+  return organizationAllowlistSchema.parse(body).settings?.allowedIpAddresses ?? [];
 }
 
 export type OrganizationIpAllowlist =
@@ -22,7 +35,9 @@ export type SaveOrganizationIpAllowlistResult =
 async function resolveOrganizationId(
   client: Awaited<ReturnType<typeof createOrgSdpApiClient>>
 ): Promise<string> {
-  const onboarding = await client.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
+  const onboarding = onboardingOrganizationSchema.parse(
+    await client.fetch<unknown>("/v1/onboarding/status")
+  );
   if (!onboarding.linked || !onboarding.organization) {
     throw new Error("Organization is not linked yet");
   }
@@ -34,14 +49,10 @@ export async function loadOrganizationIpAllowlist(): Promise<OrganizationIpAllow
   try {
     const client = await createOrgSdpApiClient();
     const organizationId = await resolveOrganizationId(client);
-    const organization = await client.fetch<OrganizationSettingsResponse>(
+    const organization = await client.fetch<unknown>(
       `/v1/organizations/${encodeURIComponent(organizationId)}`
     );
-    return {
-      ok: true,
-      organizationId,
-      allowedIps: organization.settings?.allowedIpAddresses ?? [],
-    };
+    return { ok: true, organizationId, allowedIps: parseAllowlist(organization) };
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
   }
@@ -57,7 +68,7 @@ export async function saveOrganizationIpAllowlistAction(
   try {
     const client = await createOrgSdpApiClient();
     const organizationId = await resolveOrganizationId(client);
-    const organization = await client.fetch<OrganizationSettingsResponse>(
+    const organization = await client.fetch<unknown>(
       `/v1/organizations/${encodeURIComponent(organizationId)}`,
       {
         method: "PATCH",
@@ -65,7 +76,7 @@ export async function saveOrganizationIpAllowlistAction(
       }
     );
     revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
-    return { ok: true, allowedIps: organization.settings?.allowedIpAddresses ?? [] };
+    return { ok: true, allowedIps: parseAllowlist(organization) };
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
   }

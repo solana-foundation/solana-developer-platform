@@ -5,8 +5,7 @@ import { OrganizationIpAllowlistForm } from "./organization-ip-allowlist-form";
 
 /** The organization-wide IP allowlist for its API keys. */
 export async function OrganizationAccessSection() {
-  const t = await getTranslations();
-  const allowlist = await loadOrganizationIpAllowlist();
+  const [t, allowlist] = await Promise.all([getTranslations(), loadOrganizationIpAllowlist()]);
 
   return (
     <Card id="api-access" className="scroll-mt-6">
