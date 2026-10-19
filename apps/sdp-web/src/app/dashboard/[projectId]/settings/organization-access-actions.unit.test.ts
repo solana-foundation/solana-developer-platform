@@ -61,11 +61,15 @@ describe("organization IP allowlist", () => {
   it("saves one entry per address and returns the list as stored", async () => {
     answer({ settings: { allowedIpAddresses: ["203.0.113.0/24"] } });
 
-    const result = await saveOrganizationIpAllowlistAction("203.0.113.5/24\n203.0.113.5/24, ");
+    const result = await saveOrganizationIpAllowlistAction(
+      "203.0.113.5/24\n203.0.113.5/24, ",
+      "key_allowlist_edit"
+    );
 
     expect(result).toEqual({ ok: true, allowedIps: ["203.0.113.0/24"] });
     const { init } = organizationCall();
     expect(init?.method).toBe("PATCH");
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("key_allowlist_edit");
     expect(JSON.parse(String(init?.body))).toEqual({
       settings: { allowedIpAddresses: ["203.0.113.5/24"] },
     });
@@ -74,7 +78,7 @@ describe("organization IP allowlist", () => {
   it("clears the allowlist with an empty list", async () => {
     answer({ settings: { allowedIpAddresses: [] } });
 
-    await saveOrganizationIpAllowlistAction("   ");
+    await saveOrganizationIpAllowlistAction("   ", "key_allowlist_clear");
 
     expect(JSON.parse(String(organizationCall().init?.body))).toEqual({
       settings: { allowedIpAddresses: [] },
@@ -84,7 +88,7 @@ describe("organization IP allowlist", () => {
   it("reports an API refusal without throwing", async () => {
     answer(null, 400);
 
-    expect((await saveOrganizationIpAllowlistAction("office")).ok).toBe(false);
+    expect((await saveOrganizationIpAllowlistAction("office", "key_allowlist_bad")).ok).toBe(false);
   });
 
   it("refuses a response it cannot read rather than showing it as unrestricted", async () => {

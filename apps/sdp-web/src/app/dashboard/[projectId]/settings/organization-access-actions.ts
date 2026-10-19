@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createOrgSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
@@ -61,9 +62,12 @@ export async function loadOrganizationIpAllowlist(): Promise<OrganizationIpAllow
 /**
  * Replaces the organization's API-key IP allowlist. An empty value clears it.
  * The API canonicalizes each entry, so the saved list is what it returns.
+ * The form's Idempotency-Key is forwarded, one per edit, so a retried save
+ * is the same request.
  */
 export async function saveOrganizationIpAllowlistAction(
-  value: string
+  value: string,
+  idempotencyKey: string
 ): Promise<SaveOrganizationIpAllowlistResult> {
   try {
     const client = await createOrgSdpApiClient();
@@ -72,6 +76,7 @@ export async function saveOrganizationIpAllowlistAction(
       `/v1/organizations/${encodeURIComponent(organizationId)}`,
       {
         method: "PATCH",
+        headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
         body: JSON.stringify({ settings: { allowedIpAddresses: parseAllowedIps(value) } }),
       }
     );
