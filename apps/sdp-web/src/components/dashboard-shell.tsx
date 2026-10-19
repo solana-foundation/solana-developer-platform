@@ -422,6 +422,31 @@ function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): b
 
 const DEMO_OFF: PaymentsDemoState = { demoProjectId: null };
 
+/** Where a refresh page's header starts, from the top of the content area. */
+type RefreshHeaderTop = "flush" | "flushOverDemoSwitch" | "underBackLink" | "underTitle";
+
+/**
+ * The design's spacing above a refresh header: 44px above the title row (a 34px button sits on
+ * it), 40px above a back link's row. A flow that sets its own top spacing meets the edge from
+ * md, unless the demo switch sits in its header: that keeps 24px over it.
+ */
+const REFRESH_HEADER_TOP_CLASS = {
+  flush: "pt-6 md:pt-0",
+  flushOverDemoSwitch: "pt-6",
+  underBackLink: "pt-6 md:pt-10",
+  underTitle: "pt-6 md:pt-11",
+} as const satisfies Record<RefreshHeaderTop, string>;
+
+/** Which of the header's top spacings applies, one yes-or-no question at a time. */
+function refreshHeaderTop(page: {
+  flushTopOnDesktop: boolean;
+  demoSwitchInHeader: boolean;
+  backLinkAboveTitle: boolean;
+}): RefreshHeaderTop {
+  if (page.flushTopOnDesktop) return page.demoSwitchInHeader ? "flushOverDemoSwitch" : "flush";
+  return page.backLinkAboveTitle ? "underBackLink" : "underTitle";
+}
+
 /* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing shell orchestration */ /* react-doctor-disable-next-line no-high-complexity-react-function -- this change only supplies Private Channels route configuration */
 export function DashboardShell({
   children,
@@ -897,15 +922,13 @@ export function DashboardShell({
                       "shrink-0",
                       isRefresh && [
                         refreshGutterClass,
-                        pageConfig.flushTopOnDesktop
-                          ? // A flow that sets its own top spacing, unless the demo switch sits
-                            // in its header: that keeps 24px over it rather than meeting the edge.
-                            newDesignEnabled && demoAvailable
-                            ? "pt-6"
-                            : "pt-6 md:pt-0"
-                          : stacksBackAboveTitle
-                            ? "pt-6 md:pt-10"
-                            : "pt-6 md:pt-11",
+                        REFRESH_HEADER_TOP_CLASS[
+                          refreshHeaderTop({
+                            flushTopOnDesktop: pageConfig.flushTopOnDesktop === true,
+                            demoSwitchInHeader: newDesignEnabled && demoAvailable,
+                            backLinkAboveTitle: stacksBackAboveTitle,
+                          })
+                        ],
                       ]
                     )}
                   >
