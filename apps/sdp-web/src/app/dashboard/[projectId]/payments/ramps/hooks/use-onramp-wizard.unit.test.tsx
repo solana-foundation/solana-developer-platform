@@ -402,8 +402,8 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
     act(() => rendered.result.current.retryQuoteCreation());
     await waitFor(() => expect(quoteCalls).toHaveLength(2));
 
-    expect(quoteCalls[0]?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
-    expect(quoteCalls[1]?.idempotencyKey).toBe(quoteCalls[0]?.idempotencyKey);
+    expect(quoteCalls[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(quoteCalls[1].idempotencyKey).toBe(quoteCalls[0].idempotencyKey);
     await respondToQuote(1, quoteCreated());
     await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
   });
@@ -425,7 +425,7 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
       destinationCustodyWalletId: WALLET_B.id,
       fiatAmount: "200",
     });
-    expect(quoteCalls[1]?.idempotencyKey).not.toBe(quoteCalls[0]?.idempotencyKey);
+    expect(quoteCalls[1].idempotencyKey).not.toBe(quoteCalls[0].idempotencyKey);
     await respondToQuote(1, quoteCreated());
     await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
     expect(rendered.result.current.selectedWallet?.id).toBe(WALLET_B.id);

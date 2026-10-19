@@ -354,7 +354,7 @@ const RAMP_QUOTE_PATHS: ReadonlySet<string> = new Set([
  */
 function takesActionKey(path: string, init: RequestInit, headers: Headers): boolean {
   const method = (init.method ?? "GET").toUpperCase();
-  const pathname = path.split("?", 1)[0] ?? path;
+  const [pathname] = path.split("?", 1);
   return (
     KEYED_METHODS.has(method) &&
     !UNKEYED_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
