@@ -9,7 +9,7 @@ import type { Env } from "@/types/env";
 import { screenAddress } from "./handlers";
 import { screenAddressSchema } from "./schemas";
 
-const compliance = new Hono<{ Bindings: Env }>();
+export const compliance = new Hono<{ Bindings: Env }>();
 
 /** Why screening runs `authorizeNone` (the route inventory pins it). */
 export const SCREENS_AN_ADDRESS =
@@ -30,5 +30,3 @@ compliance.post(
   meteredQuota({ name: "compliance-screening", actorMax: 30, orgMax: 120 }),
   screenAddress
 );
-
-export default compliance;

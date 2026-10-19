@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
-import { derivationMessageBase64 } from "@sdp/helius-rings-sdk";
-import type { MovementId, MovementOf } from "@sdp/types";
+import { derivationMessageBase64 } from "@sdp/helius-rings-sdk/custody-ka/seed";
+import type { MovementId, MovementOf } from "@sdp/types/movements";
 import { getBase64Codec } from "@solana/codecs";
 import {
   address,
@@ -22,7 +22,7 @@ import {
   isTransactionPartialSigner,
   type TransactionSigner,
 } from "@solana/signers";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import type { SigningProviderType } from "@/services/adapters/signing";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";

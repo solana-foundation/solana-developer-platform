@@ -1,8 +1,15 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveIntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
+import { IntegrationDetailSkeleton } from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
+import {
+  resolveComplianceIntegrations,
+  resolveCustodyIntegrations,
+  resolveRampIntegrations,
+} from "@/app/dashboard/[projectId]/integrations/integrations-status";
 import {
   availableComplianceProviders,
   availableCustodyProviders,
@@ -11,13 +18,6 @@ import {
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
-import { resolveIntegrationDetail } from "../integration-detail";
-import { IntegrationDetailSkeleton } from "../integrations-skeleton";
-import {
-  resolveComplianceIntegrations,
-  resolveCustodyIntegrations,
-  resolveRampIntegrations,
-} from "../integrations-status";
 import { IntegrationDetailView } from "./integration-detail-view";
 
 vi.mock("next/headers", () => import("@/test/next-headers"));

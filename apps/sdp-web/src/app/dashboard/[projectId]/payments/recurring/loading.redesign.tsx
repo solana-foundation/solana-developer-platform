@@ -1,5 +1,5 @@
-import { RecurringPaymentsPageSkeleton } from "../payments-route-skeletons.redesign";
+import { RecurringPaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
 
-export default function RecurringPaymentsLoading() {
+export function RecurringPaymentsLoading() {
   return <RecurringPaymentsPageSkeleton />;
 }

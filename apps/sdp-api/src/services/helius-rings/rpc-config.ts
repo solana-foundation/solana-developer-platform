@@ -1,5 +1,5 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
-import { withHeliusApiKey } from "@sdp/rpc/relay";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import { withHeliusApiKey } from "@sdp/rpc/config";
 import type { Env } from "@/types/env";
 
 const API_KEY_PLACEHOLDER = "{API_KEY}";

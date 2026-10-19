@@ -3,8 +3,8 @@ import type {
   CustodyConnectionLifecycle,
   CustodyProvider,
   ProviderCredentialStatus,
-} from "@sdp/types";
-import type { DatabaseExecutor } from "@/db";
+} from "@sdp/types/custody";
+import type { DatabaseExecutor } from "@/db/client";
 import {
   createCredentialSecretStore,
   type StoredCredentialSecret,

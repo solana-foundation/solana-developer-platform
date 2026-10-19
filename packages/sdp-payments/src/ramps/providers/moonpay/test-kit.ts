@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "../../test-kit";
+import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "#/ramps/test-kit";
 
 const API_KEY = "pk_test_contract";
 const SECRET_KEY = "sk_test_contract";

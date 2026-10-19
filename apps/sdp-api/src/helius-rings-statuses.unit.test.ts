@@ -3,7 +3,7 @@ import {
   HELIUS_RINGS_OPERATION_STATUSES,
   HELIUS_RINGS_RETIRED_OPERATION_STATUSES,
   isLiveHeliusRingsOperationStatus,
-} from "@sdp/types";
+} from "@sdp/types/helius-rings";
 import { describe, expect, it } from "vitest";
 
 describe("Helius Rings operation statuses", () => {

@@ -1,6 +1,6 @@
 "use server";
 
-import type { PrivateChannelPrincipalDto } from "@sdp/types";
+import type { PrivateChannelPrincipalDto } from "@sdp/types/private-channels";
 import { revalidatePath } from "next/cache";
 import {
   addPrincipalChannelMembership,

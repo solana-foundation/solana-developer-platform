@@ -7,16 +7,22 @@ import {
 } from "./vault-balance-read-context";
 
 const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn(), prove: vi.fn() }));
-vi.mock("@/db", () => ({ getDb: vi.fn() }));
+vi.mock("@/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/client")>()),
+  getDb: vi.fn(),
+}));
 vi.mock("@/db/repositories/earn-movements.repository", () => ({
   createPostgresEarnMovementsRepository: () => ({ getMovementById: mocks.movement }),
 }));
 vi.mock("@sdp/rpc/solana", () => ({ createRpc: vi.fn(), getSignatureStatuses: mocks.statuses }));
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
+  resolveClusterRpcUrl: () => "https://rpc.invalid",
+}));
 vi.mock("./execution-registry", () => ({
   assertClusterEndpoint: mocks.prove,
   earnClusterFor: (environment: string) =>
     environment === "production" ? "mainnet-beta" : "devnet",
-  resolveClusterRpcUrl: () => "https://rpc.invalid",
 }));
 const input = {
   movementIds: ["one", "two", "three"],

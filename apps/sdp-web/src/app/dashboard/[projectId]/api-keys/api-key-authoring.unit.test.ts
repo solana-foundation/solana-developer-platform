@@ -1,4 +1,8 @@
-import { type AllowedOperation, OPERATION_TYPES, operationTypesInFamily } from "@sdp/types";
+import {
+  type AllowedOperation,
+  OPERATION_TYPES,
+  operationTypesInFamily,
+} from "@sdp/types/allowed-operations";
 import { describe, expect, it } from "vitest";
 import {
   type ApiKeyAuthoringDraft,

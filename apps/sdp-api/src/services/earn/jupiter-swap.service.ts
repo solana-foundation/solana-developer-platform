@@ -4,10 +4,10 @@ import {
   providerUnavailable,
 } from "@sdp/earn/errors";
 import type { EarnVaultInstruction, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { isAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { isAddress } from "@solana/addresses";
 import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";

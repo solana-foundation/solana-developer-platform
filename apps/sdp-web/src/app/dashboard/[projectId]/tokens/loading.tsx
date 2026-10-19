@@ -1,13 +1,7 @@
-import { Card, CardContent } from "@/components/ui/card";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Card, CardContent } from "@sdp/ui/card";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 
 // Mirrors the holdings table: a count line, then four right-aligned columns.
 // Without this the route fell through to the dashboard skeleton, which draws the

@@ -1,6 +1,6 @@
 // Uses the production scan-owner migration in the test database.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type {
   CredentialSecretStore,
   ListCredentialSecretVersionsParams,

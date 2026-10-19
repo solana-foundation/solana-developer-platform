@@ -1,14 +1,8 @@
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import type { ReactNode } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 const TABLE_ROW_IDS = [
   "payments-loading-row-1",
@@ -454,6 +448,3 @@ export function PaymentsTransactionsPageSkeleton() {
     </ListPageSkeleton>
   );
 }
-
-// A new contact's wizard loads as it did before: its layout is unchanged.
-export { CounterpartyCreateSkeleton } from "./payments-route-skeletons";

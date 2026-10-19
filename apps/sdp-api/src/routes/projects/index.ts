@@ -8,7 +8,7 @@ import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
 import {
   addProjectMember,
@@ -18,10 +18,10 @@ import {
 } from "./handlers/members";
 import { getProject, listProjects, updateProject } from "./handlers/projects";
 import { apiKeyProjectAccessMiddleware } from "./project-access";
-import projectProviderAvailability from "./provider-availability";
+import { projectProviderAvailability } from "./provider-availability";
 import { addMemberSchema, updateMemberSchema, updateProjectSchema } from "./schemas";
 
-const projects = new Hono<{ Bindings: Env }>();
+export const projects = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 projects.use("*", unifiedAuthMiddleware());
@@ -99,5 +99,3 @@ projects.post(
 // ═══════════════════════════════════════════════════════════════════════════
 
 projects.route("/:projectId/provider-availability", projectProviderAvailability);
-
-export default projects;

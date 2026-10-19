@@ -1,6 +1,7 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
-import { errorResponseSchema, rpcRelayRequestSchema } from "../schemas";
+import { errorResponseSchema } from "@/openapi/schemas/base";
+import { rpcRelayRequestSchema } from "@/openapi/schemas/rpc";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { rpcRelayResponse } from "./responses";
 

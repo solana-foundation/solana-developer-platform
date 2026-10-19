@@ -9,7 +9,7 @@ import {
   resetIntegrationState,
   SOLANA_CONFIGURED,
   TEST_PROJECT,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 
 type CreateApiKeyResponse = {
   data: {

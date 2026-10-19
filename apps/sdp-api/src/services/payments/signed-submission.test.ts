@@ -8,7 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
-import { submitSponsoredTransaction } from "../sponsorship-submission";
+import { submitSponsoredTransaction } from "@/services/sponsorship-submission";
 import { createTransferSignedSubmissionStore } from "./signed-submission";
 
 const SIGNATURE =

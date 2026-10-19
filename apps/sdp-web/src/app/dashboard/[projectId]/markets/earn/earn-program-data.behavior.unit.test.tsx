@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { EarnVaultPosition } from "@sdp/types";
+import type { EarnVaultPosition } from "@sdp/types/earn";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";

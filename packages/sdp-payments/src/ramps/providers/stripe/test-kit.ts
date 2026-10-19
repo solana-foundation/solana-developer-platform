@@ -1,5 +1,5 @@
-import { basicAuthHeader } from "../../shared";
-import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "../../test-kit";
+import { basicAuthHeader } from "#/ramps/shared";
+import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "#/ramps/test-kit";
 
 const SECRET_KEY = "sk_test_contract";
 const FIAT_AMOUNT = "100";

@@ -3,7 +3,7 @@ import type {
   DeployPrepareApiResponse,
   PreparedTransactionApiResponse,
   TransactionListApiResponse,
-} from "../helpers/api-types";
+} from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -11,13 +11,13 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 import {
   createAndDeployStablecoin,
   createStablecoin,
   mintToWallet,
   TEST_WALLETS,
-} from "../helpers/issuance";
+} from "#/helpers/issuance";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare Endpoints", () => {
   let apiKeyHash: string;

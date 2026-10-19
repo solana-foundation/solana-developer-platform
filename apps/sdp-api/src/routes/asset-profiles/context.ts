@@ -1,5 +1,8 @@
 import type { Context } from "hono";
-import { createAssetProfilesRepository, createTokenRepository } from "@/db/repositories";
+import {
+  createAssetProfilesRepository,
+  createTokenRepository,
+} from "@/db/repositories/repository-factory";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 

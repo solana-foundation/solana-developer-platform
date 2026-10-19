@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vitest";
-import { getMessages, translate } from "@/i18n/messages";
+import { getMessages } from "@/i18n/messages";
+import { translate } from "@/i18n/translate";
 import { buildCounterpartyPlaygroundEndpointConfigs } from "./counterparty-playground-config";
 
 describe("buildCounterpartyPlaygroundEndpointConfigs", () => {

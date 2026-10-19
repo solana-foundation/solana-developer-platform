@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { RedisContainer, type StartedRedisContainer } from "@testcontainers/redis";
 import pg from "pg";
-import { runPostgresMigrations } from "../../scripts/lib/run-postgres-migrations.mjs";
+import { runPostgresMigrations } from "@/scripts/lib/run-postgres-migrations.mjs";
 import { TEST_RUNTIME_PASSWORD, TEST_RUNTIME_ROLE } from "./runtime-role";
 import { TEST_WORKER_COUNT } from "./worker-count";
 

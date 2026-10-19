@@ -1,5 +1,5 @@
-import { isAddress } from "@sdp/solana/address";
-import { COUNTERPARTY_ACCOUNT_KINDS } from "@sdp/types";
+import { COUNTERPARTY_ACCOUNT_KINDS } from "@sdp/types/counterparties";
+import { isAddress } from "@solana/addresses";
 import { z } from "zod";
 import { queryBooleanSchema } from "@/openapi/schemas/base";
 

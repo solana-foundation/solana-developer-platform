@@ -22,8 +22,6 @@ import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { isBlockedAddress } from "@sdp/rpc/blocked-address";
 
-export { isBlockedAddress };
-
 export class EgressResponseTooLargeError extends Error {
   constructor(host: string) {
     super(`The endpoint ${host} answered with a body larger than the caller accepts`);

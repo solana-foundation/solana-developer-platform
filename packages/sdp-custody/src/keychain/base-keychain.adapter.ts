@@ -1,7 +1,7 @@
 /** Shared base for custody adapters that expose @solana/kit transaction signers. */
 
 import type { Address, TransactionSigner } from "@solana/kit";
-import type { FullSigningPort } from "../signing";
+import type { FullSigningPort } from "#/signing";
 
 export abstract class BaseKeychainAdapter implements FullSigningPort {
   abstract readonly providerId: string;

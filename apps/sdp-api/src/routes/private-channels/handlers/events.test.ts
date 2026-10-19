@@ -3,10 +3,10 @@ import {
   PRIVATE_CHANNEL_EVENT_STATUSES,
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelEventListEnvelope,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresPrivateChannelEventRepository } from "@/db/repositories/private-channel-event.repository.postgres";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";

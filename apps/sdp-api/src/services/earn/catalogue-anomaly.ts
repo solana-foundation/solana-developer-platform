@@ -37,7 +37,7 @@ import {
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { logEvent } from "@/runtime/money-path-events";
 
 export const EARN_FIGURE_BOUNDS = {

@@ -1,9 +1,9 @@
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
-  CustodyWalletSummary,
   PrivateChannelDto,
   PrivateChannelMembershipChannelDto,
   PrivateChannelVerifiedWalletDto,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { describe, expect, it } from "vitest";
 import {
   createTransferScopeKey,

@@ -1,3 +1,4 @@
+import type { CustodyProviderDisplayStatus } from "@sdp/types/custody";
 import type {
   AvailableCustodyModes,
   ProjectCustodyAvailability,
@@ -5,7 +6,6 @@ import type {
 import {
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
-  type CustodyProviderDisplayStatus,
   type KnownCustodyProvider,
 } from "./provider-catalog";
 

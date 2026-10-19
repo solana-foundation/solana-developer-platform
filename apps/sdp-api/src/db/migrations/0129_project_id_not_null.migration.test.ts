@@ -1,8 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PaymentRequestStatus, ProviderCredentialStatus } from "@sdp/types";
+import type { ProviderCredentialStatus } from "@sdp/types/custody";
+import type { PaymentRequestStatus } from "@sdp/types/payments";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { runPostgresMigrations } from "@/scripts/lib/run-postgres-migrations.mjs";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
 import {
   CHECK_VIOLATION,
@@ -16,7 +18,6 @@ import {
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
 import { restorePreCounterpartyProviderAccountsScopeSchema } from "./counterparty-provider-accounts-scope-schema";
 import {
   PROJECT_ID_NOT_NULL_MIGRATION,

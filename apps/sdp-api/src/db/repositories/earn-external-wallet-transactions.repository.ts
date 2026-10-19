@@ -1,5 +1,6 @@
-import type { EarnMovementDirection, SdpEnvironment } from "@sdp/types";
-import type { AppDb } from "@/db";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnMovementDirection } from "@sdp/types/earn";
+import type { DatabaseClient as AppDb } from "@/db/client";
 
 /**
  * Built external-wallet transactions (PRO-1722): the unsigned transactions SDP built

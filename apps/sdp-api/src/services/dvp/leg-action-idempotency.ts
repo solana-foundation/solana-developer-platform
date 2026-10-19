@@ -26,7 +26,7 @@
 import { createHash } from "node:crypto";
 import { createRpc } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresDvpLegActionRequestRepository,
   type DvpLegActionAttempt,
@@ -37,8 +37,6 @@ import { AppError, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { readDvpFundingReceipt } from "./funding-receipt";
-
-export type { DvpLegActionAttempt };
 
 /**
  * A pending key with no recorded attempt, older than this, belongs to a request

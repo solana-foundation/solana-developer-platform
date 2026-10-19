@@ -1,13 +1,10 @@
 "use client";
 
-import type {
-  Counterparty,
-  CryptoRailId,
-  PaymentRampQuote,
-  PaymentsDashboardWallet,
-  RampProviderId,
-} from "@sdp/types";
-import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { PaymentRampQuote, PaymentsDashboardWallet, RampDirection } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
 import { isCollectStageStatus } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -20,6 +17,15 @@ import {
   cancelRampTransfer,
   fetchAllCounterparties,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import {
+  type MemoRow,
+  memoRowsToRecord,
+  validateMemoRows,
+} from "@/app/dashboard/[projectId]/payments/ramps/memo";
+import {
+  type RampFields,
+  rampSelectionSchema,
+} from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import { useTranslations } from "@/i18n/provider";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -27,8 +33,6 @@ import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
-import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import { useRampQuote } from "./use-ramp-quote";

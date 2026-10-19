@@ -1,5 +1,5 @@
-import { providerUnavailable } from "../../errors";
-import { providerFetchJson } from "../../fetch";
+import { providerUnavailable } from "#/errors";
+import { providerFetchJson } from "#/fetch";
 
 /** Hastra's keyless proof-of-reserves and product-metrics feed. */
 export const HASTRA_POR_API_URL = "https://hastra.io/hastra-pulse/public/api/v1/por";

@@ -1,4 +1,7 @@
-import { UNIFIED_TRANSACTION_STATUSES, type UnifiedTransactionModule } from "@sdp/types";
+import {
+  UNIFIED_TRANSACTION_STATUSES,
+  type UnifiedTransactionModule,
+} from "@sdp/types/unified-transactions";
 import { z } from "zod";
 
 const rawFiltersSchema = z.object({

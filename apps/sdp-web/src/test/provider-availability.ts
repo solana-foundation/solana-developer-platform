@@ -1,20 +1,22 @@
 import {
-  COMPLIANCE_PROVIDERS,
-  type ComplianceProviderId,
   CUSTODY_MODES,
   CUSTODY_PROVIDERS,
   type CustodyMode,
   type CustodyProvider,
+  isCustodyModeAllowedInEnvironment,
+} from "@sdp/types/custody";
+import type { Project } from "@sdp/types/projects";
+import {
+  COMPLIANCE_PROVIDERS,
+  type ComplianceProviderId,
   EARN_PROVIDERS,
   type EarnProviderId,
-  isCustodyModeAllowedInEnvironment,
-  type Project,
   type ProjectProviderAvailability,
   type ProjectProviderAvailabilityEntry,
   // biome-ignore lint/style/noRestrictedImports: the fixture mirrors the API, which lists every ramp provider the deployment knows
   RAMP_PROVIDERS,
   type RampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 
 /**
  * Builds a Project's provider availability the way the API returns it: every

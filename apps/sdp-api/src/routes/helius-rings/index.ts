@@ -26,7 +26,7 @@ import {
   voidRingsOperation,
 } from "./handlers";
 
-const heliusRings = new Hono<{ Bindings: Env }>();
+export const heliusRings = new Hono<{ Bindings: Env }>();
 
 async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Next) {
   if (!isHeliusRingsEnabled(c.env)) {
@@ -89,5 +89,3 @@ heliusRings.post(
   requirePermissions("payments:write"),
   voidRingsOperation
 );
-
-export default heliusRings;

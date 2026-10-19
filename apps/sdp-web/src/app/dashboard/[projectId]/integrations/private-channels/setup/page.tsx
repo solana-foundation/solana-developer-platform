@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
+import { privateChannelsSetupPath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { loadInstance } from "../private-channels-page.data";
-import { privateChannelsSetupPath } from "../private-channels-routes";
 import { PrivateChannelsSetupScreen } from "./private-channels-setup-screen";
 
 /** Entry point before a connection exists; active connections use their scoped URL. */

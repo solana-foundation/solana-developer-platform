@@ -1,6 +1,6 @@
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import { createSystemAssetProfilesRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createSystemAssetProfilesRepository } from "@/db/repositories/repository-factory";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { TokenService } from "@/services/token.service";

@@ -1,17 +1,11 @@
+import { Badge } from "@sdp/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { listMembers, type Member, type PendingInvitation } from "@/app/members/actions";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { getTranslations } from "@/i18n/server";
 import { readableApiError } from "@/lib/sdp-api-error";
-import { cn } from "@/lib/utils";
 import { InvitationActions } from "./invitation-actions";
 import { InviteMemberForm } from "./invite-member-form";
 import { MemberActions } from "./member-actions";

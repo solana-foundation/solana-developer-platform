@@ -5,9 +5,9 @@ import type {
   SponsorshipBudgetPolicy,
   SponsorshipReconciliationReservation,
 } from "@/db/repositories/sponsorship-budget.repository";
+import { sponsorshipProviderConfigFingerprint } from "@/services/sponsorship-budget.service";
 import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
-import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.service";
 import {
   KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
   reconcileSponsorshipBudgets,

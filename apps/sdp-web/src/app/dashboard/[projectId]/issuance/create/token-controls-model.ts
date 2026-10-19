@@ -1,9 +1,5 @@
-import {
-  dvpBlockReason,
-  type GroupedSetting,
-  getConflictingSettingKeys,
-  type SettingKey,
-} from "@sdp/issuance/capabilities";
+import { type GroupedSetting, getConflictingSettingKeys } from "@sdp/issuance/capabilities";
+import { dvpBlockReason, type SettingKey } from "@sdp/issuance/capabilities/settings";
 import type { MessageKey } from "@/i18n/messages";
 import type { AdvancedSettingsDraft } from "./issuance-draft-wizard.types";
 

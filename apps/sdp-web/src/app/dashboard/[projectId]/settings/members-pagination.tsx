@@ -1,7 +1,7 @@
 "use client";
 
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 export function MembersPagination({

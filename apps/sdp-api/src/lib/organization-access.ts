@@ -1,18 +1,14 @@
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  Permission,
-  RateLimitTier,
-} from "@sdp/types";
 import {
-  organizationStatusMayAuthenticate,
-  projectStatusMayAuthenticate,
+  type AllowedOperation,
   upgradeStoredAllowedOperations,
-} from "@sdp/types";
+} from "@sdp/types/allowed-operations";
+import type { ApiKeyEnvironment, RateLimitTier } from "@sdp/types/api-keys";
+import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
+import type { ApiKeyRole, Permission } from "@sdp/types/permissions";
+import { projectStatusMayAuthenticate } from "@sdp/types/projects";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { parseStoredApiKeyPermissions } from "@/lib/api-key-permissions";
 import { refuseTerminally } from "@/lib/api-key-refusal-cache";
@@ -24,7 +20,7 @@ import {
   resolveApiKeyWalletAuthorization,
   warnUnresolvedApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * The one uncached organization read every authenticated request makes, and

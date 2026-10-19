@@ -1,8 +1,8 @@
 import {
-  tokenFilterAliases,
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { tokenFilterAliases } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { badRequest } from "@/lib/errors";

@@ -3,16 +3,16 @@ import type {
   PaymentTransferBatch,
   PaymentTransferRecipient,
   PaymentTransferSummary,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { ArrowDownIcon, Link2Icon, ReceiptTextIcon, Repeat2Icon } from "lucide-react";
 import Link from "next/link";
 import { Fragment, Suspense } from "react";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import type { MessageKey } from "@/i18n/messages";
 import { getRequestLocale, getTranslations } from "@/i18n/server";

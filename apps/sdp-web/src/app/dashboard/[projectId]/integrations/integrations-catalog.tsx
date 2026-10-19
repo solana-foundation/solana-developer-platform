@@ -1,6 +1,9 @@
 "use client";
 
-import type { ComplianceProviderId, RampProviderId } from "@sdp/types";
+import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { SearchInput } from "@sdp/ui/search-input";
 import {
   ArrowLeftRightIcon,
   ChevronRight,
@@ -13,15 +16,12 @@ import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
 import type { CustodyProviderAvailability } from "@/app/dashboard/[projectId]/custody/provider-display-status";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Button } from "@/components/ui/button";
-import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { DASHBOARD_INTEGRATIONS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import {
   type ConnectionState,
   connectionState,

@@ -1,14 +1,18 @@
 import { resolveRampProviderClient } from "@sdp/payments/ramps";
-import { CANCELABLE_RAMP_TRANSFER_STATUSES, isCancelableRampTransferStatus } from "@sdp/types";
-import { isRampTransferType } from "@/db/repositories";
+import {
+  CANCELABLE_RAMP_TRANSFER_STATUSES,
+  isCancelableRampTransferStatus,
+  isRampTransferType,
+} from "@sdp/types/payments";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getPaymentsRepository } from "@/routes/payments/context";
+import { mapTransferRow } from "@/routes/payments/mappers";
+import { assertPaymentWalletExactAccess, resolveScope } from "@/routes/payments/wallets";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
-import { getPaymentsRepository, resolveSdpEnvironment } from "../context";
-import { mapTransferRow } from "../mappers";
-import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
 import { admitRamp } from "./admission";
 import type { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
 

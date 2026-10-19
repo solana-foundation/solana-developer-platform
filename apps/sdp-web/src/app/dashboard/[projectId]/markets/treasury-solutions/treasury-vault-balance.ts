@@ -1,5 +1,5 @@
-import type { EarnVaultPosition } from "@sdp/types";
-import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
+import type { EarnVaultPosition } from "@sdp/types/earn";
+import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
 
 export type VaultMovementKind = "deposit" | "withdrawal";
 

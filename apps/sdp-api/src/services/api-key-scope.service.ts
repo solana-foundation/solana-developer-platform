@@ -1,12 +1,11 @@
+import type { ApiKeyWalletBinding, ApiKeyWalletScope } from "@sdp/types/api-keys";
 import {
   type ApiKeyRole,
-  type ApiKeyWalletBinding,
-  type ApiKeyWalletScope,
   getPermissionsForApiKeyRole,
   hasAllPermissions,
   hasAnyPermission,
   type Permission,
-} from "@sdp/types";
+} from "@sdp/types/permissions";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import {

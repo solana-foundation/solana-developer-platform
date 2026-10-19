@@ -1,11 +1,8 @@
 "use client";
 
-import type {
-  ComplianceProviderId,
-  Counterparty,
-  PaymentsDashboardWallet,
-  RampProviderId,
-} from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";

@@ -17,7 +17,7 @@ import {
   partiallySignTransactionWithSigners,
 } from "@solana/signers";
 import { vi } from "vitest";
-import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import type { OwnedSubmissionLifecycle } from "@/services/sponsorship.service";
 
 export const DVP_TEST_T22: Address = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");

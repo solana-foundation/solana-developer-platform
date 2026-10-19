@@ -5,7 +5,7 @@
  */
 
 import { getPublicTemplateInfo, listTemplates } from "@sdp/issuance/templates";
-import type { ListTemplatesResponse, TokenTemplateResponse } from "@sdp/types";
+import type { ListTemplatesResponse, TokenTemplateResponse } from "@sdp/types/tokens";
 import type { Context } from "hono";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";

@@ -1,13 +1,12 @@
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
-  RAMP_PROVIDERS,
-  type RampProviderId,
   resolveSdpReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import type { Adapter } from "flags";
 
 /**

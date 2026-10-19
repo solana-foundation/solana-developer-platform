@@ -1,8 +1,5 @@
-import type {
-  CounterpartyAccount,
-  CounterpartyProviderAccount,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { CounterpartyAccount, CounterpartyProviderAccount } from "@sdp/types/counterparties";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";

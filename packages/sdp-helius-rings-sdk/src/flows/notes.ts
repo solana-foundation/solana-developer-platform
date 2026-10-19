@@ -1,5 +1,5 @@
 import type { Wallet, WalletUtxo } from "@heliuslabs/zolana/transaction";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import type { Address } from "@solana/kit";
 
 /**

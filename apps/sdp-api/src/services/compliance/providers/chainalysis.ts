@@ -3,7 +3,7 @@ import type {
   ComplianceAddressScreeningInput,
   ComplianceProvider,
   ComplianceProviderResult,
-} from "../types";
+} from "@/services/compliance/types";
 import { describeSchemaFailure, extractProviderErrorMessage } from "./provider-response";
 
 const DEFAULT_CHAINALYSIS_API_BASE_URL = "https://api.chainalysis.com";

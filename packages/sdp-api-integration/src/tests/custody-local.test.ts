@@ -1,10 +1,9 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import type { CustodyConfigsResponse } from "@sdp/types";
+import type { CustodyConfigsResponse } from "@sdp/types/custody";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { TokenApiResponse } from "../helpers/api-types";
+import type { TokenApiResponse } from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
-  env,
   INTEGRATION_CUSTODY_PROVIDER,
   type IntegrationCustodyWallet,
   initIntegrationSuite,
@@ -13,7 +12,8 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const { getDb } = apiTestSupport;
 

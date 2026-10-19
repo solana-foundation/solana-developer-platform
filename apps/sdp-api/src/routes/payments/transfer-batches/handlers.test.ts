@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
   createNoopSigner,
@@ -13,14 +13,14 @@ import {
   type Signature,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import {
   createPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
-} from "@/db/repositories";
-import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
-import app from "@/index";
+} from "@/db/repositories/repository-factory";
+import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
@@ -28,7 +28,7 @@ import { rootLogger } from "@/runtime/logger";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import * as solanaServices from "@/services/solana";
+import * as solanaSigner from "@/services/solana/signer";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
@@ -55,7 +55,7 @@ const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 const createOrgSignerForCustodyWalletMock = vi.spyOn(
-  solanaServices,
+  solanaSigner,
   "createOrgSignerForCustodyWallet"
 );
 

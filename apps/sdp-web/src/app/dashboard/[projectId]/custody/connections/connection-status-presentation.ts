@@ -1,5 +1,5 @@
-import type { CustodyConnectionFailureCode, CustodyConnectionLifecycle } from "@sdp/types";
-import type { BadgeVariant } from "@/components/ui/badge";
+import type { CustodyConnectionFailureCode, CustodyConnectionLifecycle } from "@sdp/types/custody";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import type { useTranslations } from "@/i18n/provider";
 
 /**

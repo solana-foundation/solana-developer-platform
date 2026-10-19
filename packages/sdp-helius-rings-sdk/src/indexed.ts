@@ -1,5 +1,5 @@
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
-import type { VerifyIndexedResult } from "@sdp/helius-rings";
+import type { VerifyIndexedResult } from "@sdp/helius-rings/port";
 import type { Signature } from "@solana/kit";
 
 /**

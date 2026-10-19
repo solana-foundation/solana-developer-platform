@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
+import { DvpTradeDetailClient } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade-detail-client";
+import { DvpTradeLoadError } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade-load-error";
+import { fetchDvpTrade, isNotFound } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trades.data";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { DvpTradeDetailClient } from "../dvp-trade-detail-client";
-import { DvpTradeLoadError } from "../dvp-trade-load-error";
-import { fetchDvpTrade, isNotFound } from "../dvp-trades.data";
 
 export const dynamic = "force-dynamic";
 

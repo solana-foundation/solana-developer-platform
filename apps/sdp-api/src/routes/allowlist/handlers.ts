@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { AppError, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";

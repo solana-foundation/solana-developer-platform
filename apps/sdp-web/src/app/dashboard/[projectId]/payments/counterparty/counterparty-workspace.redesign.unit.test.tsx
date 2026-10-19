@@ -1,4 +1,5 @@
-import type { Counterparty, CounterpartyAccountSummary } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { CounterpartyAccountSummary } from "@sdp/types/payments";
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -24,7 +25,7 @@ vi.mock("sonner", () => ({
 }));
 
 // The real menu is a Radix dropdown; render its sections flat so a test can pick an option.
-vi.mock("@/components/ui/filter-menu", () => ({
+vi.mock("@sdp/ui/filter-menu", () => ({
   FilterMenu: ({ sections }: { sections: { id: string; content: ReactNode }[] }) => (
     <div>
       {sections.map((section) => (

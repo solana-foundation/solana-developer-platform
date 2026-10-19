@@ -1,9 +1,9 @@
 "use client";
 
-import type { CounterpartyAccount } from "@sdp/types";
+import type { CounterpartyAccount } from "@sdp/types/counterparties";
+import { Button } from "@sdp/ui/button";
 import { CheckCircle2Icon } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { useCounterpartyCreate } from "./counterparty-create-context";

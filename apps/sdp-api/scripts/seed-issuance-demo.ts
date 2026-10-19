@@ -32,7 +32,11 @@ import {
   validateSettingParams,
 } from "@sdp/issuance/capabilities";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { type AssetCategory, getAssetTypeRegistryEntry, isAssetTypeSupported } from "@sdp/types";
+import {
+  type AssetCategory,
+  getAssetTypeRegistryEntry,
+  isAssetTypeSupported,
+} from "@sdp/types/asset-profiles";
 import pg from "pg";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { issuanceMetadataSchema } from "@/routes/asset-profiles/schemas";

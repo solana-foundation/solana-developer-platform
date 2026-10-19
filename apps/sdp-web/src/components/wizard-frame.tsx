@@ -1,11 +1,11 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
+import { Modal } from "@sdp/ui/modal";
+import { useThemeScope } from "@sdp/ui/theme-scope";
+import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useThemeScope } from "@/components/theme-scope";
-import { Modal } from "@/components/ui/modal";
-import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 interface WizardFrameProps {
   /** Persistent right-hand rail rendered beside the step content on large screens. */
@@ -108,6 +108,7 @@ function WizardStepHeading({
 
   return (
     <div
+      data-wizard-heading
       className={cn(
         "mb-6 gap-3 sm:gap-4",
         titleRowEmpty && "sr-only",

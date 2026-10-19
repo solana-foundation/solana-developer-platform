@@ -5,9 +5,9 @@ import {
   type OrganizationSettings,
   type OrganizationStatus,
   type OrganizationTier,
-} from "@sdp/types";
+} from "@sdp/types/organizations";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
@@ -18,7 +18,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { getProviderAvailability } from "@/services/provider-availability.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import type { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

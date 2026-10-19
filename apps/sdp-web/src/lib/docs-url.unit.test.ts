@@ -1,4 +1,4 @@
-import { DEFAULT_SDP_DOCS_URL } from "@sdp/types";
+import { DEFAULT_SDP_DOCS_URL } from "@sdp/types/site";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveDocsUrl } from "./docs-url";
 

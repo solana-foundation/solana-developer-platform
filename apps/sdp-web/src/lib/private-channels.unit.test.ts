@@ -5,7 +5,7 @@ import {
   type PrivateChannelPrincipalDto,
   type PrivateChannelTransfer,
   type PrivateChannelTransferRecipientDto,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { describe, expect, it, vi } from "vitest";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import {

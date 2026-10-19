@@ -19,8 +19,8 @@ import {
   type DvpCloseRefusalReason,
   type DvpLegRefusalReason,
   type DvpTradeSide,
-  type SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/dvp";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";

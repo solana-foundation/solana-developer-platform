@@ -12,10 +12,11 @@
  * is config-source-agnostic.
  */
 
-import { getChannelTokenBalance } from "@sdp/private-channels";
+import { getChannelTokenBalance } from "@sdp/private-channels/gateway";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { PrivateChannelBalance, PrivateChannelInstance, SolanaCluster } from "@sdp/types";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import type { PrivateChannelBalance, PrivateChannelInstance } from "@sdp/types/private-channels";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { knownMintToken, resolveRegisteredChannelToken } from "./mint";

@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 
 /** Which of a payment's two prerequisites the project is missing. */
 export type PayEmptyReason = "no_contact" | "no_funds" | "neither";

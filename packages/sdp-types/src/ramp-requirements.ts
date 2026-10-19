@@ -3,8 +3,6 @@ import { RAMP_FIAT_CURRENCIES, type RampFiatCurrency } from "./generated/ramp.ge
 import type { RampDirection } from "./payments";
 import type { RampProviderId } from "./provider-access";
 
-export type { RampDirection };
-
 export interface RequirementOption {
   value: string;
   label: string;

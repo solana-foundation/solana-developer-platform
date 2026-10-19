@@ -2,7 +2,7 @@
 
 import { getBase58Codec } from "@solana/codecs";
 import { type Address, createKeyPairSignerFromBytes, type KeyPairSigner } from "@solana/kit";
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 
 const base58 = getBase58Codec();

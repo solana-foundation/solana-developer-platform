@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EARN_PROVIDER_CLIENTS, supportsPortfolioWallets } from "@sdp/earn";
-import { EARN_PROVIDER_DEPOSIT_STYLE, EARN_PROVIDERS } from "@sdp/types";
+import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
+import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
+import { EARN_PROVIDER_DEPOSIT_STYLE, EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import {
   EARN_CREDENTIAL_ENV_KEYS,

@@ -1,6 +1,3 @@
-// One class merger for the app and its @sdp/ui primitives (token-aware tailwind-merge).
-export { cn } from "@sdp/ui/cn";
-
 const DISPLAY_LABEL_OVERRIDES: Record<string, string> = {
   rwa: "RWA",
 };

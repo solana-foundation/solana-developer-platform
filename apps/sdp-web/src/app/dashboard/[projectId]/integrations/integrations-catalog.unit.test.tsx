@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { RAMP_PROVIDERS } from "@sdp/types";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";

@@ -1,4 +1,4 @@
-import { wellKnownMint } from "@sdp/types";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import {
   earnProviderLabel,

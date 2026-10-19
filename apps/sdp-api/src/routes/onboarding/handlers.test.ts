@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { validateBody } from "@/middleware/validate";

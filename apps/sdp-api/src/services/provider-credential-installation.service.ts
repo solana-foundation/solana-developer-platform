@@ -1,7 +1,8 @@
-import { normalizePrivyWalletId } from "@sdp/custody";
+import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
+import type { ProvisionPrivyResult } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import type { Context } from "hono";
-import { type DatabaseClient, getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
@@ -26,11 +27,7 @@ import {
   getPrivyProviderAccountFingerprint,
   type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
-import {
-  findPrivyWalletByExternalId,
-  type ProvisionPrivyResult,
-  provisionPrivyWallet,
-} from "@/services/custody/provisioning";
+import { findPrivyWalletByExternalId, provisionPrivyWallet } from "@/services/custody/provisioning";
 import {
   admitByokCustodySetup,
   type CustodySetupAdmission,

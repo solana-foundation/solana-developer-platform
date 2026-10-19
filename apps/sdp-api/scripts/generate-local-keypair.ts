@@ -19,7 +19,8 @@
  *   pnpm --filter @sdp/api keygen:local
  *   pnpm --filter @sdp/api keygen:local --quiet   # private key only, for piping
  */
-import { generateLocalSignerKeypair, generateSecret } from "@sdp/env-config";
+import { generateLocalSignerKeypair } from "@sdp/env-config/local-keypair";
+import { generateSecret } from "@sdp/env-config/secrets";
 
 const quiet = process.argv.includes("--quiet");
 

@@ -1,6 +1,7 @@
 "use client";
 
-import type { PaymentTransferSummary, RampDirection, RampProviderId } from "@sdp/types";
+import type { PaymentTransferSummary, RampDirection } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import Image from "next/image";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";

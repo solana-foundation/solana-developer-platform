@@ -3,7 +3,7 @@ import {
   getPermissionsForApiKeyRole,
   PERMISSIONS,
   type Permission,
-} from "@sdp/types";
+} from "@sdp/types/permissions";
 import { z } from "zod";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";

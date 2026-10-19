@@ -1,7 +1,7 @@
 "use client";
 
-import type { CustodyConnectionFailureCode, CustodyConnectionLifecycle } from "@sdp/types";
-import { Badge } from "@/components/ui/badge";
+import type { CustodyConnectionFailureCode, CustodyConnectionLifecycle } from "@sdp/types/custody";
+import { Badge } from "@sdp/ui/badge";
 import { useTranslations } from "@/i18n/provider";
 import { failureHint, STATUS_BADGE_VARIANTS, statusLabel } from "./connection-status-presentation";
 

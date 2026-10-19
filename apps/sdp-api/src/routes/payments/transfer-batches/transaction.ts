@@ -1,5 +1,5 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
-import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   addSignersToTransactionMessage,

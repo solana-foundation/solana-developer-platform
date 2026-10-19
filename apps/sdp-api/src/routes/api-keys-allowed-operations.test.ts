@@ -1,8 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
-import type { AllowedOperation } from "@sdp/types";
+import type { AllowedOperation } from "@sdp/types/allowed-operations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

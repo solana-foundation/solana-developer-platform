@@ -16,10 +16,18 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
 vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 vi.mock("@/lib/dashboard-page-trace", () => ({ withDashboardPageTrace: vi.fn() }));
-vi.mock("../../payments-page.data", () => ({ fetchIssuedTokensByMint: vi.fn() }));
-vi.mock("../../counterparty/counterparty-page.data", () => ({ fetchCounterparty: vi.fn() }));
-vi.mock("../transaction-detail.data", () => ({ fetchTransactionDetail: vi.fn() }));
-vi.mock("../transaction-detail-workspace", () => ({ TransactionDetailWorkspace: () => null }));
+vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
+  fetchIssuedTokensByMint: vi.fn(),
+}));
+vi.mock("@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data", () => ({
+  fetchCounterparty: vi.fn(),
+}));
+vi.mock("@/app/dashboard/[projectId]/payments/transactions/transaction-detail.data", () => ({
+  fetchTransactionDetail: vi.fn(),
+}));
+vi.mock("@/app/dashboard/[projectId]/payments/transactions/transaction-detail-workspace", () => ({
+  TransactionDetailWorkspace: () => null,
+}));
 vi.mock("@/flags/new-design", () => ({
   withLegacyDesign:
     <P extends object>(

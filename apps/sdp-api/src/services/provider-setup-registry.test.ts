@@ -1,4 +1,5 @@
-import { COMPLIANCE_PROVIDERS, CUSTODY_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";

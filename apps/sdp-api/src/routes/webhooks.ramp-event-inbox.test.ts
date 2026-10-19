@@ -1,16 +1,13 @@
 import { createHmac } from "node:crypto";
-import {
-  RETIRED_RAMP_PROVIDERS,
-  SDP_RAMP_PROVIDER_STAGES,
-  type SdpRampProviderStages,
-  wellKnownMint,
-} from "@sdp/types";
+import { RETIRED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types/release-channels";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { noopObservability } from "@/runtime/observability";
 import * as replayJobs from "@/services/jobs/replay-ramp-webhook-events";
 import {
@@ -663,15 +660,70 @@ describe("Ramp webhook event inbox", () => {
     });
     const processSpy = vi
       .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
-      .mockResolvedValue("refused");
+      .mockResolvedValue({ outcome: "refused", reason: "asset_mismatch" });
     try {
       expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
     } finally {
       processSpy.mockRestore();
     }
     expect(await readInboxRows()).toMatchObject([
-      { status: "failed", apply_outcome: "refused", attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS },
+      {
+        status: "failed",
+        apply_outcome: "refused",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+        last_error: "asset_mismatch",
+      },
     ]);
+  });
+
+  it("parks a production event aimed at a sandbox transfer without binding it", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const { row: stored } = await events.insertVerifiedEvent({
+      provider: "moonpay",
+      environment: "production",
+      rawBody: JSON.stringify(completedPayload),
+      providerEventId: null,
+    });
+
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "failed",
+        apply_outcome: "refused",
+        last_error: "environment_mismatch",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      },
+    ]);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(transfer).toEqual({ status: "awaiting_payment", provider_reference: null });
+  });
+
+  it("parks a production settlement after cancellation with its reason", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET project_id = ?, status = 'canceled' WHERE id = ?")
+      .bind(`${PROJECT_ID}_production`, TRANSFER_ID)
+      .run();
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const { row: stored } = await events.insertVerifiedEvent({
+      provider: "moonpay",
+      environment: "production",
+      rawBody: JSON.stringify(completedPayload),
+      providerEventId: null,
+    });
+
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    expect(await readInboxRows()).toMatchObject([
+      {
+        status: "failed",
+        apply_outcome: "refused",
+        last_error: "settled_after_cancel",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      },
+    ]);
+    expect(await readTransferStatus()).toBe("canceled");
   });
 
   /** Inserts a replayable row directly: `insertEvent` only takes a live provider. */

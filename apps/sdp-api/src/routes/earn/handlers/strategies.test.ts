@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EarnStrategyRow } from "@/db/repositories";
+import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { mapToEarnStrategy } from "./strategies";
 
 const hastraRow: EarnStrategyRow = {

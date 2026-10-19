@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { resetClusterEndpointProofs } from "./execution-registry";

@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
-import type { EarnPortfolioWalletProvider } from "@sdp/earn";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import { hashString } from "@sdp/payments/hash";
-import type { EarnPortfolioWalletSnapshot, EarnPortfolioWithdrawal } from "@sdp/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import type { EarnPortfolioWalletSnapshot, EarnPortfolioWithdrawal } from "@sdp/types/earn";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: true }));
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/types")>();
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
   return {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>
@@ -48,15 +48,15 @@ vi.mock("@sdp/earn", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnProviderWalletRow,
-  type InsertEarnProviderWalletInput,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type {
+  EarnProviderWalletRow,
+  InsertEarnProviderWalletInput,
+  UpsertEarnStrategyInput,
+} from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";

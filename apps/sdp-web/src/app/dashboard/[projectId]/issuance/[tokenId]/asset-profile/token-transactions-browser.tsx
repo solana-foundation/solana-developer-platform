@@ -4,10 +4,8 @@ import {
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
   type TokenTransaction,
-} from "@sdp/types";
-import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
+} from "@sdp/types/tokens";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
 import {
   Card,
   CardAction,
@@ -15,21 +13,20 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Select, SelectItem } from "@/components/ui/select";
+} from "@sdp/ui/card";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
+import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { formatDateTime } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  getPageCount,
+  getPageSummary,
+} from "@/app/dashboard/[projectId]/issuance/pagination.utils";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatDisplayLabel } from "@/lib/utils";
-import { getPageCount, getPageSummary } from "../../pagination.utils";
-import { formatDateTime } from "../token-management-workspace.utils";
 import { auditActionIcon, auditActionLabel } from "./asset-audit-presentation";
 import { fetchTokenTransactionsPage } from "./transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "./transactions-cache";

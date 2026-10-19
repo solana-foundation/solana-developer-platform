@@ -1,4 +1,4 @@
-import { SdpEarnError } from "@sdp/earn";
+import { SdpEarnError } from "@sdp/earn/errors";
 import type {
   EarnLiveMetricsProvider,
   EarnVaultProvider,
@@ -33,7 +33,8 @@ vi.mock("@sdp/earn", async (importOriginal) => {
   return { ...actual, EARN_PROVIDER_CLIENTS: mocks.providerClients };
 });
 
-vi.mock("@/db/repositories", () => ({
+vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createEarnRepository: vi.fn(() => ({
     updateStrategyMetrics: mocks.updateStrategyMetrics,
     updateStrategyMetricsBatch: mocks.updateStrategyMetricsBatch,

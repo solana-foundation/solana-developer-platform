@@ -2,9 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { expandDocsBlocks } from "../src/lib/docs-blocks";
-import { isPageSourcePublished, publicSurface } from "../src/lib/release-channel";
-import { getDocsPagePath } from "../src/lib/site";
+import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { isPageSourcePublished, publicSurface } from "@/lib/release-channel";
+import { getDocsPagePath } from "@/lib/site";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
