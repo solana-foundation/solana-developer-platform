@@ -151,9 +151,15 @@ test.describe
       );
       expect(walletBalances.custodyWalletId).toBe(bookmarkWallet.id);
       expect(walletBalances.walletId).toBe(bookmarkWallet.walletId);
-      const newDesignWallets =
-        process.env.SDP_FLAG_NEW_DESIGN === "true" &&
-        process.env.SDP_FLAG_NEW_DESIGN_WALLETS === "true";
+      await gotoProjectPage(
+        page,
+        projectId,
+        `/dashboard/wallets/${encodeURIComponent(bookmarkWallet.id)}`
+      );
+      await expect(
+        page.getByRole("heading", { name: "Wallet Identity Bookmark", exact: true })
+      ).toBeVisible();
+      const newDesignWallets = await page.locator("[data-wallet-detail]").isVisible();
       const bookmarkParams = new URLSearchParams({ label: "Wallet & Treasury" });
       bookmarkParams.append("filter", "a");
       bookmarkParams.append("filter", "b");
