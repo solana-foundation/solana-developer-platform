@@ -5,17 +5,13 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { type ReactNode, useId, useState } from "react";
-import { useTranslations } from "@/i18n/provider";
-import type { PermissionRow } from "../token-management-workspace.types";
+import type { PermissionRow } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
 import {
   getNoneConfirmationCopy,
   getSignerWalletUnavailableReason,
   isValidSolanaAddressInput,
 } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
 import { TokenSignerSelect } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-signer-select";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { shortAddress, type TokenTabProps } from "./token-page.shared";
 

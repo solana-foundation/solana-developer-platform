@@ -4,6 +4,11 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { type ReactNode, useId } from "react";
+import {
+  getSignerWalletUnavailableReason,
+  isValidSolanaAddressInput,
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import { TokenSignerSelect } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-signer-select";
 import { useTranslations } from "@/i18n/provider";
 import type { TokenTabProps } from "./token-page.shared";
 

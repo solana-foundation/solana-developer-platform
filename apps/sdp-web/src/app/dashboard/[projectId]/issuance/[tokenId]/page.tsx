@@ -3,6 +3,7 @@ import type { AssetProfile } from "@sdp/types/asset-profiles";
 import type { Token } from "@sdp/types/tokens";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import { IssuanceDetailSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-detail-skeleton";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { readApiErrorMessage } from "@/lib/api-error";

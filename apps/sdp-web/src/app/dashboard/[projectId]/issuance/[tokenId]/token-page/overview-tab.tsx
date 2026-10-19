@@ -32,17 +32,6 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
-  formatTokenDay,
-  formatTokenMoment,
-  isOnChain,
-  TOKEN_LIFECYCLE_BAND,
-  TOKEN_LIFECYCLE_LABEL,
-  TOKEN_LIFECYCLE_WHY,
-} from "../../issuance-token-state.redesign";
-import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
-import type { PermissionRowId } from "../token-management-workspace.types";
-import { deployNetworkName } from "../token-management-workspace.utils";
-import {
   activityActorType,
   activityEventLabel,
   activityStatus,

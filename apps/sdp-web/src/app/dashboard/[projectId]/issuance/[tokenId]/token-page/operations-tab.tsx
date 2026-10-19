@@ -35,21 +35,6 @@ import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/paymen
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { issuanceQueryKeys } from "../../issuance-query-key";
-import { isOnChain, type TokenLifecycle } from "../../issuance-token-state.redesign";
-import {
-  getOperationGroups,
-  getOperationLabels,
-  type OperationAction,
-  type OperationRow,
-} from "../asset-profile/tabs/operation-rows.model";
-import { OpsActionForms } from "../asset-profile/tabs/ops-action-forms";
-import {
-  fetchTokenTransactionsPage,
-  type TokenTransactionsPage,
-} from "../asset-profile/transactions.data";
-import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
-import { getRemainingMintableSupply } from "../token-management-workspace.utils";
 import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
 import { activityEventLabel } from "./token-activity";
 import {

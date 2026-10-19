@@ -13,7 +13,6 @@ import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/paymen
 import { RecordBlock, RecordRow } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { getTokenTypeLabel } from "../../issuance-token-fields";
 import { MetadataSigner } from "./metadata-signer";
 import { accessControlLabel, shortAddress, type TokenTabProps } from "./token-page.shared";
 import { TokenSaveFooter } from "./token-save-footer";

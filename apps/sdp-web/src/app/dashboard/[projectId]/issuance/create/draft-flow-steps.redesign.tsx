@@ -16,7 +16,6 @@ import { RecordLine } from "@/components/refresh-record";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { IssuanceCheckRow } from "../issuance-checkbox.redesign";
 import { type AuthorityKey, type DraftState, isDraftAuthorityInUse } from "./draft-model";
 import type { DraftAccess } from "./local-drafts.redesign";
 
