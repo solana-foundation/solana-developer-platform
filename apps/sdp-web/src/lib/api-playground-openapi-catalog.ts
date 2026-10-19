@@ -1,13 +1,13 @@
+import type { RampProviderId } from "@sdp/types/provider-access";
+// biome-ignore lint/style/noRestrictedImports: validates the generated catalog's provider names; visibility comes from isRampProviderInReleaseChannel
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
   isRampProviderInReleaseChannel,
-  type RampProviderId,
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
-} from "@sdp/types";
-// biome-ignore lint/style/noRestrictedImports: validates the generated catalog's provider names; visibility comes from isRampProviderInReleaseChannel
-import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+} from "@sdp/types/release-channels";
 import { z } from "zod";
 import type {
   ApiPlaygroundEndpointConfig,

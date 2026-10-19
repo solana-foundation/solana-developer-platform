@@ -1,6 +1,6 @@
-import type * as feePaymentAdapters from "@sdp/fee-payment";
-import { FeePaymentError } from "@sdp/fee-payment";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { createFeePaymentAdapter } from "@sdp/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment/port";
+import type { confirmTransaction } from "@sdp/rpc/solana";
 import {
   generateKeyPairSigner,
   getSignatureFromTransaction,
@@ -9,7 +9,7 @@ import {
   partiallySignTransaction,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -83,7 +83,7 @@ describe("Payments routes — signed submission", () => {
         }),
         signAsFeePayer,
         signAndSend,
-      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      } as ReturnType<typeof createFeePaymentAdapter>);
 
       return { signAsFeePayer, signAndSend };
     }
@@ -145,7 +145,7 @@ describe("Payments routes — signed submission", () => {
           slot: 100n,
           confirmationStatus: "confirmed",
           err: null,
-        } as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>;
+        } as Awaited<ReturnType<typeof confirmTransaction>>;
       });
 
       const res = await transferRequest("0.001");
@@ -225,7 +225,7 @@ describe("Payments routes — signed submission", () => {
         getSponsorshipConfiguration: vi.fn().mockRejectedValue(new Error("Kora config timed out")),
         signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
         signAndSend: signAndSendMock,
-      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+      } as ReturnType<typeof createFeePaymentAdapter>);
 
       const res = await transferRequest("1");
 
@@ -245,7 +245,7 @@ describe("Payments routes — signed submission", () => {
         slot: 100n,
         confirmationStatus: "confirmed",
         err: { InstructionError: [0, { Custom: 1 }] },
-      } as unknown as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
+      } as unknown as Awaited<ReturnType<typeof confirmTransaction>>);
 
       const res = await transferRequest("1");
 
@@ -278,7 +278,7 @@ describe("Payments routes — signed submission", () => {
         slot: 100n,
         confirmationStatus: "confirmed",
         err: { InstructionError: [0, { Custom: 1 }] },
-      } as unknown as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
+      } as unknown as Awaited<ReturnType<typeof confirmTransaction>>);
       const key = "failed-after-row-400";
 
       const first = await transferRequest("1", key);

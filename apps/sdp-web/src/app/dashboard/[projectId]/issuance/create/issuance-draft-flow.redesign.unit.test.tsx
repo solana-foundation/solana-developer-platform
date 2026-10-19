@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";

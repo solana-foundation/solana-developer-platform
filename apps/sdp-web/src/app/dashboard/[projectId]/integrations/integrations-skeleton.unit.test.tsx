@@ -1,4 +1,4 @@
-import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/[projectId]/custody/provider-catalog";

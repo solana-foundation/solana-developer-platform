@@ -1,5 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isCollectableRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
@@ -10,10 +11,9 @@ import {
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
-  type SdpEnvironment,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
-  type TokenStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { TokenStatus } from "@sdp/types/tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
   address,
@@ -29,12 +29,12 @@ import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
-import baseApp from "@/index";
+import { app as baseApp } from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import * as organizationAccess from "@/lib/organization-access";
@@ -45,7 +45,7 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
-import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
+import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";

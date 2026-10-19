@@ -4,7 +4,7 @@ import {
   isInFlightTokenTransactionStatus,
   isLandedTokenTransactionStatus,
   type TokenTransaction,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
 import { useEffect, useMemo, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { dashboardFetch } from "@/lib/dashboard-fetch";

@@ -1,12 +1,15 @@
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
-  type PaymentTransactionKind,
   type PaymentTransferStatus,
-  PERSISTED_RAMP_PROVIDERS,
-  SDP_ENVIRONMENTS,
-  tokenFilterAliases,
-} from "@sdp/types";
+  RAMP_TRANSFER_TRANSITIONS,
+  type RampTransferType,
+  WALLET_TRANSFER_TYPES,
+} from "@sdp/types/payments";
+import { PERSISTED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
+import { tokenFilterAliases } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
@@ -18,11 +21,9 @@ import type {
   ListTransfersResult,
   PaymentsRepository,
   PaymentTransferRow,
-  RampTransferType,
   TransferStatusChangeFields,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { RAMP_TRANSFER_TRANSITIONS, WALLET_TRANSFER_TYPES } from "./payments.repository";
 
 function paymentTransferSearchExpression(alias: string): string {
   return `(
@@ -659,61 +660,6 @@ export function createPostgresPaymentsRepository(
         toStatus: transition.to,
         types: transition.types,
       });
-    },
-
-    async claimTransferProviderData(input) {
-      assertScope(input);
-      const scope = buildTransferScopeWhere({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ?", "status = ?", "provider_data #>> ?::text[] IS NULL"],
-        extraValues: [input.transferId, input.expectedStatus, [...input.claimPath]],
-      });
-      const row = await db
-        .prepare(
-          `WITH pt AS (
-           UPDATE payment_transfers
-           SET provider_data = provider_data || ?::jsonb, updated_at = ?
-           WHERE ${scope.where}
-           RETURNING *
-           )
-           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
-        )
-        .bind(JSON.stringify(input.providerData), input.updatedAt, ...scope.values)
-        .first<PaymentTransferProjectionRow>();
-
-      return row ? mapTransferRow(row) : null;
-    },
-
-    async releaseTransferProviderDataClaim(input) {
-      assertScope(input);
-      const scope = buildTransferScopeWhere({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ?", "status = ?", "provider_data #> ?::text[] = ?::jsonb"],
-        extraValues: [
-          input.transferId,
-          input.expectedStatus,
-          [...input.claimPath],
-          JSON.stringify(input.claimValue),
-        ],
-      });
-      const row = await db
-        .prepare(
-          `WITH pt AS (
-           UPDATE payment_transfers
-           SET provider_data = provider_data #- ?::text[], updated_at = ?
-           WHERE ${scope.where}
-           RETURNING *
-           )
-           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
-        )
-        .bind([...input.claimPath], input.updatedAt, ...scope.values)
-        .first<PaymentTransferProjectionRow>();
-
-      return row ? mapTransferRow(row) : null;
     },
 
     async getTransferById(params) {

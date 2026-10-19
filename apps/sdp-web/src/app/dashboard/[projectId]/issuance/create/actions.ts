@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import {
   type AuthorityKey,
   buildDraftPayload,

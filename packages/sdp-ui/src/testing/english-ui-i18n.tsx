@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { UiI18nProvider, type UiMessageKey, type UiTranslate } from "../i18n";
+import { UiI18nProvider, type UiMessageKey, type UiTranslate } from "#/i18n";
 
 // sdp-web's English catalog values for the keys the primitives read (messages/en/shared.json,
 // Shared.SharedComponents), so the suites assert the strings the dashboard renders. sdp-web's

@@ -1,13 +1,14 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, EarnExternalWalletPositionSummaryResponse } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import type { EarnExternalWalletPositionSummaryResponse } from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   type EarnPositionRow,
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import * as auth from "@/lib/auth";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
 import { getLogger } from "@/runtime/logger";

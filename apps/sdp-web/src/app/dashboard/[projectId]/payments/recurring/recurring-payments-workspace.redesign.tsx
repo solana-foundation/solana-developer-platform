@@ -4,41 +4,37 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { z } from "zod";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import {
   formatDisplayAmount,
   resolveTokenByMint,
   shortenAddress,
-} from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { formatDate } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { formatDate } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import {
+  PAYMENTS_TABLE_CELL,
+  PAYMENTS_TABLE_HEAD,
+} from "@/app/dashboard/[projectId]/payments/payments-table";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
-  RECURRING_PAYMENT_STATUSES,
   type RecurringPaymentsListState,
 } from "./recurring-payments.data.redesign";
 import {
@@ -290,7 +286,7 @@ function RecurringPaymentsToolbar({
                 <FilterMenuOptions
                   value={status ?? undefined}
                   anyLabel={t("DashboardPayments.recurring.allStatuses")}
-                  options={RECURRING_PAYMENT_STATUSES.map((option) => ({
+                  options={PAYMENT_RECURRING_PAYMENT_STATUSES.map((option) => ({
                     value: option,
                     label: statusLabel(option),
                   }))}

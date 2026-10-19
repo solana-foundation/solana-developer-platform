@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { SDP_ENVIRONMENTS } from "@sdp/types";
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 
 /**
  * Run one chain-touching job once per environment, each run inside that environment's cluster

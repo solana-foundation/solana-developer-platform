@@ -1,14 +1,14 @@
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
-import { providerUnavailable } from "../../errors";
-import { providerFetchJson } from "../../fetch";
+import { providerUnavailable } from "#/errors";
+import { providerFetchJson } from "#/fetch";
+import { StubEarnClient } from "#/providers/stub";
 import type {
   EarnDeclaredStrategySupport,
   EarnLiveMetricsProvider,
   EarnRuntimeContext,
   ProviderStrategyMetrics,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 
 export const JUPITER_LEND_API_URL = "https://lite-api.jup.ag/lend/v1";
 export const JUPITER_LEND_USDT_MINT = JUPITER_LEND_USDT.assetMint;

@@ -79,7 +79,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
       section: "export async function collectRecurringPayment",
       before: "await input.admitStart();",
-      after: "solanaServices.createOrgSignerForCustodyWallet(",
+      after: "const sourceSigner = await createOrgSignerForCustodyWallet(",
     },
     replay: [
       {

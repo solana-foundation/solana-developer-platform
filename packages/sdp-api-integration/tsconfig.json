@@ -5,8 +5,7 @@
     "types": ["node", "vitest/globals"],
     "paths": {
       "@/*": ["../../apps/sdp-api/src/*"],
-      "@sdp/api/test-support": ["../../apps/sdp-api/src/test/integration-support.ts"],
-      "@sdp/types": ["../../packages/sdp-types/src/index.ts"]
+      "@sdp/api/test-support": ["../../apps/sdp-api/src/test/integration-support.ts"]
     }
   },
   "include": ["src/**/*.ts", "vitest.config.ts"]

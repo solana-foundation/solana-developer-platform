@@ -8,7 +8,7 @@ import type {
   ReadIdentityInput,
   ReadIdentityResult,
   RingsIdentityMismatch,
-} from "@sdp/helius-rings";
+} from "@sdp/helius-rings/port";
 import { address } from "@solana/kit";
 import {
   canonicalShieldedIdentity,

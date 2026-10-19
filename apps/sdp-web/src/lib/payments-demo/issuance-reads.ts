@@ -1,11 +1,10 @@
 import { listTemplates } from "@sdp/issuance/templates";
+import { ASSET_CATEGORIES, ASSET_TYPES } from "@sdp/types/asset-profiles";
 import {
-  ASSET_CATEGORIES,
-  ASSET_TYPES,
   type PublicToken,
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
 import { z } from "zod";
 import type { DemoAnswer } from "./demo-handlers";
 import {

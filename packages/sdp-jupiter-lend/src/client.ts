@@ -26,8 +26,8 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { readStamp } from "@sdp/rpc/read-context";
-import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type AccountInfo,
   type Commitment,

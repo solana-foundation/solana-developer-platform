@@ -1,4 +1,4 @@
-import { IssuanceDetailSkeleton } from "../issuance-route-skeletons.redesign";
+import { IssuanceDetailSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-route-skeletons.redesign";
 
 export default function IssuanceDetailLoading() {
   return <IssuanceDetailSkeleton />;

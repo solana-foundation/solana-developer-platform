@@ -139,6 +139,25 @@ jobs:
           git diff --name-only --diff-filter=d -z origin/main...HEAD \
             | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
 
+      # Scripts sit outside every TypeScript program, and the diff-scoped lint above never re-reads
+      # one when the package it imports changes its exports, so these are linted in full every run.
+      - name: Lint script imports
+        run: |
+          git ls-files -z ':(glob)**/*.mjs' ':(glob)**/*.cjs' ':(glob)**/scripts/**' ':(glob).github/scripts/**' ':(exclude,glob)examples/**' \
+            | xargs -0 pnpm exec biome lint --no-errors-on-unmatched --diagnostic-level=error
+
+      # A package.json edit changes what every file in its workspace may import, and the
+      # diff-scoped lint re-reads only the manifest, so the dependency rule runs over all sources.
+      - name: Lint declared dependencies
+        run: pnpm exec biome lint --only=correctness/noUndeclaredDependencies --diagnostic-level=error apps packages
+
+      # Biome's noRestrictedImports does not read vi.mock-family strings or typeof import() type
+      # queries, and its options are replaced per override, so every copy must carry the ../ group.
+      - name: Check parent-relative imports
+        run: |
+          if git grep -nE "(vi\.(mock|doMock|unmock|importActual|importMock)|import)\(['\"]\.\./" -- ':(glob)apps/*/src/**' ':(glob)apps/*/scripts/**' ':(glob)packages/*/src/**' ':(exclude,glob)**/generated/**'; then exit 1; fi
+          jq -e '[.. | objects | .noRestrictedImports? | objects] | length == 5 and all(.options.patterns | any(.group | index("../**")))' biome.json
+
       - name: Check pinned dependencies
         run: pnpm check:pinned-dependencies
 
@@ -237,7 +256,7 @@ jobs:
           changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
           printf '%s\n' "$changed"
           detect() {
-            if printf '%s\n' "$changed" | grep -qE "$2"; then
+            if printf '%s\n' "$changed" | grep -E "$2" >/dev/null; then
               echo "$1=true" >> "$GITHUB_OUTPUT"
             else
               echo "$1=false" >> "$GITHUB_OUTPUT"

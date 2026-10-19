@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import {
   ArrowLeftRightIcon,
   CoinsIcon,
@@ -15,7 +16,6 @@ import {
   isDashboardNavItemActive,
 } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 
 type BottomNavItem = {
   label: string;

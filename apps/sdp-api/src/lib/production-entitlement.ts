@@ -1,4 +1,7 @@
-import { type OrganizationEntitlements, organizationEntitlementsSchema } from "@sdp/types";
+import {
+  type OrganizationEntitlements,
+  organizationEntitlementsSchema,
+} from "@sdp/types/organization-entitlements";
 import type { Context } from "hono";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { forbidden } from "@/lib/errors";

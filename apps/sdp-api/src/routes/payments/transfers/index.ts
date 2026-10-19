@@ -17,7 +17,7 @@ import {
 } from "./handlers";
 import { createTransferSchema } from "./schemas";
 
-const transfers = new Hono<{ Bindings: Env }>();
+export const transfers = new Hono<{ Bindings: Env }>();
 
 transfers.post(
   "/",
@@ -40,5 +40,3 @@ transfers.post(
 );
 transfers.get("/", requirePermissions("payments:read"), listTransfers);
 transfers.get("/:transferId", requirePermissions("payments:read"), getTransfer);
-
-export default transfers;

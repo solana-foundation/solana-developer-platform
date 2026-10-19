@@ -1,4 +1,4 @@
-import { SDP_ENVIRONMENTS } from "@sdp/types";
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { describe, expect, it, vi } from "vitest";
 import type { BackgroundRunner } from "@/runtime/background";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";

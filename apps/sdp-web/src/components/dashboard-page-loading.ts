@@ -37,6 +37,7 @@ import CounterpartyDirectoryLoading, {
 import { PaymentsPageSkeleton as LegacyPaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton";
 import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton.redesign";
 import {
+  CounterpartyCreateSkeleton,
   CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
   PaymentsDepositPageSkeleton as LegacyPaymentsDepositPageSkeleton,
@@ -47,7 +48,6 @@ import {
   RecurringPaymentsPageSkeleton as LegacyRecurringPaymentsPageSkeleton,
 } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
-  CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
   PaymentRequestCreateSkeleton,
   PaymentRequestDetailSkeleton,
@@ -63,6 +63,7 @@ import PaymentRequestsLoading, {
   PreviousPaymentRequestsLoading as LegacyPaymentRequestsLoading,
 } from "@/app/dashboard/[projectId]/payments/requests/loading";
 import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
+import { WalletConnectionsListSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import {
   CurrentWalletDetailSkeleton,
   CurrentWalletSetupSkeleton,
@@ -70,7 +71,6 @@ import {
   WalletDetailSkeleton as LegacyWalletDetailSkeleton,
   WalletSetupSkeleton as LegacyWalletSetupSkeleton,
   WalletsOverviewSkeleton as LegacyWalletsOverviewSkeleton,
-  WalletConnectionsListSkeleton,
 } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons.redesign";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";

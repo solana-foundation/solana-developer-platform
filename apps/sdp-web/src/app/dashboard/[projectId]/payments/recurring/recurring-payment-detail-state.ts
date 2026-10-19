@@ -2,7 +2,7 @@ import {
   isEditableRecurringPaymentStatus,
   type PaymentRecurringPaymentStatus,
   type PaymentsDashboardWallet,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 
 export function getRecurringPaymentDetailState({

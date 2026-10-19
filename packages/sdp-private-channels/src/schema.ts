@@ -1,4 +1,4 @@
-import type { PrivateChannelInstanceInput } from "@sdp/types";
+import type { PrivateChannelInstanceInput } from "@sdp/types/private-channels";
 import { z } from "zod";
 
 // Solana base58 pubkey: same regex used across the SDP codebase (see

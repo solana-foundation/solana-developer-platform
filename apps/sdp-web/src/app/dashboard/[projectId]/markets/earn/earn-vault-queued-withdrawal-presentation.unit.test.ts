@@ -1,4 +1,4 @@
-import type { EarnVaultWithdrawalRequestStatus } from "@sdp/types";
+import type { EarnVaultWithdrawalRequestStatus } from "@sdp/types/earn";
 import { describe, expect, it } from "vitest";
 import {
   earnVaultQueuedWithdrawalStatusPresentation,

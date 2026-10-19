@@ -1,5 +1,7 @@
+import { ASSET_CATEGORIES } from "@sdp/types/asset-profiles";
 // biome-ignore lint/style/noRestrictedImports: recognises a provider id stored in the demo session; what the demo offers comes from the channel-capped flags (see demo-mode.ts)
-import { ASSET_CATEGORIES, RAMP_PROVIDERS, type TokenTemplate } from "@sdp/types";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { TokenTemplate } from "@sdp/types/tokens";
 import { z } from "zod";
 
 /*

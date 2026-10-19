@@ -10,7 +10,7 @@ import {
   SPL_TOKEN_PROGRAM_ID,
   USER_REGISTRY_PROGRAM_ID,
 } from "@heliuslabs/zolana/interface";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import {
   type Address,
   address,

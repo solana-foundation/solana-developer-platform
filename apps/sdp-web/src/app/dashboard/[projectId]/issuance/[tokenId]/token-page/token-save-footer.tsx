@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 /**
  * The bar under an edited tab: what saving does on the left, Discard and Save changes on the

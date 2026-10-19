@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { TokenAuthorityModal } from "./token-authority-modal";
@@ -8,7 +8,7 @@ vi.mock("@/i18n/provider", () => ({
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-vi.mock("@/components/ui/modal", () => ({
+vi.mock("@sdp/ui/modal", () => ({
   Modal: ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) =>
     isOpen ? <div>{children}</div> : null,
 }));

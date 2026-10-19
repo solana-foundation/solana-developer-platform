@@ -1,15 +1,15 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { type ReactNode, useId } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useTranslations } from "@/i18n/provider";
 import {
   getSignerWalletUnavailableReason,
   isValidSolanaAddressInput,
-} from "../token-management-workspace.utils";
-import { TokenSignerSelect } from "../token-signer-select";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import { TokenSignerSelect } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-signer-select";
+import { useTranslations } from "@/i18n/provider";
 import type { TokenTabProps } from "./token-page.shared";
 
 /**

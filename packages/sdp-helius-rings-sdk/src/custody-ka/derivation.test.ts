@@ -1,14 +1,14 @@
 import { ed25519DerivationPayload } from "@heliuslabs/zolana/keypair";
 import { getBase64Codec, signBytes } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { canonicalShieldedIdentity } from "../material.js";
+import { canonicalShieldedIdentity } from "#/material";
 import {
   TEST_FOREIGN_REQUEST,
   TEST_OWNER,
   TEST_REQUEST,
   testSigner,
   testSignMessage,
-} from "../test/shielded-identity-fixtures.js";
+} from "#/test/shielded-identity-fixtures";
 import { createCustodyMaterialSource } from "./derivation.js";
 
 function source(signMessage = testSignMessage) {

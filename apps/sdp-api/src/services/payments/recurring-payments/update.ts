@@ -5,9 +5,10 @@ import {
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { PaymentRecurringPaymentUpdateAttemptMode } from "@sdp/types/payments";
 import {
   assertNever,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
@@ -19,7 +20,7 @@ import {
   isUpdatingRecurringPaymentStatus,
   recurringPaymentInFlightLifecycleOperation,
   type UpdatePaymentRecurringPaymentRequest,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import {
   type Address,
   createNoopSigner,
@@ -30,21 +31,24 @@ import {
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import { z } from "zod";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db/client";
+import type {
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+  PaymentRecurringPaymentUpdateAttemptRow,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type {
+  PaymentSubscriptionPlanRow,
+  PaymentSubscriptionRow,
+  PaymentSubscriptionsRepository,
+} from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
-  createPostgresPaymentRecurringPaymentsRepository,
-  createPostgresPaymentSubscriptionsRepository,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  type PaymentRecurringPaymentUpdateAttemptMode,
-  type PaymentRecurringPaymentUpdateAttemptRow,
-  type PaymentSubscriptionPlanRow,
-  type PaymentSubscriptionRow,
-  type PaymentSubscriptionsRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import {
   AppError,
   badRequest,
@@ -62,14 +66,14 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
-import * as solanaServices from "@/services/solana";
+import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
 } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
@@ -898,7 +902,7 @@ async function runMetadataScheduleUpdate(input: {
     }
 
     const planPda = assertValidAddress(input.claimed.plan_pda, "planPda");
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
@@ -1006,7 +1010,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: ReturnType<typeof createRpc>;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
@@ -1405,7 +1409,7 @@ async function runReplacementUpdate(input: {
     clampToMinimum: Boolean(planCreationSignature || authorizationSignature || oldCancelSignature),
   });
 
-  const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+  const sourceSigner = await createOrgSignerForCustodyWallet(
     input.env,
     input.organizationId,
     input.projectId,
@@ -1692,7 +1696,7 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
-    const oldSourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const oldSourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,

@@ -3,7 +3,7 @@ import { InterfaceError } from "@heliuslabs/zolana/interface";
 import { RingError } from "@heliuslabs/zolana/ring";
 import { TransactionError } from "@heliuslabs/zolana/transaction";
 import { WalletError } from "@heliuslabs/zolana/wallet";
-import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings";
+import { HeliusRingsError, type HeliusRingsErrorCode } from "@sdp/helius-rings/errors";
 import { describe, expect, it } from "vitest";
 import { withZolanaErrorBridge } from "./error-bridge.js";
 

@@ -3,11 +3,12 @@
 import type {
   CounterpartyProviderAccount,
   ListCounterpartyProviderAccountsResponse,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;

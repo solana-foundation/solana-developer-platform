@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/db", () => ({ getDb: () => ({}) }));
+vi.mock("@/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db/client")>()),
+  getDb: () => ({}),
+}));
 vi.mock("@/services/provider-availability.service", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   loadProjectProviderVerdict: vi.fn(),
@@ -9,35 +12,37 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   logEvent: vi.fn(),
 }));
-vi.mock("../context", async (importOriginal) => ({
+vi.mock("@/routes/payments/context", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   rampRuntime: () => ({}),
+}));
+vi.mock("@/lib/sdp-environment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-environment")>()),
   resolveSdpEnvironment: () => "sandbox",
 }));
-vi.mock("../wallets", async (importOriginal) => ({
+vi.mock("@/routes/payments/wallets", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveScope: vi.fn().mockResolvedValue({ auth: { organizationId: "org_fanout_test" } }),
 }));
 
-import { estimateNotAvailable, SdpPaymentsError } from "@sdp/payments";
+import { estimateNotAvailable, SdpPaymentsError } from "@sdp/payments/errors";
+import { CUSTODY_PROVIDERS, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types/custody";
+import type { PaymentRampEstimate } from "@sdp/types/payments";
 import {
   COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
   EARN_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
-  type PaymentRampEstimate,
   type ProviderAvailabilityEntry,
   RAMP_PROVIDERS,
-  STAGED_PROVIDER_REFUSAL_REASONS,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { AppError, forbidden } from "@/lib/errors";
+import type { AppContext } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import {
   loadProjectProviderVerdict,
   type ProjectProviderRefusal,
 } from "@/services/provider-availability.service";
-import type { AppContext } from "../context";
 import { estimateAcrossProviders } from "./shared";
 
 function buildContext(options?: { sentryDsn?: string; observability?: Observability }) {

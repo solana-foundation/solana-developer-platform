@@ -11,13 +11,8 @@ import {
   type CustodyProviderSetupFieldOption,
   type CustodyProviderUseCase,
   CUSTODY_PROVIDER_CATALOG as SHARED_CUSTODY_PROVIDER_CATALOG,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import type { MessageKey } from "@/i18n/messages";
-
-export {
-  CUSTODY_PROVIDER_DISPLAY_STATUSES,
-  type CustodyProviderDisplayStatus,
-} from "@sdp/types";
 
 export const CUSTODY_CAPABILITY_LABEL_KEYS: Record<CustodyProviderUseCase, MessageKey> =
   CUSTODY_PROVIDER_USE_CASE_LABEL_KEYS;

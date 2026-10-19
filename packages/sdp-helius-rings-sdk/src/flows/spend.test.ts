@@ -1,4 +1,4 @@
-import type { HeliusRingsError } from "@sdp/helius-rings";
+import type { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { describe, expect, it } from "vitest";
 import { buildMerge } from "./merge.js";
 import { SDP_USDC_MINT } from "./mint.js";

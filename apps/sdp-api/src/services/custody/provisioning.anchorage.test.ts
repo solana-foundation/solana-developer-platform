@@ -1,7 +1,5 @@
-import {
-  type CustodyProvisioningRuntime,
-  provisionAnchorageWallet as provisionAnchorageWalletInCustody,
-} from "@sdp/custody/provisioning";
+import { provisionAnchorageWallet as provisionAnchorageWalletInCustody } from "@sdp/custody/provisioning/anchorage";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { provisionAnchorageWallet } from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";

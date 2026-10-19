@@ -38,8 +38,8 @@
  * find because there is no row left to list.
  */
 
-import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
-import { getDb } from "@/db";
+import type { ApiKeyStatus, CachedApiKey } from "@sdp/types/api-keys";
+import { getDb } from "@/db/client";
 import { apiKeyCacheKey, apiKeyHashFromCacheKey, refreshApiKeyCache } from "@/lib/api-key-cache";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";

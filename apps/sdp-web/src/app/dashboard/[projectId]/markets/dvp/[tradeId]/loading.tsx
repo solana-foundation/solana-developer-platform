@@ -1,4 +1,4 @@
-import { DvpTradeDetailSkeleton } from "../../markets-route-skeletons";
+import { DvpTradeDetailSkeleton } from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
 
 export default function DvpTradeDetailLoading() {
   return <DvpTradeDetailSkeleton />;

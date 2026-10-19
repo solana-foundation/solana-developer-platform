@@ -1,4 +1,4 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 /** The Transactions ledger narrowed to one wallet, where its whole history pages. */
 export function walletTransactionsHref(custodyWalletId: string): string {

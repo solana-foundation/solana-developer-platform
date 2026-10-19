@@ -1,9 +1,9 @@
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
   type ProjectProviderAvailability,
   RAMP_PROVIDERS,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import {
   availableComplianceProviders,

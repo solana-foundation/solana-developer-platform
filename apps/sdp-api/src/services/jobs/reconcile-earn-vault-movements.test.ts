@@ -1,6 +1,6 @@
 import { readFloor, readStamp } from "@sdp/rpc/read-context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
@@ -16,8 +16,8 @@ const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const reconcileEarnVaultQueuedWithdrawals = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/kamino", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/kamino")>()),
+vi.mock("@sdp/kamino/deposit-receipt", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/kamino/deposit-receipt")>()),
   readKaminoDepositReceipt,
 }));
 
@@ -29,10 +29,13 @@ vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   getSignatureStatuses,
   getTransaction,
 }));
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   assertClusterEndpoint: vi.fn(async () => {}),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
   resolveVaultDirectClient: () => ({ readVaultPositions }),
 }));
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
@@ -45,12 +48,12 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 }));
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
-const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
+const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("@/cron/run-event");
 const {
   reconcileEarnVaultMovementReadThrough,
   repairUnvaluedWithdrawalPayouts,
   repairUnvaluedKaminoDeposits,
-} = await import("../earn/vault-movement-reconciliation.service");
+} = await import("@/services/earn/vault-movement-reconciliation.service");
 
 const ORG = "org_vault_reconcile";
 const PROJECT = "prj_vault_reconcile";

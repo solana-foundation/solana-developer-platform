@@ -1,8 +1,10 @@
 import * as feePaymentAdapters from "@sdp/fee-payment";
+import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
   address,
@@ -17,10 +19,11 @@ import {
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
-import * as solanaServices from "@/services/solana";
+import * as solanaSigner from "@/services/solana/signer";
+
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   seedTestPrivyConnection,
@@ -56,7 +59,7 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
-  solanaServices,
+  solanaSigner,
   "createOrgSignerForCustodyWallet"
 );
 
@@ -109,7 +112,7 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   maxAllowedLamports: 0n,
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
-} satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
+} satisfies SponsorshipProviderConfiguration;
 
 export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
   const cause =

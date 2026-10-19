@@ -1,4 +1,4 @@
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
 
 /**
  * The per-cluster managed pool: one complete endpoint URL (key embedded) per

@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { noopObservability } from "@/runtime/observability";

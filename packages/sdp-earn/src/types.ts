@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnApyType,
   EarnDepositTokenSymbol,
@@ -14,10 +15,9 @@ import type {
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnVaultPositionIntermediate,
-  SdpEnvironment,
-  SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
 /**
  * Runtime context for catalogue/quote/execute calls. Providers read their own

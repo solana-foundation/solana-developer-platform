@@ -3,7 +3,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb, type PreparedStatement } from "@/db";
+import { getDb, type PreparedStatement } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";

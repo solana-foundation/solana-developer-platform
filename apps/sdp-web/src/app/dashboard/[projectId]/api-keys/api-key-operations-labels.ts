@@ -1,4 +1,8 @@
-import { type AllowedOperation, OPERATION_FAMILIES, type OperationFamily } from "@sdp/types";
+import {
+  type AllowedOperation,
+  OPERATION_FAMILIES,
+  type OperationFamily,
+} from "@sdp/types/allowed-operations";
 import type { useTranslations } from "@/i18n/provider";
 import { summarizeAllowedOperations } from "./api-key-authoring";
 

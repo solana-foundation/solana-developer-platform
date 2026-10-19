@@ -1,31 +1,47 @@
+import type {
+  Counterparty,
+  CounterpartyAccount,
+  CounterpartyEntityType,
+} from "@sdp/types/counterparties";
+import type {
+  CustodyProvider,
+  CustodyWalletAggregate,
+  CustodyWalletTokenBalance,
+} from "@sdp/types/custody";
+import type {
+  CounterpartyAccountSummary,
+  PaymentRampQuoteDeliveryMode,
+  PaymentRecurringPayment,
+  PaymentRecurringPaymentStatus,
+  PaymentRequest,
+  PaymentRequestStatus,
+  PaymentSubscriptionCollectionAttempt,
+  PaymentTransferBatch,
+  PaymentTransferBatchStatus,
+  PaymentTransferRecipient,
+  PaymentTransferStatus,
+  PaymentTransferSummary,
+  PaymentTransferType,
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
-  type Counterparty,
-  type CounterpartyAccount,
-  type CounterpartyAccountSummary,
-  type CounterpartyEntityType,
-  type CustodyProvider,
-  type CustodyWalletAggregate,
-  type CustodyWalletTokenBalance,
-  type PaymentRampQuoteDeliveryMode,
-  type PaymentRecurringPayment,
-  type PaymentRecurringPaymentStatus,
-  type PaymentRequest,
-  type PaymentRequestStatus,
-  type PaymentSubscriptionCollectionAttempt,
-  type PaymentsDashboardWallet,
   type PaymentTransactionKind,
-  type PaymentTransferBatch,
-  type PaymentTransferBatchStatus,
-  type PaymentTransferRecipient,
-  type PaymentTransferStatus,
-  type PaymentTransferSummary,
-  type PaymentTransferType,
-  type RampProviderId,
-  SOL_MINT,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   type UnifiedTransaction,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import {
+  type Clock,
+  CREATED_BY,
+  DAY_MS,
+  type DemoWallet,
+  demoAddress,
+  demoSignature,
+  HOUR_MS,
+  MINUTE_MS,
+  ORGANIZATION_ID,
+  PROJECT_ID,
+} from "./demo-basics";
 import { buildIssuanceWorld, type IssuanceWorld } from "./issuance-fixtures";
 import { issuanceRead } from "./issuance-reads";
 
@@ -37,13 +53,6 @@ import { issuanceRead } from "./issuance-reads";
  * signatures are derived from fixed seeds, so they are stable across calls and renders.
  */
 
-export const MINUTE_MS = 60_000;
-export const HOUR_MS = 60 * MINUTE_MS;
-export const DAY_MS = 24 * HOUR_MS;
-
-export const ORGANIZATION_ID = "demo_org";
-export const PROJECT_ID = "demo_prj";
-export const CREATED_BY = "demo_user_ops";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_TRANSACTIONS_LIMIT = 50;
@@ -121,57 +130,6 @@ export function symbolForMint(mint: string | null | undefined): string | undefin
 function matchesToken(mint: string | null | undefined, filter: string): boolean {
   return mint === filter || symbolForMint(mint)?.toUpperCase() === filter.toUpperCase();
 }
-
-// ─── Stable base58 addresses and signatures ──────────────────────────────────
-
-const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-/** Replay seeds the cache with every id a visitor's session creates, so it is capped. */
-const MAX_CACHED_SEEDS = 2_000;
-const encodedSeeds = new Map<string, string>();
-
-/** Deterministic bytes for a seed: an FNV-1a hash of the seed drives a mulberry32 stream. */
-function seededBytes(seed: string, length: number): Uint8Array {
-  let state = 0x811c9dc5;
-  for (let index = 0; index < seed.length; index += 1) {
-    state = Math.imul(state ^ seed.charCodeAt(index), 0x01000193) >>> 0;
-  }
-  const bytes = new Uint8Array(length);
-  for (let index = 0; index < length; index += 1) {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let mixed = Math.imul(state ^ (state >>> 15), state | 1);
-    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
-    bytes[index] = (mixed ^ (mixed >>> 14)) & 0xff;
-  }
-  // A leading zero byte would shorten the encoding; real keys rarely start with one.
-  if (bytes[0] === 0) bytes[0] = 1;
-  return bytes;
-}
-
-function base58(bytes: Uint8Array): string {
-  let value = 0n;
-  for (const byte of bytes) {
-    value = value * 256n + BigInt(byte);
-  }
-  let encoded = "";
-  while (value > 0n) {
-    encoded = `${BASE58_ALPHABET[Number(value % 58n)]}${encoded}`;
-    value /= 58n;
-  }
-  return encoded;
-}
-
-function seededBase58(kind: "address" | "signature", seed: string): string {
-  const key = `${kind}:${seed}`;
-  const cached = encodedSeeds.get(key);
-  if (cached !== undefined) return cached;
-  const encoded = base58(seededBytes(key, kind === "address" ? 32 : 64));
-  if (encodedSeeds.size >= MAX_CACHED_SEEDS) encodedSeeds.clear();
-  encodedSeeds.set(key, encoded);
-  return encoded;
-}
-
-export const demoAddress = (seed: string) => seededBase58("address", seed);
-export const demoSignature = (seed: string) => seededBase58("signature", seed);
 
 // ─── Specs ───────────────────────────────────────────────────────────────────
 
@@ -733,8 +691,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
 
 // ─── The demo world ──────────────────────────────────────────────────────────
 
-export type DemoWallet = PaymentsDashboardWallet & { balances: CustodyWalletTokenBalance[] };
-
 export type DemoTransfer = PaymentTransferSummary & {
   organizationId: string;
   projectId: string;
@@ -777,13 +733,6 @@ export interface DemoWorld {
   issuance: IssuanceWorld;
   /** The ramp providers the dashboard offers (the channel-capped flags); the demo answers for these only. */
   rampProviders: readonly RampProviderId[];
-}
-
-export interface Clock {
-  /** ISO time `ms` before now. */
-  ago: (ms: number) => string;
-  /** ISO time at a signed offset from now. */
-  at: (offset: number) => string;
 }
 
 export function createClock(now: Date): Clock {

@@ -1,6 +1,8 @@
 "use client";
 
-import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentRequest } from "@sdp/types";
+import type { PaymentRequest } from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -8,15 +10,11 @@ import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Button } from "@/components/ui/button";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
-import { transactionHref } from "@/lib/payments-routes";
-import { useProjectHref } from "@/lib/use-dashboard-project";
-import { shortenAddress } from "../payments-overview.utils";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import {
   RecordAmount,
   RecordColumns,
@@ -24,7 +22,13 @@ import {
   RecordLoadError,
   RecordRow,
   RecordStateBand,
-} from "../payments-record";
+} from "@/app/dashboard/[projectId]/payments/payments-record";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
+import { transactionHref } from "@/lib/payments-routes";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import { deriveTokenOptions } from "./payment-requests-page.data";
 

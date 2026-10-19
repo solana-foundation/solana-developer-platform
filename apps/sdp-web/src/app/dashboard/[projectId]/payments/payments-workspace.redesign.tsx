@@ -1,6 +1,7 @@
 "use client";
 
-import type { PaymentsDashboardWallet, PaymentTransferSummary, RampProviderId } from "@sdp/types";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";

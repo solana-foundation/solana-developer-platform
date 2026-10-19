@@ -1,12 +1,12 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 // The design's record pages (a transaction, a payment request): the state as a tinted band,
 // the amount at 40px, then label and value rows in two columns, and titled sections below.

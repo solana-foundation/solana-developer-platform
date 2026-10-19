@@ -1,11 +1,11 @@
 "use client";
 
-import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types";
+import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types/earn";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Card } from "@sdp/ui/card";
 import { Clock3Icon, Loader2Icon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatEpochSecondsOr, formatTokenValue, shortenMarketAddress } from "./earn-format";

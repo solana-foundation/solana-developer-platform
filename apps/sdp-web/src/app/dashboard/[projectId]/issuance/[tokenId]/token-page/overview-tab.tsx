@@ -1,8 +1,23 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { StatusText } from "@sdp/ui/status-text";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
+import { TokenDisabledActionTooltip } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-disabled-action-tooltip";
+import type { PermissionRowId } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
+import { deployNetworkName } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import {
+  formatTokenDay,
+  formatTokenMoment,
+  isOnChain,
+  TOKEN_LIFECYCLE_BAND,
+  TOKEN_LIFECYCLE_LABEL,
+  TOKEN_LIFECYCLE_WHY,
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordAmount } from "@/app/dashboard/[projectId]/payments/payments-record";
 import {
@@ -12,25 +27,10 @@ import {
   RecordStack,
   type StateBandTone,
 } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { StatusText } from "@/components/ui/status-text";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
-import {
-  formatTokenDay,
-  formatTokenMoment,
-  isOnChain,
-  TOKEN_LIFECYCLE_BAND,
-  TOKEN_LIFECYCLE_LABEL,
-  TOKEN_LIFECYCLE_WHY,
-} from "../../issuance-token-state.redesign";
-import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
-import type { PermissionRowId } from "../token-management-workspace.types";
-import { deployNetworkName } from "../token-management-workspace.utils";
 import {
   activityActorType,
   activityEventLabel,

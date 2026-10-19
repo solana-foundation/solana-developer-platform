@@ -1,17 +1,9 @@
-import type {
-  CustodyWalletTokenBalance,
-  IssuanceMetadata,
-  PublicToken,
-  TokenExtensionsConfig,
-} from "@sdp/types";
+import type { IssuanceMetadata } from "@sdp/types/asset-profiles";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { PublicToken, TokenExtensionsConfig } from "@sdp/types/tokens";
 import { z } from "zod";
-import {
-  CREATED_BY,
-  type DemoWorld,
-  demoAddress,
-  ORGANIZATION_ID,
-  PROJECT_ID,
-} from "./demo-fixtures";
+import { CREATED_BY, demoAddress, ORGANIZATION_ID, PROJECT_ID } from "./demo-basics";
+import type { DemoWorld } from "./demo-fixtures";
 import type { DemoOpOf } from "./demo-ops";
 import {
   DEMO_DEPLOY_MS,

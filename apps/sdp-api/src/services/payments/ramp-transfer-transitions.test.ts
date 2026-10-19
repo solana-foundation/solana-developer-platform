@@ -7,10 +7,10 @@ import {
   RAMP_TRANSFER_TRANSITIONS,
   RAMP_TRANSFER_TYPES,
   type RampTransferTransitionId,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createSystemPaymentsRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import * as events from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

@@ -8,16 +8,16 @@ import {
   type NetworkPoint,
   type NetworkSnapshot,
 } from "@sdp/types/network-metrics";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { StatusText } from "@sdp/ui/status-text";
 import { ArrowUpRightIcon, RotateCwIcon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import { StatusText } from "@/components/ui/status-text";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useClientNow } from "@/lib/use-client-now";
-import { cn } from "@/lib/utils";
 import {
   formatNetworkAge,
   formatNetworkChange,

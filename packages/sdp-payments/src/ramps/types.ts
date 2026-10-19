@@ -1,13 +1,9 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   Counterparty,
+  CounterpartyEntityType,
   CounterpartyProviderData,
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  RampCryptoDeposit,
-  RampTransferSettlement,
-  SdpEnvironment,
-} from "@sdp/types";
-import type { CounterpartyEntityType } from "@sdp/types/counterparties";
+} from "@sdp/types/counterparties";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import {
   type CryptoRailId,
@@ -15,12 +11,16 @@ import {
   type RampCurrencyLimit,
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
+import type {
+  PaymentRampEstimate,
+  PaymentRampQuote,
+  RampCryptoDeposit,
+  RampTransferSettlement,
+} from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
-
-export type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export interface ProviderDirectionSupportSnapshot {
   currencies: Readonly<Record<string, RampCurrencyLimit>>;

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";

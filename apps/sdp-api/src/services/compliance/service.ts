@@ -1,4 +1,4 @@
-import type { ComplianceProviderId } from "@sdp/types";
+import type { ComplianceProviderId } from "@sdp/types/provider-access";
 import type { Env } from "@/types/env";
 import { ChainalysisComplianceProvider } from "./providers/chainalysis";
 import { EllipticComplianceProvider } from "./providers/elliptic";

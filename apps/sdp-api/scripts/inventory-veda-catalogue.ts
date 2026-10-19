@@ -39,12 +39,16 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { vedaLiquidity, vedaVaultName } from "@sdp/earn/providers/veda/client";
 import { readVedaVaults, VEDA_UNSET_AUTHORITY } from "@sdp/earn/providers/veda/vault-state";
-import { SOLANA_CLUSTERS, type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   isVedaDepositMint,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
   vedaDeployment,
 } from "@sdp/types/veda-programs";
+import {
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");

@@ -1,4 +1,4 @@
-import type { PrivateOperation } from "@sdp/helius-rings";
+import type { PrivateOperation } from "@sdp/helius-rings/types";
 import { describe, expect, it } from "vitest";
 import { InMemoryRingsGateway } from "./in-memory-rings-gateway";
 

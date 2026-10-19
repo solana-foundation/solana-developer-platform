@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 const BALANCE_SKELETON_ROW_IDS = ["one", "two"];
 const ACTIVITY_SKELETON_ROW_IDS = ["one", "two", "three", "four", "five"];

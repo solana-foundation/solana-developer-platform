@@ -1,12 +1,8 @@
-import { SdpPaymentsError } from "@sdp/payments";
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
-import { redactCredentialString } from "@sdp/redaction";
-import {
-  isStagedProviderRefusalReason,
-  type PaymentRampEstimate,
-  type PaymentRampQuote,
-  type RampProviderEstimateResult,
-} from "@sdp/types";
+import { redactCredentialString } from "@sdp/redaction/credentials";
+import { isStagedProviderRefusalReason } from "@sdp/types/custody";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -19,34 +15,32 @@ import type {
   OnrampPairSupport,
   RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
+import type {
+  PaymentRampEstimate,
+  PaymentRampQuote,
+  PaymentTransferStatus,
+  RampProviderEstimateResult,
+} from "@sdp/types/payments";
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
-import type {
-  PaymentTransferRow,
-  PaymentTransferStatus,
-} from "@/db/repositories/payments.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, redactErrorForCapture, unsupportedRampCorridor } from "@/lib/errors";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
-import { rampTransferTokenMint } from "@/services/payment-operation.service";
-import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
-import {
-  type AppContext,
-  getPaymentsRepository,
-  rampRuntime,
-  resolveSdpEnvironment,
-} from "../context";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
 import {
   assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
-} from "../wallets";
+} from "@/routes/payments/wallets";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
+import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
 import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";

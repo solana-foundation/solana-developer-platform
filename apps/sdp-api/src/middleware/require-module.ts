@@ -1,12 +1,7 @@
 import { resolveRampProviderClient } from "@sdp/payments/ramps";
-import {
-  isRampTransferType,
-  type PaymentTransferType,
-  type PersistedRampProviderId,
-  type RampProviderId,
-  type SdpModule,
-  type SdpRampProviderStages,
-} from "@sdp/types";
+import { isRampTransferType, type PaymentTransferType } from "@sdp/types/payments";
+import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
+import type { SdpModule, SdpRampProviderStages } from "@sdp/types/release-channels";
 import type { Context, Next } from "hono";
 import { forbidden, internalError } from "@/lib/errors";
 import { isModuleAvailable, isRampProviderAvailable } from "@/lib/feature-flags";

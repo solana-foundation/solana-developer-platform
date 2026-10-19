@@ -4,15 +4,25 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./capabilities": {
+      "types": "./src/capabilities/index.ts",
+      "import": "./src/capabilities/index.ts",
+      "default": "./src/capabilities/index.ts"
     },
-    "./mosaic": {
-      "types": "./src/mosaic/index.ts",
-      "import": "./src/mosaic/index.ts",
-      "default": "./src/mosaic/index.ts"
+    "./capabilities/resolver": {
+      "types": "./src/capabilities/resolver.ts",
+      "import": "./src/capabilities/resolver.ts",
+      "default": "./src/capabilities/resolver.ts"
+    },
+    "./capabilities/settings": {
+      "types": "./src/capabilities/settings.ts",
+      "import": "./src/capabilities/settings.ts",
+      "default": "./src/capabilities/settings.ts"
+    },
+    "./mosaic/authority": {
+      "types": "./src/mosaic/authority.ts",
+      "import": "./src/mosaic/authority.ts",
+      "default": "./src/mosaic/authority.ts"
     },
     "./mosaic/service": {
       "types": "./src/mosaic/service.ts",
@@ -29,11 +39,6 @@
       "import": "./src/mosaic/utils.ts",
       "default": "./src/mosaic/utils.ts"
     },
-    "./capabilities": {
-      "types": "./src/capabilities/index.ts",
-      "import": "./src/capabilities/index.ts",
-      "default": "./src/capabilities/index.ts"
-    },
     "./templates": {
       "types": "./src/templates/index.ts",
       "import": "./src/templates/index.ts",
@@ -44,6 +49,9 @@
       "import": "./src/templates/definitions.ts",
       "default": "./src/templates/definitions.ts"
     }
+  },
+  "imports": {
+    "#/*": "./src/*.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

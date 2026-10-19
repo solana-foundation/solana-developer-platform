@@ -1,9 +1,5 @@
-import {
-  ASSET_CATEGORIES,
-  isAssetTypeSupported,
-  isLandedTokenTransactionStatus,
-  type PublicToken,
-} from "@sdp/types";
+import { ASSET_CATEGORIES, isAssetTypeSupported } from "@sdp/types/asset-profiles";
+import { isLandedTokenTransactionStatus, type PublicToken } from "@sdp/types/tokens";
 import { z } from "zod";
 import { type DemoWorld, findWallet } from "./demo-fixtures";
 import type { DemoAnswer, DemoWriteResult, WriteContext } from "./demo-handlers";

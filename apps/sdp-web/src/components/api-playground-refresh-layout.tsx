@@ -1,5 +1,10 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
+import { StatusText } from "@sdp/ui/status-text";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { ChevronDown, ChevronsUpDown, Copy, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
 import Link from "next/link";
@@ -11,11 +16,6 @@ import type {
   ApiPlaygroundMessage,
 } from "@/components/api-playground-shell";
 import { SNIPPET_LANGUAGES, type SnippetLanguage } from "@/components/api-playground-snippets";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { InfoHint } from "@/components/ui/info-hint";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { StatusText } from "@/components/ui/status-text";
 import { useTranslations } from "@/i18n/provider";
 
 type RequestView = "form" | "raw" | "code";

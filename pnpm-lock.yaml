@@ -177,27 +177,6 @@ importers:
       '@solana/codecs':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-cdp':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
-      '@solana/keychain-core':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
-      '@solana/keychain-fireblocks':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
-      '@solana/keychain-para':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
-      '@solana/keychain-privy':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
-      '@solana/keychain-turnkey':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
-      '@solana/keychain-utila':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -219,9 +198,6 @@ importers:
       '@solana/sysvars':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/token-acl-gate-sdk':
-        specifier: 0.3.1
-        version: 0.3.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
       '@solana/token-acl-sdk':
         specifier: 'catalog:'
         version: 0.4.0(@solana/sysvars@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/zk-sdk@0.4.2)(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -249,9 +225,6 @@ importers:
       pino:
         specifier: 10.3.1
         version: 10.3.1
-      react:
-        specifier: 19.3.0
-        version: 19.3.0
       undici:
         specifier: 7.29.1
         version: 7.29.1
@@ -274,9 +247,6 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
-      '@types/react':
-        specifier: 19.3.0
-        version: 19.3.0
       '@vitest/coverage-v8':
         specifier: 4.1.11
         version: 4.1.11(vitest@4.1.11)
@@ -289,9 +259,6 @@ importers:
       pino-pretty:
         specifier: 13.1.3
         version: 13.1.3
-      testcontainers:
-        specifier: 12.1.0
-        version: 12.1.0
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -422,12 +389,6 @@ importers:
       '@solana/qr-code-styling':
         specifier: 1.6.0
         version: 1.6.0
-      '@vercel/flags-core':
-        specifier: 1.8.2
-        version: 1.8.2(next@16.3.8(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
-      clsx:
-        specifier: 2.1.1
-        version: 2.1.1
       date-fns:
         specifier: 4.4.0
         version: 4.4.0
@@ -455,9 +416,6 @@ importers:
       react:
         specifier: 19.3.0
         version: 19.3.0
-      react-day-picker:
-        specifier: 10.0.1
-        version: 10.0.1(@types/react@19.3.0)(react@19.3.0)
       react-dom:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
@@ -470,9 +428,6 @@ importers:
       swr:
         specifier: 2.5.1
         version: 2.5.1(react@19.3.0)
-      tailwind-merge:
-        specifier: 3.7.0
-        version: 3.7.0
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -537,9 +492,6 @@ importers:
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
-      tw-animate-css:
-        specifier: 1.4.0
-        version: 1.4.0
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -569,12 +521,6 @@ importers:
       '@solana/codecs':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-cdp':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
-      '@solana/keychain-para':
-        specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -643,9 +589,9 @@ importers:
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-istanbul@4.1.11)(@vitest/coverage-v8@4.1.11)(jsdom@30.1.1(@noble/hashes@2.4.0))(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/sdp-design-tokens:
     devDependencies:
@@ -907,9 +853,6 @@ importers:
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -938,9 +881,6 @@ importers:
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -959,9 +899,6 @@ importers:
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
-      '@solana/addresses':
-        specifier: 'catalog:'
-        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/fixed-points':
         specifier: 7.1.1
         version: 7.1.1(typescript@6.0.3)
@@ -1056,9 +993,6 @@ importers:
 
   packages/sdp-spc-escrow:
     dependencies:
-      '@solana-program/token':
-        specifier: 'catalog:'
-        version: 0.16.1(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -1078,9 +1012,6 @@ importers:
 
   packages/sdp-spc-withdraw:
     dependencies:
-      '@solana-program/token':
-        specifier: 'catalog:'
-        version: 0.16.1(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -1199,9 +1130,6 @@ importers:
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -1230,9 +1158,6 @@ importers:
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -9148,9 +9073,6 @@ packages:
     resolution: {integrity: sha512-nedZtJ2hjWpU/JBFq7Aj1GQBxQ56si+kIUmNZBUX35O35TIuhSBR6/u3yHHmk81U+RBdBcVjvLQ3/iOFzMwKsA==}
     hasBin: true
 
-  tw-animate-css@1.4.0:
-    resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
-
   tweetnacl@0.14.5:
     resolution: {integrity: sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA==}
 
@@ -15940,7 +15862,7 @@ snapshots:
       eslint: 10.11.0(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.10
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@10.11.0(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@10.11.0(jiti@2.7.0))
       eslint-plugin-react: 7.37.5(eslint@10.11.0(jiti@2.7.0))
       eslint-plugin-react-hooks: 7.1.1(eslint@10.11.0(jiti@2.7.0))
@@ -15973,7 +15895,7 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@10.11.0(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))
     transitivePeerDependencies:
       - supports-color
 
@@ -15988,7 +15910,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@10.11.0(jiti@2.7.0)):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.2.0
@@ -18963,8 +18885,6 @@ snapshots:
       '@turbo/linux-arm64': 2.11.4
       '@turbo/windows-64': 2.11.4
       '@turbo/windows-arm64': 2.11.4
-
-  tw-animate-css@1.4.0: {}
 
   tweetnacl@0.14.5: {}
 

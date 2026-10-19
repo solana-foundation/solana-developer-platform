@@ -12,7 +12,7 @@
 import { type ScheduledTask, schedule } from "node-cron";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
 import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
-import { runWithSystemDatabaseIdentity } from "@/db";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import { describeError, logEvent } from "@/runtime/money-path-events";

@@ -1,5 +1,6 @@
 import { type ClusterScope, currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
-import { CLUSTER_BY_SDP_ENVIRONMENT, SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { runInEachClusterScope } from "./cluster-scope-runs";
 

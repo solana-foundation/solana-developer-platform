@@ -1,6 +1,6 @@
 "use client";
 
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 export function LegacyIssuanceTokenCardSkeleton() {
   return (

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { Counterparty } from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";

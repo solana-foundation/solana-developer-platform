@@ -1,14 +1,14 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   type EarnMovementRow,
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

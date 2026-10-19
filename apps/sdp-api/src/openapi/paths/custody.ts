@@ -1,7 +1,7 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
-import { errorResponseSchema, walletIdParamSchema } from "../schemas/base";
+import { errorResponseSchema, walletIdParamSchema } from "@/openapi/schemas/base";
 import {
   createCustodyWalletRequestSchema,
   custodyPublicKeyResponseSchema,
@@ -11,7 +11,7 @@ import {
   orgCustodyProviderSchema,
   signerCheckRequestSchema,
   updateCustodyWalletRequestSchema,
-} from "../schemas/custody";
+} from "@/openapi/schemas/custody";
 import {
   errorResponses,
   jsonContent,

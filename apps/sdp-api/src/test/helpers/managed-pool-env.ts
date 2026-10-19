@@ -1,4 +1,4 @@
-import type { ManagedRpcEnv } from "@sdp/rpc";
+import type { ManagedRpcEnv } from "@sdp/rpc/types";
 
 /**
  * Every managed pool env key `createClusterRpc()` reads, both clusters, blank. Must stay free of

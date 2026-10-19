@@ -6,9 +6,9 @@ import type {
   UserJSON,
 } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";

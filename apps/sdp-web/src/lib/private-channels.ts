@@ -1,7 +1,7 @@
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
   CreatePrivateChannelPrincipalRequest,
   CreatePrivateChannelRequest,
-  CustodyWalletSummary,
   PrivateChannelBalance,
   PrivateChannelDeposit,
   PrivateChannelDto,
@@ -20,7 +20,7 @@ import type {
   PrivateChannelVerifiedWalletDto,
   PrivateChannelWithdrawal,
   VerifyPrivateChannelWalletRequest,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
 

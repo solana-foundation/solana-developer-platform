@@ -1,18 +1,16 @@
+import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "@sdp/types/custody";
 import {
-  type CustodyWalletAggregate,
-  type CustodyWalletTokenBalance,
   PAYMENT_TRANSFER_STATUS_TONE,
   type PaymentTransferStatus,
   type PaymentTransferStatusTone,
-  SOL_DECIMALS,
-  SOL_MINT,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
-import type { BadgeVariant } from "@/components/ui/badge";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { toTitleCase } from "../activity-format-utils";
+} from "@sdp/types/payments";
+import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import type { BadgeVariant } from "@sdp/ui/badge";
+import { toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;

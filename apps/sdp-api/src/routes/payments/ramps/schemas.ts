@@ -1,11 +1,8 @@
-import {
-  COUNTRY_CODES,
-  OFFRAMP_CRYPTO_RAILS,
-  ONRAMP_CRYPTO_RAILS,
-  RAMP_PROVIDERS,
-  RAMPS_MEMO_LIMITS,
-} from "@sdp/types";
+import { COUNTRY_CODES } from "@sdp/types/countries";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
+import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
+import { RAMPS_MEMO_LIMITS } from "@sdp/types/payments";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
 
 export const rampProviderSchema = z.enum(RAMP_PROVIDERS);

@@ -1,4 +1,4 @@
-import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {

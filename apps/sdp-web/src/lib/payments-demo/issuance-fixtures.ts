@@ -1,10 +1,9 @@
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import type { AssetCategory, AssetProfile, IssuanceMetadata } from "@sdp/types/asset-profiles";
+import { getAssetTypeRegistryEntry } from "@sdp/types/asset-profiles";
+import type { AssetAuditEvent } from "@sdp/types/audit";
 import type {
-  AssetAuditEvent,
-  AssetCategory,
-  AssetProfile,
   FrozenAccount,
-  IssuanceMetadata,
   PublicToken,
   PublicTokenTransaction,
   TokenAllowlistEntry,
@@ -12,8 +11,7 @@ import type {
   TokenTemplate,
   TokenTransactionStatus,
   TokenTransactionType,
-} from "@sdp/types";
-import { getAssetTypeRegistryEntry } from "@sdp/types";
+} from "@sdp/types/tokens";
 import {
   type Clock,
   CREATED_BY,
@@ -25,7 +23,7 @@ import {
   MINUTE_MS,
   ORGANIZATION_ID,
   PROJECT_ID,
-} from "./demo-fixtures";
+} from "./demo-basics";
 
 /*
  * Demo data for the Issuance screens: seven tokens, one in each state the screens show (live,

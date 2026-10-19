@@ -1,5 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { resolveDefaultCluster } from "@sdp/rpc";
+import { resolveDefaultCluster } from "@sdp/rpc/config";
 import { env } from "#env-impl";
 
 const { resolveKoraEndpoint } = apiTestSupport;

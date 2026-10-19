@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { TokenTransactionStatus } from "@sdp/types";
+import type { TokenTransactionStatus } from "@sdp/types/tokens";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";

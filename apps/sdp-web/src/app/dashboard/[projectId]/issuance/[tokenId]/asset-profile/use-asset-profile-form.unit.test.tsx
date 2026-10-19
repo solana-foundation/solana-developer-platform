@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import type { AssetProfile, Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getSignerSelectionForAction } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { getSignerSelectionForAction } from "../token-management-workspace.utils";
 import { useAssetProfileForm } from "./use-asset-profile-form";
 
 const mocks = vi.hoisted(() => ({

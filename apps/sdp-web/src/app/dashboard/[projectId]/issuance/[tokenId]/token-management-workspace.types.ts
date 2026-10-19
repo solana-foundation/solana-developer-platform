@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 export type AdminAction =

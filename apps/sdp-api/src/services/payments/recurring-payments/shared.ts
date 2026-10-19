@@ -1,12 +1,15 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  confirmTransaction,
+  type createRpc,
+  getRecentBlockhash,
+  getSignatureStatuses,
+} from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import {
-  type MovementId,
-  type PreparedPaymentSubscriptionTransaction,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+import type { MovementId } from "@sdp/types/movements";
+import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
+import { SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   addSignersToTransactionMessage,
@@ -26,12 +29,12 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
+import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import type {
-  PaymentRecurringPaymentRow,
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
-} from "@/db/repositories";
-import { createTokenRepository } from "@/db/repositories";
+} from "@/db/repositories/payment-subscriptions.repository";
+import { createTokenRepository } from "@/db/repositories/repository-factory";
 import {
   AppError,
   badRequest,
@@ -47,9 +50,8 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
   parseU64String,
-  SOL_MINT,
 } from "@/services/payment-operation.service";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
@@ -140,7 +142,7 @@ export async function buildPreparedSubscriptionTransaction(
   requiredSigners: Address[]
 ): Promise<PreparedPaymentSubscriptionTransaction> {
   const rpc = createClusterRpc();
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -235,7 +237,7 @@ export async function sendSubscriptionInstructions(input: {
 }): Promise<Signature> {
   const signer =
     input.sourceSigner ??
-    (await solanaServices.createOrgSignerForCustodyWallet(
+    (await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
@@ -248,7 +250,7 @@ export async function sendSubscriptionInstructions(input: {
   }
 
   const rpc = createClusterRpc();
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const feePayment = createSponsorshipFeePayment(
     input.env,
     await resolveProjectSponsorshipScope(input.env, {
@@ -341,7 +343,7 @@ export class ResumedStepUnsettledError extends AppError {
 }
 
 export async function settleResumedStep<T extends { exists: boolean }>(input: {
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: ReturnType<typeof createRpc>;
   read: (commitment: "finalized" | "confirmed") => Promise<T>;
   /** Whether the account shows the step's effect. */
   landed: (account: T) => boolean;
@@ -390,14 +392,14 @@ async function readResumedStep<T extends { exists: boolean }>(
     return { kind: "absent", account: finalized };
   }
 
-  const [status] = await solanaRpc.getSignatureStatuses(input.rpc, [input.savedSignature], {
+  const [status] = await getSignatureStatuses(input.rpc, [input.savedSignature], {
     searchTransactionHistory: true,
   });
   if (status === null || status === undefined) {
     if (input.stale) {
       throw transactionFailed(input.failureMessage);
     }
-    const confirmation = await solanaRpc.confirmTransaction(input.rpc, input.savedSignature, {
+    const confirmation = await confirmTransaction(input.rpc, input.savedSignature, {
       commitment: "confirmed",
     });
     if (confirmation.err) {
@@ -438,7 +440,7 @@ export async function confirmSubscriptionSignature(
   message: string
 ): Promise<void> {
   const rpc = createClusterRpc();
-  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
+  const confirmation = await confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 

@@ -1,25 +1,31 @@
 "use client";
 
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type Counterparty,
-  type PaymentRequest,
-  type PaymentRequestStatus,
-} from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { PaymentRequest, PaymentRequestStatus } from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
+import { StatusText } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableRow } from "@solana/design-system/table";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
+import { PaymentsTableHeader } from "@/app/dashboard/[projectId]/payments/payments-table-header";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
-import { StatusText } from "@/components/ui/status-text";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -29,11 +35,6 @@ import {
   paymentRequestHref,
 } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
-import { shortenAddress } from "../payments-overview.utils";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL } from "../payments-table";
-import { PaymentsTableHeader } from "../payments-table-header";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,

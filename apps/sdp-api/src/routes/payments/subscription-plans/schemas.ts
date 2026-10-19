@@ -1,11 +1,11 @@
-import { PAYMENT_SUBSCRIPTION_PLAN_STATUSES } from "@sdp/types";
+import { PAYMENT_SUBSCRIPTION_PLAN_STATUSES } from "@sdp/types/payments";
 import { z } from "zod";
 import {
   paymentAmountSchema,
   paymentTokenSchema,
   solanaAddressSchema,
   u64StringSchema,
-} from "../schemas";
+} from "@/routes/payments/schemas";
 
 export const subscriptionPlanIdParamsSchema = z.object({
   planId: z.string().min(1),

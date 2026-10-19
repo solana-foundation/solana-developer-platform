@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletMetadataResponse } from "@sdp/types";
+import type { CustodyWalletMetadataResponse } from "@sdp/types/custody";
 import { notFound, redirect } from "next/navigation";
 import {
   formatCustodyProviderName,
@@ -138,11 +138,7 @@ function toWalletPageView(
  * One wallet's page. The wallet itself is read before anything renders (its name heads the
  * page); balances and the issued-token names are handed to the view as promises, so each part streams in on its own instead of holding the page.
  */
-export default async function WalletDetailPage({
-  params,
-}: {
-  params: Promise<{ walletId: string }>;
-}) {
+export async function WalletDetailPage({ params }: { params: Promise<{ walletId: string }> }) {
   const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),

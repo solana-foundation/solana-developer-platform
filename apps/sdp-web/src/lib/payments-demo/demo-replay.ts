@@ -1,26 +1,27 @@
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
-  Counterparty,
-  CounterpartyAccount,
   PaymentRampQuoteDeliveryMode,
   PaymentRecurringPayment,
   PaymentTransferRecipient,
-  RampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   CREATED_BY,
+  type DemoWallet,
+  demoAddress,
+  demoSignature,
+  HOUR_MS,
+  ORGANIZATION_ID,
+  PROJECT_ID,
+} from "./demo-basics";
+import {
   DEMO_TOKENS,
   type DemoTokenKey,
   type DemoTransfer,
-  type DemoWallet,
   type DemoWorld,
-  demoAddress,
-  demoSignature,
   findWallet,
   fromBaseUnits,
-  HOUR_MS,
   newestFirst,
-  ORGANIZATION_ID,
-  PROJECT_ID,
   toBaseUnits,
   tokenBalance,
 } from "./demo-fixtures";

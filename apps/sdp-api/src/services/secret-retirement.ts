@@ -18,8 +18,8 @@
 // possible outcomes are "the row points at the version" and "the version is
 // queued for destruction" — never neither.
 
-import type { AppDb } from "@/db";
-import { createSecretRetirementsRepository } from "@/db/repositories";
+import type { DatabaseClient as AppDb } from "@/db/client";
+import { createSecretRetirementsRepository } from "@/db/repositories/repository-factory";
 import {
   cancelUnclaimedSecretRetirement,
   insertSecretRetirement,

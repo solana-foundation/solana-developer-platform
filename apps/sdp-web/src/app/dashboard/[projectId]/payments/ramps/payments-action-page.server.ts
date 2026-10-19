@@ -1,5 +1,3 @@
-import "server-only";
-
 import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";

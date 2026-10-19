@@ -9,12 +9,8 @@ catalog:
   '@solana-program/token-2022': 0.17.0
   '@solana/addresses': 7.1.1
   '@solana/codecs': 7.1.1
-  '@solana/instructions': 7.1.1
-  '@solana/keys': 7.1.1
   '@solana/kit': 7.1.1
   '@solana/mosaic-sdk': 0.2.0
-  '@solana/programs': 7.1.1
-  '@solana/rpc': 7.1.1
   '@solana/signers': 7.1.1
   '@solana/sysvars': 7.1.1
   '@solana/token-acl-sdk': 0.4.0

@@ -1,10 +1,10 @@
-import { notImplemented } from "../errors";
+import { notImplemented } from "#/errors";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
   EarnVaultProvider,
   ProviderStrategySnapshot,
-} from "../types";
+} from "#/types";
 
 /**
  * Scaffold base for vault-infra clients: every `EarnVaultProvider` operation

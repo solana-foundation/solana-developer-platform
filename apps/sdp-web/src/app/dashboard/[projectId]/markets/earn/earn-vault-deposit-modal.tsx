@@ -1,30 +1,34 @@
 "use client";
 
 import { decimalScale } from "@sdp/solana/amount";
+import type { EarnVaultDeposit, EarnVaultDepositRecord } from "@sdp/types/earn";
 import {
   EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
   type EarnStrategy,
   type EarnStrategySlippagePolicy,
   type EarnSwapSourceToken,
-  earnProviderDepositSettlement,
   earnSwapSourceTokens,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/earn";
+import { earnProviderDepositSettlement } from "@sdp/types/provider-access";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import { ArrowRightLeftIcon, Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
+import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
+import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
+import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useModalFocus } from "@/lib/use-modal-focus";
-import { cn } from "@/lib/utils";
 import {
   type EarnFundingWallet,
   useEarnFundingWallets,
@@ -39,21 +43,14 @@ import {
   sortByOptionalDecimal,
 } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
-import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
 import { formatTokenValue, shortenMarketAddress, tokenSymbol } from "./earn-format";
 import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
-  type EarnVaultDeposit,
   type EarnVaultDepositPreview,
-  type EarnVaultDepositRecord,
   fetchEarnVaultDepositPreview,
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
-import type { VaultSubmissionObserver } from "./earn-vault-movement";
-
-export { EarnVaultDepositOutcomeTracker } from "./earn-outcome-trackers";
-
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 import {
   forgetVaultDepositFloor,
@@ -62,6 +59,7 @@ import {
   vaultDepositIdempotencyKeyStore,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   mergeObservedVaultMovement,
   observableVaultMovement,

@@ -1,4 +1,5 @@
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 /** How a payment moves: onchain from a wallet, or through a fiat ramp provider. */
 export type PaymentMethod = "onchain" | "ramp";

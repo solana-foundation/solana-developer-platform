@@ -1410,13 +1410,6 @@
       "lastDeposit": "· last {date}",
       "nothingYet": "· nothing yet"
     },
-    "depositTimeline": {
-      "label": "Deposit progress",
-      "quoteAgreed": "Quote agreed",
-      "fundsSent": "Funds sent",
-      "receivedByProvider": "Received by provider",
-      "current": "(current step)"
-    },
     "record": {
       "copyField": "Copy the {field}",
       "copied": "Copied",

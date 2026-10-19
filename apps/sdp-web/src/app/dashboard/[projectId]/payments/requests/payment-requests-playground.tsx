@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";

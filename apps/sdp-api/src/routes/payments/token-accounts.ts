@@ -1,7 +1,7 @@
 import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -15,8 +15,6 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
-
-export { SOL_MINT } from "@/services/payment-operation.service";
 
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);

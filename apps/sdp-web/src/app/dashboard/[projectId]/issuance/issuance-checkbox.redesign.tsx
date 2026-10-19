@@ -1,9 +1,9 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import { CheckIcon, LockIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 
 /**
  * A row with a checkbox at its start, as the design's control lists draw it: a 16px square

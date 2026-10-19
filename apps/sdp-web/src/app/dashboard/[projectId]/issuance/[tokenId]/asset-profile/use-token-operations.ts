@@ -1,21 +1,16 @@
 "use client";
 
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token } from "@sdp/types/tokens";
 import { useState } from "react";
 import { toast } from "sonner";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
-import { DEMO_PREFILL_AMOUNTS, DEMO_PREFILL_MEMOS } from "@/lib/payments-demo/demo-prefill";
-import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
-import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
-import { buildDraftDeployRequest } from "../../draft-permissions";
-import type { FundManagementModalAction } from "../token-fund-management-section";
+import type { FundManagementModalAction } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-fund-management-section";
 import type {
   ActionExecutionInput,
   AdminAction,
   PermissionRow,
   RunActionOptions,
-} from "../token-management-workspace.types";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
 import {
   asOptionalString,
   createInitialAllowlistForm,
@@ -45,8 +40,17 @@ import {
   isValidSolanaAddressInput,
   resolveAuthorityAddressForRole,
   resolveBurnSigningWalletId,
-} from "../token-management-workspace.utils";
-import { useTokenActionRunner } from "../use-token-action-runner";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import { useTokenActionRunner } from "@/app/dashboard/[projectId]/issuance/[tokenId]/use-token-action-runner";
+import {
+  getTokenAccessControlMode,
+  hasAccessControlList,
+} from "@/app/dashboard/[projectId]/issuance/access-control.utils";
+import { buildDraftDeployRequest } from "@/app/dashboard/[projectId]/issuance/draft-permissions";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
+import { DEMO_PREFILL_AMOUNTS, DEMO_PREFILL_MEMOS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { getTokenOperationPermissions } from "./token-operation-permissions";
 import { useTokenOperationData } from "./use-token-operation-data";
 

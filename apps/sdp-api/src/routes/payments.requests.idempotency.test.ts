@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {

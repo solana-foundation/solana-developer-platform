@@ -1,4 +1,4 @@
-import type { ConnectionProbeResult } from "@sdp/private-channels";
+import type { ConnectionProbeResult } from "@sdp/private-channels/probe";
 import { describe, expect, it } from "vitest";
 import { isProjectRpcProbeFailure, summarizeProbeFailure } from "./probe-error";
 

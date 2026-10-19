@@ -1,9 +1,6 @@
-import {
-  type AssetProfile,
-  type PublicToken,
-  RAMP_PROVIDERS,
-  type TokenTransactionStatus,
-} from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { PublicToken, TokenTransactionStatus } from "@sdp/types/tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_ISSUANCE_LIST_QUERY } from "@/app/dashboard/[projectId]/issuance/issuance-list-query";
 import { tokenLifecycle } from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";

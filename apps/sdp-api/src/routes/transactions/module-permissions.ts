@@ -1,8 +1,8 @@
+import type { Permission } from "@sdp/types/permissions";
 import {
-  type Permission,
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 
 export const UNIFIED_TRANSACTION_MODULE_PERMISSIONS = {
   payments: "payments:read",

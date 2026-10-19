@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
-import type { SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import {
   provisionCoinbaseCdpAccount,
   provisionPrivyWallet,

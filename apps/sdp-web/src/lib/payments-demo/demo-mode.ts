@@ -1,18 +1,20 @@
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
   EARN_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
   type ProviderAvailabilityEntry,
   // biome-ignore lint/style/noRestrictedImports: the keys of the availability record only; which ones are on comes from the channel-capped flags
   RAMP_PROVIDERS,
   type RampProviderId,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import { parseDashboardPathname } from "../dashboard-project-path";
-import { designModuleForPath } from "../design-modules";
-import { PROJECT_HEADER_NAME } from "../project-cookie";
+import { paymentsDemoMode } from "@/flags";
+import { isNewDesignOn } from "@/flags/new-design";
+import { parseDashboardPathname } from "@/lib/dashboard-project-path";
+import { designModuleForPath } from "@/lib/design-modules";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { isDemoPath, PAYMENTS_DEMO_COOKIE_NAME, TAB_DEMO_HEADER_NAME } from "./demo-cookie";
 import { buildWorld, demoPathParts, demoWorldBody } from "./demo-fixtures";
 import { type DemoAnswer, demoFlowRead, demoWrite } from "./demo-handlers";
@@ -68,12 +70,7 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
       return false;
     }
     // Demo data is part of the new design and has a flag of its own: a page on the previous
-    // design never gets it. Imported here, not at the top: the flags module reads auth through
-    // sdp-api, which imports this file.
-    const [{ paymentsDemoMode }, { isNewDesignOn }] = await Promise.all([
-      import("@/flags"),
-      import("@/flags/new-design"),
-    ]);
+    // design never gets it.
     const [demoModeOn, newDesignPage] = await Promise.all([
       paymentsDemoMode(),
       isNewDesignOn(designModuleForPath(page) ?? undefined),

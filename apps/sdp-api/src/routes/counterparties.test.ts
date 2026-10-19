@@ -1,10 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
-import { type OrganizationProviderOverrides, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import type { OrganizationProviderOverrides } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
-import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import { app } from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { noopObservability } from "@/runtime/observability";
 import {

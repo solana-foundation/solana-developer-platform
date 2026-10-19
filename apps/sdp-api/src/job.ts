@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createRpc } from "@sdp/rpc/solana";
 
 import { parse as parseCron, validate as validateCron } from "node-cron";
 import { DVP_TRADES_MONITOR } from "@/cron/dvp-trades";
@@ -141,9 +141,9 @@ export async function runCronJob(): Promise<void> {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
 
-  let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
+  let probeRpc: ReturnType<typeof createRpc> | null = null;
   try {
-    probeRpc = solanaRpc.createRpc(env, { requestTimeoutMs: 5_000 });
+    probeRpc = createRpc(env, { requestTimeoutMs: 5_000 });
   } catch {
     // No RPC endpoint configured (some self-hosted setups): nothing to probe.
   }

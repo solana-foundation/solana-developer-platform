@@ -1,9 +1,9 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { CheckIcon, Clock3Icon, ShieldCheckIcon } from "lucide-react";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import type { ComponentType, SVGProps } from "react";
-import { cn } from "@/lib/utils";
 
 type EarnOutcomeTone = "info" | "success" | "warning";
 

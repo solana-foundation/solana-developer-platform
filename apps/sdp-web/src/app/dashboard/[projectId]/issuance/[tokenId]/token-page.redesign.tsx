@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { type AssetProfile, TOKEN_TRANSACTION_STATUSES, type Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import { TOKEN_TRANSACTION_STATUSES, type Token } from "@sdp/types/tokens";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
@@ -86,7 +87,7 @@ async function readLatestDeploy(
 }
 
 /** One token's page on the new design. */
-export default async function TokenPage({ params }: TokenPageProps) {
+export async function TokenPage({ params }: TokenPageProps) {
   const [t, { userId, orgId }, { tokenId }] = await Promise.all([
     getTranslations(),
     auth(),

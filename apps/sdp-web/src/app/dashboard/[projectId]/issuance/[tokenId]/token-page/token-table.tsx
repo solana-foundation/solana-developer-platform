@@ -1,9 +1,9 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import type { ReactNode } from "react";
 import { PAYMENTS_TABLE_HEAD } from "@/app/dashboard/[projectId]/payments/payments-table";
-import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 
 /** A column of a token-page table: its width and heading, the heading hidden when `srOnly`. */
 export interface TokenTableColumn {

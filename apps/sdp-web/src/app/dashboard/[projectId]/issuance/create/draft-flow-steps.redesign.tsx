@@ -1,25 +1,23 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { StatusText } from "@sdp/ui/status-text";
 import { BoxIcon, InfoIcon, LandmarkIcon, type LucideIcon, TriangleAlertIcon } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
+import { IssuanceCheckRow } from "@/app/dashboard/[projectId]/issuance/issuance-checkbox.redesign";
 import { RecordLine } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
-import { StatusText } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
-import { IssuanceCheckRow } from "../issuance-checkbox.redesign";
 import { type AuthorityKey, type DraftState, isDraftAuthorityInUse } from "./draft-model";
 import type { DraftAccess } from "./local-drafts.redesign";
-
-export type { DraftAccess };
 
 /** The flow's draft: the saved draft's fields, and the access list as the design picks it. */
 export interface FlowDraft {

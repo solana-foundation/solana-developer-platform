@@ -1,19 +1,26 @@
-import { PrivateChannelError } from "@sdp/private-channels";
-import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelVerifiedWalletDto } from "@sdp/types";
-import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
+import {
+  PRIVATE_CHANNEL_EVENT_TYPES,
+  type PrivateChannelVerifiedWalletDto,
+} from "@sdp/types/private-channels";
+import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories/private-channel-verified-wallet.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { AppContext } from "@/routes/private-channels/context";
+import {
+  emitMember,
+  recordInstanceError,
+  requireActiveInstance,
+} from "@/routes/private-channels/helpers";
+import type { verifyWalletBodySchema } from "@/routes/private-channels/schemas";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
 import {
   deletePrivateChannelWallet,
   listPrivateChannelWallets,
-  mapPrivateChannelError,
   verifyPrivateChannelWallet,
-} from "@/services/private-channels";
-import type { AppContext } from "../context";
-import { emitMember, recordInstanceError, requireActiveInstance } from "../helpers";
-import type { verifyWalletBodySchema } from "../schemas";
+} from "@/services/private-channels/wallets";
 
 function toVerifiedWalletDto(
   row: PrivateChannelVerifiedWalletRow

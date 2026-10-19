@@ -14,7 +14,7 @@ import {
 } from "./handlers";
 import { updateOrgSchema } from "./schemas";
 
-const organizations = new Hono<{ Bindings: Env }>();
+export const organizations = new Hono<{ Bindings: Env }>();
 
 // Protected routes below require authentication
 organizations.use("/:orgId/*", unifiedAuthMiddleware());
@@ -32,5 +32,3 @@ organizations.patch(
   updateOrganization
 );
 organizations.delete("/:orgId", requirePermissions("org:admin"), deleteOrganization);
-
-export default organizations;

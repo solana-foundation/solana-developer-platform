@@ -1,4 +1,4 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 
 export const BALANCE_REFRESH_INTERVAL_MS = 30_000;

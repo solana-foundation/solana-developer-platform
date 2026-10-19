@@ -1,4 +1,4 @@
-import type { SdpReleaseChannel } from "@sdp/types";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import {
   assetProfiles,
   dvp,

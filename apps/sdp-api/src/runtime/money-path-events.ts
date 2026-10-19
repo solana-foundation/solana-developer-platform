@@ -1,5 +1,5 @@
 import { SdpPaymentsError } from "@sdp/payments/errors";
-import { scrubTelemetry } from "@sdp/redaction";
+import { scrubTelemetry } from "@sdp/redaction/scrub";
 import { getLogger } from "./logger";
 
 export type MoneyPathEvent = Record<string, unknown> & { event: string };

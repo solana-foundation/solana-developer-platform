@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +20,7 @@ const destination = "5wLf85zhVpJ7xBjDCE1KK8yTXyCrbbzoCUuv3Dwsd5PQ";
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
 }));
-vi.mock("../use-token-action-runner", () => ({
+vi.mock("@/app/dashboard/[projectId]/issuance/[tokenId]/use-token-action-runner", () => ({
   useTokenActionRunner: () => ({
     runAction: mocks.runAction,
     runActionImmediately: mocks.runAction,

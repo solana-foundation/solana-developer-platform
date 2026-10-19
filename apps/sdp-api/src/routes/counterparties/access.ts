@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import type { AuthorizeInput } from "@/middleware/authorize";
-import type { counterpartyAccountParamsSchema } from "../counterparty-accounts/schemas";
+import type { counterpartyAccountParamsSchema } from "@/routes/counterparty-accounts/schemas";
 import {
   type AppContext,
   getCounterpartiesRepository,

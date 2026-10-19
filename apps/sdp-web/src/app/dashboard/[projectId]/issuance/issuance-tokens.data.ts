@@ -1,4 +1,4 @@
-import type { AssetCategory, IssuanceMetadata } from "@sdp/types";
+import type { AssetCategory, IssuanceMetadata } from "@sdp/types/asset-profiles";
 import { readApiErrorMessage } from "@/lib/api-error";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { type IssuanceListQuery, toIssuanceTokensApiParams } from "./issuance-list-query";
