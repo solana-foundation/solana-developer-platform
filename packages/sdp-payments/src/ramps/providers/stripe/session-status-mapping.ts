@@ -2,6 +2,7 @@ import type { CryptoRailId } from "@sdp/types/payment-rails";
 import { z } from "zod";
 import { SdpPaymentsError } from "#/errors";
 import { readString } from "#/json";
+import { providerResponseIssues } from "#/ramps/fetch";
 import type { RampSettlementEvent } from "#/ramps/types";
 
 const STRIPE_SESSION_STATUS = {
@@ -38,6 +39,13 @@ function stripeDeliveredAssetRail(currency: string, network: string): CryptoRail
 /** A session text field, read as the webhook reads one: trimmed, and blank as absent. */
 const stripeSessionText = z.string().nullish().transform(readString);
 
+/** The delivery proof a completed session carries: each field absent or non-blank text. */
+const stripeDeliveryProofSchema = z.object({
+  destination_amount: z.string().trim().min(1).nullish(),
+  transaction_id: z.string().trim().min(1).nullish(),
+  wallet_address: z.string().trim().min(1).nullish(),
+});
+
 /**
  * The fields a status lookup reads from a Stripe onramp session, the object a
  * `crypto.onramp_session.updated` webhook carries. `status` stays an open
@@ -50,9 +58,10 @@ export const stripeOnrampSessionStatusSchema = z.object({
     .object({
       destination_currency: stripeSessionText,
       destination_network: stripeSessionText,
-      destination_amount: stripeSessionText,
-      transaction_id: stripeSessionText,
-      wallet_address: stripeSessionText,
+      // Read only once the session completes, then checked as delivery proof.
+      destination_amount: z.unknown(),
+      transaction_id: z.unknown(),
+      wallet_address: z.unknown(),
     })
     .nullish(),
 });
@@ -66,7 +75,7 @@ export type StripeOnrampSessionStatus = z.output<typeof stripeOnrampSessionStatu
  * @param session - The session Stripe answered a lookup with.
  * @returns The settlement event, or an ignore event for a status SDP does not track.
  * @throws SdpPaymentsError PROVIDER_RESPONSE_INVALID for a completed session without its
- *   destination currency or network.
+ *   destination currency or network, or with malformed delivery proof.
  */
 export function stripeSessionSettlementEvent(
   session: StripeOnrampSessionStatus
@@ -92,9 +101,20 @@ export function stripeSessionSettlementEvent(
       { provider: "stripe", outcome: "unknown" }
     );
   }
-  const receivedAmount = details?.destination_amount;
-  const signature = details?.transaction_id;
-  const walletAddress = details?.wallet_address;
+  const proof = stripeDeliveryProofSchema.safeParse(details);
+  if (!proof.success) {
+    throw new SdpPaymentsError(
+      "PROVIDER_RESPONSE_INVALID",
+      "stripe returned a completed session with malformed delivery proof",
+      { provider: "stripe", outcome: "unknown" },
+      { issues: providerResponseIssues(proof.error) }
+    );
+  }
+  const {
+    destination_amount: receivedAmount,
+    transaction_id: signature,
+    wallet_address: walletAddress,
+  } = proof.data;
   return {
     provider: "stripe",
     kind,

@@ -128,7 +128,7 @@ describe("StripeRampClient.fetchTransferStatus", () => {
     assert.deepEqual(
       await eventsFor("fulfillment_complete", {
         ...COMPLETED_DETAILS,
-        destination_amount: " ",
+        destination_amount: null,
         transaction_id: null,
       }),
       [
@@ -162,6 +162,45 @@ describe("StripeRampClient.fetchTransferStatus", () => {
         "stripe returned a completed session without its destination currency or network"
       );
     }
+  });
+
+  it("refuses a completed session with malformed delivery proof, as its webhook does", async () => {
+    for (const malformed of [
+      { transaction_id: " " },
+      { wallet_address: "" },
+      { destination_amount: 96.5 },
+    ]) {
+      const result = await lookUp(
+        [
+          stripeSessionLookupExchange(200, {
+            ...STRIPE_COMPLETED_SESSION,
+            transaction_details: { ...COMPLETED_DETAILS, ...malformed },
+          }),
+        ],
+        LOOKUP
+      );
+      failsWith(
+        result,
+        "PROVIDER_RESPONSE_INVALID",
+        1,
+        "stripe returned a completed session with malformed delivery proof"
+      );
+      assert.ok(!result.settled.ok && result.settled.cause instanceof SdpPaymentsError);
+      assert.deepEqual(
+        result.settled.cause.diagnostics?.issues,
+        Object.keys(malformed).map((path) => ({
+          path,
+          code: path === "destination_amount" ? "invalid_type" : "too_small",
+        }))
+      );
+    }
+  });
+
+  it("does not read delivery proof before the session completes", async () => {
+    assert.deepEqual(
+      await eventsFor("requires_payment", { ...STRIPE_SESSION_TERMS, transaction_id: 5 }),
+      [{ provider: "stripe", kind: "awaiting_payment", reference: "cos_contract" }]
+    );
   });
 
   it("refuses an answer for another session", async () => {
