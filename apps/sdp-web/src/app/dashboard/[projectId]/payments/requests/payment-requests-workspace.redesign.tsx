@@ -443,26 +443,32 @@ export function PaymentRequestsWorkspace({
   };
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
-  const copyLink = async (row: PaymentRequest) => {
+  const copyLink = (row: PaymentRequest) => {
     // A demo request lives in this browser only, so the public pay page can't open its link.
     if (demo) {
       toast.info(t("DashboardPayments.demo.noPayLink"));
       return;
     }
     // Reads never carry the pay link (APE-849); the link read returns it only to a
-    // member whose role may manage payment requests.
-    const res = await dashboardFetch<{ data: PaymentRequestLink }>(
+    // member whose role may manage payment requests. Safari lets a clipboard
+    // write start only inside the click, so the write starts now with the link
+    // read as its pending contents.
+    let refusal: string | null = null;
+    const link = dashboardFetch<{ data: PaymentRequestLink }>(
       `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
+    ).then((res) => {
+      if (!res.ok) {
+        refusal =
+          res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error;
+        throw new Error(refusal);
+      }
+      const url = `${window.location.origin}/pay/${res.data.data.publicToken}`;
+      return new Blob([url], { type: "text/plain" });
+    });
+    navigator.clipboard.write([new ClipboardItem({ "text/plain": link })]).then(
+      () => toast.success(t("DashboardPayments.requests.paymentLinkCopied")),
+      () => toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"))
     );
-    if (!res.ok) {
-      toast.error(
-        res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error
-      );
-      return;
-    }
-    const { publicToken } = res.data.data;
-    await navigator.clipboard.writeText(`${window.location.origin}/pay/${publicToken}`);
-    toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
   };
 
   return (
@@ -515,7 +521,7 @@ export function PaymentRequestsWorkspace({
               amountLabel={amountLabel}
               fromLabel={fromLabel}
               onSelect={(request) => router.push(projectHref(paymentRequestHref(request.id)))}
-              onCopyLink={(request) => void copyLink(request)}
+              onCopyLink={copyLink}
             />
           )}
           <PaymentRequestsPagination
