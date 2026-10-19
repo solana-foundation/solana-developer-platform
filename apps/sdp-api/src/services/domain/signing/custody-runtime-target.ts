@@ -186,6 +186,23 @@ interface OperationalConnectionWalletRow extends ConnectionWalletRow {
   wallet_created_at: string;
 }
 
+/** A wallet row of {@link CustodyRuntimeTargets.findOperationalWallets}, told apart by its owner. */
+type OperationalWalletRow =
+  | (OperationalConfigWalletRow & { owner_kind: "config" })
+  | (OperationalConnectionWalletRow & { owner_kind: "connection" });
+
+function isConfigOwnedWalletRow(
+  row: OperationalWalletRow
+): row is OperationalConfigWalletRow & { owner_kind: "config" } {
+  return row.owner_kind === "config";
+}
+
+function isConnectionOwnedWalletRow(
+  row: OperationalWalletRow
+): row is OperationalConnectionWalletRow & { owner_kind: "connection" } {
+  return row.owner_kind === "connection";
+}
+
 interface ConnectionCredentialRow {
   connection_id: string;
   provider: string;
@@ -356,11 +373,12 @@ export class CustodyRuntimeTargets {
     },
     availabilityRead: Promise<OrganizationProviderAvailabilityResponse>
   ): Promise<CustodyRuntimeWalletProjection[]> {
-    const [configRows, connectionRows, availability] = await Promise.all([
-      this.findOperationalConfigWallets(params.organizationId, params.projectId),
-      this.findOperationalConnectionWallets(params.organizationId, params.projectId),
+    const [ownedWallets, availability] = await Promise.all([
+      this.findOperationalWallets(params.organizationId, params.projectId),
       availabilityRead,
     ]);
+    const configRows = ownedWallets.filter(isConfigOwnedWalletRow);
+    const connectionRows = ownedWallets.filter(isConnectionOwnedWalletRow);
     const managedUseAllowed =
       configRows.length > 0 &&
       (await isManagedCustodyUseAllowed(this.db, {
@@ -1177,38 +1195,41 @@ export class CustodyRuntimeTargets {
     };
   }
 
-  private async findOperationalConfigWallets(
+  /**
+   * The project's active wallets of both owner kinds in one statement. The
+   * caller sorts them (`sortRuntimeWallets` orders by creation time and id), so
+   * the statement orders nothing.
+   */
+  private async findOperationalWallets(
     organizationId: string,
     projectId: string
-  ): Promise<OperationalConfigWalletRow[]> {
-    return this.db.queryMany<OperationalConfigWalletRow>(
-      `SELECT w.id AS wallet_record_id, w.custody_config_id, c.provider,
+  ): Promise<OperationalWalletRow[]> {
+    return this.db.queryMany<OperationalWalletRow>(
+      `SELECT 'config' AS owner_kind,
+              w.id AS wallet_record_id, w.custody_config_id, c.provider,
               w.wallet_id, w.public_key AS wallet_public_key,
               w.label AS wallet_label, w.purpose AS wallet_purpose,
-              w.created_at AS wallet_created_at
+              w.created_at AS wallet_created_at,
+              NULL::text AS connection_id, NULL::text AS organization_id,
+              NULL::text AS project_id, NULL::text AS connection_status,
+              NULL::text AS last_check_status, NULL::text AS credential_status,
+              NULL::text AS provider_account_fingerprint, NULL::text AS wallet_status
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
        WHERE c.organization_id = ?
          AND c.status = 'active'
          AND w.status = 'active'
          AND c.project_id = ?
-       ORDER BY c.updated_at DESC, c.id DESC, w.created_at ASC`,
-      [organizationId, projectId]
-    );
-  }
-
-  private async findOperationalConnectionWallets(
-    organizationId: string,
-    projectId: string
-  ): Promise<OperationalConnectionWalletRow[]> {
-    return this.db.queryMany<OperationalConnectionWalletRow>(
-      `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
+       UNION ALL
+       SELECT 'connection' AS owner_kind,
+              w.id AS wallet_record_id, NULL::text AS custody_config_id, c.provider,
+              w.wallet_id, w.public_key AS wallet_public_key,
+              w.label AS wallet_label, w.purpose AS wallet_purpose,
+              w.created_at AS wallet_created_at,
+              c.id AS connection_id, c.organization_id, c.project_id,
               c.status AS connection_status, c.last_check_status,
               pc.status AS credential_status, c.provider_account_fingerprint,
-              w.id AS wallet_record_id, w.wallet_id,
-              w.public_key AS wallet_public_key, w.status AS wallet_status,
-              w.label AS wallet_label, w.purpose AS wallet_purpose,
-              w.created_at AS wallet_created_at
+              w.status AS wallet_status
        FROM custody_connections c
        JOIN provider_credentials pc
          ON pc.id = c.provider_credential_id
@@ -1217,9 +1238,8 @@ export class CustodyRuntimeTargets {
        WHERE c.organization_id = ?
          AND c.project_id = ?
          AND c.status = 'active'
-         AND w.status = 'active'
-       ORDER BY c.updated_at DESC, c.id DESC, w.created_at ASC`,
-      [organizationId, projectId]
+         AND w.status = 'active'`,
+      [organizationId, projectId, organizationId, projectId]
     );
   }
 

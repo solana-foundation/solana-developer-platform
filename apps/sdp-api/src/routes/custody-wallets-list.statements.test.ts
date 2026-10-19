@@ -5,6 +5,10 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { recordStatements } from "@/test/helpers/statement-log";
@@ -21,6 +25,9 @@ const ORGANIZATION_ID = "org_wallets_list_statements";
 const PROJECT_ID = "prj_wallets_list_statements";
 const USER_ID = "usr_wallets_list_statements";
 const CONFIG_ID = "cust_cfg_wallets_list_statements";
+const CREDENTIAL_ID = "pcred_wallets_list_statements";
+const CONNECTION_ID = "cconn_wallets_list_statements";
+const CONNECTION_WALLET_RECORD_ID = "cwlt_wallets_list_statements_connection";
 const API_KEY = {
   id: "key_wallets_list_statements",
   raw: "sk_test_wallets_list_statements",
@@ -93,6 +100,35 @@ async function seedFixture(): Promise<void> {
       },
     ],
   });
+  const stored = await writeTestPrivyCredentialSecret(env, {
+    organizationId: ORGANIZATION_ID,
+    credentialId: CREDENTIAL_ID,
+    appId: "wallets-list-connection-app",
+    appSecret: "wallets-list-connection-secret",
+  });
+  await getDb(env).transaction((tx) =>
+    seedTestPrivyConnection(tx, {
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      connectionId: CONNECTION_ID,
+      credentialId: CREDENTIAL_ID,
+      createdBy: USER_ID,
+      stored,
+      providerAccountFingerprint: `sha256:${CREDENTIAL_ID}`,
+      lastCheckStatus: "success",
+      wallets: [
+        {
+          id: CONNECTION_WALLET_RECORD_ID,
+          walletId: "privy_wallets_list_statements_connection",
+          publicKey: "So11111111111111111111111111111111111111112",
+          label: "Connection",
+          purpose: null,
+          status: "active",
+        },
+      ],
+      defaultCustodyWalletId: CONNECTION_WALLET_RECORD_ID,
+    })
+  );
 }
 
 async function listWallets(): Promise<Response> {
@@ -135,11 +171,24 @@ describe("GET /v1/wallets statements", () => {
     expect(organizationReads[0]).toContain("api_keys");
   });
 
+  it("reads the wallets of both owner kinds in one statement", async () => {
+    const { result: response, statements } = await recordStatements(env, listWallets);
+
+    expect(response.status).toBe(200);
+    const body = walletsBodySchema.parse(await response.json());
+    expect(body.data.wallets.map((wallet) => wallet.id).sort()).toEqual([
+      "cwlt_wallets_list_statements",
+      CONNECTION_WALLET_RECORD_ID,
+    ]);
+    expect(statements.filter((sql) => sql.includes("AS owner_kind"))).toHaveLength(1);
+  });
+
   it("answers from the organization row of this request, not an earlier one", async () => {
     const first = await listWallets();
     expect(first.status).toBe(200);
     const firstBody = walletsBodySchema.parse(await first.json());
     expect(firstBody.data.wallets.map((wallet) => wallet.isRuntimeExecutionAllowed)).toEqual([
+      true,
       true,
     ]);
 
@@ -152,6 +201,7 @@ describe("GET /v1/wallets statements", () => {
     expect(second.status).toBe(200);
     const secondBody = walletsBodySchema.parse(await second.json());
     expect(secondBody.data.wallets.map((wallet) => wallet.isRuntimeExecutionAllowed)).toEqual([
+      false,
       false,
     ]);
   });
