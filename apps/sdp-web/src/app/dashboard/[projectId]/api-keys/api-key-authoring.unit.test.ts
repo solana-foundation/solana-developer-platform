@@ -64,7 +64,6 @@ describe("API-key authoring: grants offered by the release channel", () => {
       "transactions",
       "recurring",
       "wallets",
-      "compliance",
       "projects",
       "organizations",
       "rpc",

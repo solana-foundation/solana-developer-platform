@@ -243,6 +243,60 @@ describe("Payments routes — list transfers", () => {
       rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(1, []));
     });
 
+    // A ramp or batch row is that module's record: transfers.read alone shows
+    // neither, here or in the unified feed (HOO-2099).
+    describe("with transfers.read alone", () => {
+      const TRANSFERS_ONLY_KEY = {
+        id: "key_transfers_read_only",
+        raw: "sk_test_transfers_read_only",
+        prefix: "sk_test_tro",
+      };
+      const asTransfersOnly = (path: string) =>
+        app.request(
+          path,
+          { method: "GET", headers: { Authorization: `Bearer ${TRANSFERS_ONLY_KEY.raw}` } },
+          env
+        );
+      const transferIdsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
+
+      beforeEach(async () => {
+        await seedProjectApiKey(getDb(env), env, {
+          key: TRANSFERS_ONLY_KEY,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          createdBy: TEST_USER.id,
+          grants: ["transfers.read"],
+        });
+        await seedTransfer({ id: "xfr_scope_plain", status: "confirmed" });
+        await seedTransfer({ id: "xfr_scope_onramp", status: "confirmed", type: "onramp" });
+        await seedTransfer({ id: "xfr_scope_batch", status: "confirmed", type: "transfer_batch" });
+      });
+
+      it("lists only plain transfers", async () => {
+        const res = await asTransfersOnly("/v1/payments/transfers");
+
+        expect(res.status).toBe(200);
+        expect(
+          transferIdsSchema.parse(await res.json()).data.map((transfer) => transfer.id)
+        ).toEqual(["xfr_scope_plain"]);
+      });
+
+      it("refuses a type filter it cannot read, naming the read", async () => {
+        const res = await asTransfersOnly("/v1/payments/transfers?type=onramp");
+
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({
+          error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "onramp.read" } },
+        });
+      });
+
+      it("does not disclose another module's row by id", async () => {
+        expect((await asTransfersOnly("/v1/payments/transfers/xfr_scope_onramp")).status).toBe(404);
+        expect((await asTransfersOnly("/v1/payments/transfers/xfr_scope_batch")).status).toBe(404);
+        expect((await asTransfersOnly("/v1/payments/transfers/xfr_scope_plain")).status).toBe(200);
+      });
+    });
+
     it("matches a token filter against every form the ledger stores it in", async () => {
       const solMint = "So11111111111111111111111111111111111111112";
       await seedTransfer({ id: "xfr_tok_sym_1", status: "confirmed", token: "SOL" });
