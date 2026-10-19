@@ -1,11 +1,11 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordBlock, RecordRow } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";

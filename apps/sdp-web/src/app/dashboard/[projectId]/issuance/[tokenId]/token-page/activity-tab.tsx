@@ -8,19 +8,20 @@ import {
   type AssetAuditStatus,
   isAssetAuditActorType,
   isAssetAuditStatus,
-  type Token,
-} from "@sdp/types";
+} from "@sdp/types/audit";
+import type { Token } from "@sdp/types/tokens";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
+import { StatusText } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { TableRow } from "@solana/design-system/table";
 import { ArrowUpRightIcon, XIcon } from "lucide-react";
 import { useMemo } from "react";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@/components/ui/filter-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
-import { StatusText } from "@/components/ui/status-text";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { ISSUANCE_TOOLBAR_CONTROLS } from "../../issuance-toolbar.redesign";
 import {

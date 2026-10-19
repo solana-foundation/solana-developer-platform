@@ -1,17 +1,17 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { LockIcon, PencilIcon } from "lucide-react";
 import { useState } from "react";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordBlock, RecordRow } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { getTokenTypeLabel } from "../../issuance-token-fields";
 import { MetadataSigner } from "./metadata-signer";
 import { accessControlLabel, shortAddress, type TokenTabProps } from "./token-page.shared";

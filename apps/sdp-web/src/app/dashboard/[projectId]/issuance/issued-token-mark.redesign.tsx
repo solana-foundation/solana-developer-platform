@@ -1,7 +1,7 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { useState } from "react";
-import { cn } from "@/lib/utils";
 
 const SIZES = {
   md: "size-8 text-body",

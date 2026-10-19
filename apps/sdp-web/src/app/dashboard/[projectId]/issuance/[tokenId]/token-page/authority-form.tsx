@@ -1,10 +1,10 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { type ReactNode, useId, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import type { PermissionRow } from "../token-management-workspace.types";
 import {

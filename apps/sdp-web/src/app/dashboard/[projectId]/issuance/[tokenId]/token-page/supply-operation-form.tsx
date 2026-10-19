@@ -1,11 +1,11 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { type ReactNode, useId } from "react";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { FundManagementModalAction } from "../token-fund-management-section";
 import {

@@ -1,21 +1,22 @@
 "use client";
 
-import { isInFlightTokenTransactionStatus, type TokenTransactionStatus } from "@sdp/types";
+import { isInFlightTokenTransactionStatus, type TokenTransactionStatus } from "@sdp/types/tokens";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { Modal } from "@sdp/ui/modal";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { TableRow } from "@solana/design-system/table";
 import { ArrowUpRightIcon, ChevronDownIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import useSWR from "swr";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { Modal } from "@/components/ui/modal";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
-import { TableCell, TableRow } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import { issuanceQueryKeys } from "../../issuance-query-key";
 import { isOnChain, type TokenLifecycle } from "../../issuance-token-state.redesign";
 import {

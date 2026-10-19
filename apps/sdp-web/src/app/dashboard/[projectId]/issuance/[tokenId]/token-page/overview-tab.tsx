@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { StatusText } from "@sdp/ui/status-text";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
@@ -12,14 +16,10 @@ import {
   RecordStack,
   type StateBandTone,
 } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { StatusText } from "@/components/ui/status-text";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import {
   formatTokenDay,
   formatTokenMoment,

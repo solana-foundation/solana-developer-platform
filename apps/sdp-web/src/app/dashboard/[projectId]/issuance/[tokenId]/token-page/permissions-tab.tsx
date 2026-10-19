@@ -1,10 +1,10 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { KeyRoundIcon, type LucideIcon, PencilIcon, SnowflakeIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { getTokenTypeLabel } from "../../issuance-token-fields";

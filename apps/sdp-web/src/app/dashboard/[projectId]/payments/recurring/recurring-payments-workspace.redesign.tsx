@@ -5,21 +5,15 @@ import {
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
 } from "@sdp/types/payments";
-import { ArrowPagination, ArrowPagination } from "@sdp/ui/arrow-pagination";
-import { Button, Button } from "@sdp/ui/button";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
-import { FilterMenu, FilterMenu, FilterMenuOptions, FilterMenuOptions } from "@sdp/ui/filter-menu";
-import { ListEmptyState, ListEmptyState } from "@sdp/ui/list-empty-state";
-import { ListToolbar, ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
-import { SearchInput, SearchInput } from "@sdp/ui/search-input";
-import { StatusText, StatusText, type StatusTone, type StatusTone } from "@sdp/ui/status-text";
-import { 
-  Table,
-  TableBody,TableCell, 
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,} from "@sdp/ui/table";
+import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { useRouter } from "next/navigation";

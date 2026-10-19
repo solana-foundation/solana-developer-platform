@@ -1,5 +1,5 @@
-import { isInFlightTokenTransactionStatus, type TokenTransactionStatus } from "@sdp/types";
-import type { StatusTone } from "@/components/ui/status-text";
+import { isInFlightTokenTransactionStatus, type TokenTransactionStatus } from "@sdp/types/tokens";
+import type { StatusTone } from "@sdp/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 
 /**

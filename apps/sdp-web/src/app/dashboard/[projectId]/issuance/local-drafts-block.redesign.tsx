@@ -1,11 +1,11 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { StatusText } from "@sdp/ui/status-text";
 import { Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { RecordBlock } from "@/components/refresh-record";
-import { Button } from "@/components/ui/button";
-import { StatusText } from "@/components/ui/status-text";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {

@@ -1,10 +1,10 @@
 "use client";
 
-import { Button, Button } from "@sdp/ui/button";
-import { Callout, Callout } from "@sdp/ui/callout";
-import { InfoHint, InfoHint } from "@sdp/ui/info-hint";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { InfoHint } from "@sdp/ui/info-hint";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
-import { StatusText, StatusText } from "@sdp/ui/status-text";
+import { StatusText } from "@sdp/ui/status-text";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
 import { ChevronDown, ChevronsUpDown, Copy, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
 import Link from "next/link";
