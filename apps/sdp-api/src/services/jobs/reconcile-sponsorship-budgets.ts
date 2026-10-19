@@ -1,6 +1,7 @@
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types/well-known-tokens";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
@@ -77,10 +78,10 @@ export interface SponsorshipReconciliationDependencies {
 }
 
 /**
- * Reconcile every network, every tick. One process can sponsor on both
- * clusters (Earn movements pick the paymaster by cluster), and each network has
- * its own reservations, policies, breaker and Kora, so each gets its own pass
- * against its own RPC and its own provider configuration.
+ * Reconcile the open cluster scope's network. Registered once per Environment (a `cluster` Cron
+ * Definition): one process can sponsor on both clusters (Earn movements pick the paymaster by
+ * cluster), and each network has its own reservations, policies, breaker and Kora, so each
+ * registration is its own pass against its own RPC and its own provider configuration.
  *
  * A network is never skipped for lacking a paymaster NOW: reservations outlive
  * configuration. If a cluster's Kora is unwired after transactions reserved
@@ -89,26 +90,16 @@ export interface SponsorshipReconciliationDependencies {
  * configuration, and reports that as a failed pass (tripping the breaker after
  * the usual consecutive failures) rather than leaving budget locked in
  * silence. A network with nothing outstanding costs one candidates query.
+ *
+ * @param env - Process environment.
+ * @param dependencies - Test seams for the repository, Redis, chain reads and clock.
+ * @returns Resolves once the scope's network has been reconciled.
  */
 export async function reconcileSponsorshipBudgets(
   env: Env,
   dependencies: SponsorshipReconciliationDependencies = {}
 ): Promise<void> {
-  const failures: unknown[] = [];
-  for (const cluster of SOLANA_CLUSTERS) {
-    try {
-      await reconcileSponsorshipNetwork(env, cluster, dependencies);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length === 1) throw failures[0];
-  if (failures.length > 1) {
-    throw new AggregateError(
-      failures,
-      "Sponsorship reconciliation failed on more than one network"
-    );
-  }
+  await reconcileSponsorshipNetwork(env, currentClusterScope().cluster, dependencies);
 }
 
 async function reconcileSponsorshipNetwork(

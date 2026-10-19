@@ -71,7 +71,6 @@ const banner =
 // migrate.js lets the prebuilt image apply migrations without the source tree.
 const entryPoints = {
   server: "src/server.ts",
-  job: "src/job.ts",
   migrate: "scripts/migrate-postgres.mjs",
   // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
   "custody-backfill": "scripts/migrate-custody-encryption.ts",
@@ -90,7 +89,7 @@ await build({
   target: "node22",
   format: "esm",
   outdir: "dist",
-  external: ["pg-native", "@sentry/profiling-node"],
+  external: ["pg-native"],
   banner: { js: banner },
   plugins: [zkSdkNodeWasmPlugin(zkSdkNodeEntries)],
 });

@@ -215,12 +215,11 @@ describe("applyRampSettlementEvent", () => {
     const settlementTransaction = vi
       .spyOn(db, "transaction")
       .mockImplementationOnce(async (callback) => {
-        const canceled = await createSystemPaymentsRepository(env).updateTransferStatusGuarded({
+        const canceled = await createSystemPaymentsRepository(env).transitionRampTransfer({
           transferId: "xfr_cancel_race",
           organizationId: ORG_ID,
           projectId: PROJECT_ID,
-          fromStatuses: ["awaiting_payment"],
-          toStatus: "canceled",
+          transition: "canceled",
           updatedAt: new Date().toISOString(),
         });
         expect(canceled?.status).toBe("canceled");

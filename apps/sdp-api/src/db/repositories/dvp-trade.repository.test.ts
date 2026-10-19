@@ -497,9 +497,43 @@ describe("DvpTradeRepository (postgres)", () => {
         expiryHeight: "900",
       });
 
-      await expect(repo.releaseExpiredCloseClaims(900n)).resolves.toBe(1);
+      await expect(
+        repo.releaseExpiredCloseClaims({ environment: "sandbox", blockHeight: 900n })
+      ).resolves.toBe(1);
       expect((await repo.getById(scope, created.id))?.closeClaim).toBeNull();
       expect((await repo.getById(scope, other.id))?.closeClaim?.signature).toBe(OTHER_SIGNATURE);
+    });
+
+    it("sweeps only the requested environment's expired locks", async () => {
+      const created = await openTrade();
+      const production = await repo.create(
+        tradeInsert({
+          id: "dvp_trade_production",
+          projectId: projects.production.id,
+          swapDvp: address("SwapE11111111111111111111111111111111111111"),
+        })
+      );
+      await repo.resolveCreate(production.id, "created");
+      await repo.claimClose(created.id, {
+        action: "settle",
+        signature: AUTHORITY_SIGNATURE,
+        expiryHeight: "500",
+      });
+      await repo.claimClose(production.id, {
+        action: "settle",
+        signature: OTHER_SIGNATURE,
+        expiryHeight: "500",
+      });
+
+      await expect(
+        repo.releaseExpiredCloseClaims({ environment: "sandbox", blockHeight: 900n })
+      ).resolves.toBe(1);
+
+      expect((await repo.getById(scope, created.id))?.closeClaim).toBeNull();
+      const productionScope = { organizationId: TEST_ORG.id, projectId: projects.production.id };
+      expect((await repo.getById(productionScope, production.id))?.closeClaim?.signature).toBe(
+        OTHER_SIGNATURE
+      );
     });
 
     it("clears the lock when the close is recorded", async () => {
@@ -636,9 +670,29 @@ describe("DvpTradeRepository (postgres)", () => {
       )
       .run();
 
-    const listed = await repo.listOpenForReconciliation(10);
+    const listed = await repo.listOpenForReconciliation({ environment: "sandbox", limit: 10 });
 
     expect(listed.map((trade) => trade.id).sort()).toEqual(["dvp_closed_recent", "dvp_open_old"]);
+  });
+
+  it("sweeps only the requested environment's open trades", async () => {
+    await repo.create(tradeInsert({ id: "dvp_sandbox_open" }));
+    await repo.create(
+      tradeInsert({
+        id: "dvp_production_open",
+        projectId: projects.production.id,
+        swapDvp: address("SwapE11111111111111111111111111111111111111"),
+      })
+    );
+
+    const sandbox = await repo.listOpenForReconciliation({ environment: "sandbox", limit: 10 });
+    const production = await repo.listOpenForReconciliation({
+      environment: "production",
+      limit: 10,
+    });
+
+    expect(sandbox.map((trade) => trade.id)).toEqual(["dvp_sandbox_open"]);
+    expect(production.map((trade) => trade.id)).toEqual(["dvp_production_open"]);
   });
 
   /**
@@ -715,7 +769,7 @@ describe("DvpTradeRepository (postgres)", () => {
         closedDaysAgo: 1,
       });
 
-      const listed = await repo.listOpenForReconciliation(4);
+      const listed = await repo.listOpenForReconciliation({ environment: "sandbox", limit: 4 });
 
       expect(listed.map((trade) => trade.id)).toEqual([
         "dvp_live_0",
@@ -733,7 +787,7 @@ describe("DvpTradeRepository (postgres)", () => {
         });
       }
 
-      const listed = await repo.listOpenForReconciliation(4);
+      const listed = await repo.listOpenForReconciliation({ environment: "sandbox", limit: 4 });
 
       expect(listed).toHaveLength(4);
     });
@@ -768,7 +822,7 @@ describe("DvpTradeRepository (postgres)", () => {
         .bind(TEST_ORG.id, TEST_PROJECT_ID, CUSTODY_WALLET_ID)
         .run();
 
-      const lanes = await repo.listOpenForReconciliation(8);
+      const lanes = await repo.listOpenForReconciliation({ environment: "sandbox", limit: 8 });
 
       // Round one: two live, the claimed expired trade, then the emptied one in
       // the late-deposit lane even though it is the stalest row of all.
@@ -794,7 +848,7 @@ describe("DvpTradeRepository (postgres)", () => {
         expiryTimestamp: String(Math.floor(Date.now() / 1000) - 8 * 86_400),
       });
 
-      const listed = await repo.listOpenForReconciliation(8);
+      const listed = await repo.listOpenForReconciliation({ environment: "sandbox", limit: 8 });
 
       // Never observed empty is not known empty: that one keeps its lane.
       expect(listed.map((trade) => trade.id)).toEqual(["dvp_expired_unobserved"]);
@@ -816,7 +870,7 @@ describe("DvpTradeRepository (postgres)", () => {
         expiryHeight: "100",
       });
 
-      const listed = await repo.listOpenForReconciliation(8);
+      const listed = await repo.listOpenForReconciliation({ environment: "sandbox", limit: 8 });
 
       expect(listed.map((trade) => trade.id)).toEqual(["dvp_expired_closing"]);
     });

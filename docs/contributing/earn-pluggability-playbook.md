@@ -289,7 +289,7 @@ key to the hosted `/v1/earn` routes.
 | 5. Availability | `apps/sdp-api/src/services/provider-availability.service.ts` | One line: `<id>: keyPairCredentialDefinition("<Label>", "<ID>")`. |
 | 6. Credential keys | `apps/sdp-api/src/types/env.d.ts` | `<ID>_API_KEY` + `<ID>_SANDBOX_API_KEY`. `keyPairCredentialDefinition` binds its derived keys to `keyof Env`, so skipping this is a compile error. |
 | 7. Key projections | `turbo.json` `globalEnv` + `scripts/secret-keys.mjs` | Both keys in both files (+ the secret manager for deployed environments). |
-| 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run service and Job read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero job changes (`src/job.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
+| 8. Managed deployments | sdp-infra `terraform/envs/<env>/terraform.tfvars` | Append the credential key(s) to `app_secret_keys` (the Doppler → Secret Manager mirror; also add the value to that env's Doppler config). Dev carries sandbox keys only — production keys are a launch-gated decision (PRO-1647). Nothing else: the Cloud Run API service and Worker service read the same secret set, and the hourly catalogue sync picks the provider up from `EARN_PROVIDER_CLIENTS` with zero cron changes (`src/cron/earn-catalogue-sync.ts` never names providers; an un-credentialed provider skips fail-closed with `PROVIDER_NOT_CONFIGURED`). |
 | 9. Sponsorship contract (executing providers only) | `infra/kora/kora.toml` + sdp-infra `kora/cloud-run/kora.{devnet,mainnet}.toml` | A vault-direct client must implement `sponsoredPrograms(cluster)`, a REQUIRED member of `EarnVaultDirectProvider`. For SDP-sponsored treasury flows, every returned id must be in the Kora allowlists or the whole transaction is rejected. `vault-sponsorship-allowlist.test.ts` pins the local file; the conditional `Kora / Live Smoke` shard checks the deployed devnet service when its secrets are present. External-wallet sponsorship is separate: a partner passes its own `feePayer`, both wallets sign, and no Kora allowlist is involved. Test that the provider applies the same caller-provided address as transaction fee payer and `rentPayer`; Veda's ATA payer swap is the precedent. Mainnet Kora remains non-live because Earn paymaster sponsorship is cluster-gated to devnet. Non-executing providers skip this step. |
 | 10. Execution wiring (executing providers only) | `packages/sdp-<id>` + `apps/sdp-api/src/services/earn-provider-registry.ts` + `apps/sdp-api/src/services/earn/execution-registry.ts` | The executing client lives in its own workspace package and registers TWICE in the API: the composition-root overlay in `earn-provider-registry.ts` (capability resolution for routes) and a branch in `resolveEarnExecutionClient` (the one place a provider id maps to an executing client; everything downstream narrows by capability, so no route edits). Plus workspace plumbing: `apps/sdp-api/package.json` and the Dockerfile's explicit package COPY list. Full walk in §4d. |
 | 11. Error contract (executing providers only) | Provider package error type + `apps/sdp-api/src/services/earn/vault-refusals.ts` | Emit the shared provider-neutral codes. Use `INVALID_AMOUNT`, `DEPOSIT_REFUSED`, `WITHDRAW_REFUSED`, or `COMPLIANCE_APPROVAL_REQUIRED` only for caller-actionable failures. Use `VAULT_UNREADABLE` for RPC outages, rate limits, missing live state, and other retryable read failures. The API maps those families to 400 and sanitized 503 responses respectively; unknown codes stay 500s. Never put RPC URLs, credentials, or raw transport messages in the public response. |
@@ -373,7 +373,7 @@ backfill it — do not add `NOT NULL` in the same release, however required the
 field is on the TypeScript input.
 
 `deploy-sdp-api-gcp.yml` runs migrations BEFORE it rolls the service and before
-it updates the cron job image, and a rollback restores the previous image over
+it updates the Worker service image, and a rollback restores the previous image over
 the already-applied schema. So the previous release's catalogue writer — whose
 INSERT does not list your column — writes into the new schema in both windows. A
 `NOT NULL` fails every one of those upserts, including the `ON CONFLICT` path,
@@ -507,7 +507,7 @@ the Doppler-injected values, so the file wins with no `DOPPLER_PRESERVE_ENV`
 opt-in — a plain shell export, by contrast, is dropped. Deployed environments
 take the key from Doppler/Secret Manager instead — reaching a *managed* runtime
 additionally requires the key in sdp-infra's `app_secret_keys` (step 8 of the
-§4 checklist), which feeds both the Cloud Run service and the cron Job. Until
+§4 checklist), which feeds both the Cloud Run API service and the Worker service. Until
 it resolves, the provider is `configured: false` and every call fails closed
 with `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't
 care).

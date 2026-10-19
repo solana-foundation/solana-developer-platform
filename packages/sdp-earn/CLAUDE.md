@@ -118,10 +118,10 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 ### 4. Get catalogue data — live provider sync
 
 With sandbox provider credentials set and both flags on, the catalogue-sync
-cron populates `earn_strategies` from live provider sources. It runs once at
-API boot (through the slotted `runEarnCatalogueSyncIfDue`, so restarts inside
-the hour skip) and then on the hour, so a freshly started API lists strategies
-within seconds of coming up. The sync is the only admitting writer and every
+cron populates `earn_strategies` from live provider sources. It runs once when
+the cron Worker starts (`pnpm dev`'s `dev:worker`; through the slotted
+`runEarnCatalogueSyncIfDue`, so restarts inside the hour skip) and then on the
+hour, so a freshly started stack lists strategies within seconds of coming up. The sync is the only admitting writer and every
 row must pass the provider's declared-support checks.
 
 See README.md → "Catalogue data" for cadence and failure behaviour. A database
@@ -195,7 +195,7 @@ ADR 0002's 2026-08-14 addendum.
 | `GET /v1/earn/programs` → `programs: []` with the dev API key | that key is the test org's, which has no program by design (§4b) |
 | A key you minted yourself returns `strategies: []` **and** `programs: []` | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive a provider's **production** API from a laptop. |
 | `POST /v1/earn/programs` → 400 "needs an idempotency key" | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both |
-| Catalogue empty right after boot | sync cron runs on the hour; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
+| Catalogue empty right after boot | the sync runs on Worker start and then once per hourly slot; verify flags, provider credentials, and scheduler registration, then wait for a live pass |
 | Kamino rows appear disabled in the dashboard | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; since PRO-1986 Kamino deposits open in production too, while Veda stays `environment_unavailable` there until PRO-1777 |
 | Kamino APY is blank in sandbox | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate |
 | Kamino APY looks stale in production | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync |
