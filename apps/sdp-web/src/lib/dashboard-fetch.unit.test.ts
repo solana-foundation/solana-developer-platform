@@ -1,3 +1,4 @@
+import { RAMP_DIRECTIONS } from "@sdp/types/payments";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
@@ -706,7 +707,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
 
   // APE-689: a ramp quote creates the transfer (and a Stripe session), so the
   // retry after a lost answer must reach the API as the same request.
-  it.each(["onramp", "offramp"])(
+  it.each(RAMP_DIRECTIONS)(
     "keys the %s quote, reuses its key after a lost answer, and retires it once answered",
     async (direction) => {
       openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments`);

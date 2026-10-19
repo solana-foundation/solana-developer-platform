@@ -1,6 +1,10 @@
 import { isBodylessHttpStatus } from "@sdp/types/idempotency";
 import type { IdempotencyRequiredRoute } from "@sdp/types/idempotency-required-routes";
-import { isMoneyMovementStatus, type MoneyMovementStatus } from "@sdp/types/payments";
+import {
+  isMoneyMovementStatus,
+  type MoneyMovementStatus,
+  type RampDirection,
+} from "@sdp/types/payments";
 import { z } from "zod";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
@@ -341,10 +345,10 @@ const READ_LIKE_POST = /\/(estimate|quote|simulate)$/;
  * key creates a second one (APE-689). One fires per selection, never as the
  * user types.
  */
-const RAMP_QUOTE_PATHS: ReadonlySet<string> = new Set([
-  "/api/dashboard/payments/ramps/onramp/quote",
-  "/api/dashboard/payments/ramps/offramp/quote",
-]);
+const RAMP_QUOTE_PATHS = {
+  onramp: "/api/dashboard/payments/ramps/onramp/quote",
+  offramp: "/api/dashboard/payments/ramps/offramp/quote",
+} as const satisfies Record<RampDirection, string>;
 
 /**
  * Every mutation the dashboard sends takes a key per user action, whatever
@@ -358,7 +362,8 @@ function takesActionKey(path: string, init: RequestInit, headers: Headers): bool
   return (
     KEYED_METHODS.has(method) &&
     !UNKEYED_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
-    (!READ_LIKE_POST.test(pathname) || RAMP_QUOTE_PATHS.has(pathname)) &&
+    (!READ_LIKE_POST.test(pathname) ||
+      Object.values(RAMP_QUOTE_PATHS).some((quotePath) => quotePath === pathname)) &&
     !headers.has(IDEMPOTENCY_KEY_HEADER) &&
     (init.body === undefined || init.body === null || typeof init.body === "string")
   );
