@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PaymentRequest } from "@sdp/types";
+import type { PaymentRequest } from "@sdp/types/payments";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
