@@ -1,6 +1,6 @@
 import { badRequest } from "@sdp/payments/errors";
 import { isAddress } from "@sdp/solana/address";
-import type { Permission } from "@sdp/types";
+import { type Permission, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
@@ -12,6 +12,7 @@ import {
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
+import { getRequestProviderAvailability } from "@/services/provider-availability.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
@@ -90,10 +91,16 @@ async function findProjectPaymentWallet(
 export async function resolveScope(c: AppContext, retainedCustodyWalletId?: string | null) {
   const auth = getAuth(c);
   const [operationalWallets, retainedWallet] = await Promise.all([
-    new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
-      organizationId: auth.organizationId,
-      projectId: requireProjectId(c),
-    }),
+    new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWalletsWithAvailability(
+      {
+        organizationId: auth.organizationId,
+        projectId: requireProjectId(c),
+      },
+      // Custody entries only: ramp provider stages cannot change them.
+      getRequestProviderAvailability(c, auth.organizationId, {
+        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      })
+    ),
     retainedCustodyWalletId
       ? findRetainedPaymentWallet(c, retainedCustodyWalletId)
       : Promise.resolve(null),

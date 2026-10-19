@@ -316,13 +316,50 @@ export class CustodyRuntimeTargets {
     projectId: string;
     provider?: CustodyProvider;
   }): Promise<CustodyRuntimeWalletProjection[]> {
-    const [configRows, connectionRows, availability] = await Promise.all([
-      this.findOperationalConfigWallets(params.organizationId, params.projectId),
-      this.findOperationalConnectionWallets(params.organizationId, params.projectId),
+    return this.listProjectWallets(
+      params,
       // Custody entries only: ramp provider stages cannot change them.
       getProviderAvailability(this.env, this.db, params.organizationId, {
         rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-      }),
+      })
+    );
+  }
+
+  /**
+   * {@link CustodyRuntimeTargets.listWallets} for a request that already holds
+   * its organization's provider availability, read from the organization row
+   * the request's authentication loaded. Reads no organization row of its own.
+   *
+   * @param params - The project scope and optional provider filter.
+   * @param params.organizationId - The organization that owns the project.
+   * @param params.projectId - The project whose wallets are listed.
+   * @param params.provider - Narrows the list to one custody provider when set.
+   * @param availability - The organization's provider availability for this request.
+   * @returns The project's active wallets with their runtime-execution flags.
+   */
+  async listWalletsWithAvailability(
+    params: {
+      organizationId: string;
+      projectId: string;
+      provider?: CustodyProvider;
+    },
+    availability: OrganizationProviderAvailabilityResponse
+  ): Promise<CustodyRuntimeWalletProjection[]> {
+    return this.listProjectWallets(params, Promise.resolve(availability));
+  }
+
+  private async listProjectWallets(
+    params: {
+      organizationId: string;
+      projectId: string;
+      provider?: CustodyProvider;
+    },
+    availabilityRead: Promise<OrganizationProviderAvailabilityResponse>
+  ): Promise<CustodyRuntimeWalletProjection[]> {
+    const [configRows, connectionRows, availability] = await Promise.all([
+      this.findOperationalConfigWallets(params.organizationId, params.projectId),
+      this.findOperationalConnectionWallets(params.organizationId, params.projectId),
+      availabilityRead,
     ]);
     const managedUseAllowed =
       configRows.length > 0 &&

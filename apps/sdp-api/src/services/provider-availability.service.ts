@@ -459,6 +459,13 @@ export async function getOrganizationTierState(
     throw new AppError("NOT_FOUND", "Organization not found");
   }
 
+  return toOrganizationTierState(row);
+}
+
+function toOrganizationTierState(row: OrganizationProviderRow): {
+  tier: OrganizationTier;
+  settings: OrganizationSettings | null;
+} {
   return {
     tier: normalizeOrganizationTier(row.tier),
     settings: parseOrganizationSettings(row.settings),
@@ -539,7 +546,43 @@ export async function getProviderAvailability(
   organizationId: string,
   options: ProviderAvailabilityOptions
 ): Promise<OrganizationProviderAvailabilityResponse> {
-  const organization = await getOrganizationTierState(db, organizationId);
+  return providerAvailabilityFor(env, await getOrganizationTierState(db, organizationId), options);
+}
+
+/**
+ * The organization's provider availability from the organization row this
+ * request's authentication already read, so a handler that needs it adds no
+ * statement. The row was read for this request, never carried across requests,
+ * so a changed tier or override takes effect on the next one.
+ *
+ * @param c - The authenticated request.
+ * @param organizationId - The organization the availability is for; it must be
+ *   the one the request authenticated into.
+ * @param options - The ramp provider stages to evaluate.
+ * @returns The same answer {@link getProviderAvailability} gives.
+ * @throws 500 when `organizationId` is not the authenticated organization: its
+ *   row was never read, and answering from another organization's would be wrong.
+ */
+export function getRequestProviderAvailability(
+  c: Context<{ Bindings: Env }>,
+  organizationId: string,
+  options: ProviderAvailabilityOptions
+): OrganizationProviderAvailabilityResponse {
+  const state = c.get("organizationProviderState");
+  if (state.organizationId !== organizationId) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Provider availability was requested for an organization this request did not authenticate into"
+    );
+  }
+  return providerAvailabilityFor(c.env, toOrganizationTierState(state), options);
+}
+
+function providerAvailabilityFor(
+  env: Env,
+  organization: { tier: OrganizationTier; settings: OrganizationSettings | null },
+  options: ProviderAvailabilityOptions
+): OrganizationProviderAvailabilityResponse {
   const resolved = resolveOrganizationProviderEntitlements({
     tier: organization.tier,
     providerOverrides: organization.settings?.providerOverrides,

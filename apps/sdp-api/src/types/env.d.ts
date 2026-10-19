@@ -11,6 +11,7 @@ import type {
   SdpRampProviderStages,
 } from "@sdp/types";
 import type { ManagedRpcEnv } from "@sdp/rpc";
+import type { OrganizationProviderState } from "@/lib/organization-access";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
@@ -341,6 +342,9 @@ declare module "hono" {
     projectEnvironment?: ApiKeyEnvironment;
     // Loaded once by authentication for every actor; see lib/production-entitlement.ts
     organizationEntitlements: OrganizationEntitlements;
+    // The organization row authentication read (tier and settings), for handlers
+    // that decide from it; see lib/organization-access.ts
+    organizationProviderState: OrganizationProviderState;
     // Set by requestGate middleware for gated routes
     requestGate?: RequestGateContext;
     // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)

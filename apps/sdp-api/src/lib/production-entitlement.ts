@@ -2,7 +2,7 @@ import { type OrganizationEntitlements, organizationEntitlementsSchema } from "@
 import type { Context } from "hono";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { forbidden } from "@/lib/errors";
-import { readActiveOrganizationSettings } from "@/lib/organization-access";
+import { readActiveOrganization, recordOrganizationProviderState } from "@/lib/organization-access";
 import type { Env } from "@/types/env";
 
 /**
@@ -39,7 +39,9 @@ export async function loadOrganizationEntitlements(
   c: Context<{ Bindings: Env }>,
   organizationId: string
 ): Promise<void> {
-  recordOrganizationEntitlements(c, await readActiveOrganizationSettings(c.env, organizationId));
+  const organization = await readActiveOrganization(c.env, organizationId);
+  recordOrganizationEntitlements(c, organization.settings);
+  recordOrganizationProviderState(c, { organizationId, ...organization });
 }
 
 /** Whether this request's organization may act on production (APE-351). */

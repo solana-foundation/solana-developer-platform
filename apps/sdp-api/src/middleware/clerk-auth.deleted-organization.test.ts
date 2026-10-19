@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { getClerkAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import * as organizationAccess from "@/lib/organization-access";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -150,14 +149,12 @@ describe("Clerk auth into a deleted organization", () => {
   it("refuses to provision a membership when the deletion lands after the door's read", async () => {
     // The door read the organization as active; the deletion commits before
     // the membership insert, which must then find the organization gone.
-    const original = organizationAccess.enforceOrganizationAccess;
-    const spy = vi
-      .spyOn(organizationAccess, "enforceOrganizationAccess")
-      .mockImplementation(async (c, organizationId) => {
-        const settings = await original(c, organizationId);
-        await deleteOrganization();
-        return settings;
-      });
+    const db = getDb(env);
+    const original = db.transaction.bind(db);
+    const spy = vi.spyOn(db, "transaction").mockImplementation(async (callback) => {
+      await deleteOrganization();
+      return original(callback);
+    });
     try {
       const { app, token } = await createApp();
 
