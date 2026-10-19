@@ -134,7 +134,7 @@
         "max": "195000"
       }
     },
-    "cryptos": ["pyusd.solana", "sol.solana", "usdc.solana"],
+    "cryptos": ["sol.solana", "usdc.solana"],
     "countrySupport": {
       "coverage": "all-currencies",
       "countries": [
