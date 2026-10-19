@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import { adminDatabaseUrl } from "@/test/helpers/env";
 
 /**
- * 0144 is the grants cutover (HOO-2099): an active key never given grants
+ * 0146 is the grants cutover (HOO-2099): an active key never given grants
  * is deactivated before the legacy columns go, so a rollback cannot restore
  * its role. Keys that have grants, and keys already dead, are left alone.
  */
@@ -15,7 +15,7 @@ it("deactivates exactly the active keys that predate grants, then drops the lega
   const sql = readFileSync(
     path.join(
       path.dirname(fileURLToPath(import.meta.url)),
-      "postgres/0144_drop_legacy_api_key_columns.sql"
+      "postgres/0146_drop_legacy_api_key_columns.sql"
     ),
     "utf8"
   );
