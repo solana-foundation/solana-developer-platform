@@ -5,7 +5,8 @@ import { getClerkAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { requireClerkSession, requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
@@ -24,7 +25,7 @@ const verifyApiKeySchema = z.object({
 export const playgroundInternal = new Hono<{ Bindings: Env }>();
 
 playgroundInternal.use("*", unifiedAuthMiddleware());
-playgroundInternal.use("*", requireClerkSession());
+playgroundInternal.use("*", requireHumanSession());
 playgroundInternal.use("*", projectContextMiddleware());
 
 // Metered: each call hashes a caller-supplied key against the DB, which

@@ -17,7 +17,7 @@ import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import type { acceptSchema, inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

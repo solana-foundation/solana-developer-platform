@@ -6,8 +6,8 @@ import { app } from "@/index";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const TEST_ORG = { id: "org_allowed_ops", name: "Allowed Ops Org", slug: "allowed-ops-org" };
 const TEST_PROJECT = { id: "prj_allowed_ops", slug: "allowed-ops-project" };

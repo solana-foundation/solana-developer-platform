@@ -2,7 +2,7 @@
  * API Key test fixtures
  */
 
-import type { SeededApiKey } from "@/test/mocks/kv";
+import type { SeededApiKey } from "@/test/mocks/db";
 import { TEST_ORG } from "./organizations";
 import { TEST_PROJECT } from "./tokens";
 
@@ -18,7 +18,7 @@ export const TEST_PRODUCTION_API_KEY = {
   prefix: "sk_live_sha",
 };
 
-export const TEST_CACHED_API_KEY: SeededApiKey = {
+export const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -35,13 +35,13 @@ export const TEST_CACHED_API_KEY: SeededApiKey = {
 };
 
 export const TEST_REVOKED_KEY: SeededApiKey = {
-  ...TEST_CACHED_API_KEY,
+  ...TEST_SEEDED_API_KEY,
   id: "key_revoked123456",
   status: "revoked",
 };
 
 export const TEST_EXPIRED_KEY: SeededApiKey = {
-  ...TEST_CACHED_API_KEY,
+  ...TEST_SEEDED_API_KEY,
   id: "key_expired123456",
   expiresAt: "2020-01-01T00:00:00.000Z",
 };

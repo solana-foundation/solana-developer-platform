@@ -3,14 +3,14 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
-const HOME_ORG_ID = TEST_CACHED_API_KEY.organizationId;
+const HOME_ORG_ID = TEST_SEEDED_API_KEY.organizationId;
 
 const INVITING_ORG_ID = "org_test_inviting_acceptance";
 
@@ -171,7 +171,7 @@ describe("POST /v1/members/accept", () => {
     await seedCaller(CALLER_EMAIL);
     await seedInvitation({ ...invitationFixture(), email: OTHER_EMAIL });
     await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       permissions: ["*"],
     });
     const res = await app.request(

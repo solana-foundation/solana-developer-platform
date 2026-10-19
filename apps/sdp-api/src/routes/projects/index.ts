@@ -8,7 +8,7 @@ import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
 import {
   addProjectMember,

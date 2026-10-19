@@ -3,8 +3,8 @@ import type { Permission } from "@sdp/types/permissions";
 import { getDb } from "@/db/client";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
-import type { Env } from "@/types/env.d";
+import { type SeededApiKey, seedApiKeyRow } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
 
 export interface EarnTestApiKey {
   id: string;

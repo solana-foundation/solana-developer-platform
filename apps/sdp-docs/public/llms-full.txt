@@ -3521,58 +3521,11 @@ An institutional issuer in the US pipeline configures [Anchorage Digital Bank](h
 
 ### 3. API keys: the two-key institutional pattern
 
-The hardest cliff in setup is that the dashboard's "Create API key" dialog only mints **org-scoped** keys. The issuance API requires **project-scoped** keys. Project management in the dashboard is on the SDP roadmap; until it lands, the workaround is a short sequence of API calls.
-
-The bootstrap path:
-
-<Steps>
-
-<Step>
-
-From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environment: Sandbox**. This is your bootstrap credential.
-
-![Create API key dialog in the SDP dashboard, with Role set to Admin and Environment set to Sandbox.](/issue-a-regulated-stablecoin/01-create-api-key-dialog.png)
-
-</Step>
-
-<Step>
-
-With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
-
-```json title="response.json"
-{
-  "data": {
-    "projects": [
-      {
-        "id": "prj_3bc13bcb-...",
-        "slug": "default-sandbox",
-        "environment": "sandbox",
-        "status": "active"
-      },
-      {
-        "id": "prj_8a201d47-...",
-        "slug": "default-production",
-        "environment": "production",
-        "status": "active"
-      }
-    ]
-  }
-}
-```
-
-</Step>
-
-<Step>
-
-In the dashboard, create two keys in the project: one with the Developer role for routine create, mint, and burn calls, and one with the Admin role for compliance operations (screening, freeze, seize, force-burn). API keys cannot create keys, so this step is done by a signed-in member.
+Every organization is provisioned with exactly one sandbox and one production project; isolation between workloads comes from separate organizations, not additional projects. In the dashboard, open your sandbox project and create two keys: one with the Developer role for routine create, mint, and burn calls, and one with the Admin role for compliance operations (screening, freeze, seize, force-burn). Keys are created by a signed-in member; an API key cannot create keys.
 
 <Callout type="warn">
 The full key is shown only once. Capture it into your secrets manager immediately; SDP does not surface it again.
 </Callout>
-
-</Step>
-
-</Steps>
 
 Store the two project-scoped keys with your other production secrets. Rotate or revoke them from the dashboard.
 
@@ -4224,7 +4177,7 @@ The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment 
 
 Your sandbox setup is built around six artifacts that all swap for production equivalents:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
+- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Create them in the dashboard in your production project, as in Section 2.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
 - **API base URL**. `https://api.solana.com` is the canonical production base.

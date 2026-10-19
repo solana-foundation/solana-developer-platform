@@ -11,8 +11,8 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, readRateLimitCount, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 
 const SUPPLY_ACTOR_COUNTER = `metered:${ISSUANCE_SUPPLY_QUOTA.name}:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;
 const PREPARE_ACTOR_COUNTER = `metered:${ISSUANCE_PREPARE_QUOTA.name}:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;

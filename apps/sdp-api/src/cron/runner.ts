@@ -17,7 +17,7 @@ import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { noopObservability, type Observability } from "@/runtime/observability";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   EARN_CATALOGUE_SYNC_CRON,
   EARN_CATALOGUE_SYNC_MONITOR,

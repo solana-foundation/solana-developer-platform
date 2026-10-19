@@ -3,7 +3,7 @@
  */
 
 import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
-import type { SeededApiKey } from "@/test/mocks/kv";
+import type { SeededApiKey } from "@/test/mocks/db";
 import { TEST_ORG, TEST_USER } from "./organizations";
 
 export const TEST_PROJECT = {

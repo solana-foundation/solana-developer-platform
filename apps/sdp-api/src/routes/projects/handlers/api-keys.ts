@@ -21,7 +21,7 @@ import {
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
 
