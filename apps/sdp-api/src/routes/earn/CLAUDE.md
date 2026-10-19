@@ -1015,9 +1015,8 @@ registered-client path (or equivalent durable contract), or switching the flag
 off would misclassify an atomic movement as a provider order.
 
 The every-minute vault reconciliation worker consumes
-`idx_earn_movements_unsettled` in bounded pages. Both the embedded cron and the
-dedicated Cloud Run job use the same transition service as the interactive
-detail reads. The job additionally rebroadcasts the recorded signed bytes while
+`idx_earn_movements_unsettled` in bounded pages. The Worker's Cron Definition uses the same transition service as the
+interactive detail reads. The sweep additionally rebroadcasts the recorded signed bytes while
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
 
@@ -1030,15 +1029,14 @@ that money had stopped settling. Now a completed tick emits
 `sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
 counts plus the backlog gauges read AFTER the tick, and any failure (a status
 read, a block-height read, or a per-movement error) marks the tick
-error-level and THROWS so `runWithCronRunEvent` records `status: "error"`.
+error-level and THROWS so the Worker's run event records `status: "error"`.
 Per-movement errors count too, deliberately: reads can answer perfectly while
 the write side is down (pool exhaustion, a send-side RPC outage), and an ok
 tick over a batch where nothing settled is the same silence. The sponsorship
 reconciler takes the identical posture, emitting its tick and then throwing
-when any item failed. Both runners absorb the throw: the managed job's
-`collect` records the failure without starving later ticks, and
-`NodeBackgroundRunner.run` attaches its own catch. Do not "helpfully" swallow
-it.
+when any item failed. The Worker absorbs the throw: it logs the `error` run
+event and `NodeBackgroundRunner.run` attaches its own catch, so later slots
+still run. Do not "helpfully" swallow it.
 
 Three details that look like bugs and are not:
 
@@ -1056,14 +1054,14 @@ Three details that look like bugs and are not:
 - **"Completed tick" is the honest qualifier.** A rejection from the claim or
   backlog QUERY skips the event, exactly as the sponsorship reconciler skips
   its tick when its own candidate read fails. The run is still loud
-  (`sdp_cron_run` error, non-zero exit). Do not synthesize a fallback tick: it
+  (`sdp_cron_run` error). Do not synthesize a fallback tick: it
   could only carry a null backlog (invisible to a threshold rule) or a zero,
   which reads as a drained queue and would CLEAR a firing alert mid-incident.
   Alert on the ABSENCE of the tick instead.
 
 Pinned by the "sweep telemetry" describe in
-`../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
-`runWithCronRunEvent` test composes the real wrapper.
+`../../services/jobs/reconcile-earn-vault-movements.test.ts`; the runner logs
+the `sdp_cron_run` error event itself via `logCronRun` (`src/cron/run-event.ts`).
 
 **Expiring an unknown vault movement takes TWO observations.** A broadcast
 response can be lost after landing while the durable row still says `requested`.
@@ -1227,8 +1225,8 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   builds, the insert and baseline read are FAIL-CLOSED: money in may
   refuse, and a blind advisory could only ever page on any wallet that held
   the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
-  judges each open advisory on both runners (every minute in-process, at the
-  Managed Reconciliation Cadence in the Cloud Run Job): an in-flight deposit or
+  judges each open advisory every minute (a Cron Definition run by the
+  Worker): an in-flight deposit or
   an unconsumed follow-up BUILD inside a 30-minute window is the partner still
   working; once the swap's blockhash is dead and a 30-minute grace has run, the
   intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`

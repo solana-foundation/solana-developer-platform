@@ -127,6 +127,8 @@ interface BaseRampSettlementEvent {
   provider: RampProviderId;
   /** Provider-issued quote/session reference the transfer row was created with — the reconciliation key. */
   reference: string;
+  /** Provider observation time when the provider gives a per-reference ordering field. */
+  providerObservedAt?: string;
   /** Provider-side customer identifier observed on the event, when the provider reports one. */
   providerCustomerId?: string;
   /** Canonical on-chain movement reported by the provider for this ramp transfer. */
@@ -167,7 +169,12 @@ export type RampSettlementEvent =
       deliveredAssetRail?: CryptoRailId | null;
     })
   | (BaseRampSettlementEvent & {
-      kind: "failed" | "expired";
+      kind: "failed";
+      error?: string;
+      settlement?: RampTransferSettlement;
+    })
+  | (BaseRampSettlementEvent & {
+      kind: "expired";
       error?: string;
       settlement?: RampTransferSettlement;
     })

@@ -341,8 +341,8 @@ async function processRowsConcurrently<T extends PaymentRecurringPaymentRow>(
 
 /**
  * Recover stale lifecycle operations and collections, then collect due recurring payments, for
- * the open cluster scope's environment only. Runners start it once per environment through
- * `runInEachClusterScope`, so every row is built, sent and confirmed on its project's cluster.
+ * the open cluster scope's environment only. The Worker registers it once per environment (a
+ * `cluster` Cron Definition), so every row is built, sent and confirmed on its project's cluster.
  *
  * @param env - Runtime environment for repository and signer construction.
  * @param now - Tick time anchoring the due, stale and retry windows.

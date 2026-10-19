@@ -1,39 +1,21 @@
-/**
- * Pending-withdrawals reconciliation entrypoint.
- *
- * Mirrors `pending-deposits`: wraps `trackPendingWithdrawals` with a Sentry cron
- * monitor when observability is supplied, and hands the resulting promise to the
- * BackgroundRunner so it survives past the initiating tick and drains during
- * graceful shutdown. Gated on the Private Channels feature flag.
- */
-
-import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
+import { isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import type { Env } from "@/types/env";
+import { defineCron } from "./define-cron";
 
-export const PENDING_WITHDRAWALS_MONITOR = "sdp-api-track-pending-withdrawals";
-export const PENDING_WITHDRAWALS_CRON = "* * * * *";
-
-export interface PendingWithdrawalsReconciliationDeps {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}
-
-export function runPendingWithdrawalsReconciliation(
-  deps: PendingWithdrawalsReconciliationDeps
-): void {
-  const work = () => trackPendingWithdrawals(deps.env);
-
-  // Never invoke `work` eagerly — a sync throw before the first await must become
-  // a rejected promise the BackgroundRunner can track, not propagate to the
-  // runtime entrypoint.
-  const promise = deps.observability
-    ? deps.observability.withMonitor(PENDING_WITHDRAWALS_MONITOR, work, {
-        schedule: { type: "crontab", value: PENDING_WITHDRAWALS_CRON },
-      })
-    : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
-}
+// NOTE: Private Channels is EXPERIMENTAL and still being worked on. This definition is `global`
+// on purpose for now: withdrawals are tracked through the instance gateway RPC, not the shared
+// cluster pool, so it is not cluster-scoped yet. Do not copy this shape for a chain-touching
+// cron; use `scope: "cluster"`.
+//
+// The one Money Exit gated by a flag: the work cannot run without the private-channels gateway
+// configured, which is what `isPrivateChannelsEnabled` stands for. Pinned by the definitions
+// ratchet test.
+/** Private-channel withdrawal tracking. */
+export const pendingWithdrawalsCron = defineCron({
+  name: "track-pending-withdrawals",
+  schedule: "* * * * *",
+  scope: "global",
+  effect: "finishes",
+  enabled: isPrivateChannelsEnabled,
+  run: trackPendingWithdrawals,
+});

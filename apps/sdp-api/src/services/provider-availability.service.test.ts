@@ -1,5 +1,6 @@
 import { CUSTODY_PROVIDERS, type CustodyMode, type CustodyProvider } from "@sdp/types/custody";
 import {
+  COMPLIANCE_PROVIDERS,
   EARN_PROVIDERS,
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
@@ -351,7 +352,12 @@ describe("provider-availability.service", () => {
         enabled: false,
       });
     }
-    expect(onStable.providers.compliance).toEqual(onExperimental.providers.compliance);
+    for (const provider of COMPLIANCE_PROVIDERS) {
+      expect(onStable.providers.compliance[provider]).toEqual({
+        ...onExperimental.providers.compliance[provider],
+        enabled: false,
+      });
+    }
   });
 
   it("follows injected ramp provider stages", async () => {
