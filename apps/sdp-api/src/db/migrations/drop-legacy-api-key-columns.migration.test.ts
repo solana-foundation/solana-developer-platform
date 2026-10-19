@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ApiKeyStatus } from "@sdp/types/api-keys";
 import { Client } from "pg";
 import { expect, it } from "vitest";
 import { adminDatabaseUrl } from "@/test/helpers/env";
@@ -40,7 +41,7 @@ it("deactivates exactly the active keys that predate grants, then drops the lega
 
     await client.query(sql);
 
-    const { rows } = await client.query<{ id: string; status: string; revoked: boolean }>(
+    const { rows } = await client.query<{ id: string; status: ApiKeyStatus; revoked: boolean }>(
       "SELECT id, status, revoked_at IS NOT NULL AS revoked FROM api_keys ORDER BY id"
     );
     expect(rows).toEqual([
