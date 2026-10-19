@@ -423,7 +423,10 @@ export class ApiKeyService {
           FOR UPDATE`,
         [input.keyId, input.organizationId, input.projectId]
       );
-      const held = current ? parseGrantsColumn(current.grants) : [];
+      if (!current) {
+        throw notFound("API key");
+      }
+      const held = parseGrantsColumn(current.grants);
       assertApiKeyGrantsInReleaseChannel(
         input.grantChannel,
         input.grants.filter((grant) => !held.includes(grant))

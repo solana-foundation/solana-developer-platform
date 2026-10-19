@@ -4,10 +4,10 @@ import {
   type ActionVerb,
   API_KEY_GRANTABLE_ACTIONS,
   actionModuleOf,
-  actionOwnerOf,
   actionVerbOf,
   grantsCoverAction,
   isAction,
+  isActionInReleaseChannel,
   isInEverythingGrant,
   normalizeGrants,
 } from "@sdp/types/actions";
@@ -58,10 +58,9 @@ export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
 export function grantableActionsInChannel(
   isModuleInChannel: (module: SdpModule) => boolean
 ): Action[] {
-  return API_KEY_GRANTABLE_ACTIONS.filter((action) => {
-    const owner = actionOwnerOf(action);
-    return owner === "core" || isModuleInChannel(owner);
-  });
+  return API_KEY_GRANTABLE_ACTIONS.filter((action) =>
+    isActionInReleaseChannel(action, isModuleInChannel)
+  );
 }
 
 /** One picker row: a module and the verbs a key may be granted on it here. */
