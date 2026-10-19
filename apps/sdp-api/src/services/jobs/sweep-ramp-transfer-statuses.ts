@@ -50,30 +50,31 @@ export const RAMP_ABANDONMENT_HORIZON_MS = {
   stripe: { onramp: 24 * HOUR_MS, offramp: 24 * HOUR_MS },
 } as const satisfies Record<RampProviderId, Record<RampTransferType, number>>;
 
-/** What one pulled event came to: the processor's result, or skipped as no news. */
-type RampStatusPullOutcome = RampWebhookProcessResult | { outcome: "skipped" };
+/**
+ * What one pulled event came to: the processor's result, skipped as no news, or
+ * held because the provider reported a status SDP cannot read.
+ */
+type RampStatusPullOutcome =
+  | RampWebhookProcessResult
+  | { outcome: "skipped" }
+  | { outcome: "unmapped"; status: string };
 
 /** Asks one provider about one transfer and applies each event as its webhook would. */
 type RampStatusPull = (
   ctx: RampRuntimeContext,
   env: Env,
   environment: SdpEnvironment,
-  lookup: RampTransferLookup,
-  status: PaymentTransferStatus
+  lookup: RampTransferLookup
 ) => Promise<RampStatusPullOutcome[]>;
 
 /**
  * Whether a pulled event only repeats that the customer has not paid. An untimed
- * provider (Stripe) reports that on every pull with no way to tell it is old
- * news, so it moves only a row that has not reached checkout yet: re-applying it
- * would restart the abandonment clock, or revive an expired checkout, forever.
+ * provider (Stripe) reports that on every pull with no way to tell when it
+ * became true, so it never counts as activity: applying it would restart the
+ * abandonment clock, or revive an expired checkout, on every pull.
  */
-function isUntimedNoNews(event: RampSettlementEvent, status: PaymentTransferStatus): boolean {
-  return (
-    event.kind === "awaiting_payment" &&
-    event.providerObservedAt === undefined &&
-    status !== "pending"
-  );
+function isUntimedNoNews(event: RampSettlementEvent): boolean {
+  return event.kind === "awaiting_payment" && event.providerObservedAt === undefined;
 }
 
 /**
@@ -89,14 +90,16 @@ function statusPull<Event extends RampSettlementEvent>(
   },
   processor: WebhookProcessor<Event>
 ): RampStatusPull {
-  return async (ctx, env, environment, lookup, status) => {
+  return async (ctx, env, environment, lookup) => {
     const outcomes: RampStatusPullOutcome[] = [];
     for (const event of await client.fetchTransferStatus(ctx, lookup)) {
-      outcomes.push(
-        isUntimedNoNews(event, status)
-          ? { outcome: "skipped" }
-          : await processor.process(env, environment, event)
-      );
+      if (event.kind === "ignore" && event.unmappedStatus !== undefined) {
+        outcomes.push({ outcome: "unmapped", status: event.unmappedStatus });
+      } else if (isUntimedNoNews(event)) {
+        outcomes.push({ outcome: "skipped" });
+      } else {
+        outcomes.push(await processor.process(env, environment, event));
+      }
     }
     return outcomes;
   };
@@ -118,6 +121,8 @@ export interface RampStatusSweepResult {
   failed: number;
   /** Events the settlement guard refused or could not match. */
   refused: number;
+  /** Events in a provider status SDP has no mapping for: held, never expired. */
+  unmapped: number;
 }
 
 /** The string values of the process env, which is where provider credentials live. */
@@ -129,8 +134,8 @@ function providerEnv(env: Env): Record<string, string> {
 
 /**
  * Whether SDP should now call a checkout abandoned: still waiting on the
- * customer, nothing this pull said counts as activity or needs an operator, and
- * no provider activity for the provider's horizon.
+ * customer, nothing this pull said counts as activity, needs an operator, or is
+ * a status SDP cannot read, and no provider activity for the provider's horizon.
  */
 function isAbandoned(
   provider: RampProviderId,
@@ -191,8 +196,7 @@ async function pullTransfer(
       { env: credentials, mode: environment },
       env,
       environment,
-      { transferId: transfer.id, rampType, providerReference: transfer.provider_reference },
-      transfer.status
+      { transferId: transfer.id, rampType, providerReference: transfer.provider_reference }
     );
   } catch (error) {
     result.failed += 1;
@@ -221,6 +225,17 @@ async function pullTransfer(
         environment,
         outcome: outcome.outcome,
         reason: outcome.reason,
+      });
+    }
+    if (outcome.outcome === "unmapped") {
+      result.unmapped += 1;
+      logEvent("warn", {
+        event: "sdp_api_ramp_status_pull_unmapped",
+        flow: "ramp-settlement",
+        provider,
+        transfer_id: transfer.id,
+        environment,
+        provider_status: outcome.status,
       });
     }
   }
@@ -279,6 +294,7 @@ async function sweepProvider(
     expired: 0,
     failed: 0,
     refused: 0,
+    unmapped: 0,
   };
   // SDP holds sandbox keys only: production rows wait for project credentials
   // (HOO-1942, HOO-1943) and are neither pulled nor expired until then.

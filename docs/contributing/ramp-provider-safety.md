@@ -61,8 +61,9 @@ contract; this document defines the money movement acceptance gate.
   webhook processor. A failed pull or a refused event is never absence.
 - SDP expires a checkout itself, from `pending` or `awaiting_payment` only,
   once the provider's abandonment horizon passes with no provider activity,
-  and only while the row is unchanged since the sweep read it. An expired
-  off-ramp withdraws its deposit instruction. Only provider progress revives an
+  and only while the row is unchanged since the sweep read it. A provider
+  status the mapping does not know (`unmappedStatus`) holds the transfer for
+  review instead. An expired off-ramp withdraws its deposit instruction. Only provider progress revives an
   expired transfer, so a provider's repeated "not paid yet" without an
   ordering field never counts as activity.
 - Keep retries idempotent and bounded. A worker that reads the chain runs per

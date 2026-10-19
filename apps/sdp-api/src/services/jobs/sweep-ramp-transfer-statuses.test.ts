@@ -303,6 +303,40 @@ describe("sweepRampTransferStatuses", () => {
     expect(sale.provider_data.cryptoDeposit).toBeNull();
   });
 
+  it("expires a long-quiet checkout whose session only says it is unpaid", async () => {
+    await seedTransfer({ id: "xfr_never_paid", provider: "stripe", reference: "cos_never_paid" });
+    answer(
+      "/v1/crypto/onramp_sessions/cos_never_paid",
+      200,
+      session("cos_never_paid", "requires_payment", {})
+    );
+
+    const results = await sweep();
+
+    expect(resultFor(results, "stripe")).toMatchObject({ polled: 1, applied: 0, expired: 1 });
+    expect((await row("xfr_never_paid")).status).toBe("expired");
+  });
+
+  it("holds a checkout whose provider reports a status SDP cannot map", async () => {
+    await seedTransfer({ id: "xfr_unmapped_buy", provider: "moonpay" });
+    answer("/v1/transactions/ext/xfr_unmapped_buy", 200, [
+      buy("xfr_unmapped_buy", { status: "refunded" }),
+    ]);
+    await seedTransfer({ id: "xfr_unmapped_session", provider: "stripe", reference: "cos_paused" });
+    answer(
+      "/v1/crypto/onramp_sessions/cos_paused",
+      200,
+      session("cos_paused", "fulfillment_paused", {})
+    );
+
+    const results = await sweep();
+
+    expect(resultFor(results, "moonpay")).toMatchObject({ polled: 1, unmapped: 1, expired: 0 });
+    expect(resultFor(results, "stripe")).toMatchObject({ polled: 1, unmapped: 1, expired: 0 });
+    expect((await row("xfr_unmapped_buy")).status).toBe("pending");
+    expect((await row("xfr_unmapped_session")).status).toBe("pending");
+  });
+
   it("keeps a checkout open inside its horizon and leaves webhooks their grace", async () => {
     await seedTransfer({ id: "xfr_recent", provider: "moonpay", updatedAt: minutesAgo(60) });
     await seedTransfer({ id: "xfr_in_flight", provider: "moonpay", updatedAt: minutesAgo(2) });

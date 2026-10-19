@@ -6,6 +6,8 @@ import { providerResponseIssues } from "#/ramps/fetch";
 import type { RampSettlementEvent } from "#/ramps/types";
 
 const STRIPE_SESSION_STATUS = {
+  // Known, but no settlement news: the customer has not started checkout.
+  initialized: "ignore",
   requires_payment: "awaiting_payment",
   fulfillment_processing: "settling",
   fulfillment_complete: "settled",
@@ -84,9 +86,17 @@ export function stripeSessionSettlementEvent(
   session: StripeOnrampSessionStatus
 ): RampSettlementEvent {
   if (!isTrackedStripeSessionStatus(session.status)) {
-    return { provider: "stripe", kind: "ignore", reason: `unsupported_status:${session.status}` };
+    return {
+      provider: "stripe",
+      kind: "ignore",
+      reason: `unsupported_status:${session.status}`,
+      unmappedStatus: session.status,
+    };
   }
   const kind = STRIPE_SESSION_STATUS[session.status];
+  if (kind === "ignore") {
+    return { provider: "stripe", kind, reason: `untracked_status:${session.status}` };
+  }
   const reference = session.id;
   if (kind === "failed") {
     return { provider: "stripe", kind, reference, error: "Stripe rejected the on-ramp session." };

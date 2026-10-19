@@ -146,6 +146,7 @@ export function moonpayTransactionSettlementEvent(
       provider: "moonpay",
       kind: "ignore",
       reason: `unsupported_status:${data.status}`,
+      unmappedStatus: data.status,
     };
   }
   const kind = MOONPAY_TRANSACTION_STATUS[data.status as keyof typeof MOONPAY_TRANSACTION_STATUS];
@@ -263,6 +264,7 @@ export function moonpaySellTransactionSettlementEvent(
       provider: "moonpay",
       kind: "ignore",
       reason: `unsupported_status:${data.status}`,
+      unmappedStatus: data.status,
     };
   }
   const kind =

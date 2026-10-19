@@ -113,6 +113,10 @@ minutes) asks the provider instead:
   nor was refused, and an unchanged row. An untimed "not paid yet" (no
   `providerObservedAt`) never counts as activity: it neither resets the horizon
   nor revives an expired checkout.
+- Set `unmappedStatus` on the `ignore` event for a provider status your mapping
+  does not know, so the sweep holds that checkout instead of expiring it. A
+  known status SDP deliberately ignores (Stripe's `initialized`) leaves it
+  unset.
 - Rows SDP holds no credentials for (production, until projects bring their
   own) are skipped, never expired. A release channel that hides the provider
   does not stop the sweep.

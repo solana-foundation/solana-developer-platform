@@ -88,9 +88,17 @@ describe("StripeRampClient.fetchTransferStatus", () => {
         error: "Stripe rejected the on-ramp session.",
       },
     ]);
-    for (const status of ["initialized", "toString"]) {
+    assert.deepEqual(await eventsFor("initialized", STRIPE_SESSION_TERMS), [
+      { provider: "stripe", kind: "ignore", reason: "untracked_status:initialized" },
+    ]);
+    for (const status of ["fulfillment_paused", "toString"]) {
       assert.deepEqual(await eventsFor(status, STRIPE_SESSION_TERMS), [
-        { provider: "stripe", kind: "ignore", reason: `unsupported_status:${status}` },
+        {
+          provider: "stripe",
+          kind: "ignore",
+          reason: `unsupported_status:${status}`,
+          unmappedStatus: status,
+        },
       ]);
     }
   });
