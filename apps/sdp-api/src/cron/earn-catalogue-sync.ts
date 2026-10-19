@@ -75,8 +75,9 @@ const EARN_CATALOGUE_SYNC_SLOT_KEY = "cron:earn-catalogue-sync:slot";
 // deadline. A pass is a handful of catalogue GETs (seconds today), so ten
 // minutes is generous headroom while staying far under the slot TTL — a run
 // can therefore never still be syncing when its token expires and a newer run
-// takes over. On the deadline the run fails loudly and releases its (provably
-// still owned) claim.
+// takes over. On the deadline the run fails loudly but keeps its claim: nothing
+// can cancel the sync still running underneath, so the claim is released only
+// once that sync settles (and only if it failed).
 export const EARN_CATALOGUE_SYNC_DEADLINE_SECONDS = 600;
 
 // The catalogue is platform-global but environment-scoped (sandbox rows carry
@@ -628,11 +629,14 @@ export type EarnCatalogueSyncOutcome = "synced" | "skipped";
  * One catalogue sync if this hourly window has not had one: claim the slot, then sync. A run
  * that loses the claim skips.
  *
- * A failed or deadline-exceeded sync releases the slot, so the next run retries instead of
- * waiting out the hour, and rethrows: syncEarnCatalogue already degrades per provider and per
- * row, so anything escaping it is infrastructure-level. The release is compareAndDelete on this
- * run's claim token, so it atomically no-ops if a newer run has taken the slot over; the sync
- * deadline (far under the claim expiry) guarantees that never happens while a sync still runs.
+ * A failed sync releases the slot before rethrowing, so the next run retries instead of waiting
+ * out the hour: syncEarnCatalogue already degrades per provider and per row, so anything escaping
+ * it is infrastructure-level. A sync past its deadline rethrows WITHOUT releasing: the deadline
+ * only stops waiting, the sync itself keeps running in this long-lived Worker, and freeing the
+ * slot would let the next run sync beside it and delist rows from a newer snapshot. Its claim is
+ * released once the sync settles with a failure, or expires with the token. The release is
+ * compareAndDelete on this run's claim token, so it atomically no-ops if a newer run has taken
+ * the slot over.
  *
  * @param env - Process environment.
  * @returns Whether this run synced or found the window's slot already claimed.
@@ -644,26 +648,43 @@ export async function runEarnCatalogueSyncIfDue(env: Env): Promise<EarnCatalogue
     return "skipped";
   }
 
+  const sync = syncEarnCatalogue(env);
+  const releasedAfterFailure = sync.then(
+    () => undefined,
+    () => releaseEarnCatalogueSyncSlot(cache, claimToken)
+  );
   try {
-    await withSyncDeadline(syncEarnCatalogue(env));
+    await withSyncDeadline(sync);
   } catch (err) {
-    try {
-      // Atomic owner check and delete in one step: no-ops unless the slot
-      // still holds this run's token, so a newer run's takeover can never be
-      // cancelled from here.
-      await cache.compareAndDelete(EARN_CATALOGUE_SYNC_SLOT_KEY, claimToken);
-    } catch (releaseErr) {
-      // Log-and-continue: a release failure must never mask the sync error,
-      // and the token's embedded expiry bounds the damage to one skipped
-      // window.
-      getLogger().error(
-        { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
-        "syncEarnCatalogue: failed to release hourly slot after sync failure"
-      );
+    if (!(err instanceof EarnCatalogueSyncDeadlineError)) {
+      await releasedAfterFailure;
     }
     throw err;
   }
   return "synced";
+}
+
+/**
+ * Release this run's claim on the hourly slot.
+ *
+ * Atomic owner check and delete in one step: no-ops unless the slot still holds this run's
+ * token, so a newer run's takeover can never be cancelled from here. Log-and-continue: a release
+ * failure must never mask the sync error, and the token's embedded expiry bounds the damage to
+ * one skipped window.
+ *
+ * @param cache - The KV store holding the slot.
+ * @param claimToken - The token this run claimed the slot with.
+ * @returns Resolves once the release was attempted; never rejects.
+ */
+async function releaseEarnCatalogueSyncSlot(cache: KVStore, claimToken: string): Promise<void> {
+  try {
+    await cache.compareAndDelete(EARN_CATALOGUE_SYNC_SLOT_KEY, claimToken);
+  } catch (releaseErr) {
+    getLogger().error(
+      { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
+      "syncEarnCatalogue: failed to release hourly slot after sync failure"
+    );
+  }
 }
 
 /**
@@ -695,19 +716,25 @@ export const earnCatalogueSyncCron = defineCron({
   runOnStart: true,
 });
 
+/** A sync that outlived `EARN_CATALOGUE_SYNC_DEADLINE_SECONDS`; it is still running underneath. */
+export class EarnCatalogueSyncDeadlineError extends Error {
+  readonly code = "EARN_CATALOGUE_SYNC_DEADLINE_EXCEEDED";
+
+  constructor() {
+    super(`earn catalogue sync exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`);
+    this.name = "EarnCatalogueSyncDeadlineError";
+  }
+}
+
 // Rejects when the sync outlives its deadline, enforcing the lease-validity
-// invariant above. The losing promise is not cancelled: the slot is released
-// and later runs are free to claim it. The timer is unref'd/cleared so a fast
-// pass neither leaks it nor holds the process open.
+// invariant above. The losing promise is not cancelled, which is why the
+// caller keeps the claim until it settles. The timer is unref'd/cleared so a
+// fast pass neither leaks it nor holds the process open.
 async function withSyncDeadline<T>(sync: Promise<T>): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(
-        new Error(
-          `earn catalogue sync exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`
-        )
-      );
+      reject(new EarnCatalogueSyncDeadlineError());
     }, EARN_CATALOGUE_SYNC_DEADLINE_SECONDS * 1000);
     timer.unref();
   });
