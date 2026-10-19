@@ -340,6 +340,8 @@ export interface StubTokenAccount {
   amount: string;
   decimals: number;
   uiAmountString: string;
+  /** Set to answer with the account's state, as a real node always does. */
+  state?: "initialized" | "frozen";
 }
 
 /**
@@ -367,6 +369,7 @@ export function tokenAccountsByOwnerResult(
                 decimals: tokenAccount.decimals,
                 uiAmountString: tokenAccount.uiAmountString,
               },
+              ...(tokenAccount.state === undefined ? {} : { state: tokenAccount.state }),
             },
           },
         },

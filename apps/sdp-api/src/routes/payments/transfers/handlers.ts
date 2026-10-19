@@ -8,7 +8,7 @@ import {
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import {
   isRampTransferType,
   isSuccessfulPaymentTransferStatus,
@@ -73,7 +73,13 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
-import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
+import {
+  buildSplTransferInstructions,
+  resolveMintTokenProgram,
+  resolveSourceTokenAccount,
+  resolveTokenLabel,
+  type SplTransferSource,
+} from "@/routes/payments/token-accounts";
 import {
   admitPaymentWalletRuntimeExecution,
   assertPaymentWalletReadAccess,
@@ -234,6 +240,54 @@ function getRampCryptoDeposit(transfer: TransferRow) {
   return result.success ? result.data : null;
 }
 
+/**
+ * Refuses a token deposit the source wallet cannot send now. It runs before
+ * the claim: a send that fails after it fails the sale for good, while this
+ * refusal leaves it awaiting payment for a retry.
+ *
+ * @returns The source it read, which the send reuses; undefined for SOL.
+ */
+async function assertRampDepositFunded(
+  transfer: TransferRow,
+  operation: OutboundPaymentOperation
+): Promise<SplTransferSource | undefined> {
+  if (isNativePaymentToken(operation.token)) return undefined;
+  const rpc = createClusterRpc();
+  const mint = assertValidAddress(operation.token, "token");
+  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+  const source = await resolveSourceTokenAccount(
+    rpc,
+    address(operation.sourceWallet.publicKey),
+    mint,
+    tokenProgram
+  );
+  const needed = parseDecimalAmount(operation.amount, source.decimals);
+  if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram };
+
+  const token = resolveTokenLabel(mint);
+  const held = formatDecimalAmount(source.amount, source.decimals);
+  const neededAmount = formatDecimalAmount(needed, source.decimals);
+  logEvent("info", {
+    event: "sdp_api_ramp_deposit_refused",
+    reason: source.frozen ? "account_frozen" : "insufficient_balance",
+    provider: transfer.provider,
+    organization_id: transfer.organization_id,
+    project_id: transfer.project_id,
+    transfer_id: transfer.id,
+    token_mint: mint,
+    held,
+    needed: neededAmount,
+  });
+  if (source.frozen) {
+    throw accountFrozen(`Source wallet's ${token} account is frozen`);
+  }
+  throw new AppError(
+    "INSUFFICIENT_TOKEN_BALANCE",
+    `Source wallet holds ${held} ${token}; this deposit needs ${neededAmount} ${token}`,
+    { held, needed: neededAmount }
+  );
+}
+
 async function updateOnchainTransferForRamp(
   c: AppContext,
   input: {
@@ -244,7 +298,7 @@ async function updateOnchainTransferForRamp(
     destinationAddress: string;
     idempotency: { key: string; fingerprint: string } | null;
   }
-): Promise<TransferRow> {
+): Promise<{ row: TransferRow; splSource: SplTransferSource | undefined }> {
   const { existing, scope, operation, destinationAddress } = input;
   const tenant = {
     transferId: existing.id,
@@ -277,6 +331,7 @@ async function updateOnchainTransferForRamp(
   if (existing.status !== "awaiting_payment") {
     throw conflict(`Ramp transfer is no longer awaiting payment (status: ${existing.status})`);
   }
+  const splSource = await assertRampDepositFunded(existing, operation);
 
   const db = getDb(c.env);
   const updated = await createPostgresPaymentsRepository(
@@ -297,7 +352,7 @@ async function updateOnchainTransferForRamp(
   if (!updated) {
     throw conflict("Ramp transfer already has an on-chain transaction");
   }
-  return updated;
+  return { row: updated, splSource };
 }
 
 /**
@@ -660,7 +715,8 @@ async function executeSplTransfer(
   destinationAddress: Address,
   mintAddress: Address,
   amount: string,
-  submissionStore: SignedSubmissionStore
+  submissionStore: SignedSubmissionStore,
+  source: SplTransferSource | undefined
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   return executeSponsoredTransfer(c, {
     sourceWallet,
@@ -673,6 +729,7 @@ async function executeSplTransfer(
           mint: mintAddress,
           amount,
           ataRentPayer: feePayer,
+          source,
         });
       return [createDestinationAtaInstruction, transferInstruction];
     },
@@ -778,17 +835,17 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const idempotency =
     recordKey !== undefined && fingerprint !== undefined ? { key: recordKey, fingerprint } : null;
 
-  const { row: transfer, replayed } = rampTransfer
-    ? {
-        row: await updateOnchainTransferForRamp(c, {
-          existing: rampTransfer,
-          scope,
-          operation,
-          destinationAddress: body.destination,
-          idempotency,
-        }),
-        replayed: false,
-      }
+  const rampClaim = rampTransfer
+    ? await updateOnchainTransferForRamp(c, {
+        existing: rampTransfer,
+        scope,
+        operation,
+        destinationAddress: body.destination,
+        idempotency,
+      })
+    : null;
+  const { row: transfer, replayed } = rampClaim
+    ? { row: rampClaim.row, replayed: false }
     : await createTransferRecord(c, {
         organizationId: scope.auth.organizationId,
         projectId: requireProjectId(c),
@@ -875,7 +932,8 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       operation.destinationAddress,
       mintAddress,
       operation.amount,
-      submissionStore
+      submissionStore,
+      rampClaim?.splSource
     );
 
     const updated = resolveTransferUpdateResult(
