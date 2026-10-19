@@ -46,7 +46,7 @@ export interface CreateSponsorshipReservationInput {
   network: SponsorshipNetwork;
   productEnvironment: "sandbox" | "production";
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   actorType: string;
   actorId: string;
   transactionDigest: string;
@@ -82,13 +82,13 @@ export interface SponsorshipLiveWindowReservation {
   attempt: number;
   reservedLamports: number;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
 }
 
 export interface SponsorshipReconciliationReservation extends SponsorshipReservation {
   network: SponsorshipNetwork;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   feePayer: string;
   providerConfigFingerprint: string;
   recentBlockhash: string;
@@ -157,7 +157,7 @@ export class SponsorshipBudgetRepository {
   async resolvePolicies(input: {
     network: SponsorshipNetwork;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
   }): Promise<SponsorshipBudgetPolicy[]> {
     const rows = await this.db.queryMany<PolicyRow>(
       `SELECT DISTINCT ON (scope_type) *
@@ -166,15 +166,13 @@ export class SponsorshipBudgetRepository {
          AND (
            (scope_type = 'global' AND scope_id IS NULL) OR
            (scope_type = 'organization' AND (scope_id = ? OR scope_id IS NULL)) OR
-           (scope_type = 'project' AND ?::text IS NOT NULL AND (scope_id = ? OR scope_id IS NULL))
+           (scope_type = 'project' AND (scope_id = ? OR scope_id IS NULL))
          )
        ORDER BY scope_type, (scope_id IS NOT NULL) DESC`,
-      [input.network, input.organizationId, input.projectId, input.projectId]
+      [input.network, input.organizationId, input.projectId]
     );
     const policies = rows.map(mapPolicy);
-    const requiredScopes: SponsorshipBudgetScopeType[] = input.projectId
-      ? ["global", "organization", "project"]
-      : ["global", "organization"];
+    const requiredScopes: SponsorshipBudgetScopeType[] = ["global", "organization", "project"];
     if (requiredScopes.some((scopeType) => !policies.some((row) => row.scopeType === scopeType))) {
       throw new Error("Sponsorship budget policy hierarchy is incomplete");
     }
@@ -505,14 +503,14 @@ export class SponsorshipBudgetRepository {
     input: {
       network: SponsorshipNetwork;
       organizationId: string;
-      projectId: string | null;
+      projectId: string;
       hourBucket: string;
       dayBucket: string;
     },
     executor: DatabaseExecutor = this.db,
     excludeReservationId?: string
   ): Promise<{ hour: SponsorshipBudgetUsage; day: SponsorshipBudgetUsage }> {
-    const params: Array<string | null> = [
+    const params: string[] = [
       input.hourBucket,
       input.hourBucket,
       input.organizationId,
@@ -534,10 +532,10 @@ export class SponsorshipBudgetRepository {
       `SELECT
          COALESCE(SUM(CASE WHEN hour_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_hour,
          COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS organization_hour,
-         COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_hour,
+         COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? AND project_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_hour,
          COALESCE(SUM(CASE WHEN day_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_day,
          COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS organization_day,
-         COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_day
+         COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? AND project_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_day
        FROM sponsorship_budget_reservations
        WHERE network = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)${
          excludeReservationId ? " AND id <> ?" : ""
@@ -570,14 +568,14 @@ export class SponsorshipBudgetRepository {
     hour: SponsorshipLiveWindowReservation[];
     day: SponsorshipLiveWindowReservation[];
   }> {
-    const params: Array<string | null> = [input.network, input.hourBucket, input.dayBucket];
+    const params: string[] = [input.network, input.hourBucket, input.dayBucket];
     if (excludeReservationId) params.push(excludeReservationId);
     const rows = await executor.queryMany<{
       id: string;
       attempt: number;
       reserved_lamports: number;
       organization_id: string;
-      project_id: string | null;
+      project_id: string;
       hour_bucket: string;
       day_bucket: string;
     }>(
@@ -610,7 +608,7 @@ export class SponsorshipBudgetRepository {
   async loadWindowAdmissionSnapshot(input: {
     network: SponsorshipNetwork;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     hourBucket: string;
     dayBucket: string;
     excludeReservationId?: string;
@@ -648,7 +646,7 @@ export class SponsorshipBudgetRepository {
       attempt: number;
       network: SponsorshipNetwork;
       organization_id: string;
-      project_id: string | null;
+      project_id: string;
       fee_payer: string;
       provider_config_fingerprint: string;
       recent_blockhash: string;

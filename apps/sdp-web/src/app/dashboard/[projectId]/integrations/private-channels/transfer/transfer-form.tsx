@@ -15,10 +15,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import {
+  MOVEMENT_READ_PATHS,
+  privateChannelTransferStatusOf,
+  settleWhenMovementFinal,
+} from "@/lib/dashboard-fetch";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import {
+  claimMovementKey,
+  movementAnswer,
   privateChannelTransferIdempotencyKeyStore,
   privateChannelTransferRequestFingerprint,
 } from "../value-movement-tracking";
@@ -361,18 +368,35 @@ function TransferFormState({
       mint: selectedToken?.mint,
     };
     const fingerprint = privateChannelTransferRequestFingerprint(requestPayload);
-    const idempotencyKey = privateChannelTransferIdempotencyKeyStore.claim(fingerprint);
+    const idempotencyKey = claimMovementKey(privateChannelTransferIdempotencyKeyStore, fingerprint);
+    if (idempotencyKey === null) {
+      // Nothing was sent, so the form must take the next press once storage
+      // works again.
+      submitting.current = false;
+      updateState({ error: t("Shared.idempotency.keyNotPersisted") });
+      return;
+    }
 
     startTransition(async () => {
       try {
         const result = await createTransferAction({ ...requestPayload, idempotencyKey });
-        applyIdempotencyKeyOutcome(
+        const settled = settleMoneyIdempotencyKey(
           privateChannelTransferIdempotencyKeyStore,
           fingerprint,
+          idempotencyKey,
           result.ok
-            ? { ok: true, status: 200, data: { kind: "transfer" } }
-            : { ok: false, status: result.kind === "server" ? result.status : 400 }
+            ? { ...movementAnswer(result), movementStatus: result.transfer.status }
+            : movementAnswer(result)
         );
+        if (result.ok && !settled) {
+          // Kept while the transfer has no verdict: retired once a read of it
+          // shows one, so an identical new transfer is not answered by this one.
+          settleWhenMovementFinal(
+            MOVEMENT_READ_PATHS.privateChannelTransfer(result.transfer.id),
+            () => privateChannelTransferIdempotencyKeyStore.release(fingerprint, idempotencyKey),
+            privateChannelTransferStatusOf
+          );
+        }
         if (result.ok) {
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });
           if (result.transfer.status === "failed") {
@@ -383,8 +407,10 @@ function TransferFormState({
             toast.success(t("DashboardPrivateChannels.transfer.confirmedToast"));
           } else {
             // `submitted`/`pending`: accepted but no execution verdict, so this must
-            // not be a success toast.
-            toast.warning(t("DashboardPrivateChannels.transfer.submittedToast"));
+            // not be a success toast. The key is kept until it has one (APE-593).
+            toast.warning(t("DashboardPrivateChannels.transfer.submittedToast"), {
+              description: t("Shared.idempotency.processingCheckStatus"),
+            });
           }
         } else if (result.kind === "server") {
           updateState({ error: result.message });

@@ -1,4 +1,6 @@
 import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment";
+import * as solanaRpc from "@sdp/rpc/solana";
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
 import {
   type Blockhash,
   compileTransaction,
@@ -10,17 +12,18 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
 import { type MoneyAdmissionFacts, MoneyMovementRefusedError } from "@/lib/money-admission";
+import { env as testEnv } from "@/test/helpers/env";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/sponsor-signing";
 import type { Env } from "@/types/env";
-import type { SponsorshipScope } from "./sponsorship.service";
-import { BudgetedFeePayment } from "./sponsorship-budget.service";
+import type { SponsorshipMovementScope } from "./sponsorship.service";
+import { BudgetedFeePayment, createKoraClusterRpc } from "./sponsorship-budget.service";
 
 const logEvent = vi.hoisted(() => vi.fn());
 // The real reader queries Postgres; the admission decision itself stays real.
@@ -38,7 +41,7 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
-const SCOPE: SponsorshipScope = {
+const SCOPE: SponsorshipMovementScope = {
   environment: "sandbox",
   organizationId: "org_1",
   projectId: "project_1",
@@ -50,6 +53,12 @@ const ACTIVE_SANDBOX: MoneyAdmissionFacts = {
   organizationStatus: "active",
   projectEnvironment: "sandbox",
   rawSettings: null,
+};
+
+const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = {
+  organizationStatus: "active",
+  projectEnvironment: "production",
+  rawSettings: JSON.stringify({ enableProductionProject: true }),
 };
 
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
@@ -85,7 +94,7 @@ function policy(
   };
 }
 
-function harness(scope: SponsorshipScope = SCOPE) {
+function harnessParts() {
   const repository = {
     resolvePolicies: vi
       .fn()
@@ -127,13 +136,23 @@ function harness(scope: SponsorshipScope = SCOPE) {
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
   const readAdmissionFacts = readMoneyAdmissionFacts.mockReset().mockResolvedValue(ACTIVE_SANDBOX);
-  const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
-    repository,
-    budgetRedis,
-    getNetworkFee: vi.fn().mockResolvedValue(5_000n),
-    now: () => new Date("2026-08-03T10:15:00.000Z"),
-  });
-  return { feePayment, provider, repository, budgetRedis, readAdmissionFacts };
+  return { provider, repository, budgetRedis, readAdmissionFacts };
+}
+
+function harness(scope: SponsorshipMovementScope = SCOPE) {
+  const parts = harnessParts();
+  const feePayment = new BudgetedFeePayment(
+    { SOLANA_NETWORK: "devnet" } as Env,
+    scope,
+    parts.provider,
+    {
+      repository: parts.repository,
+      budgetRedis: parts.budgetRedis,
+      getNetworkFee: vi.fn().mockResolvedValue(5_000n),
+      now: () => new Date("2026-08-03T10:15:00.000Z"),
+    }
+  );
+  return { feePayment, ...parts };
 }
 
 describe("BudgetedFeePayment", () => {
@@ -160,11 +179,9 @@ describe("BudgetedFeePayment", () => {
     expect(created).toBeLessThan(reserved);
   });
 
-  it("charges the scope's cluster network, not the process default", async () => {
-    // A mainnet Earn movement on a devnet-default process must reserve against
-    // the mainnet policies and record a mainnet reservation, or the devnet
-    // budget silently pays for mainnet and the mainnet breaker never sees it.
-    const { feePayment, repository } = harness({ ...SCOPE, cluster: "mainnet-beta" });
+  it("charges a production project's mainnet network, not the process default", async () => {
+    const { feePayment, repository } = harness({ ...SCOPE, environment: "production" });
+    readMoneyAdmissionFacts.mockResolvedValue(ACTIVE_ENTITLED_PRODUCTION);
     repository.resolvePolicies.mockResolvedValue([
       { ...policy("global"), network: "mainnet" },
       { ...policy("organization"), network: "mainnet" },
@@ -1062,5 +1079,91 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markReleased).toHaveBeenCalledWith(expect.any(String), 1, "stale rejection");
     expect(budgetRedis.settle).not.toHaveBeenCalled();
     expect(repository.markRedisSettled).not.toHaveBeenCalled();
+  });
+});
+
+describe("sponsorship network-fee preflight on each cluster's Kora RPC", () => {
+  const KORA_RPC_URLS = {
+    devnet: "https://kora-devnet-rpc.preflight.invalid",
+    "mainnet-beta": "https://kora-mainnet-rpc.preflight.invalid",
+  } as const satisfies Record<SolanaCluster, string>;
+  const koraRpcEnv: Env = {
+    ...testEnv,
+    KORA_DEVNET_RPC_URL: KORA_RPC_URLS.devnet,
+    KORA_MAINNET_RPC_URL: KORA_RPC_URLS["mainnet-beta"],
+  };
+
+  function productionFeePayment(env: Env) {
+    const parts = harnessParts();
+    readMoneyAdmissionFacts.mockResolvedValue(ACTIVE_ENTITLED_PRODUCTION);
+    parts.repository.resolvePolicies.mockResolvedValue([
+      { ...policy("global"), network: "mainnet" },
+      { ...policy("organization"), network: "mainnet" },
+      { ...policy("project"), network: "mainnet" },
+    ]);
+    const feePayment = new BudgetedFeePayment(
+      env,
+      { ...SCOPE, environment: "production" },
+      parts.provider,
+      {
+        repository: parts.repository,
+        budgetRedis: parts.budgetRedis,
+        now: () => new Date("2026-08-03T10:15:00.000Z"),
+      }
+    );
+    return { feePayment, ...parts };
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(SOLANA_CLUSTERS)("builds the %s Kora RPC from that cluster's own key", (cluster) => {
+    const createRpcSpy = vi.spyOn(solanaRpc, "createRpc");
+
+    createKoraClusterRpc(koraRpcEnv, cluster);
+
+    expect(createRpcSpy).toHaveBeenCalledExactlyOnceWith(koraRpcEnv, {
+      rpcUrl: KORA_RPC_URLS[cluster],
+    });
+  });
+
+  it("refuses a cluster whose Kora RPC is unset", () => {
+    const { KORA_MAINNET_RPC_URL: _mainnetRpcUrl, ...envWithoutMainnetRpc } = koraRpcEnv;
+
+    expect(() => createKoraClusterRpc(envWithoutMainnetRpc, "mainnet-beta")).toThrow(
+      new FeePaymentError(
+        "No Kora RPC is configured for mainnet-beta: set KORA_MAINNET_RPC_URL",
+        "PROVIDER_NOT_AVAILABLE"
+      )
+    );
+  });
+
+  it("prices a production scope's network fee on the mainnet Kora RPC", async () => {
+    const createRpcSpy = vi.spyOn(solanaRpc, "createRpc");
+    const getNetworkFeeSpy = vi
+      .spyOn(solanaRpc, "getTransactionNetworkFee")
+      .mockResolvedValue(5_000n);
+    const { feePayment } = productionFeePayment(koraRpcEnv);
+
+    await expect(feePayment.signAndSend(buildTransaction())).resolves.toBe("signature_1");
+
+    expect(createRpcSpy).toHaveBeenCalledExactlyOnceWith(koraRpcEnv, {
+      rpcUrl: KORA_RPC_URLS["mainnet-beta"],
+    });
+    expect(getNetworkFeeSpy).toHaveBeenCalledWith(
+      createRpcSpy.mock.results[0]?.value,
+      expect.any(Uint8Array)
+    );
+  });
+
+  it("refuses to sponsor a production scope before signing when the mainnet Kora RPC is unset", async () => {
+    const { KORA_MAINNET_RPC_URL: _mainnetRpcUrl, ...envWithoutMainnetRpc } = koraRpcEnv;
+    const { feePayment, provider } = productionFeePayment(envWithoutMainnetRpc);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+      message: "Sponsorship preflight is unavailable",
+    });
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
   });
 });

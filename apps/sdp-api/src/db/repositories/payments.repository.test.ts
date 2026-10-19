@@ -1,10 +1,16 @@
-import { NON_TERMINAL_RAMP_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types";
+import {
+  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  type PaymentTransferStatus,
+  SDP_ENVIRONMENTS,
+  type SdpEnvironment,
+  WALLET_TRANSFER_TYPES,
+} from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -234,6 +240,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         token: "SOL",
         amount: "1",
         initiatedByKeyId: "key_ramp_onchain",
+        idempotency: null,
         updatedAt: "2026-08-31T10:00:00.000Z",
       })
     ).resolves.toBeNull();
@@ -249,6 +256,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       token: "SOL",
       amount: "1",
       initiatedByKeyId: "key_ramp_onchain",
+      idempotency: null,
       updatedAt: "2026-08-31T10:00:00.000Z",
     });
 
@@ -287,6 +295,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         token: "SOL",
         amount: "1",
         initiatedByKeyId: "key_ramp_occupied",
+        idempotency: null,
         updatedAt: "2026-08-31T10:00:00.000Z",
       })
     ).resolves.toBeNull();
@@ -419,7 +428,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
     };
-    const providerData = { bvnk: {} };
+    const providerData = { moonpay: {} };
     const claimValue = { requestedAt: "2026-09-01T12:00:00.000Z" };
     const claimInput: Parameters<PaymentsRepository["claimTransferProviderData"]>[0] = {
       ...scope,
@@ -456,9 +465,9 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         type: "onramp",
         direction: "inbound",
         status: claimInput.expectedStatus,
-        provider: "bvnk",
+        provider: "moonpay",
         providerReference: scope.transferId,
-        deliveryMode: "manual_instructions",
+        deliveryMode: "hosted",
         fiatCurrency: "USD",
         fiatAmount: "25.00",
         providerData,
@@ -572,8 +581,15 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       transferId: transfer.id,
       provider: "moonpay" as const,
       providerReference: "moonpay-transaction-1",
+      environment: "sandbox" as const,
       updatedAt: "2026-08-31T11:00:00.000Z",
     };
+    await expect(
+      repo.setProviderReferenceIfEmpty({ ...input, environment: "production" })
+    ).resolves.toBeNull();
+    await expect(
+      repo.getTransferProjectEnvironment({ transferId: transfer.id, provider: "moonpay" })
+    ).resolves.toBe("sandbox");
     await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
@@ -590,7 +606,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await expect(
       repo.setProviderReferenceIfEmpty({
         ...input,
-        provider: "coinbase",
+        provider: "stripe",
       })
     ).resolves.toBeNull();
   });
@@ -638,29 +654,6 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     expect(updated).toBeNull();
     expect(await readStatus("xfr_guard_org")).toBe("awaiting_payment");
-  });
-
-  it("lets an organization-scoped repository read and update project transfers", async () => {
-    await seedTransfer({ id: "xfr_org_admin", status: "awaiting_payment" });
-    const scoped = createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: null })
-    );
-
-    await expect(
-      scoped.getTransferById({
-        transferId: "xfr_org_admin",
-        organizationId: TEST_ORG.id,
-        projectId: null,
-      })
-    ).resolves.toMatchObject({ id: "xfr_org_admin", project_id: TEST_PROJECT_ID });
-    await expect(
-      scoped.updateTransfer({
-        transferId: "xfr_org_admin",
-        status: "confirmed",
-        updatedAt: new Date().toISOString(),
-      })
-    ).resolves.toMatchObject({ id: "xfr_org_admin", status: "confirmed" });
   });
 
   it("does not transition a transfer scoped to another project", async () => {
@@ -1039,7 +1032,12 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     return repo;
   }
 
-  const listArgs = { organizationId: TEST_ORG.id, projectId: null, limit: 50, offset: 0 };
+  const listArgs = {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    limit: 50,
+    offset: 0,
+  };
 
   it("returns the mint rows and the symbol rows for one filter", async () => {
     const repo = await seedMixedForms();
@@ -1153,7 +1151,12 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     return repo;
   }
 
-  const listArgs = { organizationId: TEST_ORG.id, projectId: null, limit: 50, offset: 0 };
+  const listArgs = {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    limit: 50,
+    offset: 0,
+  };
 
   it("matches nothing for an empty allowlist instead of dropping the filter", async () => {
     const repo = await seedTwoWallets();
@@ -1226,4 +1229,77 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     );
     expect(denied).toEqual({ rows: [], total: 0 });
   });
+});
+
+describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
+  const PRODUCTION_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
+  const TRANSFER_ID_BY_ENVIRONMENT = {
+    sandbox: "xfr_job_sandbox",
+    production: "xfr_job_production",
+  } as const satisfies Record<SdpEnvironment, string>;
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await resetPaymentFixtures();
+    await seedUnreadPrivyWallet(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: PRODUCTION_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      custodyWalletId: "cwlt_payments_repo_production",
+      walletId: "wallet_payments_repo_production",
+      publicKey: "Production111",
+    });
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    await repo.createTransfer({
+      ...transferInput({ suffix: "job_sandbox" }),
+      signature: "sig_job_sandbox",
+    });
+    await repo.createTransfer({
+      ...transferInput({
+        suffix: "job_production",
+        custodyWalletId: "cwlt_payments_repo_production",
+        walletId: "wallet_payments_repo_production",
+      }),
+      projectId: PRODUCTION_PROJECT_ID,
+      signature: "sig_job_production",
+    });
+  });
+
+  it.each(SDP_ENVIRONMENTS)(
+    "selects only %s processing transfers for that environment's run",
+    async (environment) => {
+      const rows = await createPostgresPaymentsRepository(getDb(env)).listTransfersByStatus({
+        environment,
+        statuses: ["processing"],
+        types: WALLET_TRANSFER_TYPES,
+        hasSignature: true,
+        limit: 50,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([TRANSFER_ID_BY_ENVIRONMENT[environment]]);
+    }
+  );
+
+  it.each(SDP_ENVIRONMENTS)(
+    "polls only %s confirmed transfers for that environment's run",
+    async (environment) => {
+      const confirmedAt = new Date().toISOString();
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET status = 'confirmed', confirmed_at = ?")
+        .bind(confirmedAt)
+        .run();
+
+      const rows = await createPostgresPaymentsRepository(getDb(env)).listConfirmedTransfersToPoll({
+        environment,
+        confirmedAfter: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        limit: 50,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([TRANSFER_ID_BY_ENVIRONMENT[environment]]);
+    }
+  );
 });

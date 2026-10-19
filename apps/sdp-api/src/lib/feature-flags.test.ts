@@ -105,11 +105,32 @@ describe("isCustodyProviderAvailable", () => {
   const nonByokCustodyProviders = CUSTODY_PROVIDERS.filter(
     (provider) => !isByokCustodyProvider(provider)
   );
+  const nonPrivyCustodyProviders = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy");
+  const releaseChannelsBelowStable = SDP_RELEASE_CHANNEL_NAMES.filter(
+    (releaseChannel) => releaseChannel !== "stable"
+  );
 
-  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
-    it.each(CUSTODY_PROVIDERS)("offers Managed %s", (provider) => {
+  describe.each(releaseChannelsBelowStable)("on the %s release channel", (releaseChannel) => {
+    it.each(nonPrivyCustodyProviders)("offers Managed %s", (provider) => {
       expect(
         isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "managed")
+      ).toBe(true);
+    });
+  });
+
+  it.each(nonPrivyCustodyProviders)(
+    "refuses Managed %s on the stable release channel",
+    (provider) => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: "stable" }, provider, "managed")
+      ).toBe(false);
+    }
+  );
+
+  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
+    it("offers Managed privy", () => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, "privy", "managed")
       ).toBe(true);
     });
 
@@ -205,26 +226,26 @@ describe("isEarnHastraDexExitEnabled", () => {
 describe("isEarnVaultSponsorshipEnabled", () => {
   // Which clusters sponsor is configuration: the flag AND a paymaster for the
   // cluster. Opening mainnet is wiring its Kora in, never a code change.
-  const devnetOnly = {
+  const devnetOnly: Parameters<typeof isEarnVaultSponsorshipEnabled>[0] = {
     EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
     SOLANA_NETWORK: "devnet",
-    KORA_RPC_URL: "https://kora-devnet.example",
-  } as Env;
+    KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
+  };
 
   it("is off without the flag, whatever paymasters are configured", () => {
-    const env = { ...devnetOnly, EARN_VAULT_FEE_SPONSORSHIP_ENABLED: undefined } as Env;
+    const env = { ...devnetOnly, EARN_VAULT_FEE_SPONSORSHIP_ENABLED: undefined };
     expect(isEarnVaultSponsorshipEnabled(env, "devnet")).toBe(false);
   });
 
   it("sponsors only the clusters that have a paymaster", () => {
     expect(isEarnVaultSponsorshipEnabled(devnetOnly, "devnet")).toBe(true);
     expect(isEarnVaultSponsorshipEnabled(devnetOnly, "mainnet-beta")).toBe(false);
-    const both = { ...devnetOnly, KORA_RPC_URL_MAINNET: "https://kora-mainnet.example" } as Env;
+    const both = { ...devnetOnly, KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid" };
     expect(isEarnVaultSponsorshipEnabled(both, "mainnet-beta")).toBe(true);
   });
 
   it("limits the native fee payer to the process default cluster", () => {
-    const env = { ...devnetOnly, FEE_PAYMENT_PROVIDER: "native" } as Env;
+    const env = { ...devnetOnly, FEE_PAYMENT_PROVIDER: "native" as const };
     expect(isEarnVaultSponsorshipEnabled(env, "devnet")).toBe(true);
     expect(isEarnVaultSponsorshipEnabled(env, "mainnet-beta")).toBe(false);
   });
@@ -270,16 +291,16 @@ describe("release channels", () => {
 
   it("pins each custody (provider, mode) pair's stage", () => {
     expect(SDP_MANAGED_CUSTODY_PROVIDER_STAGES).toEqual({
-      local: "stable",
-      fireblocks: "stable",
+      local: "beta",
+      fireblocks: "beta",
       privy: "stable",
-      coinbase_cdp: "stable",
-      para: "stable",
-      turnkey: "stable",
-      dfns: "stable",
-      ibm_haven: "stable",
-      anchorage: "stable",
-      utila: "stable",
+      coinbase_cdp: "beta",
+      para: "beta",
+      turnkey: "beta",
+      dfns: "beta",
+      ibm_haven: "beta",
+      anchorage: "beta",
+      utila: "beta",
     });
     expect(SDP_BYOK_CUSTODY_PROVIDER_STAGES).toEqual({ privy: "stable" });
   });
@@ -294,16 +315,14 @@ describe("release channels", () => {
   );
 
   it("runs ramps only where at least one ramp provider is in the release channel", () => {
-    const bvnkInBeta: SdpRampProviderStages = {
+    const stripeInBeta: SdpRampProviderStages = {
       moonpay: "experimental",
-      bvnk: "beta",
-      coinbase: "experimental",
-      stripe: "experimental",
+      stripe: "beta",
     };
-    expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);
-    expect(isModuleInReleaseChannel("stable", "ramps", bvnkInBeta)).toBe(false);
-    expect(isRampProviderInReleaseChannel("beta", "bvnk", bvnkInBeta)).toBe(true);
-    expect(isRampProviderInReleaseChannel("beta", "moonpay", bvnkInBeta)).toBe(false);
+    expect(isModuleInReleaseChannel("beta", "ramps", stripeInBeta)).toBe(true);
+    expect(isModuleInReleaseChannel("stable", "ramps", stripeInBeta)).toBe(false);
+    expect(isRampProviderInReleaseChannel("beta", "stripe", stripeInBeta)).toBe(true);
+    expect(isRampProviderInReleaseChannel("beta", "moonpay", stripeInBeta)).toBe(false);
   });
 
   it("keeps release-channel-excluded modules off in stable even with every flag on", () => {

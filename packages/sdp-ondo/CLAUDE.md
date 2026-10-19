@@ -21,14 +21,19 @@ price accrues Treasury yield. So:
 - **Exchange rate** = the live market price, which is why BOTH builders require
   an explicit slippage floor and both quote capabilities exist to derive one.
 
-**The primary mint/redeem facility is deliberately not used** (PRO-1803,
-measured 2026-09-02): fresh primary mints carry a 40–50 day Reg S transfer
-lockup and sub-$100k primary redemptions wait out that window — incompatible
-with on-demand exits. Using the secondary market instead is what makes this
+**The primary mint/redeem facility is deliberately not used** (PRO-1803): it
+needs Ondo onboarding, and Ondo's docs list its on-chain entry point
+(`USDY_InstantManager`) on Ethereum, BNB Chain and Tempo, not Solana. Using the
+secondary market instead is what makes this
 provider keyless. Ondo's credentialed GM API (`api.gm.ondo.finance`, staging
 `api.gm-staging.ondo.finance` — staging also runs ON MAINNET with different
 mints) remains available for a later live-metrics capability or a large-size
 redemption backstop; both need Ondo onboarding (API key + KYC + allowlisting).
+
+Do not cite a primary-mint lockup duration or the $100,000 early-redemption
+threshold: Ondo's docs state neither (re-checked 2026-10-15). Both came from a
+USDY FAQ Ondo has since retired; `docs/earn/ondo-catalogue-inventory.md` has
+the record.
 
 ## The rate comes from Ondo's public assets API, keyless (PRO-1833)
 

@@ -28,6 +28,24 @@ describe("buildSnippets", () => {
     expect(py.endsWith("})")).toBe(true);
   });
 
+  it("gives every write its own Idempotency-Key in each language, and a read none", () => {
+    for (const method of ["POST", "PATCH", "DELETE"]) {
+      const { curl, ts, py } = buildSnippets({ method, url: URL, body: null });
+      expect(curl).toBe(
+        `curl -X ${method} '${URL}' \\\n  -H "Authorization: Bearer $SDP_API_KEY" \\\n  -H "Idempotency-Key: $(uuidgen)"`
+      );
+      expect(ts).toContain('    "Idempotency-Key": crypto.randomUUID()');
+      expect(py.startsWith("import os, requests, uuid\n")).toBe(true);
+      expect(py).toContain('"Idempotency-Key": str(uuid.uuid4())');
+    }
+    const write = buildSnippets({ method: "POST", url: URL, body: { label: "Ops" } });
+    expect(write.curl).toContain(
+      '  -H "Idempotency-Key: $(uuidgen)" \\\n  -H "Content-Type: application/json" \\'
+    );
+    const read = buildSnippets({ method: "GET", url: URL, body: null });
+    expect(`${read.curl}${read.ts}${read.py}`).not.toMatch(/Idempotency-Key|uuid/);
+  });
+
   it("keeps a single quote in the body from ending curl's shell string", () => {
     const { curl } = buildSnippets({ method: "POST", url: URL, body: { label: "Ana's wallet" } });
     expect(curl).toContain(`"label": "Ana'\\''s wallet"`);

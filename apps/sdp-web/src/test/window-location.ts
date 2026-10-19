@@ -12,7 +12,21 @@ export function setWindowPathname(pathname: string): void {
     window.history.replaceState(null, "", pathname);
     return;
   }
-  vi.stubGlobal("window", { location: { pathname } });
+  // A browser tab has session storage; the dashboard keeps its per-action
+  // Idempotency-Keys there, and refuses money movements without it.
+  const entries = new Map<string, string>();
+  vi.stubGlobal("window", {
+    location: { pathname },
+    sessionStorage: {
+      getItem: (name: string) => entries.get(name) ?? null,
+      setItem: (name: string, value: string) => {
+        entries.set(name, value);
+      },
+      removeItem: (name: string) => {
+        entries.delete(name);
+      },
+    },
+  });
 }
 
 /** Undoes {@link setWindowPathname}; call from `afterEach`. */

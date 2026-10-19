@@ -1,14 +1,10 @@
 "use client";
 
-import {
-  BVNK_FUNDING_WALLET_STATUSES,
-  type BvnkFundingWalletStatus,
-  type CounterpartyProviderAccount,
-  type CounterpartyProviderCustomerLink,
-  type CounterpartyProviderCustomerLinkAgreement,
-  type PersistedRampProviderId,
+import type {
+  CounterpartyProviderAccount,
+  CounterpartyProviderCustomerLink,
+  PersistedRampProviderId,
 } from "@sdp/types";
-import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { StatusText, type StatusTone } from "@/components/ui/status-text";
@@ -22,9 +18,8 @@ import {
 } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
-import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
 import { toTitleCase } from "../../activity-format-utils";
-import { formatDisplayAmount, formatTimestamp } from "../payments-overview.utils";
+import { formatDisplayAmount } from "../payments-overview.utils";
 
 const PROVIDER_ACCOUNT_STATUS_TONE: ReadonlyMap<string, StatusTone> = new Map([
   ["active", "positive"],
@@ -37,11 +32,6 @@ const PROVIDER_ACCOUNT_STATUS_TONE: ReadonlyMap<string, StatusTone> = new Map([
   ["rejected", "critical"],
 ]);
 
-const FUNDING_WALLET_STATUS_LABEL_KEY = {
-  provisioning_funding_wallet: "DashboardPayments.counterparty.providerAccountWalletProvisioning",
-  provisioned_funding_wallet: "DashboardPayments.counterparty.providerAccountWalletActive",
-} as const satisfies Record<BvnkFundingWalletStatus, string>;
-
 /** The table's columns, left to right, as the message keys of their headers. */
 const PROVIDER_ACCOUNT_COLUMN_KEYS = [
   "DashboardPayments.counterparty.detail.provider",
@@ -50,10 +40,6 @@ const PROVIDER_ACCOUNT_COLUMN_KEYS = [
   "DashboardPayments.counterparty.detail.account",
   "DashboardPayments.counterparty.detail.status",
 ] as const;
-
-function isBvnkFundingWalletStatus(value: string): value is BvnkFundingWalletStatus {
-  return BVNK_FUNDING_WALLET_STATUSES.some((status) => status === value);
-}
 
 /**
  * Picks the status to display for a provider account: the provider's own status when one
@@ -73,14 +59,9 @@ function providerAccountStatus(
  * the known settled/failed set reads as still in progress.
  */
 function ProviderAccountStatus({ status }: { status: string }) {
-  const t = useTranslations();
   const tone = PROVIDER_ACCOUNT_STATUS_TONE.get(status.toLowerCase());
   return (
-    <StatusText tone={tone === undefined ? "attention" : tone}>
-      {isBvnkFundingWalletStatus(status)
-        ? t(FUNDING_WALLET_STATUS_LABEL_KEY[status])
-        : toTitleCase(status)}
-    </StatusText>
+    <StatusText tone={tone === undefined ? "attention" : tone}>{toTitleCase(status)}</StatusText>
   );
 }
 
@@ -169,14 +150,7 @@ function CustomerLinkCells({ link }: { link: CounterpartyProviderCustomerLink | 
   return (
     <>
       <TableCell className="text-body text-secondary">
-        {link?.provider === "bvnk" ? (
-          <span title={t("DashboardPayments.counterparty.taxResidence")}>
-            <span aria-hidden="true">{regionFlagEmoji(link.residenceCountryCode)}</span>{" "}
-            {link.residenceCountryCode}
-          </span>
-        ) : (
-          <Missing />
-        )}
+        <Missing />
       </TableCell>
       <TableCell className="text-body">
         <Missing />
@@ -238,53 +212,6 @@ function providerAccountRows(accounts: CounterpartyProviderAccount[]): ProviderA
   return rows;
 }
 
-/** The provider agreements a contact is asked to accept, with where each one stands. */
-function ProviderAgreements({
-  agreements,
-}: {
-  agreements: { provider: string; agreement: CounterpartyProviderCustomerLinkAgreement }[];
-}) {
-  const t = useTranslations();
-  return (
-    <ul className="flex flex-col gap-2 text-body">
-      {agreements.map(({ provider, agreement }) => (
-        <li
-          key={`${provider}:${agreement.name}`}
-          className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
-        >
-          <span className="text-secondary">{provider}</span>
-          <span className="min-w-0 truncate text-primary">{agreement.displayName}</span>
-          {agreement.signedAt === null ? (
-            <StatusText tone="attention">
-              {t("DashboardPayments.counterparty.agreementAwaitingSignature")}
-            </StatusText>
-          ) : (
-            <span title={formatTimestamp(agreement.signedAt, t)}>
-              <StatusText tone="positive">
-                {t("DashboardPayments.counterparty.agreementSigned")}
-              </StatusText>
-            </span>
-          )}
-          <button
-            type="button"
-            className="text-secondary underline underline-offset-4 hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.url)}
-          >
-            {t("DashboardPayments.counterparty.viewAgreement")}
-          </button>
-          <button
-            type="button"
-            className="text-secondary underline underline-offset-4 hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.privacyPolicyUrl)}
-          >
-            {t("DashboardPayments.counterparty.viewPrivacyPolicy")}
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /**
  * The contact's provider accounts as the design's table, one row per account the providers
  * hold for this contact: payout accounts (corridor, rail, bank, account), funding wallets
@@ -335,14 +262,6 @@ export function CounterpartyProviderAccounts({
     );
   }
   const rows = providerAccountRows(accounts);
-  const agreements = rows.flatMap((row) =>
-    row.kind === "customer" && row.link.provider === "bvnk"
-      ? row.link.agreements.map((agreement) => ({
-          provider: getRampProviderLabel(row.provider),
-          agreement,
-        }))
-      : []
-  );
   return (
     <div className="flex flex-col gap-4">
       {error ? (
@@ -389,7 +308,6 @@ export function CounterpartyProviderAccounts({
           </TableBody>
         </Table>
       </div>
-      {agreements.length > 0 ? <ProviderAgreements agreements={agreements} /> : null}
     </div>
   );
 }

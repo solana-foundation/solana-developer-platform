@@ -27,7 +27,10 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { badRequest, conflict, transactionFailed } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveRequestSponsorshipScope,
+} from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   type SignedSubmissionStore,
@@ -187,7 +190,11 @@ export async function closeDvpTrade(
   });
 
   // Sponsorship is resolved only after every local refusal above, as in create.
-  const feePayment = createRequestSponsorshipFeePayment(c, movement);
+  const feePayment = createSponsorshipFeePayment(
+    c.env,
+    resolveRequestSponsorshipScope(c),
+    movement
+  );
   const sponsor = await feePayment.getFeePayer();
 
   const instructions = [

@@ -892,8 +892,8 @@ jobs:
         run: |
           doppler run --config dev_ci -- bash <<'EOF'
           set -euo pipefail
-          if [ -z "${KORA_RPC_URL:-}" ]; then
-            echo "KORA_RPC_URL must be set in the dev_ci Doppler config for integration tests." >&2
+          if [ -z "${KORA_DEVNET_URL:-}" ]; then
+            echo "KORA_DEVNET_URL must be set in the dev_ci Doppler config for integration tests." >&2
             exit 1
           fi
           if [ -z "${PRIVY_APP_ID:-}" ] || [ -z "${PRIVY_APP_SECRET:-}" ]; then

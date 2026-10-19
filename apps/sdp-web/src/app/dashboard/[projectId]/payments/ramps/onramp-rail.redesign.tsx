@@ -1,6 +1,5 @@
 "use client";
 
-import { isRampOnboardingPendingStatus } from "@sdp/types/ramp-requirements";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
@@ -45,14 +44,8 @@ function onrampPrimaryLabel(
       return t("DashboardPayments.processing");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
-    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
-      return wizard.verificationSimulating
-        ? t("DashboardPayments.demo.verification.simulating")
-        : t("DashboardPayments.demo.verification.simulate");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
-    case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
-      return t("DashboardPayments.bvnk.acceptAgreements");
     case wizard.currentStepId === "REVIEW" && wizard.fields.provider !== null:
       return t("DashboardPayments.ramps.continueWithProvider", {
         provider: getRampProviderLabel(wizard.fields.provider),
@@ -67,8 +60,6 @@ function onrampPrimaryAction(
   verificationUrl: string | undefined
 ): () => void {
   switch (true) {
-    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
-      return () => void wizard.simulateVerification();
     case verificationUrl !== undefined:
       return () => openExternalRampUrl(verificationUrl);
     case simulatesDeposit(wizard, verificationUrl):
@@ -111,16 +102,8 @@ function onrampFrameState(
   onCancel: (() => void) | undefined,
   t: ReturnType<typeof useTranslations>
 ) {
-  const onOnboardingStep =
-    wizard.currentStepId === "PROVIDER" || wizard.currentStepId === "REQUIREMENTS";
-  const verificationUrl =
-    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
-      ? wizard.onboarding.verificationUrl
-      : undefined;
-  const verificationPending =
-    onOnboardingStep &&
-    wizard.onboarding !== null &&
-    isRampOnboardingPendingStatus(wizard.onboarding.status);
+  const verificationUrl: string | undefined = undefined;
+  const verificationPending = false;
   const transferState =
     wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
   const cancelable = transferState?.cancelable === true;
@@ -146,7 +129,6 @@ function onrampFrameState(
       ? wizard.quoteSimulationLoading || wizard.quoteSimulationSucceeded
       : wizard.hostedQuoteLoading ||
         verificationPending ||
-        wizard.verificationSimulating ||
         !wizard.canProceed ||
         (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading),
     hidePrimary:

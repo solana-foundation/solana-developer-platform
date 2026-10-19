@@ -1,4 +1,4 @@
-import { getSolanaConfig } from "@sdp/rpc";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getSdpDocsOrigin } from "@sdp/types";
 import { encodeURL } from "@solana/pay";
@@ -49,7 +49,7 @@ export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">
     reference: request.reference,
     status,
     expiresAt: request.expires_at,
-    network: getSolanaConfig(c.env).network,
+    network: currentClusterScope().cluster,
     solanaPayUrl,
   });
 }

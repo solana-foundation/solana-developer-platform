@@ -60,7 +60,5 @@ export const {
   newDesignActivity,
   newDesignIssuance,
   rampProviderMoonpay,
-  rampProviderBvnk,
-  rampProviderCoinbase,
   rampProviderStripe,
 } = flags;

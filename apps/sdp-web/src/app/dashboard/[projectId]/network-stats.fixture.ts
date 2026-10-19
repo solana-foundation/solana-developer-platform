@@ -1,129 +1,30 @@
-import type {
-  NetworkMetric,
-  NetworkMetricId,
-  NetworkPoint,
-  NetworkSnapshot,
-} from "./network-stats";
+import type { NetworkPoint, NetworkSnapshot } from "@sdp/types/network-metrics";
 
 /**
- * DESIGN-REVIEW FIXTURE — not data. The prototype's Solana network figures, expanded into daily
- * series so the charts and the 30D / 90D / 1Y switch behave. No provider backs the Overview's
- * network section yet (solana.com/data publishes no API); replace `NETWORK_STATS_FIXTURE` with
- * a real source such as Allium, Artemis or Dune before this ships.
+ * TEST FIXTURE, not data: the prototype's year figures (data.solana.com's cross-provider medians
+ * on 2026-09-14) as straight daily series ending on `asOf`, in the shape the network API returns.
  */
-export const NETWORK_STATS_FIXTURE_AS_OF = "2026-09-25";
-
 const DAYS = 365;
+const DAY_MS = 86_400_000;
 
-/** mulberry32: a tiny seeded generator, so every render draws the same wiggle. */
-function seededRandom(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let next = state;
-    next = Math.imul(next ^ (next >>> 15), next | 1);
-    next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
-    return ((next ^ (next >>> 14)) >>> 0) / 4_294_967_296;
+function series(asOf: string, start: number, end: number): NetworkPoint[] {
+  const close = Date.parse(`${asOf}T00:00:00Z`);
+  return Array.from({ length: DAYS }, (_, day) => ({
+    date: new Date(close - (DAYS - 1 - day) * DAY_MS).toISOString().slice(0, 10),
+    value: start + ((end - start) * day) / (DAYS - 1),
+  }));
+}
+
+/** The prototype's year-end figures and year-on-year changes, over the year ending on `asOf`. */
+export function buildNetworkStatsFixture(asOf: string): NetworkSnapshot {
+  return {
+    asOf,
+    health: null,
+    metrics: {
+      stablecoinSupply: series(asOf, 16.27e9 / 1.297, 16.27e9),
+      stablecoinTransfers: series(asOf, 18.9e6 / 2.606, 18.9e6),
+      stablecoinShare: series(asOf, 18.3 / 1.523, 18.3),
+      costPerTransaction: series(asOf, 0.0063 / 0.364, 0.0063),
+    },
   };
 }
-
-function isoDay(offsetFromEnd: number): string {
-  const date = new Date(`${NETWORK_STATS_FIXTURE_AS_OF}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - offsetFromEnd);
-  return date.toISOString().slice(0, 10);
-}
-
-/**
- * A daily series from `start` to `end` along `shape` (0→1 over the year), with a smoothed random
- * walk on top that fades out at both ends so the first and last values are exact.
- */
-function series({
-  start,
-  end,
-  shape,
-  wiggle,
-  seed,
-}: {
-  start: number;
-  end: number;
-  shape: (t: number) => number;
-  wiggle: number;
-  seed: number;
-}): NetworkPoint[] {
-  const random = seededRandom(seed);
-  const walk: number[] = [];
-  let position = 0;
-  for (let day = 0; day < DAYS; day++) {
-    position = position * 0.9 + (random() - 0.5);
-    walk.push(position);
-  }
-  const span = Math.abs(end - start);
-  return walk.map((step, day) => {
-    const t = day / (DAYS - 1);
-    const trend = start + (end - start) * shape(t);
-    const noise = step * wiggle * span * Math.sin(Math.PI * t);
-    return { date: isoDay(DAYS - 1 - day), value: trend + noise };
-  });
-}
-
-function metric(
-  id: NetworkMetricId,
-  rest: Omit<NetworkMetric, "id" | "points">,
-  points: NetworkPoint[]
-): NetworkMetric {
-  return { id, ...rest, points };
-}
-
-// Year-end figures and year-on-year changes as the prototype prints them.
-export const NETWORK_STATS_FIXTURE: NetworkSnapshot = {
-  // No live health check backs the fixture, so it claims no health and reads as sample data.
-  health: null,
-  sample: true,
-  updatedAt: "2026-09-23T12:00:00Z",
-  metrics: [
-    metric(
-      "stablecoinSupply",
-      { format: "usdCompact", unit: "usd", higherIsBetter: true },
-      series({
-        start: 16.27e9 / 1.297,
-        end: 16.27e9,
-        shape: (t) => t ** 1.08,
-        wiggle: 0.02,
-        seed: 11,
-      })
-    ),
-    metric(
-      "stablecoinTransfers",
-      { format: "countCompact", unit: "count", higherIsBetter: true },
-      series({
-        start: 18.9e6 / 2.606,
-        end: 18.9e6,
-        shape: (t) => t ** 1.45,
-        wiggle: 0.025,
-        seed: 23,
-      })
-    ),
-    metric(
-      "stablecoinShare",
-      { format: "percent", unit: "percent", higherIsBetter: true },
-      series({
-        start: 18.3 / 1.523,
-        end: 18.3,
-        shape: (t) => 1 - (1 - t) ** 1.45,
-        wiggle: 0.03,
-        seed: 37,
-      })
-    ),
-    metric(
-      "costPerTransaction",
-      { format: "usdPrecise", unit: "usd", higherIsBetter: false },
-      series({
-        start: 0.0063 / 0.364,
-        end: 0.0063,
-        shape: (t) => t ** 0.9,
-        wiggle: 0.02,
-        seed: 41,
-      })
-    ),
-  ],
-};

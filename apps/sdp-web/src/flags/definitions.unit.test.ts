@@ -37,8 +37,6 @@ const FLAG_CAPS = {
   dvp: { module: "dvp" },
   earn: { module: "earn" },
   rampProviderMoonpay: { rampProvider: "moonpay" },
-  rampProviderBvnk: { rampProvider: "bvnk" },
-  rampProviderCoinbase: { rampProvider: "coinbase" },
   rampProviderStripe: { rampProvider: "stripe" },
 } as const satisfies Record<keyof DashboardFlags, FlagCap>;
 
@@ -86,8 +84,6 @@ const EXCLUDED_FROM_STABLE = Object.entries(FLAG_CAPS)
 
 const RAMP_PROVIDER_FLAG_NAMES = {
   moonpay: "rampProviderMoonpay",
-  bvnk: "rampProviderBvnk",
-  coinbase: "rampProviderCoinbase",
   stripe: "rampProviderStripe",
 } as const satisfies Record<RampProviderId, keyof DashboardFlags>;
 

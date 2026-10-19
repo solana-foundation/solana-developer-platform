@@ -47,11 +47,13 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/transfer-batches/create.ts",
       evidence: "resolved.scope.auth.organizationId",
     },
+    // Access before the key, the row replay before admission (ADR 0009).
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
       section: 'transferBatches.post(\n  "/",',
-      before: 'requireAllowedOperation("payment_transfer_batch_execute")',
-      through: "requestGate(",
+      before:
+        'requireAllowedOperation("payment_transfer_batch_execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
+      through: "replayFromRecord(findTransferBatchRecordReplay),\n  admit(",
       after: "\n  createTransferBatch\n",
     },
     replay: [
@@ -63,7 +65,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/payments/transfer-batches/handlers.test.ts",
-        evidence: "returns the original batch when a concurrent insert loses the idempotency race",
+        evidence: "answers a concurrent duplicate 409 while the first batch holds its key",
       },
     ],
   },
@@ -71,7 +73,7 @@ const contracts: ValueMovingContract[] = [
     family: "recurring",
     trustedContext: {
       file: "apps/sdp-api/src/services/payments/recurring-payments/shared.ts",
-      evidence: "createProjectSponsorshipFeePayment(input.env",
+      evidence: "await resolveProjectSponsorshipScope(input.env, {",
     },
     authorization: {
       file: "apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
@@ -258,14 +260,15 @@ const contracts: ValueMovingContract[] = [
   {
     family: "payments",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/payments/context.ts",
-      evidence: "createRequestSponsorshipFeePayment(c, movement)",
+      file: "apps/sdp-api/src/routes/payments/transfers/handlers.ts",
+      evidence: "resolveRequestSponsorshipScope(c),",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",
       section: "transfers.post(",
-      before: 'requireAllowedOperation("payment_transfer_execute")',
-      through: "requestGate(",
+      before:
+        'requireAllowedOperation("payment_transfer_execute"),\n  validateBody(createTransferSchema),\n  authorize(authorizeTransfer)',
+      through: "replayFromRecord(findTransferRecordReplay),\n  admit(",
       after: "\n  createTransfer\n",
     },
     replay: [
@@ -734,7 +737,18 @@ describe("value-moving authorization and replay conformance", () => {
     for (const family of ["payments", "batch", "ramps"] as const) {
       for (const contract of contracts.filter((candidate) => candidate.family === family)) {
         expect(contract.authorization.before).toContain("requireAllowedOperation(");
-        expect(contract.authorization.through).toBe("requestGate(");
+      }
+    }
+    // Ramps still admit through the request gate. Transfers and batches run
+    // authorize -> idempotent -> replayFromRecord -> admit instead (ADR 0009):
+    // access before the key is claimed, a replay before admission.
+    for (const contract of contracts.filter((candidate) => candidate.family === "ramps")) {
+      expect(contract.authorization.through).toBe("requestGate(");
+    }
+    for (const family of ["payments", "batch"] as const) {
+      for (const contract of contracts.filter((candidate) => candidate.family === family)) {
+        expect(contract.authorization.before).toContain("authorize(");
+        expect(contract.authorization.through).toMatch(/^replayFromRecord\(.*\n {2}admit\($/s);
       }
     }
   });
@@ -787,12 +801,12 @@ describe("value-moving authorization and replay conformance", () => {
     // SAFETY: the guards read only SDP_RELEASE_CHANNEL and SDP_DEPLOYMENT_MODE, and
     // decrypt is the one cipher method these paths can reach; the fakes implement exactly that.
     const managedEnv = {
-      SDP_RELEASE_CHANNEL: "stable",
+      SDP_RELEASE_CHANNEL: "beta",
       SDP_DEPLOYMENT_MODE: "managed",
       DATABASE_URL: "postgres://unused",
     } as never;
     const selfHostedEnv = {
-      SDP_RELEASE_CHANNEL: "stable",
+      SDP_RELEASE_CHANNEL: "beta",
       SDP_DEPLOYMENT_MODE: "self_hosted",
     } as never;
     const cipher = { decrypt } as never;

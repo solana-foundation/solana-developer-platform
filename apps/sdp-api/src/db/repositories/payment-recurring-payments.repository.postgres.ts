@@ -8,6 +8,7 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
+  RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
@@ -123,6 +124,7 @@ const activationAttemptRowSchema = z.object({
   metadata: z.record(z.string(), z.unknown()),
   created_at: z.string(),
   updated_at: z.string(),
+  idempotency_key: z.string().nullable(),
 });
 const lifecycleAttemptRowSchema = z.object({
   id: z.string(),
@@ -137,6 +139,7 @@ const lifecycleAttemptRowSchema = z.object({
   metadata: z.record(z.string(), z.unknown()),
   created_at: z.string(),
   updated_at: z.string(),
+  idempotency_key: z.string().nullable(),
 });
 const updateAttemptRowSchema = z.object({
   id: z.string(),
@@ -163,6 +166,8 @@ const updateAttemptRowSchema = z.object({
   created_by: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
+  idempotency_fingerprint: z.string().nullable(),
+  idempotency_key: z.string().nullable(),
 });
 const updateEventRowSchema = z.object({
   id: z.string(),
@@ -333,32 +338,35 @@ export function createPostgresPaymentRecurringPaymentsRepository(
   db: DatabaseExecutor
 ): PaymentRecurringPaymentsRepository {
   return {
-    async listStaleLifecyclePayments({ staleBefore, limit }) {
+    async listStaleLifecyclePayments({ environment, staleBefore, limit }) {
       const result = await db
         .prepare(
-          `SELECT * FROM payment_recurring_payments
-          WHERE status = ANY(?::text[])
-            AND updated_at <= ? ORDER BY updated_at ASC LIMIT ?`
+          `SELECT rp.* FROM payment_recurring_payments rp
+           JOIN projects p ON p.id = rp.project_id
+          WHERE p.environment = ?
+            AND rp.status = ANY(?::text[])
+            AND rp.updated_at <= ? ORDER BY rp.updated_at ASC LIMIT ?`
         )
-        .bind([...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON], staleBefore, limit)
+        .bind(environment, [...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON], staleBefore, limit)
         .all<Record<string, unknown>>();
       return result.rows.map(mapRecurringPaymentRow);
     },
-    async listStaleUpdatePayments({ staleBefore, limit }) {
+    async listStaleUpdatePayments({ environment, staleBefore, limit }) {
       const result = await db
         .prepare(
-          `SELECT organization_id, project_id, id, updated_at,
-                COUNT(*) OVER () AS stale_count, MIN(updated_at) OVER () AS oldest_updated_at
-           FROM payment_recurring_payments WHERE status = 'updating' AND updated_at <= ?
-          ORDER BY updated_at DESC, id DESC LIMIT ?`
+          `SELECT rp.organization_id, rp.project_id, rp.id, rp.updated_at,
+                COUNT(*) OVER () AS stale_count, MIN(rp.updated_at) OVER () AS oldest_updated_at
+           FROM payment_recurring_payments rp JOIN projects p ON p.id = rp.project_id
+          WHERE p.environment = ? AND rp.status = 'updating' AND rp.updated_at <= ?
+          ORDER BY rp.updated_at DESC, rp.id DESC LIMIT ?`
         )
-        .bind(staleBefore, limit)
+        .bind(environment, staleBefore, limit)
         .all<Record<string, unknown>>();
       return result.rows.map(
         (row): StalePaymentRecurringPaymentUpdateRow => staleUpdateRowSchema.parse(row)
       );
     },
-    async listRecoverableCollectionPayments({ staleBefore, limit }) {
+    async listRecoverableCollectionPayments({ environment, staleBefore, limit }) {
       const result = await db
         .prepare(
           `SELECT * FROM (
@@ -368,13 +376,16 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              JOIN payment_subscription_collection_attempts a
                ON a.organization_id = rp.organization_id AND a.project_id = rp.project_id
               AND a.subscription_id = rp.subscription_id AND a.due_at = rp.next_collection_due_at
-            WHERE rp.status = ANY(?::text[])
+             JOIN projects p ON p.id = rp.project_id
+            WHERE p.environment = ?
+              AND rp.status = ANY(?::text[])
               AND rp.next_collection_due_at IS NOT NULL
               AND a.status = ANY(?::text[])
               AND ((a.status = 'processing' AND a.updated_at <= ?) OR (rp.status = 'active' AND a.status = 'confirmed'))
          ) recoverable_attempts WHERE attempt_rank = 1 ORDER BY attempt_updated_at ASC LIMIT ?`
         )
         .bind(
+          environment,
           [...RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION],
           [...COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER],
           staleBefore,
@@ -383,11 +394,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .all<Record<string, unknown>>();
       return result.rows.map(mapRecoverableCollectionRecurringPaymentRow);
     },
-    async listDueCollectionPayments({ dueBefore, retryBefore, limit }) {
+    async listDueCollectionPayments({ environment, dueBefore, retryBefore, limit }) {
       const result = await db
         .prepare(
           `SELECT rp.* FROM payment_recurring_payments rp
-          WHERE rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
+           JOIN projects p ON p.id = rp.project_id
+          WHERE p.environment = ? AND rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
             AND NOT EXISTS (SELECT 1 FROM payment_subscription_collection_attempts active_attempt
               WHERE active_attempt.organization_id = rp.organization_id AND active_attempt.project_id = rp.project_id
                 AND active_attempt.subscription_id = rp.subscription_id AND active_attempt.due_at = rp.next_collection_due_at
@@ -398,7 +410,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                 AND failed_attempt.status = 'failed' AND failed_attempt.updated_at > ?)
           ORDER BY rp.next_collection_due_at ASC LIMIT ?`
         )
-        .bind(dueBefore, [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE], retryBefore, limit)
+        .bind(
+          environment,
+          dueBefore,
+          [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE],
+          retryBefore,
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.rows.map(mapCollectibleRecurringPaymentRow);
     },
@@ -422,8 +440,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              metadata_uri,
              created_by,
              created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             updated_at,
+             idempotency_key,
+             idempotency_fingerprint
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           input.id,
@@ -442,7 +462,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.metadataUri,
           input.createdBy,
           input.createdAt,
-          input.updatedAt
+          input.updatedAt,
+          input.idempotencyKey,
+          input.idempotencyFingerprint
         )
         .run();
 
@@ -451,6 +473,20 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async findRecurringPaymentByIdempotencyKey({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT id, idempotency_fingerprint
+             FROM payment_recurring_payments
+            WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(organizationId, projectId, idempotencyKey)
+        .first<{ id: string; idempotency_fingerprint: string | null }>();
+      return row === null
+        ? null
+        : { id: row.id, idempotencyFingerprint: row.idempotency_fingerprint };
     },
 
     async updateRecurringPayment(input: UpdatePaymentRecurringPaymentInput) {
@@ -823,8 +859,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              error,
              metadata,
              created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+             updated_at,
+             idempotency_key
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)`
         )
         .bind(
           input.id,
@@ -838,7 +875,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error,
           JSON.stringify(input.metadata),
           input.createdAt,
-          input.updatedAt
+          input.updatedAt,
+          input.idempotencyKey ?? null
         )
         .run();
 
@@ -861,6 +899,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                     CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
                   metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
+                  idempotency_key = COALESCE(idempotency_key, ?),
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
@@ -877,6 +916,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error ?? null,
           input.metadata !== undefined,
           input.metadata === undefined ? null : JSON.stringify(input.metadata),
+          input.adoptIdempotencyKey ?? null,
           input.updatedAt,
           input.attemptId,
           input.organizationId,
@@ -921,6 +961,26 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapActivationAttemptRow(row) : null;
     },
 
+    async findActivationAttemptByIdempotencyKey(input) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_recurring_payment_activation_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND idempotency_key = ?
+              AND status = ANY(?::text[])
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.idempotencyKey, [
+          ...RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
+        .first<Record<string, unknown>>();
+
+      return row ? mapActivationAttemptRow(row) : null;
+    },
+
     async createLifecycleAttempt(input: CreatePaymentRecurringPaymentLifecycleAttemptInput) {
       await db
         .prepare(
@@ -936,8 +996,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              error,
              metadata,
              created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+             updated_at,
+             idempotency_key
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)`
         )
         .bind(
           input.id,
@@ -951,7 +1012,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error,
           JSON.stringify(input.metadata),
           input.createdAt,
-          input.updatedAt
+          input.updatedAt,
+          input.idempotencyKey ?? null
         )
         .run();
 
@@ -971,6 +1033,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
                   metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
+                  idempotency_key = COALESCE(idempotency_key, ?),
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
@@ -986,6 +1049,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error ?? null,
           input.metadata !== undefined,
           input.metadata === undefined ? null : JSON.stringify(input.metadata),
+          input.adoptIdempotencyKey ?? null,
           input.updatedAt,
           input.attemptId,
           input.organizationId,
@@ -1028,6 +1092,27 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapLifecycleAttemptRow(row) : null;
     },
 
+    async findLifecycleAttemptByIdempotencyKey(input) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND operation = ?
+              AND idempotency_key = ?
+              AND status = ANY(?::text[])
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.operation, input.idempotencyKey, [
+          ...RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
+        .first<Record<string, unknown>>();
+
+      return row ? mapLifecycleAttemptRow(row) : null;
+    },
+
     async createUpdateAttempt(input: CreatePaymentRecurringPaymentUpdateAttemptInput) {
       await db
         .prepare(
@@ -1055,10 +1140,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              error,
              created_by,
              created_at,
-             updated_at
+             updated_at,
+             idempotency_key,
+             idempotency_fingerprint
            ) VALUES (
              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             ?::text[], ?::jsonb, ?::jsonb, ?, ?, ?, ?
+             ?::text[], ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?
            )`
         )
         .bind(
@@ -1085,7 +1172,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error,
           input.createdBy,
           input.createdAt,
-          input.updatedAt
+          input.updatedAt,
+          input.idempotencyKey ?? null,
+          input.idempotencyFingerprint ?? null
         )
         .run();
 
@@ -1122,6 +1211,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   after_values =
                     CASE WHEN ?::boolean THEN ?::jsonb ELSE after_values END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
+                  -- Both read the row as it was: the fingerprint is adopted with the key.
+                  idempotency_fingerprint = CASE WHEN idempotency_key IS NULL
+                    THEN COALESCE(?, idempotency_fingerprint) ELSE idempotency_fingerprint END,
+                  idempotency_key = COALESCE(idempotency_key, ?),
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
@@ -1153,6 +1246,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.afterValues === undefined ? null : JSON.stringify(input.afterValues),
           input.error !== undefined,
           input.error ?? null,
+          input.adoptIdempotencyFingerprint ?? null,
+          input.adoptIdempotencyKey ?? null,
           input.updatedAt,
           input.attemptId,
           input.organizationId,
@@ -1184,6 +1279,26 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             LIMIT 1`
         )
         .bind(...values)
+        .first<Record<string, unknown>>();
+
+      return row ? mapUpdateAttemptRow(row) : null;
+    },
+
+    async findUpdateAttemptByIdempotencyKey(input) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_recurring_payment_update_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND idempotency_key = ?
+              AND status = ANY(?::text[])
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.idempotencyKey, [
+          ...RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
         .first<Record<string, unknown>>();
 
       return row ? mapUpdateAttemptRow(row) : null;

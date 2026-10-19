@@ -2,7 +2,10 @@ import type { FeePaymentPort } from "@sdp/fee-payment";
 import type { MovementOf, SolanaCluster } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 
@@ -87,13 +90,15 @@ export async function resolveVaultSponsorship(
     return { kind: "wallet-pays" };
   }
 
-  const feePayment = await createProjectSponsorshipFeePayment(env, {
-    movement: input.movement,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    actor: { type: "wallet", id: input.walletId },
-    cluster: input.cluster,
-  });
+  const feePayment = createSponsorshipFeePayment(
+    env,
+    await resolveProjectSponsorshipScope(env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.walletId },
+    }),
+    input.movement
+  );
   const sponsor = await input.deadline.run("Resolving the sponsored fee payer", () =>
     feePayment.getFeePayer()
   );

@@ -1,4 +1,12 @@
-import type { RampWebhookEventStatus, SdpEnvironment } from "@sdp/types";
+import {
+  RAMP_WEBHOOK_APPLY_OUTCOMES,
+  RAMP_WEBHOOK_EVENT_STATUSES,
+  type RampWebhookApplyOutcome,
+  type RampWebhookDischargeOutcome,
+  type RampWebhookEventStatus,
+  type RampWebhookFailureOutcome,
+  type SdpEnvironment,
+} from "@sdp/types";
 import {
   PERSISTED_RAMP_PROVIDERS,
   type PersistedRampProviderId,
@@ -16,8 +24,10 @@ export interface RampWebhookEventRow {
   /** A retired provider's row still reads, and parks for want of a processor. */
   provider: PersistedRampProviderId;
   environment: SdpEnvironment;
-  /** The signature-verified provider payload, exactly as `verify` returned it. */
-  payload: unknown;
+  /** Verified provider body, retained only until the event is discharged. */
+  rawBody: string;
+  providerEventId: string | null;
+  applyOutcome: RampWebhookApplyOutcome | null;
   status: RampWebhookEventStatus;
   attempts: number;
   last_error: string | null;
@@ -29,6 +39,13 @@ export interface InsertRampWebhookEventInput {
   provider: RampProviderId;
   environment: SdpEnvironment;
   payload: unknown;
+}
+
+export interface InsertVerifiedRampWebhookEventInput {
+  provider: RampProviderId;
+  environment: SdpEnvironment;
+  rawBody: string;
+  providerEventId: string | null;
 }
 
 export interface ClaimReplayableRampWebhookEventsInput {
@@ -57,6 +74,7 @@ export interface RecordRampWebhookEventFailureInput {
   appRevision: string;
   /** A permanent failure: the row parks as terminal and no deploy re-arms it. */
   terminal?: boolean;
+  outcome?: RampWebhookFailureOutcome;
 }
 
 export interface ParkExhaustedRampWebhookEventsInput {
@@ -76,12 +94,15 @@ export interface RearmRampWebhookEventsInput {
 }
 
 export interface RampWebhookEventsRepository {
-  /** Persists a verified event; runs before the webhook is acked. */
+  /** Legacy JSONB fixture and compatibility writer. New ingress uses signed bytes. */
   insertEvent(input: InsertRampWebhookEventInput): Promise<RampWebhookEventRow>;
-  /** Discharges a delivered event. The row is deleted, not archived: the
-   * settlement itself is the durable record, and deleting bounds how long a
-   * raw provider payload stays at rest. */
-  deleteEvent(id: string): Promise<void>;
+  /** Persists a verified body before ack. A duplicate provider event returns its existing row. */
+  insertVerifiedEvent(
+    input: InsertVerifiedRampWebhookEventInput
+  ): Promise<{ row: RampWebhookEventRow; inserted: boolean }>;
+  /** Retains the outcome until the retention job archives the discharged row. */
+  dischargeEvent(id: string, outcome: RampWebhookDischargeOutcome, reason?: string): Promise<void>;
+  archiveDischarged(before: string, limit: number): Promise<number>;
   /** Records a failed apply. Below `maxAttempts` the row stays `pending` for
    * the replay job; at the limit it parks as `failed`. */
   recordFailure(input: RecordRampWebhookEventFailureInput): Promise<void>;
@@ -110,6 +131,8 @@ export interface RampWebhookEventsRepository {
 }
 
 const storedEventProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS);
+const storedEventOutcomeSchema = z.enum(RAMP_WEBHOOK_APPLY_OUTCOMES).nullable();
+const storedEventStatusSchema = z.enum(RAMP_WEBHOOK_EVENT_STATUSES);
 
 /**
  * The claim, park and re-arm statements take only rows whose provider this
@@ -119,15 +142,44 @@ const storedEventProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS);
  */
 const KNOWN_PROVIDERS: string[] = [...PERSISTED_RAMP_PROVIDERS];
 
+function replayBody(row: Record<string, unknown>): string {
+  const status = storedEventStatusSchema.parse(row.status);
+  switch (status) {
+    case "discharged":
+    case "archived":
+      return "";
+    case "pending":
+    case "failed": {
+      const rawBody = z.string().nullable().parse(row.raw_body);
+      if (rawBody !== null) {
+        return rawBody;
+      }
+      const stringPayload = z.string().safeParse(row.payload);
+      if (stringPayload.success) {
+        return stringPayload.data;
+      }
+      const jsonPayload = z.json().safeParse(row.payload);
+      if (jsonPayload.success && jsonPayload.data !== null) {
+        return JSON.stringify(jsonPayload.data);
+      }
+      throw new Error("active ramp webhook event has no replay body");
+    }
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+}
+
 function mapRow(row: Record<string, unknown>): RampWebhookEventRow {
   return {
     id: row.id as string,
     provider: storedEventProviderSchema.parse(row.provider),
     environment: row.environment as SdpEnvironment,
-    // JSONB comes back decoded; a provider whose payload IS a string (a raw
-    // signed body) must get that exact string back, never a re-parse of it.
-    payload: row.payload,
-    status: row.status as RampWebhookEventStatus,
+    rawBody: replayBody(row),
+    providerEventId: z.string().nullable().parse(row.provider_event_id),
+    applyOutcome: storedEventOutcomeSchema.parse(row.apply_outcome),
+    status: storedEventStatusSchema.parse(row.status),
     attempts: Number(row.attempts),
     last_error: (row.last_error as string | null) ?? null,
     created_at: row.created_at as string,
@@ -157,8 +209,70 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
       return mapRow(row);
     },
 
-    async deleteEvent(id) {
-      await db.prepare("DELETE FROM ramp_webhook_events WHERE id = ?").bind(id).run();
+    async insertVerifiedEvent(input) {
+      const row = await db
+        .prepare(
+          `INSERT INTO ramp_webhook_events
+             (id, provider, environment, raw_body, provider_event_id)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (provider, environment, provider_event_id)
+             WHERE status <> 'archived' AND provider_event_id IS NOT NULL
+           DO NOTHING
+           RETURNING *`
+        )
+        .bind(
+          generateRampWebhookEventId(),
+          input.provider,
+          input.environment,
+          input.rawBody,
+          input.providerEventId
+        )
+        .first<Record<string, unknown>>();
+      if (row) {
+        return { row: mapRow(row), inserted: true };
+      }
+      const existing = await db
+        .prepare(
+          `SELECT * FROM ramp_webhook_events
+           WHERE provider = ? AND environment = ? AND provider_event_id = ?`
+        )
+        .bind(input.provider, input.environment, input.providerEventId)
+        .first<Record<string, unknown>>();
+      if (!existing) {
+        throw new Error("ramp webhook event dedupe returned no row");
+      }
+      return { row: mapRow(existing), inserted: false };
+    },
+
+    async dischargeEvent(id, outcome, reason) {
+      await db
+        .prepare(
+          `UPDATE ramp_webhook_events
+           SET status = 'discharged', apply_outcome = ?, last_error = ?,
+               raw_body = NULL, payload = NULL, discharged_at = sdp_iso_now(),
+               updated_at = sdp_iso_now()
+           WHERE id = ? AND status = 'pending'`
+        )
+        .bind(outcome, reason ?? null, id)
+        .run();
+    },
+
+    async archiveDischarged(before, limit) {
+      const result = await db
+        .prepare(
+          `UPDATE ramp_webhook_events
+           SET status = 'archived', apply_outcome = NULL, last_error = NULL,
+               provider_event_id = NULL, updated_at = sdp_iso_now()
+           WHERE id IN (
+             SELECT id FROM ramp_webhook_events
+             WHERE status = 'discharged' AND discharged_at <= ?
+             ORDER BY discharged_at ASC
+             LIMIT ? FOR UPDATE SKIP LOCKED
+           ) RETURNING id`
+        )
+        .bind(before, limit)
+        .all<{ id: string }>();
+      return result.results.length;
     },
 
     async recordFailure(input) {
@@ -173,8 +287,9 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
                  status = CASE WHEN GREATEST(attempts, ?) >= ? THEN 'failed' ELSE status END,
                  parked_app_revision = CASE WHEN GREATEST(attempts, ?) >= ? THEN ? ELSE parked_app_revision END,
                  terminal = ?,
+                 apply_outcome = ?,
                  updated_at = sdp_iso_now()
-           WHERE id = ?`
+           WHERE id = ? AND status = 'pending'`
         )
         .bind(
           input.attempts,
@@ -185,6 +300,7 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
           input.maxAttempts,
           input.appRevision,
           input.terminal === true,
+          input.outcome ?? "retryable_error",
           input.id
         )
         .run();

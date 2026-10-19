@@ -30,6 +30,7 @@ import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
+import { warnIfCustodySigningBudgetCapped } from "@/services/domain/signing/signing-timeout";
 import type { Env } from "@/types/env";
 
 const DEFAULT_PORT = 8787;
@@ -123,6 +124,7 @@ async function main(): Promise<void> {
   installOutboundDispatcher();
   const env = getProcessEnv();
   assertRequiredEnv(env);
+  warnIfCustodySigningBudgetCapped(env);
 
   // Validate boot-time process.env tunables before opening any sockets, so a
   // typo fails immediately instead of after a partial startup.

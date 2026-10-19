@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey, SignerCheckRequest } from "@sdp/types";
+import type { CachedApiKey, SdpEnvironment, SignerCheckRequest } from "@sdp/types";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -11,14 +11,20 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import {
+  clusterOfRpcClient,
+  ENVIRONMENT_CLUSTER_CASES,
+  installClusterRpcStub,
+} from "@/test/helpers/cluster-rpc";
 import {
   insertTestCustodyConfigRow,
   insertTestCustodyWalletRow,
   seedTestCustodyRows,
 } from "@/test/helpers/custody";
-import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { seedTestPrivyConnection, seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -44,11 +50,6 @@ vi.mock("@/services/solana", async (importOriginal) => ({
   createOrgSignerForCustodyWallet: signerCheckMocks.createExactSigner,
 }));
 
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  resolveAuthenticatedSponsoredFeePayer: signerCheckMocks.createSponsorship,
-}));
-
 const SEEDED_PUBLIC_KEYS = {
   privyA: "HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH",
   privyB: "CKmTHyQ4xMzL3dYzzaTBV5BKLjGPYVLPA4Q5DMLRRXUm",
@@ -56,8 +57,6 @@ const SEEDED_PUBLIC_KEYS = {
 };
 
 const actualCreateSigningService = signingServiceModule.createSigningService;
-const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
-const createClusterRpcMock = vi.spyOn(solanaRpc, "createClusterRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getMultipleAccountsLamportsMock = vi.spyOn(solanaRpc, "getMultipleAccountsLamports");
 const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
@@ -254,6 +253,41 @@ async function seedActiveConnectionWallet(
   );
 }
 
+const PRODUCTION_WALLET = {
+  custodyWalletId: "cwlt_scope_privy_production",
+  walletId: "privy_wallet_production",
+  publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+} as const;
+
+const SCOPE_WALLET_BY_ENVIRONMENT = {
+  sandbox: { projectId: TEST_PROJECT.id, walletId: "privy_wallet_a" },
+  production: { projectId: TEST_PRODUCTION_PROJECT_ID, walletId: PRODUCTION_WALLET.walletId },
+} as const satisfies Record<SdpEnvironment, { projectId: string; walletId: string }>;
+
+const SCOPE_CLUSTER_CASES = ENVIRONMENT_CLUSTER_CASES.map((clusterCase) => ({
+  ...clusterCase,
+  ...SCOPE_WALLET_BY_ENVIRONMENT[clusterCase.environment],
+}));
+
+async function seedProductionWallet(): Promise<void> {
+  await seedUnreadPrivyWallet(getDb(env), {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    createdBy: TEST_USER.id,
+    ...PRODUCTION_WALLET,
+  });
+}
+
+async function requestAsMember(path: string, projectId: string, init: RequestInit) {
+  const headers = new Headers(init.headers);
+  headers.set(
+    "Authorization",
+    `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`
+  );
+  headers.set("x-project-id", projectId);
+  return app.request(path, { ...init, headers }, env);
+}
+
 async function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "clerk") {
   const headers = new Headers({
     "Content-Type": "application/json",
@@ -279,11 +313,15 @@ async function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "
 }
 
 describe("Custody wallet scope routes", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
+    vi.spyOn(sponsorshipService, "resolveSponsoredFeePayer").mockImplementation(
+      signerCheckMocks.createSponsorship
+    );
 
-    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
       lamports: 0n,
       owner: "11111111111111111111111111111111",
@@ -340,7 +378,6 @@ describe("Custody wallet scope routes", () => {
   });
 
   afterEach(async () => {
-    env.SOLANA_MAINNET_RPC_URL = undefined;
     await clearKVStores(env);
     createSigningServiceMock.mockReset();
     getAccountInfoMock.mockReset();
@@ -365,7 +402,7 @@ describe("Custody wallet scope routes", () => {
     });
     expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
     expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-    expect(createClusterRpcMock).not.toHaveBeenCalled();
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
     expect(simulateTransactionMock).not.toHaveBeenCalled();
   });
 
@@ -385,7 +422,7 @@ describe("Custody wallet scope routes", () => {
     });
     expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
     expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-    expect(createClusterRpcMock).not.toHaveBeenCalled();
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
     expect(simulateTransactionMock).not.toHaveBeenCalled();
   });
 
@@ -408,7 +445,6 @@ describe("Custody wallet scope routes", () => {
       "custody.signer_check"
     );
     expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
-    expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "devnet");
   });
 
   it.each(["clerk", "api_key"] as const)(
@@ -434,7 +470,7 @@ describe("Custody wallet scope routes", () => {
       expect(response.status).toBe(actor === "clerk" ? 409 : 403);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(createClusterRpcMock).not.toHaveBeenCalled();
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
     }
   );
@@ -492,68 +528,29 @@ describe("Custody wallet scope routes", () => {
       });
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(createClusterRpcMock).not.toHaveBeenCalled();
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
     }
   );
 
-  it.each([
-    {
-      environment: "sandbox",
-      projectId: TEST_PROJECT.id,
-      walletId: "privy_wallet_a",
-      cluster: "devnet",
-    },
-    {
-      environment: "production",
-      projectId: TEST_PRODUCTION_PROJECT_ID,
-      walletId: "privy_wallet_production",
-      cluster: "mainnet-beta",
-    },
-  ] as const)(
+  it.for(SCOPE_CLUSTER_CASES)(
     "simulates a $environment project's signer check on $cluster",
     async ({ projectId, walletId, cluster }) => {
-      await getDb(env).transaction((tx) =>
-        seedTestPrivyConnection(tx, {
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PRODUCTION_PROJECT_ID,
-          connectionId: "cconn_scope_privy_production",
-          credentialId: "pcred_scope_privy_production",
-          createdBy: TEST_USER.id,
-          stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
-          providerAccountFingerprint: "sha256:privy_production",
-          lastCheckStatus: "success",
-          wallets: [
-            {
-              id: "cwlt_scope_privy_production",
-              walletId: "privy_wallet_production",
-              publicKey: TEST_SOLANA_ADDRESSES.wallet3,
-              label: null,
-              purpose: "root",
-              status: "active",
-            },
-          ],
-          defaultCustodyWalletId: "cwlt_scope_privy_production",
-        })
-      );
-      env.SOLANA_MAINNET_RPC_URL = "https://mainnet-rpc.mock.invalid";
-      const response = await app.request(
-        "/v1/wallets/signer-check",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
-            "x-project-id": projectId,
-          },
-          body: JSON.stringify({ walletId }),
-        },
-        env
-      );
+      await seedProductionWallet();
+
+      const response = await requestAsMember("/v1/wallets/signer-check", projectId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletId }),
+      });
 
       expect(response.status).toBe(200);
-      expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, cluster);
-      expect(simulateTransactionMock).toHaveBeenCalledOnce();
+      expect(
+        getRecentBlockhashMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+      ).toEqual([cluster]);
+      expect(
+        simulateTransactionMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+      ).toEqual([cluster]);
     }
   );
 
@@ -629,7 +626,7 @@ describe("Custody wallet scope routes", () => {
       expect(response.status).toBe(state === "read-only" ? 403 : 401);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(createClusterRpcMock).not.toHaveBeenCalled();
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
     }
   );
@@ -645,7 +642,7 @@ describe("Custody wallet scope routes", () => {
       });
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(createClusterRpcMock).not.toHaveBeenCalled();
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
     }
   );
 
@@ -761,7 +758,7 @@ describe("Custody wallet scope routes", () => {
       } else {
         expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
         expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-        expect(createClusterRpcMock).not.toHaveBeenCalled();
+        expect(getRecentBlockhashMock).not.toHaveBeenCalled();
       }
     }
   );
@@ -975,6 +972,42 @@ describe("Custody wallet scope routes", () => {
 
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(6);
   });
+
+  it.for(SCOPE_CLUSTER_CASES)(
+    "reads a $environment project's listed wallet balances on $cluster",
+    async ({ projectId, cluster }) => {
+      clearWalletCaches();
+      await seedProductionWallet();
+
+      const response = await requestAsMember("/v1/wallets?includeBalances=true", projectId, {
+        method: "GET",
+      });
+
+      expect(response.status).toBe(200);
+      expect(
+        getMultipleAccountsLamportsMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+      ).toEqual([cluster]);
+      expect(
+        new Set(getSplTokenBalancesMock.mock.calls.map(([client]) => clusterOfRpcClient(client)))
+      ).toEqual(new Set([cluster]));
+    }
+  );
+
+  it.for(SCOPE_CLUSTER_CASES)(
+    "reads a $environment project's wallet detail balance on $cluster",
+    async ({ projectId, walletId, cluster }) => {
+      await seedProductionWallet();
+
+      const response = await requestAsMember(`/v1/wallets/${walletId}`, projectId, {
+        method: "GET",
+      });
+
+      expect(response.status).toBe(200);
+      expect(getAccountInfoMock.mock.calls.map(([client]) => clusterOfRpcClient(client))).toEqual([
+        cluster,
+      ]);
+    }
+  );
 
   it("refuses an incomplete aggregate and recovers after the missing wallet can be read", async () => {
     clearWalletCaches();
@@ -1515,6 +1548,33 @@ describe("Custody wallet scope routes", () => {
       .first<{ label: string | null }>();
 
     expect(required(updated).label).toBe("Operations");
+  });
+
+  it("refuses a PATCH naming a wallet outside the project before claiming the key", async () => {
+    const res = await app.request(
+      "/v1/wallets/wallet_of_no_project",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "wallet-patch-missing",
+        },
+        body: JSON.stringify({ label: "Operations" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({
+      error: { code: "NOT_FOUND", message: "Wallet not found" },
+    });
+    // Refused before the claim: no 404 is stored under the key for 24 hours.
+    const keys = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("wallet-patch-missing")
+      .first<{ count: number }>();
+    expect(keys).toEqual({ count: 0 });
   });
 
   it("returns 404 when updating a wallet outside the API key bindings", async () => {

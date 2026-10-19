@@ -8,6 +8,11 @@ on:
         description: "Merge commit on main to deploy to prod together with its pending migrations"
         type: string
         required: true
+      clear_hold:
+        description: "Deploy while prod is held (sdp_prod_hold), for a repair migration a rollback could not undo, and lift the hold once the canary passes"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   actions: read
@@ -101,6 +106,23 @@ jobs:
               "${IMAGE_SHA}" "${pending:-none}" "${commits}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Refuse while prod is held unless this run lifts the hold
+        env:
+          CLEAR_HOLD: ${{ inputs.clear_hold }}
+        run: |
+          set -euo pipefail
+          hold="$(gcloud run jobs describe sdp-prod-api-public-migrate \
+            --region us-central1 --project solana-developer-platform \
+            --format 'value(metadata.labels.sdp_prod_hold)')"
+          if [[ -z "${hold}" ]]; then
+            exit 0
+          fi
+          if [[ "${CLEAR_HOLD}" != "true" ]]; then
+            echo "Prod is held by the deploy of ${hold}, so an approval would deploy nothing. Dispatch this workflow again with clear_hold to apply a repair while held." >&2
+            exit 1
+          fi
+          echo "Prod is held by the deploy of ${hold}. This run deploys anyway and lifts the hold once its canary passes." >> "${GITHUB_STEP_SUMMARY}"
+
   approve:
     name: Schema approval
     needs: pending
@@ -120,6 +142,8 @@ jobs:
   deploy:
     name: sdp-api + worker + cron — prod
     needs: approve
+    # Cancelling the run must not take the prod workflow's rollback job down with this caller.
+    if: always() && needs.approve.result == 'success'
     permissions:
       actions: read
       contents: read
@@ -130,3 +154,4 @@ jobs:
     with:
       image_sha: ${{ inputs.image_sha }}
       approved_schema: true
+      clear_hold: ${{ inputs.clear_hold }}

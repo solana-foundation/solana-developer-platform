@@ -24,28 +24,20 @@ import type { Address, Signature } from "@solana/kit";
  */
 export interface FeePaymentEnv extends RpcEnv {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
-  /** The Kora serving the process's default cluster (`SOLANA_NETWORK`). */
-  KORA_RPC_URL?: string;
-  KORA_API_KEY?: string;
-  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   /**
-   * Per-cluster Kora endpoints, for a process that sponsors on BOTH clusters.
-   * Each trio is self-contained: a cluster with its own URL uses its own key and
-   * audience, never the default trio's. See `resolveKoraEndpoint`.
-   *
-   * The cluster is a SUFFIX on purpose. `KORA_DEVNET_RPC_URL` and
-   * `KORA_MAINNET_RPC_URL` already exist in Doppler and mean something else:
-   * the Solana RPC each deployed Kora service itself talks to, mounted into
-   * sdp-api on every environment. Reusing those names made CI's Kora shim lose
-   * to a Solana RPC URL. Do not rename these back.
+   * One Kora per cluster, named `KORA_<CLUSTER>_*` identically in Doppler, the
+   * API and the Kora service. Each trio is self-contained; see
+   * `resolveKoraEndpoint`. `KORA_<CLUSTER>_URL` is the Kora endpoint the API
+   * calls; `KORA_<CLUSTER>_RPC_URL` (not read here) is the Solana RPC that
+   * Kora itself talks to.
    */
-  KORA_RPC_URL_DEVNET?: string;
-  KORA_API_KEY_DEVNET?: string;
-  KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
-  KORA_RPC_URL_MAINNET?: string;
-  KORA_API_KEY_MAINNET?: string;
-  KORA_CLOUD_RUN_AUDIENCE_MAINNET?: string;
+  KORA_DEVNET_URL?: string;
+  KORA_DEVNET_API_KEY?: string;
+  KORA_DEVNET_CLOUD_RUN_AUDIENCE?: string;
+  KORA_MAINNET_URL?: string;
+  KORA_MAINNET_API_KEY?: string;
+  KORA_MAINNET_CLOUD_RUN_AUDIENCE?: string;
   FEE_PAYER_PRIVATE_KEY?: string;
   CUSTODY_PRIVATE_KEY?: string;
 }
@@ -96,28 +88,6 @@ export interface SponsorshipProviderConfiguration {
   feePayerMayTransferLamports: boolean;
   /** Raw authority policy used to pin security-relevant provider configuration. */
   feePayerPolicy: unknown;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Extended Interface (Optional Capabilities)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Extended fee payment port with additional capabilities.
- * Some providers may support fee estimation and token-based fee payment.
- */
-export interface ExtendedFeePaymentPort extends FeePaymentPort {
-  /**
-   * Estimate the fee for a transaction.
-   * Returns fee in lamports.
-   */
-  estimateFee?(transaction: Uint8Array): Promise<bigint>;
-
-  /**
-   * Get supported fee payment tokens (if provider supports non-SOL fees).
-   * Returns list of SPL token mints that can be used to pay fees.
-   */
-  getSupportedTokens?(): Promise<Address[]>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

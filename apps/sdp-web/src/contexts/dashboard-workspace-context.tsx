@@ -23,6 +23,7 @@ import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
+import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
 import { clearStoredApiKeySecrets, syncStoredApiKeySecretScope } from "@/lib/playground-api-keys";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
@@ -120,6 +121,9 @@ export function DashboardWorkspaceProvider({
     () => getDashboardCacheScopeKey(liveDashboardCacheScope),
     [liveDashboardCacheScope]
   );
+  // Set while rendering, before any child reads a key, so a key store never
+  // hands one user's or org's Idempotency-Keys to another in the same tab.
+  setIdempotencyKeyScope(liveDashboardCacheScopeKey);
   const serverDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(serverDashboardCacheScope),
     [serverDashboardCacheScope]

@@ -25,12 +25,7 @@ export const CRON_MONITOR_MONEY_EFFECTS = {
     effect: "starts",
     admission: { via: "money_admission" },
   },
-  "sdp-api-track-pending-transfers": {
-    effect: "starts",
-    admission: {
-      gap: "In process, this tick also creates BVNK on-ramp payouts (reconcile-bvnk-onramp-payouts.ts) with no admission; the ramps slice adds it.",
-    },
-  },
+  "sdp-api-track-pending-transfers": { effect: "finishes" },
   "sdp-api-poll-rings-indexing": {
     effect: "starts",
     admission: {
@@ -48,6 +43,8 @@ export const CRON_MONITOR_MONEY_EFFECTS = {
   "sdp-api-reconcile-revoked-api-key-cache": { effect: "observes" },
   "sdp-api-retire-secrets": { effect: "observes" },
   "sdp-api-cleanup-provider-credential-secrets": { effect: "observes" },
+  // Deletes expired Idempotency-Key records (HOO-1918); touches no money row.
+  "sdp-api-prune-idempotency-keys": { effect: "observes" },
 } as const satisfies Record<string, CronMoneyEffect>;
 
 export type CronMonitor = keyof typeof CRON_MONITOR_MONEY_EFFECTS;

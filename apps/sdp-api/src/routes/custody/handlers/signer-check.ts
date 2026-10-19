@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
-import { createClusterRpc, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
-import { CLUSTER_BY_SDP_ENVIRONMENT, MEMO_PROGRAM_ADDRESS } from "@sdp/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
@@ -20,7 +21,6 @@ import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -31,7 +31,10 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
-import { resolveAuthenticatedSponsoredFeePayer } from "@/services/sponsorship.service";
+import {
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
@@ -110,10 +113,10 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
         wallet.id,
         "custody.signer_check"
       ),
-      resolveAuthenticatedSponsoredFeePayer(c),
+      resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     ]);
 
-    const rpc = createClusterRpc(c.env, CLUSTER_BY_SDP_ENVIRONMENT[resolveSdpEnvironment(c)]);
+    const rpc = createClusterRpc();
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
@@ -184,7 +187,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
 
       throw new AppError(
         "SOLANA_RPC_ERROR",
-        `Kora signer-check request failed: ${error.message}. Verify KORA_RPC_URL/KORA_API_KEY and Kora service health.`
+        `Kora signer-check request failed: ${error.message}. Verify KORA_<CLUSTER>_URL/KORA_<CLUSTER>_API_KEY and Kora service health.`
       );
     }
 

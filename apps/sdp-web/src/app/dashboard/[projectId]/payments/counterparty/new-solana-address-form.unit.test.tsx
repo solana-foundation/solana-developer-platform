@@ -11,6 +11,7 @@ import { NewSolanaAddressForm } from "./new-solana-address-form";
 
 const screening = vi.hoisted(() => ({ next: null as ComplianceSnapshot | null }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("../payments-workspace.data", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../payments-workspace.data")>()),

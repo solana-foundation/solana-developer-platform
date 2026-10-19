@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SdpApiResponseError } from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
 
@@ -50,6 +51,47 @@ describe("initializeCustodySetupAction", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
+  // The key's original request never recorded its outcome: the wallet may
+  // exist, so the user is told to check the list, not that the provider is set up.
+  it("tells the user to check the list after an unknown outcome", async () => {
+    client.fetch.mockRejectedValue(
+      new SdpApiResponseError(
+        409,
+        JSON.stringify({ error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "GET it" } })
+      )
+    );
+
+    const result = await initializeCustodySetupAction(
+      walletForm({ provider: "privy", walletLabel: "Treasury" })
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      message: "Shared.idempotency.outcomeUnknownCheckList",
+      answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN" },
+    });
+  });
+
+  // Greptile (#2333): the first setup still running answered the retry with a
+  // 409 that read as "already set up", so the user was sent to add a wallet.
+  it("reports a setup still in flight as a retryable error, not as set up", async () => {
+    client.fetch.mockRejectedValue(
+      new SdpApiResponseError(
+        409,
+        JSON.stringify({ error: { code: "IDEMPOTENCY_KEY_IN_FLIGHT", message: "In progress" } })
+      )
+    );
+
+    const result = await initializeCustodySetupAction(
+      walletForm({ provider: "privy", walletLabel: "Treasury" })
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_IN_FLIGHT" },
+    });
+  });
+
   it("reports an already set up provider and makes no other API call", async () => {
     client.fetch.mockRejectedValue(
       new Error('SDP API request failed (409): {"error":{"message":"Signing already initialized"}}')
@@ -59,7 +101,10 @@ describe("initializeCustodySetupAction", () => {
       walletForm({ provider: "privy", walletLabel: "Treasury" })
     );
 
-    expect(result).toEqual({ status: "provider_already_set_up" });
+    expect(result).toEqual({
+      status: "provider_already_set_up",
+      answer: { status: 409, replayed: false, code: null },
+    });
     expect(client.fetch).toHaveBeenCalledExactlyOnceWith(
       "/v1/wallets/initialize",
       expect.anything()
@@ -85,6 +130,35 @@ describe("createCustodySetupWalletAction", () => {
     expect(result).toEqual({ status: "success" });
     expect(client.fetch).toHaveBeenCalledWith("/v1/wallets", expect.anything());
     expect(requestBody(client)).toEqual({ connectionId: "conn_eu", label: "Treasury" });
+  });
+
+  // HOO-1918: the browser mints the key per user action; the server forwards it
+  // and never mints one, so a retried action is the same request upstream.
+  it("forwards the browser's Idempotency-Key and keeps it out of the body", async () => {
+    await createCustodySetupWalletAction(
+      walletForm({ provider: "privy", label: "Treasury", idempotencyKey: "browser-key" })
+    );
+
+    expect(client.fetch.mock.calls[0]?.[1]?.headers).toEqual({ "Idempotency-Key": "browser-key" });
+    expect(requestBody(client)).not.toHaveProperty("idempotencyKey");
+  });
+
+  // The browser cannot see the status or Idempotent-Replayed through a server
+  // action, so the action reports what sdp-api answered for the key it forwarded.
+  it.each([
+    ["a replayed stored failure", new SdpApiResponseError(422, "{}", true), 422, true],
+    ["a fresh refusal", new SdpApiResponseError(422, "{}"), 422, false],
+    ["a conflict", new SdpApiResponseError(409, "{}"), 409, false],
+    ["a server error", new SdpApiResponseError(502, "{}"), 502, false],
+    ["a transport failure", new TypeError("fetch failed"), null, false],
+  ] as const)("reports %s to the browser", async (_name, error, status, replayed) => {
+    client.fetch.mockRejectedValue(error);
+
+    const result = await createCustodySetupWalletAction(
+      walletForm({ provider: "privy", idempotencyKey: "browser-key" })
+    );
+
+    expect(result).toMatchObject({ status: "error", answer: { status, replayed } });
   });
 
   // Sending both would leave the API to reconcile a connection against a

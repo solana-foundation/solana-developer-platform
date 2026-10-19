@@ -8,6 +8,7 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import * as auth from "@/lib/auth";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
 import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -432,25 +433,16 @@ describe("external-wallet position reads", () => {
   });
 
   it("coalesces concurrent project-wide live portfolio reads", async () => {
+    const projectScopeReads = vi.spyOn(auth, "requireProjectId");
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-coalesced",
       tokenMint: USDC,
       label: "Coalesced vault",
     });
-    let release: ((value: unknown[]) => void) | undefined;
-    readVaultPositions.mockImplementation(
-      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
-        new Promise((resolve) => {
-          release = resolve;
-          expect(input.owner).toBe(OWNER_A);
-        })
-    );
-
-    const first = get("/v1/earn/external-wallet/positions/summary");
-    const second = get("/v1/earn/external-wallet/positions/summary");
-    await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1));
-    release?.([
+    const releases: Array<(value: unknown[]) => void> = [];
+    let released = false;
+    const snapshot = [
       {
         providerReference: "vault-coalesced",
         owner: OWNER_A,
@@ -461,7 +453,25 @@ describe("external-wallet position reads", () => {
         tokenMint: USDC,
         shareMint: SHARE,
       },
-    ]);
+    ];
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        new Promise((resolve) => {
+          expect(input.owner).toBe(OWNER_A);
+          if (released) resolve(snapshot);
+          else releases.push(resolve);
+        })
+    );
+
+    const first = get("/v1/earn/external-wallet/positions/summary");
+    const second = get("/v1/earn/external-wallet/positions/summary");
+    try {
+      await vi.waitFor(() => expect(projectScopeReads).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1));
+    } finally {
+      released = true;
+      for (const release of releases) release(snapshot);
+    }
 
     const responses = await Promise.all([first, second]);
     expect(responses.map((response) => response.status)).toEqual([200, 200]);

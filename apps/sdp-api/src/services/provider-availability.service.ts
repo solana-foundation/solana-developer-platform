@@ -242,30 +242,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       isConfigured: (env, testMode) =>
         hasMoonpayManagedKeys(env, testMode === false ? "production" : "sandbox"),
     },
-    bvnk: {
-      label: "BVNK",
-      isConfigured: (env, testMode) => {
-        const prod = hasAllEnv(env, [
-          "BVNK_WALLET_ID",
-          "BVNK_HAWK_AUTH_ID",
-          "BVNK_HAWK_SECRET_KEY",
-        ]);
-        const sandbox = hasAllEnv(env, [
-          "BVNK_SANDBOX_WALLET_ID",
-          "BVNK_SANDBOX_HAWK_AUTH_ID",
-          "BVNK_SANDBOX_HAWK_SECRET_KEY",
-        ]);
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
-    },
-    coinbase: {
-      label: "Coinbase Onramp",
-      // Onramp uses the account-wide CDP Secret API Key (same key across environments).
-      isConfigured: (env) =>
-        hasAllEnv(env, ["COINBASE_CDP_API_KEY_ID", "COINBASE_CDP_API_KEY_SECRET"]),
-    },
     stripe: {
       label: "Stripe",
       // The client's own key check, so a live key under the sandbox names

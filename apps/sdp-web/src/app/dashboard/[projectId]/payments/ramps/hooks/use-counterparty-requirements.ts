@@ -13,7 +13,7 @@ import {
   isCollectStageStatus,
   isCounterpartyRequirementsPollStatus,
 } from "@sdp/types/ramp-requirements";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import {
   buildCounterpartyRequirementsKey,
@@ -74,51 +74,11 @@ export interface AdvanceRequirementsPayload {
   fiatCurrency: RampFiatCurrency;
 }
 
-/** Advance kinds select the submission body: collected field data, or a pure consent flag. */
-export type AdvanceRequirementsKind = "collected" | "consent";
-
-/**
- * Consent keys one pending agreement requires: the agreement text and its
- * privacy policy are acknowledged separately, so each gets its own key.
- *
- * @param agreement - Pending agreement from the requirements answer.
- * @returns The two consent keys the step gate expects for this agreement.
- */
-export function bvnkAgreementConsentKeys(agreement: { name: string }): {
-  agreement: string;
-  privacyPolicy: string;
-} {
-  return { agreement: agreement.name, privacyPolicy: `${agreement.name}:privacy-policy` };
-}
-
-type CounterpartyRequirementsAdvanceBody =
-  | (AdvanceRequirementsPayload & { collectedData: CollectedFieldData })
-  | (AdvanceRequirementsPayload & { agreementConsent: true });
-
-/**
- * Shapes the advance POST body: a consent advance carries only the consent
- * flag; a collected advance carries the client-collected fields.
- *
- * @param payload - Corridor identity the advance answers for.
- * @param advance - Whether this advance submits collected data or consent.
- * @param collectedData - Fields collected so far for the current stage.
- * @returns The request body for the requirements advance.
- */
-function buildAdvanceBody(
-  payload: AdvanceRequirementsPayload,
-  advance: AdvanceRequirementsKind,
-  collectedData: CollectedFieldData
-): CounterpartyRequirementsAdvanceBody {
-  return advance === "consent"
-    ? { ...payload, agreementConsent: true }
-    : { ...payload, collectedData };
-}
-
 async function advanceCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
   direction: RampDirection,
-  advanceBody: CounterpartyRequirementsAdvanceBody,
+  advanceBody: AdvanceRequirementsPayload & { collectedData: CollectedFieldData },
   t: Translate
 ): Promise<CounterpartyRequirements> {
   const response = await dashboardRequest(
@@ -156,14 +116,8 @@ interface AdvanceRecord {
   corridor: string;
   advanceId: string;
   payload: AdvanceRequirementsPayload;
-  kind: AdvanceRequirementsKind;
   result: CounterpartyRequirements;
 }
-
-type PendingAgreements = Extract<
-  CounterpartyRequirements,
-  { status: "counterparty_collect_agreement" }
->["agreements"];
 
 /**
  * Names the request corridor: every field of the request that, when it
@@ -226,41 +180,6 @@ function currentOnboarding(
 }
 
 /**
- * Reads the agreements awaiting consent off a requirements answer.
- *
- * @param answer - Requirements answer to inspect.
- * @returns The agreements, or null when the step collects fields instead.
- */
-function pendingAgreementsOf(
-  answer: CounterpartyRequirements | undefined
-): PendingAgreements | null {
-  return answer !== undefined && answer.status === "counterparty_collect_agreement"
-    ? answer.agreements
-    : null;
-}
-
-/**
- * Whether every pending agreement and its privacy policy has been checked.
- *
- * @param pending - Agreements awaiting consent, or null when there are none.
- * @param acceptedAgreements - Consent keys checked so far.
- * @returns False when nothing is pending.
- */
-function everyAgreementAccepted(
-  pending: PendingAgreements | null,
-  acceptedAgreements: readonly string[]
-): boolean {
-  if (pending === null) {
-    return false;
-  }
-  const accepted = new Set(acceptedAgreements);
-  return pending.every((agreement) => {
-    const keys = bvnkAgreementConsentKeys(agreement);
-    return accepted.has(keys.agreement) && accepted.has(keys.privacyPolicy);
-  });
-}
-
-/**
  * Every status the provider can return is handled: "collect" → needsCollection,
  * "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
  * A fetch error only blocks while no usable answer exists: a failed refetch
@@ -298,39 +217,14 @@ export interface CounterpartyRequirementsState {
    * advance and its status poll; null until advanced or after a corridor change.
    */
   onboarding: CounterpartyRequirements | null;
-  /**
-   * Advances provider provisioning; resolves to the new lifecycle state. The
-   * kind selects the submission body: collected field data, or a pure consent
-   * flag with no collected data.
-   */
-  submitRequirements: (
-    payload: AdvanceRequirementsPayload,
-    advance: AdvanceRequirementsKind
-  ) => Promise<CounterpartyRequirements>;
+  /** Advances provider requirements with collected data. */
+  submitRequirements: (payload: AdvanceRequirementsPayload) => Promise<CounterpartyRequirements>;
   /** An advance POST is in flight. */
   isAdvancing: boolean;
   /** Re-runs the advance (POST) to retry — used by the customer funding provisioning failure action. */
   retryOnboarding: () => void;
   /** Reads the onboarding status now instead of on the poll's next tick. */
   refreshOnboarding: () => Promise<void>;
-  /** Agreements awaiting consent on the requirements step, or null when the step collects fields. */
-  pendingAgreements:
-    | Extract<CounterpartyRequirements, { status: "counterparty_collect_agreement" }>["agreements"]
-    | null;
-  /**
-   * Consent keys (see `bvnkAgreementConsentKeys`) the user has ticked for the
-   * current corridor; cleared whenever the corridor changes so consent never
-   * leaks across subjects.
-   */
-  acceptedAgreements: readonly string[];
-  /**
-   * Records or withdraws one consent key; the step gate releases only once
-   * every pending agreement has both of its keys accepted.
-   *
-   * @param key - A consent key from `bvnkAgreementConsentKeys`.
-   * @param accepted - Whether the user checked (true) or unchecked (false) it.
-   */
-  toggleAgreement: (key: string, accepted: boolean) => void;
 }
 
 /**
@@ -344,7 +238,6 @@ export function useCounterpartyRequirements(
 ): CounterpartyRequirementsState {
   const t = useTranslations();
   const [collectedData, setCollectedData] = useState<CollectedFieldData>({});
-  const [acceptedAgreements, setAcceptedAgreements] = useState<readonly string[]>([]);
   const setField = (key: string, value: string) => {
     setCollectedData((previous) => ({ ...previous, [key]: value }));
   };
@@ -368,15 +261,9 @@ export function useCounterpartyRequirements(
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
-    setAcceptedAgreements([]);
     setAdvanceRecord(null);
     setCollectRecord(null);
   }
-  const toggleAgreement = useCallback((key: string, accepted: boolean) => {
-    setAcceptedAgreements((previous) =>
-      accepted ? [...previous, key] : previous.filter((acceptedKey) => acceptedKey !== key)
-    );
-  }, []);
   const advance = recordForCorridor(advanceRecord, subjectKey);
 
   const key = buildCounterpartyRequirementsKey(params);
@@ -408,8 +295,7 @@ export function useCounterpartyRequirements(
   );
 
   const submitRequirements = async (
-    payload: AdvanceRequirementsPayload,
-    advance: AdvanceRequirementsKind
+    payload: AdvanceRequirementsPayload
   ): Promise<CounterpartyRequirements> => {
     if (!params?.provider || !params.counterpartyId) {
       throw new Error(t("DashboardPayments.workspace.requirementsContextMissing"));
@@ -417,7 +303,7 @@ export function useCounterpartyRequirements(
     const corridor = subjectKey;
     setIsAdvancing(true);
     try {
-      const advanceBody = buildAdvanceBody(payload, advance, collectedData);
+      const advanceBody = { ...payload, collectedData };
       const result = await advanceCounterpartyRequirements(
         params.counterpartyId,
         params.provider,
@@ -429,7 +315,6 @@ export function useCounterpartyRequirements(
         corridor,
         advanceId: crypto.randomUUID(),
         payload,
-        kind: advance,
         result,
       });
       if (isCollectStageStatus(result.status)) {
@@ -443,7 +328,7 @@ export function useCounterpartyRequirements(
 
   const retryOnboarding = () => {
     if (advance !== null) {
-      void submitRequirements(advance.payload, advance.kind).catch(() => {});
+      void submitRequirements(advance.payload).catch(() => {});
     }
   };
 
@@ -492,7 +377,6 @@ export function useCounterpartyRequirements(
   // The furthest collect stage wins for stage and field selection.
   const collectAnswer = recordForCorridor(collectRecord, subjectKey);
   const requirementsData = collectAnswer !== null ? collectAnswer.result : data;
-  const pendingAgreements = pendingAgreementsOf(requirementsData);
   const fields = useMemo<RequirementField[]>(
     () =>
       requirementsData !== undefined && isCollectFieldsRequirements(requirementsData)
@@ -508,11 +392,7 @@ export function useCounterpartyRequirements(
         .every((field) => requirementFieldError(field, collectedData[field.key]) === null),
     [fields, collectedData]
   );
-  const isComplete =
-    requirementsData !== undefined &&
-    (pendingAgreements !== null
-      ? everyAgreementAccepted(pendingAgreements, acceptedAgreements)
-      : fieldsComplete);
+  const isComplete = requirementsData !== undefined && fieldsComplete;
 
   const blockReason = requirementsBlockReason(error, requirementsData, data);
 
@@ -532,8 +412,5 @@ export function useCounterpartyRequirements(
     refreshOnboarding: async () => {
       await refreshPolledOnboarding();
     },
-    pendingAgreements,
-    acceptedAgreements,
-    toggleAgreement,
   };
 }

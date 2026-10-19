@@ -4,7 +4,8 @@ import {
   getRecurringPaymentOperationStaleBefore,
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -22,11 +23,13 @@ import {
 import {
   type Address,
   createNoopSigner,
+  removeNullCharacters,
   type Signature,
   type TransactionSigner,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
+import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
@@ -50,6 +53,7 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
+import { normalizeDecimalString } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -59,7 +63,10 @@ import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
@@ -68,26 +75,45 @@ import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
+  isSubscriptionDelegationCanceled,
   parseNullableStoredSignature,
+  ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
   sendSubscriptionInstructions,
+  settleResumedStep,
+  settleStepIfResumed,
   subscriptionProgramMetadataUri,
 } from "./shared";
 
-type RecurringPaymentUpdateSnapshot = {
-  sourceCustodyWalletId: string | null;
-  counterpartyId: string;
-  counterpartyAccountId: string;
-  token: string;
-  amount: string;
-  periodHours: number;
-  firstCollectionAt: string | null;
-  nextCollectionDueAt: string | null;
-  metadataUri: string | null;
-};
+/** An update request's Idempotency-Key and the fingerprint of its validated body. */
+export interface RecurringPaymentUpdateIdempotency {
+  key: string;
+  fingerprint: string;
+}
+
+const recurringPaymentUpdateSnapshotSchema = z.object({
+  sourceCustodyWalletId: z.string().nullable(),
+  counterpartyId: z.string(),
+  counterpartyAccountId: z.string(),
+  token: z.string(),
+  amount: z.string(),
+  periodHours: z.number(),
+  firstCollectionAt: z.string().nullable(),
+  nextCollectionDueAt: z.string().nullable(),
+  metadataUri: z.string().nullable(),
+});
+
+type RecurringPaymentUpdateSnapshot = z.infer<typeof recurringPaymentUpdateSnapshotSchema>;
+
+/**
+ * The values an update attempt saved (`before_values`, `after_values`): any
+ * subset of the snapshot's fields, and nothing else.
+ */
+const savedUpdateValuesSchema = recurringPaymentUpdateSnapshotSchema.partial().strict();
+type SavedUpdateValues = z.infer<typeof savedUpdateValuesSchema>;
 
 const RECURRING_PAYMENT_UPDATE_FIELDS = [
   "sourceCustodyWalletId",
@@ -114,8 +140,8 @@ type ResolvedRecurringPaymentUpdate = {
   nextCollectionDueAt: string | null;
   metadataUri: string | null;
   changedFields: Array<keyof RecurringPaymentUpdateSnapshot>;
-  beforeValues: Record<string, unknown>;
-  afterValues: Record<string, unknown>;
+  beforeValues: SavedUpdateValues;
+  afterValues: SavedUpdateValues;
 };
 
 const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>([
@@ -161,8 +187,12 @@ function buildUpdateDiff(
   beforeValues: Partial<RecurringPaymentUpdateSnapshot>;
   afterValues: Partial<RecurringPaymentUpdateSnapshot>;
 } {
-  const changedFields = RECURRING_PAYMENT_UPDATE_FIELDS.filter(
-    (field) => before[field] !== after[field]
+  // An amount is compared by value, so a respelling ("1" and "1.0") is no change
+  // and never broadcasts a replacement.
+  const changedFields = RECURRING_PAYMENT_UPDATE_FIELDS.filter((field) =>
+    field === "amount"
+      ? normalizeDecimalString(before.amount) !== normalizeDecimalString(after.amount)
+      : before[field] !== after[field]
   );
   const beforeValues: Partial<RecurringPaymentUpdateSnapshot> = { ...before };
   const afterValues: Partial<RecurringPaymentUpdateSnapshot> = { ...after };
@@ -174,23 +204,43 @@ function sameStringSet(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value) => right.includes(value));
 }
 
-function sameFlatRecord(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  const keys = Object.keys(left);
-  return sameStringSet(keys, Object.keys(right)) && keys.every((key) => left[key] === right[key]);
+/** One snapshot field: an amount by value ("30" and "30.0" are one amount), the rest as stored. */
+function sameSnapshotValue(
+  field: RecurringPaymentUpdateField,
+  left: SavedUpdateValues,
+  right: SavedUpdateValues
+): boolean {
+  if (field === "amount" && left.amount !== undefined && right.amount !== undefined) {
+    return normalizeDecimalString(left.amount) === normalizeDecimalString(right.amount);
+  }
+  return left[field] === right[field];
+}
+
+/** The same fields, each the same value (`sameSnapshotValue`). */
+function sameSavedValues(left: SavedUpdateValues, right: SavedUpdateValues): boolean {
+  return RECURRING_PAYMENT_UPDATE_FIELDS.every(
+    (field) => field in left === field in right && sameSnapshotValue(field, left, right)
+  );
 }
 
 function updateAttemptMatchesRequest(
   attempt: PaymentRecurringPaymentUpdateAttemptRow,
   input: {
     changedFields: string[];
-    beforeValues: Record<string, unknown>;
-    afterValues: Record<string, unknown>;
+    beforeValues: SavedUpdateValues;
+    afterValues: SavedUpdateValues;
   }
 ): boolean {
+  // Parsed where they are read: a row whose saved values are not a snapshot
+  // subset is not this request's attempt.
+  const before = savedUpdateValuesSchema.safeParse(attempt.before_values);
+  const after = savedUpdateValuesSchema.safeParse(attempt.after_values);
   return (
+    before.success &&
+    after.success &&
     sameStringSet(attempt.changed_fields, input.changedFields) &&
-    sameFlatRecord(attempt.before_values, input.beforeValues) &&
-    sameFlatRecord(attempt.after_values, input.afterValues)
+    sameSavedValues(before.data, input.beforeValues) &&
+    sameSavedValues(after.data, input.afterValues)
   );
 }
 
@@ -363,6 +413,68 @@ async function recordRecurringPaymentUpdateEvent(input: {
   }
 }
 
+/**
+ * Records that a keyed PATCH was answered without an attempt of its own: a
+ * request that changes nothing, or one that finished a stale attempt another
+ * key claimed. The confirmed attempt carries this request's key and
+ * fingerprint and changes nothing, so a retry once the key's shared record has
+ * expired is answered from it instead of applying its terms again over a newer
+ * edit. The fingerprint check is the key step's, as for any update attempt.
+ * An unkeyed request, or one whose own attempt carries its key, records nothing.
+ */
+async function recordAnsweredUpdate(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
+  /** The key on the attempt this request ran; null when it ran none. */
+  ranAttemptKey: string | null;
+}): Promise<void> {
+  if (input.idempotency === null || input.idempotency.key === input.ranAttemptKey) {
+    return;
+  }
+  const answeredAt = new Date().toISOString();
+  const attempt = await input.recurringRepo.createUpdateAttempt({
+    id: `prpu_${crypto.randomUUID()}`,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+    mode: "metadata_schedule",
+    status: "confirmed",
+    stage: "finalize",
+    oldPlanId: null,
+    oldSubscriptionId: null,
+    newPlanId: null,
+    newSubscriptionId: null,
+    newSourceCustodyWalletId: null,
+    planUpdateSignature: null,
+    planCreationSignature: null,
+    authorizationSetupSignature: null,
+    authorizationSignature: null,
+    oldCancelSignature: null,
+    changedFields: [],
+    beforeValues: {},
+    afterValues: {},
+    error: null,
+    createdBy: input.createdBy,
+    createdAt: answeredAt,
+    updatedAt: answeredAt,
+    idempotencyKey: input.idempotency.key,
+    idempotencyFingerprint: input.idempotency.fingerprint,
+  });
+  if (!attempt) {
+    throw internalError("Failed to journal recurring payment update");
+  }
+}
+
+/**
+ * Updates a schedule that never went on chain. The row, a confirmed update
+ * attempt carrying the request's key and fingerprint, and the update event
+ * commit together, so a retry of the same request is answered from the attempt
+ * (HOO-1918), as a pending schedule's cancel is.
+ */
 async function updatePendingRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -370,8 +482,14 @@ async function updatePendingRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   resolved: ResolvedRecurringPaymentUpdate;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (input.resolved.changedFields.length === 0) {
+    await recordAnsweredUpdate({
+      ...input,
+      recurringRepo: createPaymentRecurringPaymentsRepository(input.env, createTenantScope(input)),
+      ranAttemptKey: null,
+    });
     return input.recurringPayment;
   }
 
@@ -379,10 +497,75 @@ async function updatePendingRecurringPayment(input: {
     input.resolved.destinationAddress !== input.recurringPayment.destination_address ||
     input.resolved.token !== input.recurringPayment.token;
   const updatedAt = new Date().toISOString();
-  const recurringRepo = createPaymentRecurringPaymentsRepository(
-    input.env,
-    createTenantScope(input)
-  );
+  return getDb(input.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const updated = await updatePendingRecurringPaymentRow(recurringRepo, {
+      ...input,
+      changedDestinationOrToken,
+      updatedAt,
+    });
+    const attempt = await recurringRepo.createUpdateAttempt({
+      id: `prpu_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      mode: "metadata_schedule",
+      status: "confirmed",
+      stage: "finalize",
+      oldPlanId: null,
+      oldSubscriptionId: null,
+      newPlanId: null,
+      newSubscriptionId: null,
+      newSourceCustodyWalletId:
+        input.resolved.sourceWallet.id === input.recurringPayment.source_custody_wallet_id
+          ? null
+          : input.resolved.sourceWallet.id,
+      planUpdateSignature: null,
+      planCreationSignature: null,
+      authorizationSetupSignature: null,
+      authorizationSignature: null,
+      oldCancelSignature: null,
+      changedFields: input.resolved.changedFields.map(String),
+      beforeValues: input.resolved.beforeValues,
+      afterValues: input.resolved.afterValues,
+      error: null,
+      createdBy: input.createdBy,
+      createdAt: updatedAt,
+      updatedAt,
+      idempotencyKey: input.idempotency?.key ?? null,
+      idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
+    });
+    if (!attempt) {
+      throw internalError("Failed to journal recurring payment update");
+    }
+    await recordRecurringPaymentUpdateEvent({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attemptId: attempt.id,
+      changedFields: input.resolved.changedFields.map(String),
+      beforeValues: input.resolved.beforeValues,
+      afterValues: input.resolved.afterValues,
+      createdBy: input.createdBy,
+      createdAt: updatedAt,
+    });
+    return updated;
+  });
+}
+
+async function updatePendingRecurringPaymentRow(
+  recurringRepo: PaymentRecurringPaymentsRepository,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPayment: PaymentRecurringPaymentRow;
+    resolved: ResolvedRecurringPaymentUpdate;
+    changedDestinationOrToken: boolean;
+    updatedAt: string;
+  }
+): Promise<PaymentRecurringPaymentRow> {
+  const { changedDestinationOrToken, updatedAt } = input;
   const updated = await recurringRepo.updateRecurringPayment({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -407,20 +590,6 @@ async function updatePendingRecurringPayment(input: {
   if (!updated) {
     throw conflict("Recurring payment changed while updating; retry with the latest payment");
   }
-
-  await recordRecurringPaymentUpdateEvent({
-    recurringRepo,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPayment.id,
-    attemptId: null,
-    changedFields: input.resolved.changedFields.map(String),
-    beforeValues: input.resolved.beforeValues,
-    afterValues: input.resolved.afterValues,
-    createdBy: input.createdBy,
-    createdAt: updatedAt,
-  });
-
   return updated;
 }
 
@@ -437,7 +606,10 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   createdBy: string | null;
   nowIso: string;
   recoveringStaleUpdate: boolean;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
+  // A stale claim resumes the in-flight attempt under its original key, or
+  // records this request's key and fingerprint on it when it has none.
   if (input.recoveringStaleUpdate) {
     const existing = await input.recurringRepo.getLatestUpdateAttempt({
       organizationId: input.organizationId,
@@ -463,6 +635,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
           organizationId: input.organizationId,
           projectId: input.projectId,
           error: null,
+          adoptIdempotencyKey: input.idempotency?.key ?? null,
+          adoptIdempotencyFingerprint: input.idempotency?.fingerprint ?? null,
           updatedAt: input.nowIso,
         })
       );
@@ -494,6 +668,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     createdBy: input.createdBy,
     createdAt: input.nowIso,
     updatedAt: input.nowIso,
+    idempotencyKey: input.idempotency?.key ?? null,
+    idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
   });
 
   if (!attempt) {
@@ -585,6 +761,7 @@ async function finalizeMetadataScheduleUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   nextCollectionDueAt: string | null | undefined;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
@@ -660,6 +837,18 @@ async function finalizeMetadataScheduleUpdate(input: {
       createdAt: finalizedAt,
     });
 
+    // A request that finished a stale attempt another key claimed (the attempt
+    // keeps that key) is answered under its own key in the same commit, so the
+    // update never lands without the record its retry is answered from.
+    await recordAnsweredUpdate({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: updated,
+      createdBy: input.createdBy,
+      idempotency: input.idempotency,
+      ranAttemptKey: input.attempt.idempotency_key,
+    });
     return updated;
   });
 }
@@ -675,12 +864,13 @@ async function runMetadataScheduleUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   let attempt = input.attempt;
   let planUpdateSignature = parseNullableStoredSignature(attempt.plan_update_signature);
 
@@ -719,10 +909,33 @@ async function runMetadataScheduleUpdate(input: {
       throw badRequest("Resolved signing wallet does not match source wallet");
     }
 
-    if (!planUpdateSignature) {
-      const onChainPlan = await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
-        commitment: "confirmed",
-      });
+    // An attempt an earlier run left at `update_plan` reached the send (HOO-2044):
+    // the plan's metadata settles whether it landed.
+    const targetMetadataUri = subscriptionProgramMetadataUri(input.resolved.metadataUri);
+    const readPlan = (commitment: "finalized" | "confirmed") =>
+      subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment });
+    const step =
+      input.attempt.stage === "update_plan"
+        ? await settleResumedStep({
+            rpc,
+            read: readPlan,
+            landed: (onChain) =>
+              onChain.exists &&
+              // The on-chain field is fixed at 128 bytes, padded with NULs.
+              removeNullCharacters(onChain.data.data.metadataUri) === targetMetadataUri,
+            savedSignature: planUpdateSignature,
+            stale: true,
+            failureMessage: "Recurring payment update failed on-chain",
+            logContext: {
+              recurring_payment_id: input.claimed.id,
+              attempt_id: attempt.id,
+              step: "update_plan",
+            },
+          })
+        : null;
+
+    if (step?.kind !== "landed") {
+      const onChainPlan = step === null ? await readPlan("confirmed") : step.account;
       if (!onChainPlan.exists) {
         throw transactionFailed("Subscription plan was not found on-chain");
       }
@@ -742,7 +955,7 @@ async function runMetadataScheduleUpdate(input: {
         expectedEndTs: onChainPlan.data.data.endTs,
         expectedMetadataUri: onChainPlan.data.data.metadataUri,
         expectedPullers: onChainPlan.data.data.pullers,
-        metadataUri: subscriptionProgramMetadataUri(input.resolved.metadataUri),
+        metadataUri: targetMetadataUri,
         owner: sourceSigner,
         planPda,
         pullers: onChainPlan.data.data.pullers,
@@ -766,13 +979,11 @@ async function runMetadataScheduleUpdate(input: {
           updatedAt: new Date().toISOString(),
         })
       );
+      await confirmSubscriptionSignature(
+        planUpdateSignature,
+        "Recurring payment update failed on-chain"
+      );
     }
-
-    await confirmSubscriptionSignature(
-      input.env,
-      planUpdateSignature,
-      "Recurring payment update failed on-chain"
-    );
   }
 
   return finalizeMetadataScheduleUpdate({
@@ -785,6 +996,7 @@ async function runMetadataScheduleUpdate(input: {
     resolved: input.resolved,
     nextCollectionDueAt: nextDueAt,
     createdBy: input.createdBy,
+    idempotency: input.idempotency,
   });
 }
 
@@ -850,11 +1062,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     authorizationSetupSignature: initSignature,
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(
-    input.env,
-    initSignature,
-    "Recurring payment update failed on-chain"
-  );
+  await confirmSubscriptionSignature(initSignature, "Recurring payment update failed on-chain");
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -979,14 +1187,16 @@ async function finalizeReplacementUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   planPda: Address;
   planCreatedAt: string;
-  planCreationSignature: Signature;
+  /** Each signature is null when an earlier run's send landed before it was saved. */
+  planCreationSignature: Signature | null;
   subscriptionPda: Address;
   subscriptionAuthorityAddress: Address;
-  authorizationSignature: Signature;
-  oldCancelSignature: Signature;
+  authorizationSignature: Signature | null;
+  oldCancelSignature: Signature | null;
   currentPeriodStartAt: string;
   nextCollectionDueAt: string;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
@@ -1119,6 +1329,18 @@ async function finalizeReplacementUpdate(input: {
       createdAt: finalizedAt,
     });
 
+    // A request that finished a stale attempt another key claimed (the attempt
+    // keeps that key) is answered under its own key in the same commit, so the
+    // update never lands without the record its retry is answered from.
+    await recordAnsweredUpdate({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: updated,
+      createdBy: input.createdBy,
+      idempotency: input.idempotency,
+      ranAttemptKey: input.attempt.idempotency_key,
+    });
     return updated;
   });
 }
@@ -1134,6 +1356,7 @@ async function runReplacementUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (
     !input.claimed.plan_pda ||
@@ -1164,11 +1387,16 @@ async function runReplacementUpdate(input: {
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   let attempt = input.attempt;
   let planCreationSignature = parseNullableStoredSignature(attempt.plan_creation_signature);
   let authorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
   let oldCancelSignature = parseNullableStoredSignature(attempt.old_cancel_signature);
+  // A step's signature is saved only after its send returns, so on an attempt an
+  // earlier run started, a step with no signature may have landed (HOO-2044).
+  // Such a step reads the chain before it sends again; a fresh attempt
+  // (`claim`) has sent nothing and reads nothing extra.
+  const resumedAttempt = attempt.stage !== "claim";
   const replacementPeriodStartAt = attempt.created_at;
   const requestedNextDue = replacementNextCollectionDueAt({
     requested: input.request.nextCollectionDueAt,
@@ -1230,7 +1458,20 @@ async function runReplacementUpdate(input: {
     })
   );
 
-  if (!planCreationSignature) {
+  let onChainPlan = await settleStepIfResumed(resumedAttempt, {
+    stale: true,
+    logContext: {
+      recurring_payment_id: attempt.recurring_payment_id,
+      attempt_id: attempt.id,
+      step: "create_plan",
+    },
+    rpc,
+    read: (commitment) => subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment }),
+    landed: (onChain) => onChain.exists,
+    savedSignature: planCreationSignature,
+    failureMessage: "Recurring payment replacement plan creation failed on-chain",
+  });
+  if (!onChainPlan) {
     attempt = requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
         attemptId: attempt.id,
@@ -1270,16 +1511,14 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
+    await confirmSubscriptionSignature(
+      planCreationSignature,
+      "Recurring payment replacement plan creation failed on-chain"
+    );
+    onChainPlan = await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
+      commitment: "confirmed",
+    });
   }
-
-  await confirmSubscriptionSignature(
-    input.env,
-    planCreationSignature,
-    "Recurring payment replacement plan creation failed on-chain"
-  );
-  const onChainPlan = await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
-    commitment: "confirmed",
-  });
   if (!onChainPlan.exists) {
     throw transactionFailed("Subscription plan was not found on-chain");
   }
@@ -1326,7 +1565,22 @@ async function runReplacementUpdate(input: {
     })
   );
 
-  if (!authorizationSignature) {
+  const subscribedOnChain =
+    (await settleStepIfResumed(resumedAttempt, {
+      stale: true,
+      logContext: {
+        recurring_payment_id: attempt.recurring_payment_id,
+        attempt_id: attempt.id,
+        step: "authorize_subscription",
+      },
+      rpc,
+      read: (commitment) =>
+        subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment }),
+      landed: (onChain) => onChain.exists,
+      savedSignature: authorizationSignature,
+      failureMessage: "Recurring payment replacement authorization failed on-chain",
+    })) !== null;
+  if (!subscribedOnChain) {
     attempt = requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
         attemptId: attempt.id,
@@ -1341,12 +1595,15 @@ async function runReplacementUpdate(input: {
       subscriptionAuthorityAddress,
       { commitment: "confirmed" }
     );
-    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-      movement: "recurring.update",
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
-    });
+    const feePayment = createSponsorshipFeePayment(
+      input.env,
+      await resolveProjectSponsorshipScope(input.env, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
+      }),
+      "recurring.update"
+    );
     const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
@@ -1400,15 +1657,32 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
+    await confirmSubscriptionSignature(
+      authorizationSignature,
+      "Recurring payment replacement authorization failed on-chain"
+    );
   }
 
-  await confirmSubscriptionSignature(
-    input.env,
-    authorizationSignature,
-    "Recurring payment replacement authorization failed on-chain"
-  );
-
-  if (!oldCancelSignature) {
+  const oldPlanPda = assertValidAddress(input.claimed.plan_pda, "planPda");
+  const oldSubscriptionPda = assertValidAddress(input.claimed.subscription_pda, "subscriptionPda");
+  const oldCanceledOnChain =
+    (await settleStepIfResumed(resumedAttempt, {
+      stale: true,
+      logContext: {
+        recurring_payment_id: attempt.recurring_payment_id,
+        attempt_id: attempt.id,
+        step: "cancel_old_subscription",
+      },
+      rpc,
+      read: (commitment) =>
+        subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, oldSubscriptionPda, {
+          commitment,
+        }),
+      landed: isSubscriptionDelegationCanceled,
+      savedSignature: oldCancelSignature,
+      failureMessage: "Recurring payment old subscription cancellation failed on-chain",
+    })) !== null;
+  if (!oldCanceledOnChain) {
     attempt = requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
         attemptId: attempt.id,
@@ -1430,9 +1704,9 @@ async function runReplacementUpdate(input: {
     }
     const cancelInstruction =
       await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
-        planPda: assertValidAddress(input.claimed.plan_pda, "planPda"),
+        planPda: oldPlanPda,
         subscriber: oldSourceSigner,
-        subscriptionPda: assertValidAddress(input.claimed.subscription_pda, "subscriptionPda"),
+        subscriptionPda: oldSubscriptionPda,
       });
     oldCancelSignature = await sendSubscriptionInstructions({
       movement: "recurring.update_cancel_old",
@@ -1452,13 +1726,11 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
+    await confirmSubscriptionSignature(
+      oldCancelSignature,
+      "Recurring payment old subscription cancellation failed on-chain"
+    );
   }
-
-  await confirmSubscriptionSignature(
-    input.env,
-    oldCancelSignature,
-    "Recurring payment old subscription cancellation failed on-chain"
-  );
 
   const finalizedAt = new Date().toISOString();
   const safeNextDue = replacementNextCollectionDueAt({
@@ -1488,6 +1760,7 @@ async function runReplacementUpdate(input: {
     currentPeriodStartAt: finalizedAt,
     nextCollectionDueAt: safeNextDue,
     createdBy: input.createdBy,
+    idempotency: input.idempotency,
   });
 }
 
@@ -1600,6 +1873,8 @@ export async function updateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  /** The request's Idempotency-Key and body fingerprint, written on the attempt it claims. */
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
@@ -1618,6 +1893,7 @@ export async function updateRecurringPayment(input: {
       recurringPayment: input.recurringPayment,
       resolved,
       createdBy: input.createdBy,
+      idempotency: input.idempotency,
     });
   }
 
@@ -1651,9 +1927,6 @@ export async function updateRecurringPayment(input: {
     recurringPayment: settled.recurringPayment,
   });
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
-  if (sourceChanged) {
-  }
-
   const mode = requestedActiveUpdateMode(resolved.changedFields);
   const requiresRuntimeExecution =
     mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;
@@ -1674,6 +1947,12 @@ export async function updateRecurringPayment(input: {
   }
 
   if (resolved.changedFields.length === 0) {
+    await recordAnsweredUpdate({
+      ...input,
+      recurringRepo,
+      recurringPayment: settled.recurringPayment,
+      ranAttemptKey: null,
+    });
     return settled.recurringPayment;
   }
 
@@ -1713,6 +1992,7 @@ export async function updateRecurringPayment(input: {
       createdBy: input.createdBy,
       nowIso,
       recoveringStaleUpdate,
+      idempotency: input.idempotency,
     });
     return { claimed, attempt };
   });
@@ -1721,9 +2001,10 @@ export async function updateRecurringPayment(input: {
   }
   const { attempt, claimed } = claimResult;
 
+  let updated: PaymentRecurringPaymentRow;
   try {
     if (mode === "metadata_schedule") {
-      return await runMetadataScheduleUpdate({
+      updated = await runMetadataScheduleUpdate({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -1734,21 +2015,23 @@ export async function updateRecurringPayment(input: {
         resolved,
         request: input.request,
         createdBy: input.createdBy,
+        idempotency: input.idempotency,
+      });
+    } else {
+      updated = await runReplacementUpdate({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        oldSourceWallet: input.sourceWallet,
+        claimed,
+        subscription: settled.subscription,
+        attempt,
+        resolved,
+        request: input.request,
+        createdBy: input.createdBy,
+        idempotency: input.idempotency,
       });
     }
-
-    return await runReplacementUpdate({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      oldSourceWallet: input.sourceWallet,
-      claimed,
-      subscription: settled.subscription,
-      attempt,
-      resolved,
-      request: input.request,
-      createdBy: input.createdBy,
-    });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     getLogger().error(
@@ -1780,8 +2063,11 @@ export async function updateRecurringPayment(input: {
         currentAttempt.mode === "metadata_schedule" &&
         Boolean(currentAttempt.plan_update_signature);
       const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
+      // A resumed step the chain cannot settle yet may have landed: keep the attempt.
       resetToActive =
-        !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
+        !(error instanceof ResumedStepUnsettledError) &&
+        !hasReplacementAuthorization &&
+        (!hasSubmittedMetadataUpdate || transactionFailed);
 
       await recordRecurringPaymentUpdateFailure({
         env: input.env,
@@ -1805,4 +2091,6 @@ export async function updateRecurringPayment(input: {
 
     throw error;
   }
+
+  return updated;
 }

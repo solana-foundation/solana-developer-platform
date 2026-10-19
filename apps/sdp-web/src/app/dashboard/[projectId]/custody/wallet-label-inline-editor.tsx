@@ -4,8 +4,10 @@ import { PencilIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { updateWalletLabelAction } from "./actions";
 
 interface WalletLabelInlineEditorProps {
@@ -26,6 +28,7 @@ export function WalletLabelInlineEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(label ?? "");
   const [isPending, startTransition] = useTransition();
+  const actionKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
   const displayLabel = label ?? emptyLabel ?? t("DashboardCustody.untitled");
 
   useEffect(() => {
@@ -42,13 +45,16 @@ export function WalletLabelInlineEditor({
       position: "bottom-right",
     });
 
+    const input = JSON.stringify([walletId, draft.trim()]);
     startTransition(async () => {
-      const result = await updateWalletLabelAction(walletId, draft).catch((error) => ({
+      const key = actionKey.keyFor(input);
+      const result = await updateWalletLabelAction(walletId, draft, key).catch((error) => ({
         status: "error" as const,
         message:
           error instanceof Error ? error.message : t("DashboardCustody.unableToUpdateWalletLabel"),
       }));
 
+      actionKey.settled(input, key, result);
       if (result.status === "success") {
         toast.success(t("DashboardCustody.walletLabelUpdated"), {
           id: toastId,

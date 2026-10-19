@@ -1,26 +1,35 @@
 "use client";
 
 import type { PaymentTransferBatchRequest } from "@sdp/types";
+import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
+import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
-  createPaymentIdempotencyStore,
-  isIdempotencyKeyConflict,
-} from "./payment-idempotency-store";
+  createIdempotencyKeyStore,
+  resetIdempotencyKeyStoresForTests,
+  settleMoneyIdempotencyKey,
+} from "@/lib/idempotency-key-store";
+import {
+  type CreateTransferBatchResult,
+  createTransferBatch,
+  TransferBatchRequestError,
+  type Translate,
+} from "./payments-workspace.data";
 
 /**
  * Browser-side durability for the transfer-batch IDEMPOTENCY KEY.
  *
  * `POST /v1/payments/transfer-batches` replays by Idempotency-Key + payload
  * fingerprint, but only when the caller carries a key at all: an unkeyed retry
- * is a brand-new batch that moves the whole amount again. The storage, expiry
- * and hold mechanics live in `payment-idempotency-store.ts`, shared with single
- * transfers; this module owns what makes two batches the same one.
+ * is a brand-new batch that moves the whole amount again. Storage and
+ * the retire rule are the shared key store's (`lib/idempotency-key-store.ts`),
+ * as for single transfers; this module owns what makes two batches the same one.
  */
 
-const store = createPaymentIdempotencyStore("sdp:payments:transfer-batch:idempotency:v1");
+const store = createIdempotencyKeyStore("sdp:payments:transfer-batch:idempotency:v1");
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferBatchIdempotencyStateForTests(): void {
-  store.resetForTests();
+  resetIdempotencyKeyStoresForTests();
 }
 
 /**
@@ -30,7 +39,7 @@ export function resetTransferBatchIdempotencyStateForTests(): void {
  * the SAME intent, but the API fingerprints resolved recipients IN ORDER. Left
  * to diverge, a retry that reorders the list (remove a recipient, add it back)
  * carries the same key with a differently-ordered body, which the API refuses
- * as a fingerprint conflict — and a refusal is exactly what retires the key,
+ * as a fingerprint conflict — and that refusal (422) is what retires the key,
  * so the next press mints a fresh one and sends a SECOND batch for a request
  * that may already be recorded.
  *
@@ -78,18 +87,66 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
  * The same batch rebuilt after a retry or a reload gets the SAME key.
  */
 export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint);
+  return store.claim(fingerprint).key;
 }
 
 /**
- * Retire a key once the API has answered for it: a recorded batch, or a 4xx
- * refusal other than a key conflict. Never on a 5xx or a network failure.
+ * Retire a key once the API has answered for it: a recorded batch, or a
+ * definitive refusal ({@link sendTransferBatchUnderKey}).
  */
-export function releaseTransferBatchIdempotencyKey(fingerprint: string): void {
-  store.release(fingerprint);
+export function releaseTransferBatchIdempotencyKey(fingerprint: string, key: string): void {
+  store.release(fingerprint, key);
 }
 
-/** A 409 under our own key is the one 4xx that must keep it. */
-export function isTransferBatchKeyConflict(status: number): boolean {
-  return isIdempotencyKeyConflict(status);
+/**
+ * Sends one batch under the key that makes a retry a retry: claimed and pinned
+ * before the request goes out (a batch whose key storage refused is not sent;
+ * see `createTransferBatch`), and retired only on the dashboard-wide rule
+ * (`moneyAnswerRetiresKey`): a recorded batch no longer processing, a replay or a 422 retires it, and
+ * anything else keeps it, since an earlier attempt may have paid every
+ * recipient. A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` or a 422
+ * `IDEMPOTENCY_KEY_REUSED` keeps it too and tells the user to check the list.
+ *
+ * @param request - The batch, in canonical form.
+ * @param t - Translator, for the API's refusal message.
+ * @returns The recorded batch.
+ */
+export async function sendTransferBatchUnderKey(
+  request: PaymentTransferBatchRequest,
+  t: Translate
+): Promise<CreateTransferBatchResult> {
+  const fingerprint = transferBatchRequestFingerprint(request);
+  const { key, persisted } = store.claim(fingerprint);
+  let result: CreateTransferBatchResult;
+  try {
+    result = await createTransferBatch(request, t, { value: key, persisted });
+  } catch (error) {
+    if (error instanceof TransferBatchRequestError) {
+      const answer = { status: error.status, replayed: error.replayed, code: error.code };
+      settleMoneyIdempotencyKey(store, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (uncertain !== null) {
+        // The key is kept, so the next press is answered under it: send nothing new.
+        throw new TransferBatchRequestError(t(uncertain), error.status, error.replayed, error.code);
+      }
+    }
+    throw error;
+  }
+  // The batch row exists, so once it is final the key is spent and the next
+  // identical batch is a new intent. While it is still processing the key is
+  // kept, so that send is answered by the replay (APE-461).
+  const settled = settleMoneyIdempotencyKey(store, fingerprint, key, {
+    status: 200,
+    replayed: false,
+    code: null,
+    movementStatus: result.batch.status,
+  });
+  // A replay repeats the first answer verbatim, so only a read of the batch's
+  // current state can show it final and settle the key.
+  if (!settled) {
+    settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), () =>
+      store.release(fingerprint, key)
+    );
+  }
+  return result;
 }

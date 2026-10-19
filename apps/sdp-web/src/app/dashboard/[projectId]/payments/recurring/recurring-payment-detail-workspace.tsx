@@ -55,7 +55,10 @@ import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
-import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
+import {
+  getRecurringPaymentDetailState,
+  refreshIfOutcomeUnknown,
+} from "./recurring-payment-detail-state";
 import {
   type RecurringPaymentAction,
   runRecurringPaymentAction,
@@ -493,6 +496,7 @@ export function RecurringPaymentDetailWorkspace({
       toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
       router.refresh();
     } catch (error) {
+      refreshIfOutcomeUnknown(error, () => router.refresh());
       const message =
         error instanceof Error ? error.message : t("DashboardPayments.recurring.actionFailed");
       setActionError({ action, message });
@@ -584,6 +588,7 @@ export function RecurringPaymentDetailWorkspace({
       setEditingPayment(false);
       router.refresh();
     } catch (error) {
+      refreshIfOutcomeUnknown(error, () => router.refresh());
       toast.error(t("DashboardPayments.recurring.paymentUpdateFailed"), {
         id: toastId,
         description:

@@ -48,12 +48,8 @@ export type KoraAdapterConfig = KoraClientOptions & {
    */
   timeoutMs?: number;
 
-  /**
-   * Per-user id forwarded to Kora as `user_id`.
-   * Callers should provide an owned, server-derived scope. Missing values use
-   * one shared fail-closed quota bucket instead of bypassing usage tracking.
-   */
-  userId?: string;
+  /** Per-user id forwarded to Kora as `user_id`: an owned, server-derived scope, never caller input. */
+  userId: string;
 
   /**
    * Cloud Run audience used to fetch a service identity token from the metadata
@@ -106,7 +102,7 @@ export class KoraAdapter implements FeePaymentPort {
           })
         : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
     this.client = withCallTimeouts(this.client, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    this.userId = userId?.trim() || "sdp:unscoped";
+    this.userId = userId;
   }
 
   /**
@@ -610,7 +606,7 @@ class AuthorizedKoraClient implements KoraClientTransport {
 function createCloudRunIdentityTokenProvider(audience: string): () => Promise<string> {
   const normalizedAudience = audience.trim();
   if (!normalizedAudience) {
-    throw new Error("KORA_CLOUD_RUN_AUDIENCE cannot be empty");
+    throw new Error("KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE cannot be empty");
   }
 
   let cachedToken: string | undefined;
@@ -649,7 +645,7 @@ function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): vo
     destination = new URL(rpcUrl);
     trustedAudience = new URL(audience);
   } catch {
-    throw new Error("KORA_RPC_URL and KORA_CLOUD_RUN_AUDIENCE must be valid URLs");
+    throw new Error("KORA_<CLUSTER>_URL and KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE must be valid URLs");
   }
 
   const hasCredentials =
@@ -663,7 +659,9 @@ function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): vo
     destination.origin !== trustedAudience.origin ||
     hasCredentials
   ) {
-    throw new Error("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+    throw new Error(
+      "KORA_<CLUSTER>_URL must use HTTPS and match the KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE origin"
+    );
   }
 }
 

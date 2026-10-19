@@ -6,7 +6,6 @@ import type {
   SdpEnvironment,
 } from "@sdp/types";
 import type { RepositoryDbClient } from "./base";
-import type { BvnkCustomerProviderAccountMetadata } from "./counterparty-provider-account.repository";
 
 export type { CounterpartyRow } from "@sdp/payments";
 export { generateCounterpartyId } from "@sdp/payments";
@@ -50,17 +49,6 @@ export interface ListCounterpartiesResult {
   total: number;
 }
 
-export interface UpsertBvnkCustomerProviderDataInput {
-  counterpartyId: string;
-  organizationId: string;
-  projectId: string;
-  customer: {
-    customerReference: string;
-    residenceCountryCode?: BvnkCustomerProviderAccountMetadata["residenceCountryCode"];
-    session?: BvnkCustomerProviderAccountMetadata["session"];
-  };
-}
-
 export interface MutateCounterpartyProviderDataInput {
   counterpartyId: string;
   organizationId: string;
@@ -80,6 +68,12 @@ export interface CounterpartiesRepository {
     counterpartyId: string;
     organizationId: string;
     projectId: string;
+    /**
+     * `any` for an access check (HOO-1918): the row must belong to the project
+     * whatever its status, so the retry of a request that archived it is still
+     * answered.
+     */
+    status?: "active" | "any";
   }): Promise<CounterpartyRow | null>;
   getCounterpartyByExternalId(params: {
     externalId: string;
@@ -96,6 +90,5 @@ export interface CounterpartiesRepository {
     environment: SdpEnvironment;
   }): Promise<CounterpartyRow | null>;
   mutateProviderData(params: MutateCounterpartyProviderDataInput): Promise<CounterpartyRow | null>;
-  upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput): Promise<void>;
   listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult>;
 }

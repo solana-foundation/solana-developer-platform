@@ -72,7 +72,7 @@ describe("integration provider route availability", () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
     mocks.custody.mockReturnValue(true);
-    mocks.rampProviders.mockResolvedValue(["moonpay", "bvnk"]);
+    mocks.rampProviders.mockResolvedValue(["moonpay", "stripe"]);
     mocks.payments.mockReturnValue(true);
     mocks.complianceInChannel.mockReturnValue(true);
     mocks.organizationFetch.mockResolvedValue({
@@ -96,7 +96,7 @@ describe("integration provider route availability", () => {
     );
   });
 
-  it.each(["turnkey", "bvnk", "trm"])(
+  it.each(["turnkey", "stripe", "trm"])(
     "404s provider %s the project cannot use",
     async (provider) => {
       await expect(

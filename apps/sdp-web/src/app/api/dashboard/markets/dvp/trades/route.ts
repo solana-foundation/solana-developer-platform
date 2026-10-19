@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
@@ -51,6 +50,5 @@ export async function POST(request: Request) {
     request,
     traceSource: "route.dashboard.dvp.trades.create",
     path: "/v1/dvp/trades",
-    upstreamHeaders: forwardedIdempotencyHeaders(request),
   });
 }

@@ -24,6 +24,7 @@ import {
   initializeCustodySetupAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
 import type { CustodyConnectionListItem } from "@/app/dashboard/[projectId]/custody/connections/connections.data";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,
@@ -46,6 +47,7 @@ import type {
   AvailableCustodyModes,
   ProjectCustodyAvailability,
 } from "@/lib/provider-availability";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
@@ -845,6 +847,7 @@ function useCreateWallet({
   const { dashboardCacheScope, flags, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const submissionInFlightRef = useRef(false);
+  const setupKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
 
   const createWallet = (form: HTMLFormElement) => {
     if (submissionInFlightRef.current || !form.reportValidity() || !canSubmit || isPending) {
@@ -859,13 +862,38 @@ function useCreateWallet({
 
     submissionInFlightRef.current = true;
     setErrorMessage(null);
+    // One key per submitted setup: the same details keep it across retries.
+    // The project is part of it: a setup's key is the API's per project, so a
+    // lost answer in one project is never settled by the same form in another.
+    const input = JSON.stringify([
+      selectedProjectId,
+      formAction === initializeCustodySetupAction,
+      [...formData.entries()].map(([k, v]) => [k, String(v)]),
+    ]);
+    const key = setupKey.keyFor(input);
+    formData.set("idempotencyKey", key);
 
     startTransition(async () => {
       try {
-        const result = await formAction(formData);
+        let result: Awaited<ReturnType<typeof formAction>>;
+        try {
+          result = await formAction(formData);
+        } catch {
+          // No answer: the call may have reached the server. The key stays and the form stays,
+          // so Create wallet again resends the same request under the same key.
+          setupKey.settled(input, key, { status: "error" });
+          // The wallet may exist: the inventory is refreshed so the list shows it.
+          refreshWalletInventory();
+          setErrorMessage(t("DashboardCustody.walletSetupOutcomeUnknown"));
+          return;
+        }
+        setupKey.settled(input, key, result);
 
         switch (result.status) {
           case "error":
+            // A refusal may follow an earlier attempt that did create the
+            // wallet, so the inventory is refreshed before the user retries.
+            refreshWalletInventory();
             setErrorMessage(result.message);
             return;
           case "provider_already_set_up":

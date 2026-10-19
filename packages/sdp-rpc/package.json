@@ -24,6 +24,11 @@
       "import": "./src/factory.ts",
       "default": "./src/factory.ts"
     },
+    "./helius-das": {
+      "types": "./src/helius-das.ts",
+      "import": "./src/helius-das.ts",
+      "default": "./src/helius-das.ts"
+    },
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts",

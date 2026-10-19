@@ -62,7 +62,7 @@ describe("POST /api/dashboard/payments/transfers", () => {
   });
 
   // Without the key a retried send is a new payment.
-  it("forwards the Idempotency-Key and nothing else from the caller", async () => {
+  it("leaves the Idempotency-Key to proxyToSdpApi and adds no upstream headers", async () => {
     const request = new Request("https://dashboard.example/api/dashboard/payments/transfers", {
       method: "POST",
       headers: { "Idempotency-Key": "transfer-key-1", Cookie: "session=secret" },
@@ -74,19 +74,6 @@ describe("POST /api/dashboard/payments/transfers", () => {
       request,
       traceSource: "route.dashboard.payments.transfers.post",
       path: "/v1/payments/transfers",
-      upstreamHeaders: { "Idempotency-Key": "transfer-key-1" },
     });
-  });
-
-  it("forwards no key when the caller sent none", async () => {
-    const request = new Request("https://dashboard.example/api/dashboard/payments/transfers", {
-      method: "POST",
-    });
-
-    await POST(request);
-
-    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
-      expect.objectContaining({ upstreamHeaders: undefined })
-    );
   });
 });

@@ -53,7 +53,10 @@ import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
@@ -473,12 +476,15 @@ export async function createDvpTrade(
   // validation and after the durable claim has won the idempotency race.
   let signed = false;
   try {
-    const feePayment = await createProjectSponsorshipFeePayment(env, {
-      movement: "dvp.create",
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actor: { type: "wallet", id: settlement.custodyWalletId },
-    });
+    const feePayment = createSponsorshipFeePayment(
+      env,
+      await resolveProjectSponsorshipScope(env, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        actor: { type: "wallet", id: settlement.custodyWalletId },
+      }),
+      "dvp.create"
+    );
     const sponsor = await feePayment.getFeePayer();
 
     const instruction = getCreateDvpInstruction({

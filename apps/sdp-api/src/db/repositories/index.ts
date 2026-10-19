@@ -10,7 +10,6 @@ export type {
 } from "./asset-profile.repository";
 export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
 export type { RepositoryDbClient } from "./base";
-export { createPostgresBvnkOnrampTransfersRepository } from "./bvnk-onramp-transfers.repository.postgres";
 export type {
   ArchiveCounterpartyInput,
   CounterpartiesRepository,
@@ -34,16 +33,11 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
-  AssignFundingWalletReferenceInput,
-  ClaimFundingWalletInput,
   CounterpartyProviderAccountKind,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
-  GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
-  InsertProviderResourceAccountInput,
   ListProviderAccountsInput,
-  PatchAccountMetadataInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";

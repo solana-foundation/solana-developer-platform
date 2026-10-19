@@ -25,7 +25,6 @@ import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import { hasOnboardingLifecycle } from "../components/providers";
 import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
 import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
@@ -274,14 +273,11 @@ export function useRampWizard<TId extends string>(
       position: "bottom-right",
     });
     try {
-      const result = await requirements.submitRequirements(
-        {
-          assetRail: selectedRampPair.assetRail,
-          destinationCustodyWalletId: selectedWallet.id,
-          fiatCurrency: selectedRampPair.fiatCurrency,
-        },
-        requirements.pendingAgreements !== null ? "consent" : "collected"
-      );
+      const result = await requirements.submitRequirements({
+        assetRail: selectedRampPair.assetRail,
+        destinationCustodyWalletId: selectedWallet.id,
+        fiatCurrency: selectedRampPair.fiatCurrency,
+      });
       setHostedQuoteLoading(false);
       if (result.status === "unsupported") {
         toast.error(result.reason, { id: toastId, position: "bottom-right" });
@@ -290,10 +286,6 @@ export function useRampWizard<TId extends string>(
       if (isCollectStageStatus(result.status)) {
         // Progressive collection: the provider accepted this step and returned
         // the next field set, which the step re-renders in place.
-        toast.dismiss(toastId);
-        return;
-      }
-      if (hasOnboardingLifecycle(result.provider) && result.status !== "ready") {
         toast.dismiss(toastId);
         return;
       }
@@ -441,9 +433,6 @@ export function useRampWizard<TId extends string>(
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
     retryOnboarding: requirements.retryOnboarding,
-    pendingAgreements: requirements.pendingAgreements,
-    acceptedAgreements: requirements.acceptedAgreements,
-    toggleAgreement: requirements.toggleAgreement,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

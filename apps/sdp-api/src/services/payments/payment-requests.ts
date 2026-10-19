@@ -1,5 +1,5 @@
-import type { Signature } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type { Signature, SolanaRpc } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
@@ -34,7 +34,9 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
  * when a valid payment is found, records the inbound transfer and marks the
  * request paid.
  *
- * @param env - API environment for RPC and database access.
+ * Reads the chain on the open cluster scope's cluster (the row's Project).
+ *
+ * @param env - API environment for database access.
  * @param row - The stored payment request row to reconcile.
  * @param options.bestEffort - When true, unexpected infra failures (e.g. an
  *   RPC outage) degrade to the stored row with a log so one bad row cannot
@@ -46,6 +48,8 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
  *   failure rethrows, for paths that must not act on stale state.
  * @returns The settled row when a valid payment was found, otherwise the
  *   stored row.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope, or
+ *   `RPC_NOT_CONFIGURED` when the cluster has no endpoint, even when best-effort.
  */
 export async function reconcilePaymentRequest(
   env: Env,
@@ -65,8 +69,9 @@ export async function reconcilePaymentRequest(
     throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
   }
 
+  const rpc = createClusterRpc();
   try {
-    return await settlePaymentRequestIfPaid(env, row, row.custody_wallet_id);
+    return await settlePaymentRequestIfPaid(env, rpc, row, row.custody_wallet_id);
   } catch (err) {
     if (!options.bestEffort || err instanceof AppError) {
       throw err;
@@ -92,6 +97,7 @@ export async function reconcilePaymentRequest(
  */
 async function settlePaymentRequestIfPaid(
   env: Env,
+  rpc: SolanaRpc,
   row: PaymentRequestRow,
   custodyWalletId: string
 ): Promise<PaymentRequestRow> {
@@ -101,7 +107,6 @@ async function settlePaymentRequestIfPaid(
     throw internalError("payment_requests row is missing project_id");
   }
 
-  const rpc = solanaRpc.createRpc(env);
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(

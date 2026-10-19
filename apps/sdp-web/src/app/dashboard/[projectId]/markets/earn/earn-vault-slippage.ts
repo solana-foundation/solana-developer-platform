@@ -151,12 +151,12 @@ export type VaultFloorReplay =
   | { kind: "unavailable" };
 
 export function floorToReplay(
-  resolution: { wasReused: boolean },
+  resolution: { reused: boolean },
   recallFloor: (fingerprint: string) => string | null | undefined,
   fingerprint: string,
   freshFloor: string | null
 ): VaultFloorReplay {
-  if (!resolution.wasReused) return { kind: "fresh", floor: freshFloor };
+  if (!resolution.reused) return { kind: "fresh", floor: freshFloor };
   const floor = recallFloor(fingerprint);
   return floor === undefined ? { kind: "unavailable" } : { kind: "replay", floor };
 }

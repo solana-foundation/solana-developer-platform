@@ -1,22 +1,21 @@
-import { type KeyboardEvent, useId, useRef, useState } from "react";
+import { type KeyboardEvent, memo, useId, useMemo, useRef, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { CHART_VIEW, type ChartPaths, chartPaths } from "./overview-chart-path";
 
 /** The data sits 7px inside the plot so the end dot never clips on the right edge. */
 const INSET_PX = 7;
-const VIEW = 1000;
 
-function toPath(values: readonly number[], floor: number, ceiling: number): string {
-  const span = ceiling - floor || 1;
-  const last = Math.max(values.length - 1, 1);
-  return values
-    .map((value, index) => {
-      const x = (index / last) * VIEW;
-      const y = ((ceiling - value) / span) * VIEW;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(" ");
-}
+/** The plot beside a 3rem column of tick labels; a caption row above can share the columns. */
+export const CHART_COLUMNS = "grid grid-cols-[minmax(0,1fr)_3rem] gap-x-2";
+/** The plot's height, shared by every stand-in for the chart so none of them moves the page. */
+export const CHART_PLOT_HEIGHT = "h-[11.375rem]";
+/**
+ * The plot and the tick column place what is inside them with transforms against their own size
+ * (`cqw` and `cqh`), never with left or top. A transform moves no layout, so a hover, a range
+ * switch or a refreshed figure shifts nothing on the page, and each move skips layout entirely.
+ */
+const SIZE_CONTAINER = "[container-type:size]";
 
 /** The reading a key moves to, or null for a key the chart leaves alone. */
 function readingForKey(key: string, from: number, last: number): number | null {
@@ -36,16 +35,21 @@ function readingForKey(key: string, from: number, last: number): number | null {
   }
 }
 
-/** The plot's vertical scale: a value's distance from the top, in percent of the plot. */
-function verticalScale(ticks: readonly number[]) {
-  const floor = ticks[0] ?? 0;
-  const ceiling = ticks.at(-1) ?? 1;
-  const span = ceiling - floor || 1;
-  return {
-    floor,
-    ceiling,
-    topPercent: (value: number) => ((ceiling - value) / span) * 100,
-  };
+interface VerticalScale {
+  floor: number;
+  ceiling: number;
+  /** A value's distance from the top, in percent of the plot. */
+  topPercent: (value: number) => number;
+  /** The same distance as a length inside a size container. */
+  yOf: (value: number) => string;
+}
+
+/** The scale over ticks that bracket the data: at least two, the first below the last. */
+function verticalScale(ticks: readonly number[]): VerticalScale {
+  const floor = ticks[0];
+  const ceiling = ticks[ticks.length - 1];
+  const topPercent = (value: number) => ((ceiling - value) / (ceiling - floor)) * 100;
+  return { floor, ceiling, topPercent, yOf: (value) => `${topPercent(value)}cqh` };
 }
 
 /** A reading's horizontal position, inside the plot's inset. */
@@ -53,17 +57,35 @@ function horizontalScale(last: number) {
   const fractionOf = (index: number) => (last === 0 ? 1 : index / last);
   return {
     fractionOf,
-    leftOf: (index: number) =>
-      `calc(${INSET_PX}px + (100% - ${INSET_PX * 2}px) * ${fractionOf(index)})`,
+    xOf: (index: number) =>
+      `calc(${INSET_PX}px + (100cqw - ${INSET_PX * 2}px) * ${fractionOf(index)})`,
   };
 }
 
 /** The reading the pointer or the keyboard picked, or null while the chart is at rest. */
-function useChartReading(last: number) {
-  const [active, setActive] = useState<number | null>(null);
+function useChartReading(values: readonly number[]) {
+  const last = values.length - 1;
+  // A pick belongs to the series it was made on. When a refresh or a new range swaps the series
+  // it lapses, rather than pointing past the end of a shorter one.
+  const [pick, setPick] = useState<{ values: readonly number[]; index: number } | null>(null);
+  const active = pick !== null && pick.values === values ? pick.index : null;
   const plotRef = useRef<HTMLDivElement>(null);
   const shown = active ?? last;
 
+  /** Picks a reading, or none. An unchanged pick keeps its state, so moving within one reading
+   * re-renders nothing. */
+  function setActive(index: number | null) {
+    setPick((previous) => {
+      if (index === null) return null;
+      if (previous !== null && previous.values === values && previous.index === index) {
+        return previous;
+      }
+      return { values, index };
+    });
+  }
+
+  /** Picks the reading nearest `clientX`, measuring the plot on every move: it can shift or
+   * resize under a resting pointer. */
   function pickAt(clientX: number) {
     const plot = plotRef.current;
     if (!plot || last === 0) {
@@ -91,31 +113,35 @@ function useChartReading(last: number) {
     setActive(next);
   }
 
-  return { active, shown, plotRef, pickAt, handleKeyDown, clear: () => setActive(null) };
+  function clear() {
+    setActive(null);
+  }
+
+  return { active, shown, last, plotRef, pickAt, handleKeyDown, clear };
 }
 
 /** Dotted gridlines on the ticks over a solid baseline. */
-function ChartGridlines({
+const ChartGridlines = memo(function ChartGridlines({
   ticks,
-  topPercent,
+  scale,
 }: {
   ticks: readonly number[];
-  topPercent: (value: number) => number;
+  scale: VerticalScale;
 }) {
   return ticks.map((tick, index) => (
     <span
       key={tick}
       aria-hidden="true"
-      style={{ top: `${topPercent(tick)}%` }}
+      style={{ transform: `translateY(${scale.yOf(tick)})` }}
       className={cn(
-        "pointer-events-none absolute inset-x-0 h-px",
+        "pointer-events-none absolute inset-x-0 top-0 h-px",
         index === 0
           ? "bg-border-default"
           : "bg-[repeating-linear-gradient(to_right,var(--border-l)_0_2px,transparent_2px_6px)]"
       )}
     />
   ));
-}
+});
 
 const LINE_STROKE = {
   fill: "none",
@@ -128,14 +154,10 @@ const LINE_STROKE = {
 
 /** The line over its fading fill; with a reading picked, lit up to it and dimmed past it. */
 function ChartLines({
-  values,
-  floor,
-  ceiling,
+  paths,
   activeFraction,
 }: {
-  values: readonly number[];
-  floor: number;
-  ceiling: number;
+  paths: ChartPaths;
   /** How far along the picked reading sits, or null while the chart is at rest. */
   activeFraction: number | null;
 }) {
@@ -143,14 +165,12 @@ function ChartLines({
   const id = useId().replace(/[^\w-]/g, "");
   const gradientId = `${id}-fill`;
   const clipId = `${id}-upto`;
-  const line = toPath(values, floor, ceiling);
-  const area = `${line} L${VIEW} ${VIEW} L0 ${VIEW} Z`;
   const picked = activeFraction !== null;
 
   return (
     <svg
       aria-hidden="true"
-      viewBox={`0 0 ${VIEW} ${VIEW}`}
+      viewBox={`0 0 ${CHART_VIEW} ${CHART_VIEW}`}
       preserveAspectRatio="none"
       style={{ left: INSET_PX, right: INSET_PX }}
       className="pointer-events-none absolute inset-y-0 h-full w-[calc(100%-14px)] overflow-visible text-primary"
@@ -160,59 +180,74 @@ function ChartLines({
           <stop offset="0%" stopColor="currentColor" stopOpacity="0.15" />
           <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
         </linearGradient>
-        <clipPath id={clipId}>
-          <rect x={0} y={-VIEW} width={(activeFraction ?? 0) * VIEW} height={VIEW * 3} />
-        </clipPath>
+        {activeFraction === null ? null : (
+          <clipPath id={clipId}>
+            <rect
+              x={0}
+              y={-CHART_VIEW}
+              width={activeFraction * CHART_VIEW}
+              height={CHART_VIEW * 3}
+            />
+          </clipPath>
+        )}
       </defs>
       <path
-        d={area}
+        d={paths.area}
         fill={`url(#${gradientId})`}
         clipPath={picked ? `url(#${clipId})` : undefined}
       />
       <path
-        d={line}
+        d={paths.line}
         {...LINE_STROKE}
         className={cn(
           "transition-opacity motion-reduce:transition-none",
           picked ? "opacity-25" : "opacity-100"
         )}
       />
-      {picked ? <path d={line} {...LINE_STROKE} clipPath={`url(#${clipId})`} /> : null}
+      {picked ? <path d={paths.line} {...LINE_STROKE} clipPath={`url(#${clipId})`} /> : null}
     </svg>
   );
 }
 
-/** Where the reading card sits: pinned to an edge near either end, centred between. */
-function readingCardShift(fraction: number): string {
-  if (fraction < 1 / 6) return "-translate-x-1";
-  if (fraction > 5 / 6) return "-translate-x-[calc(100%-var(--spacing))]";
-  return "-translate-x-1/2";
+type ReadingCardPin = "start" | "middle" | "end";
+
+/** How the card hangs off its reading: pinned to an edge near either end, centred between. */
+const READING_CARD_SHIFT = {
+  start: "calc(var(--spacing) * -1)",
+  middle: "-50%",
+  end: "calc(var(--spacing) - 100%)",
+} as const satisfies Record<ReadingCardPin, string>;
+
+function readingCardPin(fraction: number): ReadingCardPin {
+  if (fraction < 1 / 6) return "start";
+  if (fraction > 5 / 6) return "end";
+  return "middle";
 }
 
-/** The card naming the picked reading's date and value. */
+/** The card naming the picked reading's date and value, at the plot's foot or its top. */
 function ChartReadingCard({
-  left,
+  x,
   atFoot,
   fraction,
   date,
   value,
 }: {
-  left: string;
+  x: string;
   atFoot: boolean;
   fraction: number;
   date: string;
   value: string;
 }) {
+  const pin = readingCardPin(fraction);
+  const y = atFoot ? "calc(100cqh - 100% - var(--spacing) * 2)" : "0px";
   return (
     <span
       aria-hidden="true"
       data-chart-reading=""
-      style={{ left }}
-      className={cn(
-        "pointer-events-none absolute z-10 flex flex-col gap-0.5 rounded-control bg-primary px-3 py-1.5 text-meta whitespace-nowrap text-surface-raised tabular-nums",
-        atFoot ? "bottom-2" : "top-0",
-        readingCardShift(fraction)
-      )}
+      data-chart-reading-at={atFoot ? "foot" : "top"}
+      data-chart-reading-pin={pin}
+      style={{ transform: `translate(calc(${x} + ${READING_CARD_SHIFT[pin]}), ${y})` }}
+      className="pointer-events-none absolute top-0 left-0 z-10 flex flex-col gap-0.5 rounded-control bg-primary px-3 py-1.5 text-meta whitespace-nowrap text-surface-raised tabular-nums"
     >
       <span className="opacity-60">{date}</span>
       <span className="font-medium">{value}</span>
@@ -220,64 +255,76 @@ function ChartReadingCard({
   );
 }
 
-/** Tick labels in the 48px column right of the plot. */
-function ChartTickColumn({
+/** Tick labels in the 3rem column right of the plot. */
+const ChartTickColumn = memo(function ChartTickColumn({
   ticks,
-  topPercent,
-  formatTick,
+  tickLabels,
+  scale,
 }: {
   ticks: readonly number[];
-  topPercent: (value: number) => number;
-  formatTick: (value: number) => string;
+  tickLabels: readonly string[];
+  scale: VerticalScale;
 }) {
   return (
-    <div aria-hidden="true" className="relative h-[11.375rem]">
-      {ticks.map((tick) => (
+    <div aria-hidden="true" className={cn("relative", SIZE_CONTAINER, CHART_PLOT_HEIGHT)}>
+      {ticks.map((tick, index) => (
         <span
           key={tick}
-          style={{ top: `${topPercent(tick)}%` }}
-          className="absolute left-0 -translate-y-1/2 text-meta whitespace-nowrap text-tertiary tabular-nums"
+          style={{ transform: `translateY(calc(${scale.yOf(tick)} - 50%))` }}
+          className="absolute top-0 left-0 text-meta whitespace-nowrap text-tertiary tabular-nums"
         >
-          {formatTick(tick)}
+          {tickLabels[index]}
         </span>
       ))}
     </div>
   );
-}
+});
 
-/** The range's first, middle and last dates under the plot. */
-function ChartDateRow({ dateLabels }: { dateLabels: readonly [string, string, string] }) {
+/**
+ * The range's first, middle and last dates under the plot. Three nowrap dates need a 270px plot,
+ * a 328px chart, so on a narrower one the middle date steps out rather than push the page wide.
+ */
+const ChartDateRow = memo(function ChartDateRow({
+  dateLabels,
+}: {
+  dateLabels: readonly [string, string, string];
+}) {
   return (
     <div
       aria-hidden="true"
       style={{ paddingLeft: INSET_PX, paddingRight: INSET_PX }}
-      className="mt-2 flex justify-between gap-2 text-meta whitespace-nowrap text-tertiary tabular-nums"
+      className="mt-2 flex h-4 justify-between gap-2 text-meta whitespace-nowrap text-tertiary tabular-nums"
     >
       {dateLabels.map((dateLabel, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: the three positions are fixed.
-        <span key={index}>{dateLabel}</span>
+        <span key={index} className={index === 1 ? "@max-[20.5rem]:hidden" : undefined}>
+          {dateLabel}
+        </span>
       ))}
     </div>
   );
-}
+});
 
 /**
  * A single-series area chart in the design's grammar: dotted gridlines on the ticks with a solid
  * baseline, a 2px line over a fill that fades to nothing at the floor, a dot on the latest
- * value, tick labels in a 48px column on the right and three dates underneath. The SVG only
+ * value, tick labels in a 3rem column on the right and three dates underneath. The SVG only
  * draws the line and the fill; gridlines, labels and the dot are HTML, so the text and the dot
  * stay crisp at any width.
  *
  * Hovering (or arrowing, once focused) picks the nearest reading: a rule drops through it, the
  * line and fill stay lit up to it and the rest of the line dims, the dot moves onto it and a card
  * names its date and value. The card sits at the foot of the plot when the reading is high and
- * at the top when it is low, and pins to an edge near either end.
+ * at the top when it is low, and pins to an edge near either end. A touch picks on contact and
+ * dragging scrubs the series. Leaving the whole chart, not just the plot, clears the pick, so the
+ * pointer can run into the tick column to reach the last reading. The paths, gridlines, ticks and
+ * dates are built once per series, so a hover redraws only the cursor, the dot and the card.
  */
 export function OverviewAreaChart({
   label,
   values,
   ticks,
-  formatTick,
+  tickLabels,
   formatValue,
   formatDate,
   dateLabels,
@@ -285,10 +332,12 @@ export function OverviewAreaChart({
 }: {
   /** Names the chart for assistive technology, as the metric's caption does on screen. */
   label: string;
+  /** At least one reading, oldest first. */
   values: readonly number[];
   /** Ascending; the first and last are the plot's floor and ceiling. */
   ticks: readonly number[];
-  formatTick: (value: number) => string;
+  /** One label per tick, in the same order. */
+  tickLabels: readonly string[];
   /** A reading's value, as the hover card shows it. */
   formatValue: (value: number) => string;
   /** A reading's date, by its index in `values`. */
@@ -298,27 +347,21 @@ export function OverviewAreaChart({
   className?: string;
 }) {
   const t = useTranslations();
-  const last = Math.max(values.length - 1, 0);
-  const { active, shown, plotRef, pickAt, handleKeyDown, clear } = useChartReading(last);
-  const { floor, ceiling, topPercent } = verticalScale(ticks);
-  const { fractionOf, leftOf } = horizontalScale(last);
+  const { active, shown, last, plotRef, pickAt, handleKeyDown, clear } = useChartReading(values);
+  const scale = useMemo(() => verticalScale(ticks), [ticks]);
+  const paths = useMemo(
+    () => chartPaths(values, scale.floor, scale.ceiling),
+    [values, scale.floor, scale.ceiling]
+  );
+  const { fractionOf, xOf } = horizontalScale(last);
   const shownValue = values[shown];
-  const reading =
-    shownValue === undefined
-      ? undefined
-      : t("Shared.homeWorkspace.network.chartReading", {
-          value: formatValue(shownValue),
-          date: formatDate(shown),
-        });
-  const activeValue = active === null ? undefined : values[active];
+  const reading = t("Shared.homeWorkspace.network.chartReading", {
+    value: formatValue(shownValue),
+    date: formatDate(shown),
+  });
 
   return (
-    // Leaving the whole chart, not just the plot, clears the reading, so the pointer can run
-    // into the tick column to reach the last one.
-    <div
-      className={cn("grid grid-cols-[minmax(0,1fr)_48px] gap-x-2.5", className)}
-      onPointerLeave={clear}
-    >
+    <div className={cn(CHART_COLUMNS, "@container", className)} onPointerLeave={clear}>
       <div
         ref={plotRef}
         role="slider"
@@ -329,45 +372,62 @@ export function OverviewAreaChart({
         aria-valuenow={shown}
         aria-valuetext={reading}
         data-chart-plot=""
+        onPointerDown={(event) => pickAt(event.clientX)}
         onPointerMove={(event) => pickAt(event.clientX)}
         onKeyDown={handleKeyDown}
         onBlur={clear}
-        className="relative h-[11.375rem] touch-pan-y outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        className={cn(
+          "relative touch-pan-y outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+          SIZE_CONTAINER,
+          CHART_PLOT_HEIGHT
+        )}
       >
-        <ChartGridlines ticks={ticks} topPercent={topPercent} />
+        <ChartGridlines ticks={ticks} scale={scale} />
         {active === null ? null : (
           <span
             aria-hidden="true"
             data-chart-cursor=""
-            style={{ left: leftOf(active) }}
-            className="pointer-events-none absolute inset-y-0 w-px bg-tertiary/60"
+            style={{ transform: `translateX(${xOf(active)})` }}
+            className="pointer-events-none absolute inset-y-0 left-0 w-px bg-tertiary/60"
           />
         )}
-        <ChartLines
-          values={values}
-          floor={floor}
-          ceiling={ceiling}
-          activeFraction={active === null ? null : fractionOf(active)}
+        <ChartLines paths={paths} activeFraction={active === null ? null : fractionOf(active)} />
+        <span
+          aria-hidden="true"
+          data-chart-dot=""
+          style={{
+            transform: `translate(calc(${xOf(shown)} - 50%), calc(${scale.yOf(shownValue)} - 50%))`,
+          }}
+          className="pointer-events-none absolute top-0 left-0 size-2 rounded-full bg-primary ring-2 ring-surface-raised"
         />
-        {shownValue === undefined ? null : (
-          <span
-            aria-hidden="true"
-            style={{ left: leftOf(shown), top: `${topPercent(shownValue)}%` }}
-            className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-2 ring-surface-raised"
-          />
-        )}
-        {active === null || activeValue === undefined ? null : (
+        {active === null ? null : (
           <ChartReadingCard
-            left={leftOf(active)}
-            atFoot={topPercent(activeValue) < 45}
+            x={xOf(active)}
+            atFoot={scale.topPercent(values[active]) < 45}
             fraction={fractionOf(active)}
             date={formatDate(active)}
-            value={formatValue(activeValue)}
+            value={formatValue(values[active])}
           />
         )}
       </div>
-      <ChartTickColumn ticks={ticks} topPercent={topPercent} formatTick={formatTick} />
+      <ChartTickColumn ticks={ticks} tickLabels={tickLabels} scale={scale} />
       <ChartDateRow dateLabels={dateLabels} />
+    </div>
+  );
+}
+
+/**
+ * The chart's footprint with nothing to draw: the baseline over an empty date row, so a figure
+ * without readings stands as tall as one with them and the page never moves when they arrive.
+ */
+export function EmptyAreaChart({ className }: { className?: string }) {
+  return (
+    <div aria-hidden="true" data-chart-empty="" className={cn(CHART_COLUMNS, className)}>
+      <div className={cn("relative", CHART_PLOT_HEIGHT)}>
+        <span className="absolute inset-x-0 top-full h-px bg-border-default" />
+      </div>
+      <div />
+      <div className="mt-2 h-4" />
     </div>
   );
 }

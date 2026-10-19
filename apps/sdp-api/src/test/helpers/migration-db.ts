@@ -119,7 +119,7 @@ export async function seedCounterparty(
 }
 
 /**
- * Seeds an active BVNK customer-link provider account. The organization and
+ * Seeds an active customer-link provider account. The organization and
  * project are taken as given, so a test can seed one that disagrees with its
  * counterparty's.
  *
@@ -139,7 +139,7 @@ export async function seedCustomerLink(
     `INSERT INTO counterparty_provider_accounts (
        id, organization_id, project_id, counterparty_id, provider,
        provider_customer_reference, kind, status
-     ) VALUES ($1, $2, $3, $4, 'bvnk', $1, 'customer_link', 'active')`,
+     ) VALUES ($1, $2, $3, $4, 'moonpay', $1, 'customer_link', 'active')`,
     [link.id, link.organizationId, link.projectId, link.counterpartyId]
   );
 }

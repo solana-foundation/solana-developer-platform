@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -31,7 +32,11 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions, SOL_MINT } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+  type SponsorshipFeePayment,
+} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
@@ -55,7 +60,8 @@ export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransac
  * because a signed transaction is a bearer instrument until its blockhash expires, and two live
  * ones would double the sponsor's exposure.
  *
- * @param c - The request context, for the bindings and the sponsor-signature audit entry.
+ * @param c - The request context, under the payment request's cluster scope (it builds and reads
+ *   on that cluster), for the bindings and the sponsor-signature audit entry.
  * @param params - The payable request and the parties to the transfer.
  * @param params.request - The reconciled, payable payment request; its Project sponsors.
  * @param params.payer - The account that pays and signs client-side.
@@ -77,7 +83,7 @@ export async function issuePaymentRequestTransaction(
 ): Promise<SponsoredPaymentTransaction> {
   const { request, payer } = params;
   const repository = createSystemPaymentRequestsRepository(c.env);
-  const rpc = solanaRpc.createRpc(c.env);
+  const rpc = createClusterRpc();
   const currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
 
   const serveLiveClaim = async (): Promise<SponsoredPaymentTransaction | null> => {
@@ -97,15 +103,17 @@ export async function issuePaymentRequestTransaction(
     return signAndStore(claim.unsignedTransaction);
   };
 
-  let feePaymentInstance: Awaited<ReturnType<typeof createProjectSponsorshipFeePayment>> | null =
-    null;
+  let feePaymentInstance: SponsorshipFeePayment | null = null;
   const getFeePayment = async () => {
-    feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
-      movement: "payments.pay_request",
-      organizationId: request.organization_id,
-      projectId: request.project_id,
-      actor: { type: "wallet", id: request.wallet_id },
-    });
+    feePaymentInstance ??= createSponsorshipFeePayment(
+      c.env,
+      await resolveProjectSponsorshipScope(c.env, {
+        organizationId: request.organization_id,
+        projectId: request.project_id,
+        actor: { type: "wallet", id: request.wallet_id },
+      }),
+      "payments.pay_request"
+    );
     return feePaymentInstance;
   };
 

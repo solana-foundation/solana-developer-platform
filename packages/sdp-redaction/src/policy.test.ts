@@ -113,7 +113,7 @@ describe("isPiiKey", () => {
     // The `address` container is excluded to protect Solana addresses, so the
     // street line is only defused if each provider's spelling is named. These
     // are the shapes actually submitted: a retired ramp provider's
-    // `physicalAddress`, `BvnkRuleEntityAddress` in BVNK's provider-data, and
+    // `physicalAddress`, a retired provider's rule entity address, and
     // SDP's own `CounterpartyAddress`.
     for (const key of [
       "line1",
@@ -164,7 +164,7 @@ describe("isPiiKey", () => {
   });
 
   it("still exempts crypto addresses that read like postal keys", () => {
-    // BVNK's `beneficiaryAddress` carries `destinationWalletAddress` — a crypto
+    // A retired provider's `beneficiaryAddress` carries a crypto
     // address. This is why there is no `*Address` suffix rule.
     for (const key of ["beneficiaryAddress", "cryptoAddress", "destinationAddress"]) {
       assert.equal(isPiiKey(key), false, key);

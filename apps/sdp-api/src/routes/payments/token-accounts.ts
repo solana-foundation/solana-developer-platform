@@ -26,6 +26,9 @@ export type TokenLabelsByMint = ReadonlyMap<string, string>;
 
 interface GetSplTokenBalancesOptions {
   tokenLabelsByMint?: TokenLabelsByMint;
+  /** Refuse answers from chain state older than this slot (the node errors instead). */
+  minContextSlot?: bigint;
+  abortSignal?: AbortSignal;
 }
 
 function issuedTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string | null {
@@ -97,9 +100,13 @@ export async function getSplTokenBalances(
         .getTokenAccountsByOwner(
           owner,
           { programId },
-          { encoding: "jsonParsed", commitment: "confirmed" }
+          {
+            encoding: "jsonParsed",
+            commitment: "confirmed",
+            minContextSlot: options?.minContextSlot,
+          }
         )
-        .send()
+        .send({ abortSignal: options?.abortSignal })
     )
   );
 

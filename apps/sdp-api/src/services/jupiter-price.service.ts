@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
@@ -114,7 +115,7 @@ export async function fetchJupiterUsdPrices(
 ): Promise<Map<string, number>> {
   const { url, apiKey } = resolveJupiterPriceConfig(env);
 
-  return priceCache.lookup(env.SOLANA_NETWORK ?? "devnet", mints, async (missingMints) => {
+  return priceCache.lookup(currentClusterScope().cluster, mints, async (missingMints) => {
     const prices = new Map<string, number>();
     // Chunks are independent, so one failing batch must not discard the others.
     const results = await Promise.allSettled(

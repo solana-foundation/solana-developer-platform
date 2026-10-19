@@ -29,7 +29,7 @@ import {
   resolveDefaultCluster,
   resolveSolanaRpcProviderUrls,
 } from "./config";
-import { solanaRpcError } from "./errors";
+import { RpcTimeoutError, solanaRpcError } from "./errors";
 import { withReadSocketRetry } from "./socket-retry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
@@ -107,8 +107,7 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
       return await transport<TResponse>({ ...config, signal: controller.signal });
     } catch (error) {
       if (controller.signal.aborted) {
-        // Deterministic, transient-classified message (see transient.ts).
-        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
+        throw new RpcTimeoutError(timeoutMs);
       }
       throw error;
     } finally {
@@ -351,8 +350,10 @@ export async function sendTransaction(
  */
 async function getSignatureStatusOrNull(rpc: SolanaRpc, signature: Signature) {
   try {
-    const status = await rpc.getSignatureStatuses([signature]).send();
-    return status.value[0];
+    const [status] = (await rpc.getSignatureStatuses([signature]).send()).value;
+    return status
+      ? { ...status, err: status.err === null ? null : numericTransactionError(status.err) }
+      : status;
   } catch (error) {
     if (isTransientRpcError(error)) {
       return null;
@@ -615,6 +616,25 @@ export interface SignatureStatusInfo {
 }
 
 /**
+ * A signature status's `err` with its instruction and account indices as numbers. Kit decodes
+ * `getSignatureStatuses` without a numeric allowlist for `err`, so those indices arrive as bigints
+ * although kit types them `number`, and `JSON.stringify` throws on them. The indices are small,
+ * so the conversion is exact.
+ *
+ * @param err - The status's transaction error as kit decoded it.
+ * @returns The same error with every bigint replaced by its number.
+ */
+function numericTransactionError(err: TransactionError): TransactionError {
+  const decoded: unknown = JSON.parse(
+    JSON.stringify(err, (_key, value: unknown) =>
+      typeof value === "bigint" ? Number(value) : value
+    )
+  );
+  // SAFETY: the round-trip only turns bigint indices into numbers, so the shape is still kit's TransactionError.
+  return decoded as TransactionError;
+}
+
+/**
  * Batch-fetch status for multiple transaction signatures
  */
 export async function getSignatureStatuses(
@@ -641,7 +661,7 @@ export async function getSignatureStatuses(
           slot: item.slot,
           confirmations: item.confirmations,
           confirmationStatus: item.confirmationStatus,
-          err: item.err,
+          err: item.err === null ? null : numericTransactionError(item.err),
         }
       : null
   );

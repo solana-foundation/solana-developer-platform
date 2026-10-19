@@ -7,6 +7,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptStage,
   RecurringPaymentStatusWithRecoverableCollection,
+  SdpEnvironment,
 } from "@sdp/types";
 
 export type {
@@ -76,6 +77,8 @@ export interface PaymentRecurringPaymentActivationAttemptRow {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /** The Idempotency-Key of the request that claimed this attempt (HOO-1918), or null. */
+  idempotency_key: string | null;
 }
 
 export interface PaymentRecurringPaymentLifecycleAttemptRow {
@@ -91,6 +94,8 @@ export interface PaymentRecurringPaymentLifecycleAttemptRow {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /** The Idempotency-Key of the request that claimed this attempt (HOO-1918), or null. */
+  idempotency_key: string | null;
 }
 
 export interface PaymentRecurringPaymentUpdateAttemptRow {
@@ -118,6 +123,10 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** The Idempotency-Key of the request that claimed this attempt (HOO-1918), or null. */
+  idempotency_key: string | null;
+  /** The fingerprint of that request's validated body: the same key with other terms is a 422. */
+  idempotency_fingerprint: string | null;
 }
 
 export interface PaymentRecurringPaymentUpdateEventRow {
@@ -151,6 +160,9 @@ export interface CreatePaymentRecurringPaymentInput {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  /** The request's Idempotency-Key and its fingerprint (HOO-1918), or null. */
+  idempotencyKey: string | null;
+  idempotencyFingerprint: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentInput {
@@ -271,6 +283,8 @@ export interface CreatePaymentRecurringPaymentUpdateAttemptInput {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  idempotencyKey?: string | null;
+  idempotencyFingerprint?: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
@@ -290,6 +304,14 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   beforeValues?: Record<string, unknown>;
   afterValues?: Record<string, unknown>;
   error?: string | null;
+  /**
+   * A keyed request that adopts this attempt (a stale claim, a takeover)
+   * records its Idempotency-Key on it when it has none (HOO-1918), so a retry
+   * is answered from the attempt instead of running the action again.
+   */
+  adoptIdempotencyKey?: string | null;
+  /** The adopting request's fingerprint, recorded only with its key. */
+  adoptIdempotencyFingerprint?: string | null;
   updatedAt: string;
 }
 
@@ -326,6 +348,7 @@ export interface CreatePaymentRecurringPaymentActivationAttemptInput {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  idempotencyKey?: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
@@ -338,6 +361,12 @@ export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
   authorizationSignature?: string | null;
   error?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * A keyed request that adopts this attempt (a stale claim, a takeover)
+   * records its Idempotency-Key on it when it has none (HOO-1918), so a retry
+   * is answered from the attempt instead of running the action again.
+   */
+  adoptIdempotencyKey?: string | null;
   updatedAt: string;
 }
 
@@ -354,6 +383,7 @@ export interface CreatePaymentRecurringPaymentLifecycleAttemptInput {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  idempotencyKey?: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
@@ -365,7 +395,20 @@ export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
   signature?: string | null;
   error?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * A keyed request that adopts this attempt (a stale claim, a takeover)
+   * records its Idempotency-Key on it when it has none (HOO-1918), so a retry
+   * is answered from the attempt instead of running the action again.
+   */
+  adoptIdempotencyKey?: string | null;
   updatedAt: string;
+}
+
+/** Looks up the live (not failed) attempt a request's Idempotency-Key claimed. */
+export interface FindRecurringPaymentAttemptByIdempotencyKeyInput {
+  organizationId: string;
+  projectId: string;
+  idempotencyKey: string;
 }
 
 export interface GetLatestPaymentRecurringPaymentLifecycleAttemptInput {
@@ -414,18 +457,26 @@ export interface StalePaymentRecurringPaymentUpdateRow {
 
 export interface PaymentRecurringPaymentsRepository {
   listStaleLifecyclePayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
+    environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<PaymentRecurringPaymentRow[]>;
   listStaleUpdatePayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
+    environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<StalePaymentRecurringPaymentUpdateRow[]>;
   listRecoverableCollectionPayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
+    environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<RecoverableCollectionRecurringPaymentRow[]>;
   listDueCollectionPayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
+    environment: SdpEnvironment;
     dueBefore: string;
     retryBefore: string;
     limit: number;
@@ -433,6 +484,12 @@ export interface PaymentRecurringPaymentsRepository {
   createRecurringPayment(
     input: CreatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  /** The recurring payment created under this Idempotency-Key, if any. */
+  findRecurringPaymentByIdempotencyKey(params: {
+    organizationId: string;
+    projectId: string;
+    idempotencyKey: string;
+  }): Promise<{ id: string; idempotencyFingerprint: string | null } | null>;
   updateRecurringPayment(
     input: UpdatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
@@ -476,6 +533,9 @@ export interface PaymentRecurringPaymentsRepository {
   getLatestActivationAttempt(
     input: GetLatestPaymentRecurringPaymentActivationAttemptInput
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
+  findActivationAttemptByIdempotencyKey(
+    input: FindRecurringPaymentAttemptByIdempotencyKeyInput
+  ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
   createLifecycleAttempt(
     input: CreatePaymentRecurringPaymentLifecycleAttemptInput
   ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
@@ -485,6 +545,11 @@ export interface PaymentRecurringPaymentsRepository {
   getLatestLifecycleAttempt(
     input: GetLatestPaymentRecurringPaymentLifecycleAttemptInput
   ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
+  findLifecycleAttemptByIdempotencyKey(
+    input: FindRecurringPaymentAttemptByIdempotencyKeyInput & {
+      operation: PaymentRecurringPaymentLifecycleOperation;
+    }
+  ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
   createUpdateAttempt(
     input: CreatePaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
@@ -493,6 +558,9 @@ export interface PaymentRecurringPaymentsRepository {
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
   getLatestUpdateAttempt(
     input: GetLatestPaymentRecurringPaymentUpdateAttemptInput
+  ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
+  findUpdateAttemptByIdempotencyKey(
+    input: FindRecurringPaymentAttemptByIdempotencyKeyInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
   createUpdateEvent(
     input: CreatePaymentRecurringPaymentUpdateEventInput

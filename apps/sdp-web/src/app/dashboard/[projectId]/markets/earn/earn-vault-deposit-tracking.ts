@@ -102,7 +102,14 @@ export function recallVaultDepositFloor(fingerprint: string): string | null | un
   return vaultDepositFloorMemo.recall(fingerprint);
 }
 
-/** Drop a retired key's floor so the next fresh derivation cannot inherit it. */
+/**
+ * Drop a retired key's floor so the next fresh derivation cannot inherit it.
+ * Only once no key is kept for the fingerprint: a late answer to an earlier
+ * attempt, or one from another user or org, must not erase the floor a newer
+ * kept key will replay. A floor left behind is harmless, since only a kept
+ * key's retry reads one.
+ */
 export function forgetVaultDepositFloor(fingerprint: string): void {
+  if (vaultDepositIdempotencyKeyStore.has(fingerprint)) return;
   vaultDepositFloorMemo.forget(fingerprint);
 }
