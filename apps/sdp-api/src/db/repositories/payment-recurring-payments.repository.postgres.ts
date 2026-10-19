@@ -157,6 +157,9 @@ const updateAttemptRowSchema = z.object({
   updated_at: z.string(),
   idempotency_fingerprint: z.string().nullable(),
   idempotency_key: z.string().nullable(),
+  previous_activator: z
+    .object({ apiKeyId: z.string().nullable(), userId: z.string().nullable() })
+    .nullable(),
 });
 const updateEventRowSchema = z.object({
   id: z.string(),
@@ -580,6 +583,38 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .first<Record<string, unknown>>();
 
       return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async lockRecurringPaymentActivator(params) {
+      const row = await db
+        .prepare(
+          `SELECT activated_by_api_key_id, activated_by_user_id
+             FROM payment_recurring_payments
+            WHERE id = ? AND organization_id = ? AND project_id = ?
+            FOR UPDATE`
+        )
+        .bind(params.recurringPaymentId, params.organizationId, params.projectId)
+        .first<{ activated_by_api_key_id: string | null; activated_by_user_id: string | null }>();
+      return row
+        ? { apiKeyId: row.activated_by_api_key_id, userId: row.activated_by_user_id }
+        : null;
+    },
+
+    async restoreRecurringPaymentActivator(params) {
+      await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET activated_by_api_key_id = ?, activated_by_user_id = ?
+            WHERE id = ? AND organization_id = ? AND project_id = ?`
+        )
+        .bind(
+          params.activator.apiKeyId,
+          params.activator.userId,
+          params.recurringPaymentId,
+          params.organizationId,
+          params.projectId
+        )
+        .run();
     },
 
     async claimRecurringPaymentActivation(params) {
@@ -1141,10 +1176,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              created_at,
              updated_at,
              idempotency_key,
-             idempotency_fingerprint
+             idempotency_fingerprint,
+             previous_activator
            ) VALUES (
              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             ?::text[], ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?
+             ?::text[], ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?::jsonb
            )`
         )
         .bind(
@@ -1173,7 +1209,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.createdAt,
           input.updatedAt,
           input.idempotencyKey ?? null,
-          input.idempotencyFingerprint ?? null
+          input.idempotencyFingerprint ?? null,
+          input.previousActivator ? JSON.stringify(input.previousActivator) : null
         )
         .run();
 

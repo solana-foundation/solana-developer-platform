@@ -118,6 +118,17 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   idempotency_key: string | null;
   /** The fingerprint of that request's validated body: the same key with other terms is a 422. */
   idempotency_fingerprint: string | null;
+  /**
+   * The activator this attempt's claim replaced, restored if the attempt is
+   * abandoned; null when the claim changed no activator (HOO-2099).
+   */
+  previous_activator: StoredRecurringPaymentActivator | null;
+}
+
+/** An activator as stored: both null for a payment no principal activated. */
+export interface StoredRecurringPaymentActivator {
+  apiKeyId: string | null;
+  userId: string | null;
 }
 
 export interface PaymentRecurringPaymentUpdateEventRow {
@@ -291,6 +302,8 @@ export interface CreatePaymentRecurringPaymentUpdateAttemptInput {
   updatedAt: string;
   idempotencyKey?: string | null;
   idempotencyFingerprint?: string | null;
+  /** The activator the claim replaced; null when it changed none. */
+  previousActivator?: StoredRecurringPaymentActivator | null;
 }
 
 export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
@@ -493,6 +506,19 @@ export interface PaymentRecurringPaymentsRepository {
   updateRecurringPayment(
     input: UpdatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  /** The stored activator, row-locked for the claim that may replace it. */
+  lockRecurringPaymentActivator(params: {
+    recurringPaymentId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<StoredRecurringPaymentActivator | null>;
+  /** Puts back the activator an abandoned update's claim replaced. */
+  restoreRecurringPaymentActivator(params: {
+    recurringPaymentId: string;
+    organizationId: string;
+    projectId: string;
+    activator: StoredRecurringPaymentActivator;
+  }): Promise<void>;
   claimRecurringPaymentActivation(params: {
     recurringPaymentId: string;
     organizationId: string;

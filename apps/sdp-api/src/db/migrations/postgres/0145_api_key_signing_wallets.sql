@@ -87,3 +87,10 @@ ALTER TABLE payment_recurring_payments
   ADD COLUMN IF NOT EXISTS activated_by_api_key_id TEXT,
   ADD COLUMN IF NOT EXISTS activated_by_user_id TEXT;
 -- Their index builds concurrently in 0146.
+
+-- An update that changes where or how much money moves records its caller as
+-- the activator when it claims the payment. The activator it replaced is kept
+-- on the attempt as {apiKeyId, userId}, and an attempt abandoned before the
+-- new terms take effect puts it back. NULL: the attempt changed no activator.
+ALTER TABLE payment_recurring_payment_update_attempts
+  ADD COLUMN IF NOT EXISTS previous_activator JSONB;

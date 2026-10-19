@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { currentDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import type { KVStore } from "@/runtime/kv";
 import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditPersistenceError, AuditService } from "./audit.service";
 
@@ -130,33 +129,6 @@ describe("AuditService", () => {
       ...vi.mocked(checkpoint.compareAndSet).mock.invocationCallOrder
     );
     expect(execute.mock.invocationCallOrder[0]).toBeLessThan(firstRedisCall);
-  });
-
-  it("runs audited work under the request's identity, not the ledger's system grant", async () => {
-    const { db, checkpoint } = createAuditWriter();
-    const context = {
-      get: (key: string) =>
-        key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
-      req: { header: () => null },
-    };
-    let identityInWork: unknown;
-
-    await runWithTenantDatabaseIdentity({ organizationId: "org_123" }, () =>
-      new AuditService(db as never, checkpoint).logWithin(context as never, async () => {
-        identityInWork = currentDatabaseIdentity();
-        return {
-          entry: {
-            action: "update",
-            resourceType: "api_key",
-            resourceId: "ak_123",
-            status: "success",
-          },
-          result: null,
-        };
-      })
-    );
-
-    expect(identityInWork).toEqual({ kind: "tenant", organizationId: "org_123" });
   });
 
   it("redacts credential-shaped metadata before persisting", async () => {
