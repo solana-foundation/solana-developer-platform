@@ -19,6 +19,7 @@ import { pendingTransfersCron } from "@/cron/pending-transfers";
 import { pendingWithdrawalsCron } from "@/cron/pending-withdrawals";
 import { providerCredentialSecretCleanupCron } from "@/cron/provider-credential-secret-cleanup";
 import { rampDeliveriesCron } from "@/cron/ramp-deliveries";
+import { rampTransferStatusesCron } from "@/cron/ramp-transfer-statuses";
 import { rampTransfersCron } from "@/cron/ramp-transfers";
 import { recurringPaymentsCron } from "@/cron/recurring-payments";
 import { revokedApiKeyCacheCron } from "@/cron/revoked-api-key-cache";
@@ -48,6 +49,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   recurringPaymentsCron,
   rampTransfersCron,
   rampDeliveriesCron,
+  rampTransferStatusesCron,
   earnVaultMovementsCron,
   earnSplitSwapsCron,
   dvpTradesCron,

@@ -81,6 +81,10 @@ function appendRampTransitionGuards(
       "(provider_data->'providerSettlement' IS NULL OR provider_data #>> '{providerSettlement,onchain,signature}' IS NULL)"
     );
   }
+  if (input.expectedUpdatedAt !== undefined) {
+    clauses.push("updated_at = ?");
+    values.push(input.expectedUpdatedAt);
+  }
 }
 
 function paymentTransferSearchExpression(alias: string): string {
@@ -776,6 +780,72 @@ export function createPostgresPaymentsRepository(
         )
         .bind(polledAt, [...transferIds])
         .run();
+    },
+
+    async claimRampTransferForStatusPull(params) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.claimRampTransferForStatusPull is system-only"
+        );
+      }
+      const createdAfterClause =
+        params.createdAfter === undefined ? "" : "AND candidate.created_at > ?";
+      const createdAfterValues = params.createdAfter === undefined ? [] : [params.createdAfter];
+      // The verifier finishes a settling row once it holds the provider's
+      // settlement and, for an onramp, its delivery signature; asking again
+      // would only spend a provider request.
+      const row = await db
+        .prepare(
+          `WITH next AS (
+             SELECT candidate.id
+             FROM payment_transfers candidate
+             JOIN projects p ON p.id = candidate.project_id
+             WHERE candidate.provider = ?
+               AND candidate.type = ANY(?)
+               AND candidate.status = ANY(?)
+               AND p.environment = ANY(?)
+               AND candidate.updated_at < ?
+               AND (candidate.provider_status_last_polled_at IS NULL
+                    OR candidate.provider_status_last_polled_at < ?)
+               ${createdAfterClause}
+               AND NOT (
+                 candidate.status = 'settling'
+                 AND jsonb_typeof(candidate.provider_data->'providerSettlement') = 'object'
+                 AND (candidate.type = 'offramp'
+                      OR candidate.provider_data #>> '{providerSettlement,onchain,signature}' IS NOT NULL)
+               )
+             ORDER BY candidate.provider_status_last_polled_at ASC NULLS FIRST,
+                      candidate.created_at ASC, candidate.id ASC
+             LIMIT 1
+             FOR UPDATE OF candidate SKIP LOCKED
+           ), pt AS (
+             UPDATE payment_transfers
+             SET provider_status_last_polled_at = ?
+             FROM next
+             WHERE payment_transfers.id = next.id
+             RETURNING payment_transfers.*
+           )
+           SELECT pt.*, p.environment AS project_environment,
+                  ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM pt JOIN projects p ON p.id = pt.project_id`
+        )
+        .bind(
+          params.provider,
+          [...RAMP_TRANSFER_TYPES],
+          [...params.statuses],
+          [...params.environments],
+          params.updatedBefore,
+          params.polledBefore,
+          ...createdAfterValues,
+          params.polledAt
+        )
+        .first<PaymentTransferProjectionRow & { project_environment: unknown }>();
+      return row
+        ? {
+            transfer: mapTransferRow(row),
+            environment: z.enum(SDP_ENVIRONMENTS).parse(row.project_environment),
+          }
+        : null;
     },
 
     async getTransferById(params) {

@@ -147,6 +147,8 @@ export interface RampTransferTransitionInput extends TransferStatusChangeFields 
   /** Untimed providers may claim completion evidence once, never replace it by redelivery. */
   providerSettlementUnclaimed?: boolean;
   providerSettlementMissingSignature?: boolean;
+  /** Matches only while `updated_at` still holds this value: a write decided on a read refuses a row that moved since. */
+  expectedUpdatedAt?: string;
   updatedAt: string;
 }
 
@@ -282,6 +284,25 @@ export interface PaymentsRepository {
     transferIds: readonly string[];
     polledAt: string;
   }): Promise<void>;
+  /**
+   * Claims the next ramp transfer a provider status pull should ask about: never
+   * polled first, then least recently polled, then oldest. Stamps
+   * `provider_status_last_polled_at` in the same statement, so a concurrent sweep
+   * skips the row, and leaves `updated_at` alone. A settling row whose provider
+   * evidence the chain verifier already holds is left to the verifier. System-only.
+   */
+  claimRampTransferForStatusPull(params: {
+    provider: RampProviderId;
+    environments: readonly SdpEnvironment[];
+    statuses: readonly PaymentTransferStatus[];
+    /** Rows updated since are left to the webhooks that may still be in flight. */
+    updatedBefore: string;
+    /** Rows polled since are not due yet. */
+    polledBefore: string;
+    /** Rows created before are past their revival window. */
+    createdAfter?: string;
+    polledAt: string;
+  }): Promise<{ transfer: PaymentTransferRow; environment: SdpEnvironment } | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled
