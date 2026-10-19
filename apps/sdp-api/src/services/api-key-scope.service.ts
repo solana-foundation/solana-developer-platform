@@ -1,6 +1,6 @@
 import {
   type Action,
-  actionOwnerOf,
+  isActionInReleaseChannel,
   isApiKeyGrantableAction,
   organizationRoleMayPerform,
 } from "@sdp/types/actions";
@@ -408,13 +408,12 @@ export function assertApiKeyGrantsInReleaseChannel(
   channel: ApiKeyGrantChannel,
   requestedGrants: readonly Action[]
 ): void {
-  const outside = requestedGrants.filter((grant) => {
-    const owner = actionOwnerOf(grant);
-    return (
-      owner !== "core" &&
-      !isModuleInReleaseChannel(channel.releaseChannel, owner, channel.rampProviderStages)
-    );
-  });
+  const outside = requestedGrants.filter(
+    (grant) =>
+      !isActionInReleaseChannel(grant, (module) =>
+        isModuleInReleaseChannel(channel.releaseChannel, module, channel.rampProviderStages)
+      )
+  );
   if (outside.length > 0) {
     throw new AppError(
       "BAD_REQUEST",

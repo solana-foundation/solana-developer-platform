@@ -45,8 +45,8 @@ heliusRings.get("/setup-status", requireAction("helius_rings.read"), getRingsSet
 
 heliusRings.get("/rings", requireAction("helius_rings.read"), listRingsProjectRings);
 // Recording a ring runs bring-up (signed transactions through custody), so it
-// carries write.
-heliusRings.post("/rings", requireAction("helius_rings.manage"), createRingsProjectRing);
+// carries execute.
+heliusRings.post("/rings", requireAction("helius_rings.execute"), createRingsProjectRing);
 
 heliusRings.get("/wallets", requireAction("helius_rings.read"), listRingsWallets);
 heliusRings.post("/wallets", requireAction("helius_rings.manage"), createRingsWallet);
@@ -63,11 +63,8 @@ heliusRings.get(
   getRingsWalletIdentity
 );
 heliusRings.get("/wallets/:walletId/zones", requireAction("helius_rings.read"), listRingsZones);
-heliusRings.post(
-  "/wallets/:walletId/zones",
-  requireAction("helius_rings.execute"),
-  createRingsZone
-);
+// A zone is an SDP row; nothing signs.
+heliusRings.post("/wallets/:walletId/zones", requireAction("helius_rings.manage"), createRingsZone);
 
 heliusRings.get("/operations", requireAction("helius_rings.read"), listRingsOperations);
 heliusRings.post("/operations", requireAction("helius_rings.execute"), prepareRingsOperation);

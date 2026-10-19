@@ -6,10 +6,10 @@ import {
   type Action,
   API_KEY_FORBIDDEN_ACTIONS,
   actionModuleOf,
-  actionOwnerOf,
   actionVerbOf,
   COARSE_ACTION_MODULES,
   isAction,
+  isActionInReleaseChannel,
 } from "@sdp/types/actions";
 import {
   isModuleInReleaseChannel,
@@ -114,7 +114,7 @@ describe("route actions", () => {
         if (declaration.kind !== "action" || !isAction(declaration.action)) return [];
         const routeOwner = routeOwnerOf(route.slice(route.indexOf(" ") + 1));
         if (!routeOwner || !inChannel(routeOwner)) return [];
-        return inChannel(actionOwnerOf(declaration.action))
+        return isActionInReleaseChannel(declaration.action, inChannel)
           ? []
           : [`${declaration.action} ${route}`];
       });

@@ -23,6 +23,7 @@ This file is the canonical agent guide for this repository.
 Do not hand-edit generated artifacts. Regenerate them with the owning script.
 
 - OpenAPI JSON: `pnpm -C apps/sdp-api openapi:generate`
+- Route actions inventory (`apps/sdp-api/src/openapi/route-actions.generated.json`): `pnpm -C apps/sdp-api route-actions:generate`
 - API playground catalog: `pnpm generate:api-playground`
 - API reference docs: `pnpm -C apps/sdp-docs generate:api`
 - AI discovery resources: `pnpm -C apps/sdp-docs generate:ai`

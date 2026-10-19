@@ -151,6 +151,19 @@ export function actionOwnerOf(action: Action): ActionOwner {
   return ACTION_MODULES[actionModuleOf(action)].owner;
 }
 
+/**
+ * Whether a deployment runs `action`: a core action always, a module's action
+ * when `isModuleInChannel` admits its module. Each caller passes its own
+ * channel's module predicate.
+ */
+export function isActionInReleaseChannel(
+  action: Action,
+  isModuleInChannel: (module: SdpModule) => boolean
+): boolean {
+  const owner = actionOwnerOf(action);
+  return owner === "core" || isModuleInChannel(owner);
+}
+
 /** The actions of one module, in the registry's verb order. */
 export function actionsInModule(module: ActionModule): Action[] {
   return actionsOfModule(module);
