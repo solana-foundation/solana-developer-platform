@@ -183,7 +183,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
     status: row.status as PaymentTransferRow["status"],
     provider: storedTransferProviderSchema.parse(row.provider),
     provider_reference: row.provider_reference as string | null,
-    provider_observed_at: row.provider_observed_at as string | null,
+    provider_observed_at: z.string().nullable().parse(row.provider_observed_at),
     delivery_mode: row.delivery_mode as PaymentTransferRow["delivery_mode"],
     fiat_currency: row.fiat_currency as string | null,
     fiat_amount: row.fiat_amount as string | null,

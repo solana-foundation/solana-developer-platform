@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import * as events from "@/runtime/money-path-events";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { env } from "@/test/helpers/env";
@@ -210,6 +211,12 @@ describe("moonpayWebhook.process", () => {
       provider_observed_at: null,
     });
     expect(await processor.process(env, "sandbox", failed)).toEqual({ outcome: "ignored" });
+    await getDb(env)
+      .prepare(
+        "UPDATE moonpay_failed_transactions SET status = 'archived' WHERE transaction_id = ?"
+      )
+      .bind(MOONPAY_TRANSACTION_ID)
+      .run();
     expect(
       await processor.process(env, "sandbox", {
         ...failed,
@@ -230,6 +237,83 @@ describe("moonpayWebhook.process", () => {
       .bind(TRANSFER_ID)
       .first<{ status: string; provider_reference: string | null }>();
     expect(row).toEqual({ status: "awaiting_payment", provider_reference: "new-moonpay-buy-id" });
+  });
+
+  it("refuses a first failed-buy observation that already reports crypto delivery", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    expect(
+      await processor.process(env, "sandbox", {
+        provider: "moonpay",
+        kind: "failed",
+        rampType: "onramp",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+        providerObservedAt: OBSERVED_AT,
+        onchain: { signature: "funded-buy-signature" },
+      })
+    ).toEqual({ outcome: "refused", reason: "moonpay_failure_after_funding" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "pending", provider_reference: null });
+  });
+
+  it("rolls back a failed buy when recording its retired id fails", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    const event = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: "2026-08-31T10:59:00.000Z",
+    } as const;
+    expect(await processor.process(env, "sandbox", event)).toMatchObject({ outcome: "applied" });
+
+    const original = repositoryFactory.createSystemTransactionalPaymentsRepository;
+    vi.spyOn(repositoryFactory, "createSystemTransactionalPaymentsRepository").mockImplementation(
+      (db) => ({
+        ...original(db),
+        recordFailedMoonpayTransaction: async () => {
+          throw new Error("forced retired-id write failure");
+        },
+      })
+    );
+    await expect(
+      processor.process(env, "sandbox", {
+        ...event,
+        kind: "failed",
+        providerObservedAt: OBSERVED_AT,
+      })
+    ).rejects.toThrow("forced retired-id write failure");
+
+    const row = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        provider_observed_at: string | null;
+      }>();
+    expect(row).toEqual({
+      status: "awaiting_payment",
+      provider_reference: MOONPAY_TRANSACTION_ID,
+      provider_observed_at: event.providerObservedAt,
+    });
+    const retired = await getDb(env)
+      .prepare("SELECT transaction_id FROM moonpay_failed_transactions WHERE transaction_id = ?")
+      .bind(MOONPAY_TRANSACTION_ID)
+      .first();
+    expect(retired).toBeNull();
   });
 
   it("holds a sale failure for review while its deposit may still arrive", async () => {

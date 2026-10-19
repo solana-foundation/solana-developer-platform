@@ -150,9 +150,9 @@ environment, then claims the transaction id and applies settlement in one
 transaction. Its first claim also checks the environment inside the UPDATE
 (HOO-2039). `provider_observed_at` orders MoonPay events only within the
 bound transaction id; equal or older observations are ignored. A failed buy
-without recorded payment activity releases its reference for retry and records
-that id
-in `moonpay_failed_transactions`, so a later webhook cannot reclaim it.
+releases its reference only when neither the row nor the incoming event reports
+payment activity. It records the id in `moonpay_failed_transactions`; archived
+tombstones still block later claims.
 Competing ids, conflicting terminal state, unsafe failures, cross-environment
 events, and settlement after cancellation are `refused`. Production parks them
 for review; sandbox discards them.

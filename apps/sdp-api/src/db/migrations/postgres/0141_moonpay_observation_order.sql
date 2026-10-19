@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS moonpay_failed_transactions (
   transfer_id TEXT NOT NULL,
   provider_observed_at TEXT NOT NULL,
   failure_reason TEXT,
-  settlement JSONB
+  settlement JSONB,
+  -- Archived records still block this transaction id from claiming again.
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived'))
 );
 
 -- Webhook retry bookkeeping is read and written in system scope. Keep

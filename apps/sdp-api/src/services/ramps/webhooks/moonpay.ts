@@ -168,28 +168,29 @@ async function applyFailedMoonpayObservation(
   if (
     transfer.status === "settling" ||
     transfer.signature !== null ||
-    transfer.submission_started_at !== null
+    transfer.submission_started_at !== null ||
+    event.onchain?.signature !== undefined ||
+    event.settlement?.cryptoTransactionId !== undefined
   ) {
     return { outcome: "refused", reason: "moonpay_failure_after_funding" };
   }
   if (transfer.status !== "expired" && isTerminalRampTransferStatus(transfer.status)) {
     return { outcome: "refused", reason: "moonpay_terminal_conflict" };
   }
-  const updated = await repo.transitionRampTransfer({
+  const transitionInput: Parameters<PaymentsRepository["transitionRampTransfer"]>[0] = {
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
     transition: "moonpay_attempt_failed",
     updatedAt: new Date().toISOString(),
-    ...(transfer.provider_reference === event.reference
-      ? {
-          providerObservation: {
-            reference: event.reference,
-            observedAt: event.providerObservedAt,
-          },
-        }
-      : {}),
-  });
+  };
+  if (transfer.provider_reference === event.reference) {
+    transitionInput.providerObservation = {
+      reference: event.reference,
+      observedAt: event.providerObservedAt,
+    };
+  }
+  const updated = await repo.transitionRampTransfer(transitionInput);
   if (!updated) return { outcome: "refused", reason: "moonpay_failure_after_funding" };
   await repo.releaseMoonpayProviderReference({
     transferId: transfer.id,
@@ -197,13 +198,14 @@ async function applyFailedMoonpayObservation(
     providerObservedAt:
       transfer.provider_reference === event.reference ? event.providerObservedAt : null,
   });
-  await repo.recordFailedMoonpayTransaction({
+  const failureInput: Parameters<PaymentsRepository["recordFailedMoonpayTransaction"]>[0] = {
     transactionId: event.reference,
     transferId: transfer.id,
     providerObservedAt: event.providerObservedAt,
-    ...(event.error ? { failureReason: event.error } : {}),
-    ...(event.settlement ? { settlement: event.settlement } : {}),
-  });
+  };
+  if (event.error) failureInput.failureReason = event.error;
+  if (event.settlement) failureInput.settlement = event.settlement;
+  await repo.recordFailedMoonpayTransaction(failureInput);
   return { outcome: "applied" };
 }
 
