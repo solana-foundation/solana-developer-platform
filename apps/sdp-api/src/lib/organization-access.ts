@@ -15,7 +15,7 @@ import {
   resolveApiKeyWalletAuthorization,
   warnUnresolvedApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * The one uncached organization read every authenticated request makes, and

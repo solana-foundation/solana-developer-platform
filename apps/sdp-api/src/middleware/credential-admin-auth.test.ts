@@ -6,7 +6,7 @@ import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { requireAction } from "@/middleware/require-action";
-import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   authenticateTestClerkUser,
@@ -15,9 +15,9 @@ import {
   signTestClerkClaims,
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
-import type { Env } from "@/types/env.d";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 import { credentialAdminAuthMiddleware } from "./credential-admin-auth";
 
 function buildProbe() {
@@ -107,7 +107,7 @@ describe("credentialAdminAuthMiddleware", () => {
   ] as const)("rejects a valid %s API key before the handler", async (_label, grants) => {
     const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
     await seedApiKeyRow(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       grants: [...grants],
     });
     const { app, wasHandlerReached } = buildProbe();

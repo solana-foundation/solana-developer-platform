@@ -4,7 +4,7 @@ import { idempotent } from "@/middleware/idempotency";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import { authorizePaymentRequest } from "@/routes/payments/access";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   createPaymentRequest,
   getPaymentRequest,

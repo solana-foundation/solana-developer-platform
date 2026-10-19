@@ -6,7 +6,7 @@ import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quot
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { relayRpcRequest } from "./handlers";
 import { rpcRelayPayloadSchema } from "./schemas";
 

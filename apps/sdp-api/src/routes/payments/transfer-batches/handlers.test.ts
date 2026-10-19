@@ -46,8 +46,8 @@ import {
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -82,7 +82,7 @@ const TEST_API_KEY = {
   raw: "sk_test_batch_payments",
   prefix: "sk_test_bat",
 };
-const TEST_CACHED_API_KEY: SeededApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -136,7 +136,7 @@ function ownedSubmissionAdapter(
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
 
-  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(
@@ -301,7 +301,7 @@ async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise
   ]);
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
+    ...TEST_SEEDED_API_KEY,
     walletScope: "selected",
     signingWalletId: TEST_WALLET_ID,
     signingWalletIds: [TEST_WALLET_ID],
@@ -959,7 +959,7 @@ describe("payment transfer batches", () => {
     ]);
     const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
     await seedApiKeyRow(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       walletScope: "selected",
       walletBindings: [
         {
@@ -2041,7 +2041,7 @@ describe("payment transfer batches", () => {
       .bind(productionProjectId, TEST_API_KEY.id)
       .run();
     await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       projectId: productionProjectId,
       environment: "production",
     });

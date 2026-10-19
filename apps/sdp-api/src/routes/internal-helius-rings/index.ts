@@ -13,7 +13,7 @@ import {
   makeDefaultRingsConnection,
   testRingsConnection,
 } from "@/services/helius-rings/connection.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 const connectionInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(100),

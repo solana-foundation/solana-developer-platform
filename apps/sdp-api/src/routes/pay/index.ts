@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { publicRoute } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { paymentRequestScope } from "./context";
 import { createSponsoredTransaction, getPaymentRequest, getTransactionMetadata } from "./handlers";
 import { transactionRequestBodySchema } from "./schemas";

@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { publicRoute } from "@/middleware/require-action";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export const llms = new Hono<{ Bindings: Env }>();
 

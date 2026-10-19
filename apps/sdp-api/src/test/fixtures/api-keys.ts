@@ -3,7 +3,7 @@
  */
 
 import { type Action, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
-import type { SeededApiKey } from "@/test/mocks/kv";
+import type { SeededApiKey } from "@/test/mocks/db";
 import { TEST_ORG } from "./organizations";
 import { TEST_PROJECT } from "./tokens";
 
@@ -25,7 +25,7 @@ export const ALL_API_KEY_GRANTS: Action[] = [...API_KEY_GRANTABLE_ACTIONS];
 /** {@link ALL_API_KEY_GRANTS} as a Postgres `text[]` literal, for SQL written inline. */
 export const ALL_API_KEY_GRANTS_SQL = `'{${ALL_API_KEY_GRANTS.join(",")}}'`;
 
-export const TEST_CACHED_API_KEY: SeededApiKey = {
+export const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -41,13 +41,13 @@ export const TEST_CACHED_API_KEY: SeededApiKey = {
 };
 
 export const TEST_REVOKED_KEY: SeededApiKey = {
-  ...TEST_CACHED_API_KEY,
+  ...TEST_SEEDED_API_KEY,
   id: "key_revoked123456",
   status: "revoked",
 };
 
 export const TEST_EXPIRED_KEY: SeededApiKey = {
-  ...TEST_CACHED_API_KEY,
+  ...TEST_SEEDED_API_KEY,
   id: "key_expired123456",
   expiresAt: "2020-01-01T00:00:00.000Z",
 };

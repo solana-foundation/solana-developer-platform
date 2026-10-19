@@ -4,7 +4,7 @@
 
 import { Hono } from "hono";
 import { publicRoute } from "@/middleware/require-action";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export const docs = new Hono<{ Bindings: Env }>();
 

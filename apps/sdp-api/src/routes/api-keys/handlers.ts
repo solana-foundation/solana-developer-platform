@@ -8,7 +8,7 @@ import type { OrganizationRole } from "@sdp/types/permissions";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
@@ -30,7 +30,7 @@ import {
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { type AuditLogEntry, AuditService } from "@/services/audit.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { buildApiKeyAccessSummaries } from "./access-response";
 import type {
   apiKeyCreateSchema,
@@ -439,10 +439,10 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   }
 
   if (existing.status === "deactivated" || existing.status === "revoked") {
-    return success(c, {
-      success: true,
-      revokedAt: existing.revoked_at ?? new Date().toISOString(),
-    });
+    if (existing.revoked_at === null) {
+      throw internalError("A deactivated API key has no revocation time");
+    }
+    return success(c, { success: true, revokedAt: existing.revoked_at });
   }
 
   if (!confirmation) {
@@ -477,6 +477,6 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
 
   return success(c, {
     success: true,
-    revokedAt: revokedKey.revokedAt ?? new Date().toISOString(),
+    revokedAt: revokedKey.revokedAt,
   });
 };

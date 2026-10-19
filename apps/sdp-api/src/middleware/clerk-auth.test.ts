@@ -20,7 +20,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 describe("Clerk auth request cache", () => {
   const issuerReady = ensureTestClerkIssuer(env);

@@ -13,9 +13,9 @@ import { requireAction } from "@/middleware/require-action";
 import {
   ALL_API_KEY_GRANTS,
   TEST_API_KEY,
-  TEST_CACHED_API_KEY,
   TEST_EXPIRED_KEY,
   TEST_REVOKED_KEY,
+  TEST_SEEDED_API_KEY,
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
@@ -23,14 +23,14 @@ import { ensureTestClerkIssuer } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { archiveProject, seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const errorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 });
 
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 describe("Auth Middleware", () => {
   const issuerReady = ensureTestClerkIssuer(env);
@@ -57,10 +57,10 @@ describe("Auth Middleware", () => {
 
   describe("key extraction", () => {
     it("accepts Bearer token format", async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -73,10 +73,10 @@ describe("Auth Middleware", () => {
     });
 
     it("accepts raw key format", async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: TEST_API_KEY.raw,
@@ -90,7 +90,7 @@ describe("Auth Middleware", () => {
 
     it("rejects requests without Authorization header", async () => {
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {},
         env
       );
@@ -102,7 +102,7 @@ describe("Auth Middleware", () => {
 
     it("rejects invalid Authorization header format", async () => {
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: "Basic invalid",
@@ -118,7 +118,7 @@ describe("Auth Middleware", () => {
   describe("key validation", () => {
     it("rejects invalid key format (not sk_test or sk_live)", async () => {
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: "Bearer invalid_key_format",
@@ -136,7 +136,7 @@ describe("Auth Middleware", () => {
       const unknownKey = "sk_test_unknown_fixture";
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${unknownKey}`,
@@ -151,10 +151,10 @@ describe("Auth Middleware", () => {
     });
 
     it("accepts a valid API key", async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -168,12 +168,12 @@ describe("Auth Middleware", () => {
 
     it("rejects an API key used outside its IPv4 allowlist", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         allowedIps: ["203.0.113.0/24"],
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -190,12 +190,12 @@ describe("Auth Middleware", () => {
 
     it("accepts an API key used from an allowed IPv4 address", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         allowedIps: ["203.0.113.0/24"],
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -210,12 +210,12 @@ describe("Auth Middleware", () => {
 
     it("uses the Cloud Run verified client instead of an untrusted forwarded prefix", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         allowedIps: ["198.51.100.99/32"],
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -230,12 +230,12 @@ describe("Auth Middleware", () => {
 
     it("rejects a restricted API key when no trusted client IP is available", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         allowedIps: ["203.0.113.0/24"],
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -249,12 +249,12 @@ describe("Auth Middleware", () => {
 
     it("rejects malformed allowlist data stored on the key", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         allowedIps: ["not-an-ip-range"],
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -307,7 +307,7 @@ describe("Auth Middleware", () => {
         .run();
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -339,7 +339,7 @@ describe("Auth Middleware", () => {
       await seedApiKeyRow(env, revokedKeyHash, TEST_REVOKED_KEY);
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -358,7 +358,7 @@ describe("Auth Middleware", () => {
       await seedApiKeyRow(env, expiredKeyHash, TEST_EXPIRED_KEY);
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -375,12 +375,12 @@ describe("Auth Middleware", () => {
     // A malformed expiry fails closed instead of reading as "not expired".
     it("rejects a key whose expiry does not parse", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         expiresAt: "not-a-timestamp",
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -396,12 +396,12 @@ describe("Auth Middleware", () => {
 
     it("rejects rotated API keys after their grace period ends", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         rotationDeadline: "2020-01-01T00:00:00.000Z",
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -417,12 +417,12 @@ describe("Auth Middleware", () => {
 
     it("accepts rotated API keys while their grace period is active", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         rotationDeadline: "2999-01-01T00:00:00.000Z",
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -480,7 +480,7 @@ describe("Auth Middleware", () => {
     });
 
     it("refuses a key narrowed from all wallets to selected ones on its next request", async () => {
-      await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, walletScope: "all" });
+      await seedApiKeyRow(env, validKeyHash, { ...TEST_SEEDED_API_KEY, walletScope: "all" });
       expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
 
       await getDb(env)
@@ -496,7 +496,7 @@ describe("Auth Middleware", () => {
 
     it("refuses a wallet whose binding was revoked on its next request", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         walletScope: "selected",
         signingWalletId: "wallet_fresh_a",
         walletBindings: [
@@ -544,7 +544,7 @@ describe("Auth Middleware", () => {
       );
     const orgRequest = () =>
       app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
@@ -555,7 +555,7 @@ describe("Auth Middleware", () => {
         .run();
 
     beforeEach(async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
     });
 
     it("builds the request context from the key's row", async () => {
@@ -749,12 +749,12 @@ describe("Auth Middleware", () => {
   describe("actions", () => {
     it("allows access with wildcard permission", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         grants: ALL_API_KEY_GRANTS,
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -768,12 +768,12 @@ describe("Auth Middleware", () => {
 
     it("allows access with the route's action", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         grants: ["organizations.read"],
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -787,12 +787,12 @@ describe("Auth Middleware", () => {
 
     it("rejects a request without the route's action, naming it", async () => {
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         grants: ["issuance.read"],
       });
 
       const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,

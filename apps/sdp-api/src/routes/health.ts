@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import { getDb } from "@/db/client";
 import { publicRoute } from "@/middleware/require-action";
 import { pingRedis } from "@/runtime/kv-redis";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export const health = new Hono<{ Bindings: Env }>();
 

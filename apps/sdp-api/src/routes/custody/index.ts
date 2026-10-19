@@ -26,7 +26,7 @@ import {
   listWallets,
   updateWallet,
 } from "@/routes/custody/handlers/wallets";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   authorizeCreateWallet,
   authorizeDeleteWallet,

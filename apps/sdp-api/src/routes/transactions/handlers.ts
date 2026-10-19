@@ -20,7 +20,7 @@ import {
 } from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   PAYMENT_TRANSACTION_KIND_ACTIONS,
   permittedPaymentTransactionKinds,
