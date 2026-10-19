@@ -147,6 +147,8 @@ const NODE_POOL_OPTIONS = {
   // audit-ledger writer does for its Redis waits (`audit.service.ts`).
   statement_timeout: 30_000,
   idle_in_transaction_session_timeout: 60_000,
+  // Lets a leased connection take several commands in one write; see `inOneFlight`.
+  pipeline: true,
   connectionTimeoutMillis: 5_000,
   idleTimeoutMillis: 30_000,
   maxLifetimeSeconds: 300,
@@ -355,21 +357,63 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
 }
 
 /**
- * Open a transaction stamped with the ambient database identity
- * (src/db/identity.ts) in a single round trip. The GUCs are `SET LOCAL`, so
- * COMMIT/ROLLBACK clears them and pooled connection reuse can never leak an
- * identity across callers. A missing or `none` identity opens a bare
+ * The command that opens a transaction stamped with the ambient database
+ * identity (src/db/identity.ts) in a single round trip. The GUCs are `SET
+ * LOCAL`, so COMMIT/ROLLBACK clears them and pooled connection reuse can never
+ * leak an identity across callers. A missing or `none` identity opens a bare
  * transaction — row-level security then denies by default.
  */
+function beginCommand(identity: DatabaseIdentity | undefined): { text: string } {
+  if (!identity || identity.kind === "none") {
+    return { text: "BEGIN" };
+  }
+  return { text: `BEGIN; ${databaseIdentityConfigStatement(identity).text}` };
+}
+
 async function beginWithDatabaseIdentity(
   client: Queryable,
   identity: DatabaseIdentity | undefined
 ): Promise<void> {
-  if (!identity || identity.kind === "none") {
-    await client.query({ text: "BEGIN" });
-    return;
+  await client.query(beginCommand(identity));
+}
+
+/**
+ * Sends `commands` on one connection without waiting for each to finish, and
+ * answers once every one of them has settled. node-postgres (`pipeline: true`)
+ * writes them back to back and PostgreSQL runs them in order, so a stamped
+ * statement costs one round trip instead of three.
+ *
+ * Nothing is left on the wire when this returns or throws, so the caller may
+ * roll back or release the connection straight away. The failure reported is
+ * the first in sending order, which is the one that caused the rest: after an
+ * error the server skips to the next command and runs it in an aborted
+ * transaction, where a `COMMIT` rolls back instead of committing.
+ */
+async function inOneFlight(
+  commands: readonly (() => Promise<QueryResult>)[]
+): Promise<QueryResult[]> {
+  const sent: Promise<QueryResult>[] = [];
+  let sendError: Error | undefined;
+  for (const send of commands) {
+    try {
+      sent.push(send());
+    } catch (error) {
+      sendError = error instanceof Error ? error : new Error(String(error));
+      break;
+    }
   }
-  await client.query({ text: `BEGIN; ${databaseIdentityConfigStatement(identity).text}` });
+  const settled = await Promise.allSettled(sent);
+  const results: QueryResult[] = [];
+  for (const outcome of settled) {
+    if (outcome.status === "rejected") {
+      throw outcome.reason instanceof Error ? outcome.reason : new Error(String(outcome.reason));
+    }
+    results.push(outcome.value);
+  }
+  if (sendError) {
+    throw sendError;
+  }
+  return results;
 }
 
 /**
@@ -397,9 +441,13 @@ class IdentityStampingPoolQueryable implements Queryable {
     const client = await acquireClient(this.pool);
     let releaseError: Error | undefined;
     try {
-      await beginWithDatabaseIdentity(client, identity);
-      const result = await this.statements.run(client, args);
-      await client.query("COMMIT");
+      // The identity is stamped first, so a statement never runs without it.
+      const begin = beginCommand(identity);
+      const [, result] = await inOneFlight([
+        () => client.query(begin),
+        () => this.statements.run(client, args),
+        () => client.query("COMMIT"),
+      ]);
       return result;
     } catch (error) {
       try {

@@ -193,6 +193,7 @@ describe("database client connection management", () => {
       idleTimeoutMillis: 30_000,
       maxLifetimeSeconds: 300,
       keepAlive: true,
+      pipeline: true,
     });
 
     for (const resolve of pendingQueries) {
@@ -552,6 +553,7 @@ describe("database client connection management", () => {
     expect(failed.queries.map(([query]) => query)).toEqual([
       expect.objectContaining({ text: expect.stringContaining("BEGIN") }),
       expect.objectContaining({ name: expect.stringMatching(/^sdp_/) }),
+      "COMMIT",
       "ROLLBACK",
     ]);
     expect(failed.release).toHaveBeenCalledWith(stale);
@@ -672,6 +674,171 @@ describe("database client connection management", () => {
       throw duplicate;
     };
     await expect(db.execute("INSERT INTO t (id) VALUES (?)", ["a"])).rejects.toBe(duplicate);
+  });
+
+  describe("a stamped statement outside a transaction", () => {
+    const runStamped = (db: ReturnType<typeof createDatabaseClient>) =>
+      runWithTenantDatabaseIdentity({ organizationId: "org_1" }, () =>
+        db.queryOne(STATUS_QUERY, ["org_1"])
+      );
+
+    /** Which command a mocked connection was asked to run. */
+    const commandOf = (input: SentInput): "BEGIN" | "COMMIT" | "ROLLBACK" | "STATEMENT" => {
+      const text = typeof input === "string" ? input : input.text;
+      if (text.startsWith("BEGIN")) return "BEGIN";
+      if (text === "COMMIT") return "COMMIT";
+      if (text === "ROLLBACK") return "ROLLBACK";
+      return "STATEMENT";
+    };
+
+    /** The command the mocked connection was asked to run most recently. */
+    const lastCommand = (): ReturnType<typeof commandOf> => {
+      const input = pgMock.lastClientQuery;
+      if (input === undefined) throw new Error("expected the client to have sent a command");
+      return commandOf(input);
+    };
+
+    it("sends the stamp, the statement and COMMIT before any of them is answered", async () => {
+      const answers: Array<() => void> = [];
+      pgMock.poolClientQuery = () =>
+        new Promise<MockQueryResult>((resolve) => {
+          answers.push(() => resolve({ rows: [{ status: "active" }], rowCount: 1 }));
+        });
+      const db = createDatabaseClient("postgresql://node-stamp-flight/sdp");
+
+      const pending = runStamped(db);
+      await vi.waitFor(() => {
+        expect(answers).toHaveLength(3);
+      });
+      const client = connectedClient(0);
+      expect(client.queries.map(([query]) => commandOf(query))).toEqual([
+        "BEGIN",
+        "STATEMENT",
+        "COMMIT",
+      ]);
+      expect(client.queries[0]?.[0]).toMatchObject({
+        text: expect.stringContaining("SET LOCAL app.tenant_isolation_organization_id = 'org_1'"),
+      });
+      for (const answer of answers) {
+        answer();
+      }
+
+      await expect(pending).resolves.toEqual({ status: "active" });
+      expect(client.release).toHaveBeenCalledOnce();
+      expect(client.release).toHaveBeenCalledWith(undefined);
+    });
+
+    it("keeps the connection until every command of the flight has settled", async () => {
+      let finishCommit: (() => void) | undefined;
+      pgMock.poolClientQuery = () => {
+        if (lastCommand() === "COMMIT") {
+          return new Promise<MockQueryResult>((resolve) => {
+            finishCommit = () => resolve({ rows: [], rowCount: 0 });
+          });
+        }
+        if (lastCommand() === "STATEMENT") {
+          return Promise.reject(serverError("23505", "duplicate key value"));
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      };
+      const db = createDatabaseClient("postgresql://node-stamp-settle/sdp");
+
+      const outcome = runStamped(db).catch((caught: unknown) => caught);
+      await vi.waitFor(() => {
+        expect(finishCommit).toBeTypeOf("function");
+      });
+      // The statement failed, but its COMMIT is still on the wire: no ROLLBACK
+      // may queue behind it and the connection may not go back to the pool.
+      const client = connectedClient(0);
+      await Promise.resolve();
+      expect(client.release).not.toHaveBeenCalled();
+      expect(client.queries.map(([query]) => commandOf(query))).toEqual([
+        "BEGIN",
+        "STATEMENT",
+        "COMMIT",
+      ]);
+
+      finishCommit?.();
+      const error = await outcome;
+
+      expect(error).toMatchObject({ code: "23505" });
+      expect(client.queries.map(([query]) => query).at(-1)).toBe("ROLLBACK");
+      expect(client.release).toHaveBeenCalledOnce();
+      expect(client.release).toHaveBeenCalledWith(undefined);
+    });
+
+    it("throws the statement's own error, not the COMMIT's, when both fail", async () => {
+      const statementFailure = serverError("23503", "foreign key violation");
+      const commitFailure = serverError("25P02", "current transaction is aborted");
+      pgMock.poolClientQuery = async () => {
+        if (lastCommand() === "COMMIT") throw commitFailure;
+        if (lastCommand() === "STATEMENT") throw statementFailure;
+        return { rows: [], rowCount: 0 };
+      };
+      const db = createDatabaseClient("postgresql://node-stamp-statement-error/sdp");
+
+      await expect(runStamped(db)).rejects.toBe(statementFailure);
+
+      expect(connectedClient(0).release).toHaveBeenCalledWith(undefined);
+    });
+
+    it("throws the stamp's error when it fails and the statement is refused after it", async () => {
+      const stampFailure = serverError("42501", "permission denied to set parameter");
+      pgMock.poolClientQuery = async () => {
+        if (lastCommand() === "BEGIN") throw stampFailure;
+        if (lastCommand() === "STATEMENT") {
+          throw serverError("25P02", "current transaction is aborted");
+        }
+        return { rows: [], rowCount: 0 };
+      };
+      const db = createDatabaseClient("postgresql://node-stamp-stamp-error/sdp");
+
+      await expect(runStamped(db)).rejects.toBe(stampFailure);
+    });
+
+    it("gives the caller the COMMIT error and never the statement's result", async () => {
+      const commitFailure = serverError("23505", "duplicate key value at commit");
+      pgMock.poolClientQuery = async () => {
+        if (lastCommand() === "COMMIT") throw commitFailure;
+        return { rows: [{ status: "active" }], rowCount: 1 };
+      };
+      const db = createDatabaseClient("postgresql://node-stamp-commit-error/sdp");
+
+      await expect(runStamped(db)).rejects.toBe(commitFailure);
+
+      const client = connectedClient(0);
+      expect(client.queries.map(([query]) => query).at(-1)).toBe("ROLLBACK");
+      expect(client.release).toHaveBeenCalledWith(undefined);
+    });
+
+    it("discards the connection when the ROLLBACK after a failure fails too", async () => {
+      const statementFailure = serverError("23505", "duplicate key value");
+      const rollbackFailure = new Error("connection reset during rollback");
+      pgMock.poolClientQuery = async () => {
+        if (lastCommand() === "ROLLBACK") throw rollbackFailure;
+        if (lastCommand() === "STATEMENT") throw statementFailure;
+        return { rows: [], rowCount: 0 };
+      };
+      const db = createDatabaseClient("postgresql://node-stamp-rollback-error/sdp");
+
+      await expect(runStamped(db)).rejects.toBe(statementFailure);
+
+      expect(connectedClient(0).release).toHaveBeenCalledWith(rollbackFailure);
+    });
+
+    it("refuses an identity it cannot stamp before sending anything", async () => {
+      const db = createDatabaseClient("postgresql://node-stamp-bad-identity/sdp");
+
+      await expect(
+        runWithTenantDatabaseIdentity({ organizationId: "org\0" }, () =>
+          db.queryOne(STATUS_QUERY, ["org_1"])
+        )
+      ).rejects.toMatchObject({ name: "DatabaseIdentityError" });
+
+      const sent = connectedClient(0).queries.map(([query]) => commandOf(query));
+      expect(sent).not.toContain("STATEMENT");
+      expect(sent).not.toContain("BEGIN");
+    });
   });
 
   it("waits for every pool to close before shutdown completes", async () => {
