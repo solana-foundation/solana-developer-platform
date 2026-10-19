@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { internalError } from "@/lib/errors";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { IDEMPOTENCY_KEY_HEADER } from "./idempotency-key";
 
 type GateContext = Context<{ Bindings: Env }>;

@@ -3,7 +3,7 @@ import { currentDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "./dvp-trades";
 import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSyncIfDue } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";

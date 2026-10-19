@@ -8,7 +8,7 @@ import { getCounterpartyRequirements } from "@/routes/counterparties/handlers";
 import { listCounterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts/handlers";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env as baseEnv } from "@/test/helpers/env";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { listOfframpCurrencies } from "./offramp/handlers";
 import { listOnrampCurrencies } from "./onramp/handlers";
 import { filterProviders } from "./shared";

@@ -56,7 +56,7 @@ import { webhooks } from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export interface SdpPlugin {
   name: string;

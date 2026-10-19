@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppError, forbidden } from "@/lib/errors";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { authorize } from "./authorize";
 import { deriveIdempotencyRecordKey } from "./idempotency";
 import { admit, replayFromRecord } from "./movement-steps";

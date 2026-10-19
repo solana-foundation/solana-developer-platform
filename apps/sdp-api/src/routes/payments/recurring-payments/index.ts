@@ -5,7 +5,7 @@ import { idempotent } from "@/middleware/idempotency";
 import { replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   authorizeRecurringPayment,
   authorizeRecurringPaymentCreate,

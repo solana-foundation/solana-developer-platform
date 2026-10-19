@@ -27,7 +27,7 @@ import { AppError } from "@/lib/errors";
 import { authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   API_KEY_PRE_READ_MAX_REQUESTS,
   apiKeyFloodGuardIdentifier,
@@ -333,20 +333,5 @@ export function unifiedAuthMiddleware() {
     }
 
     throw new AppError("UNAUTHORIZED", "API key required");
-  };
-}
-
-/**
- * Refuses a request no dashboard session made: an API key passes `unifiedAuthMiddleware` but not
- * this. Mount it after `unifiedAuthMiddleware`.
- *
- * @returns Hono middleware that throws 401 without a Clerk session.
- */
-export function requireClerkSession() {
-  return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (!c.get("clerk")) {
-      throw new AppError("UNAUTHORIZED", "Clerk JWT required");
-    }
-    await next();
   };
 }

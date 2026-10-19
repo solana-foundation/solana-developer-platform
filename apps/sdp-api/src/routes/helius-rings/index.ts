@@ -4,7 +4,7 @@ import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   createRingsProjectRing,
   createRingsWallet,

@@ -7,7 +7,7 @@ import {
   authorizeCounterparty,
   authorizeCounterpartyAccount,
 } from "@/routes/counterparties/access";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   archiveCounterpartyAccount,
   createCounterpartyAccount,

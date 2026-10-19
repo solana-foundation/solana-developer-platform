@@ -36,7 +36,7 @@ import {
   getPendingWalletLabel,
   ProviderCredentialStore,
 } from "@/services/stores/provider-credential.store";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
 const credentialParamsSchema = z.object({ credentialId: z.string().trim().min(1) }).strict();

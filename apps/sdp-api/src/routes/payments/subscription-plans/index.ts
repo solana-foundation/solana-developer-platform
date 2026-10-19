@@ -7,7 +7,7 @@ import {
   authorizeSubscriptionPlanCreate,
   authorizeSubscriptionPlanUpdate,
 } from "@/routes/payments/access";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   createSubscriptionPlan,
   getSubscriptionPlan,

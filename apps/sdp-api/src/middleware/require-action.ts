@@ -2,7 +2,7 @@ import { type Action, isApiKeyGrantableAction } from "@sdp/types/actions";
 import type { Context, MiddlewareHandler } from "hono";
 import { authMayPerform, getOptionalAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * Route authorization by action (HOO-2099). Every route declares exactly one

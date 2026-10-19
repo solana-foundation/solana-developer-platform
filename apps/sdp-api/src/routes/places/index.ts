@@ -3,7 +3,7 @@ import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams, validateQuery } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { autocomplete, getPlace, getStaticMap } from "./handlers";
 import {
   placeDetailsQuerySchema,

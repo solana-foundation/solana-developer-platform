@@ -8,7 +8,7 @@ import { requireModule } from "@/middleware/require-module";
 import { validateBody, validateParams } from "@/middleware/validate";
 import { counterpartyAccounts } from "@/routes/counterparty-accounts";
 import { counterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { authorizeCounterparty } from "./access";
 import {
   archiveCounterparty,

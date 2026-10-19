@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 import type { Redis, RedisOptions } from "ioredis";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import type {
   KVListResult,
   KVPutOptions,

@@ -8,7 +8,7 @@ import { payloadTooLarge } from "@/lib/errors";
 import { localRateLimit } from "@/middleware/local-rate-limit";
 import { publicRoute } from "@/middleware/require-action";
 import { requireModule, requireRampProviderParam } from "@/middleware/require-module";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { handleClerkWebhook, handleRampProviderWebhook } from "./handlers";
 
 // Provider webhook payloads are a few kilobytes; the handlers buffer the body

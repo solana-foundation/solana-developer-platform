@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
 import { publicRoute } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { completeOnboarding, getOnboardingStatus } from "./handlers";
 import { completeOnboardingSchema } from "./schemas";
 

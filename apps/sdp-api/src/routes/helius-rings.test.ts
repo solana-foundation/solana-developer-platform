@@ -17,9 +17,9 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
-import type { Env } from "@/types/env.d";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 /**
  * The one seam these tests reach through; everything else runs for real. Left
@@ -48,7 +48,7 @@ const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 /** Allowlisted by neither the asset catalogue nor the spend gate. */
 const OTHER_MINT = "E4KqM12ZDosJbV7gZ5iR8rK1T2mC3nF4pQ6sU8wX9yZa";
 
-const TEST_CACHED_API_KEY: SeededApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -66,7 +66,7 @@ let ringsWalletId: string;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   const db = getDb(env);
   await db.batch([
     db
@@ -467,7 +467,7 @@ describe("Helius Rings routes", () => {
 
       const paymentsOnlyKey = { id: "key_hr_payments_only", raw: "sk_test_helius_rings_pay" };
       await seedApiKeyRow(env, await hashString(paymentsOnlyKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         id: paymentsOnlyKey.id,
         grants: ["helius_rings.manage"],
       });
@@ -513,7 +513,7 @@ describe("Helius Rings routes", () => {
       // A key holding helius_rings.execute goes through to the normal path.
       const privacyKey = { id: "key_hr_privacy_family", raw: "sk_test_helius_rings_privacy" };
       await seedApiKeyRow(env, await hashString(privacyKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         id: privacyKey.id,
         grants: ["helius_rings.execute"],
       });
@@ -903,7 +903,7 @@ describe("Helius Rings routes", () => {
       const readOnlyKey = { id: "key_hr_sync_ro", raw: "sk_test_helius_rings_ro" };
       const keyHash = await hashString(readOnlyKey.raw, env.API_KEY_PEPPER);
       await seedApiKeyRow(env, keyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         id: readOnlyKey.id,
         grants: ["transfers.read"],
       });
@@ -974,7 +974,7 @@ describe("Helius Rings routes", () => {
     it("answers a key holding only helius_rings.read", async () => {
       const readOnlyKey = { id: "key_hr_identity_ro", raw: "sk_test_helius_rings_id_ro" };
       await seedApiKeyRow(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         id: readOnlyKey.id,
         grants: ["helius_rings.read"],
       });
@@ -989,7 +989,7 @@ describe("Helius Rings routes", () => {
     it("403s a key holding neither payments permission", async () => {
       const otherKey = { id: "key_hr_identity_none", raw: "sk_test_helius_rings_id_none" };
       await seedApiKeyRow(env, await hashString(otherKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         id: otherKey.id,
         grants: ["wallets.read"],
       });

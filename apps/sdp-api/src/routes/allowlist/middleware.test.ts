@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { adminAuth } from "./middleware";
 
 const ADMIN_KEY = "platform-admin-secret";

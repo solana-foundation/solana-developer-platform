@@ -4,7 +4,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import { createTokenWithAssetProfileSchema } from "@/routes/issuance/schemas";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { createTokenWithAssetProfile } from "./create";
 import {
   archiveAssetProfile,

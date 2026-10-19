@@ -10,15 +10,9 @@ import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  clearKVStores,
-  readRateLimitCount,
-  type SeededApiKey,
-  seedApiKeyRow,
-  seedRateLimit,
-} from "@/test/mocks/kv";
-import type { Env } from "@/types/env.d";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
 const buildExternalWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
@@ -102,7 +96,7 @@ const TEST_USER = { id: "usr_earn_ext", email: "earn-ext@example.com" };
 const TEST_API_KEY = { id: "key_earn_ext", raw: "sk_test_earn_ext", prefix: "sk_test_ear" };
 const PROD_API_KEY = { id: "key_earn_ext_prod", raw: "sk_live_earn_ext", prefix: "sk_live_ear" };
 
-const TEST_CACHED_API_KEY: SeededApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -115,7 +109,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   expiresAt: null,
 };
 const PROD_CACHED_API_KEY: SeededApiKey = {
-  ...TEST_CACHED_API_KEY,
+  ...TEST_SEEDED_API_KEY,
   id: PROD_API_KEY.id,
   projectId: TEST_PRODUCTION_PROJECT.id,
   environment: "production",
@@ -132,7 +126,7 @@ let originalEarnEnabled: string | undefined;
 async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
   const entitled = options.entitled ?? true;
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, prodKeyHash, PROD_CACHED_API_KEY);
 

@@ -44,7 +44,7 @@ import {
 } from "@/test/fixtures/tokens";
 import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export type ApiTestEnv = Env;
 export type ApiTestCustodyWallet = CustodyWallet;

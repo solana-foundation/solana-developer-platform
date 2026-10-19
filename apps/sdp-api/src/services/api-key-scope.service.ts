@@ -19,7 +19,7 @@ import {
   type ExactApiKeyWalletBinding,
   normalizeApiKeyWalletPermissions,
 } from "@/services/api-key-wallets.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 type WalletBindingInput = {
   walletId: string;
