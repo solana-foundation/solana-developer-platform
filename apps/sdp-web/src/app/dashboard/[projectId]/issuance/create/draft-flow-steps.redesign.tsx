@@ -19,8 +19,6 @@ import { IssuanceCheckRow } from "../issuance-checkbox.redesign";
 import { type AuthorityKey, type DraftState, isDraftAuthorityInUse } from "./draft-model";
 import type { DraftAccess } from "./local-drafts.redesign";
 
-export type { DraftAccess };
-
 /** The flow's draft: the saved draft's fields, and the access list as the design picks it. */
 export interface FlowDraft {
   draft: DraftState;

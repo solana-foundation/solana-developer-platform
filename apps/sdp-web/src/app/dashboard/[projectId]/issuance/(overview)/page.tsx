@@ -15,7 +15,7 @@ import {
   fetchIssuanceTokensPage,
 } from "../issuance-tokens.data";
 import { IssuanceWorkspace } from "../issuance-workspace";
-import RedesignIssuancePage from "./page.redesign";
+import { IssuancePage as RedesignIssuancePage } from "./page.redesign";
 
 interface IssuanceTemplateView {
   id: string;

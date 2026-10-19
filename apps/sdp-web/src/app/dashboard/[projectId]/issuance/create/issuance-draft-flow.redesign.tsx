@@ -16,12 +16,12 @@ import {
   ClassifyStep,
   ControlsStep,
   DetailsStep,
-  type DraftAccess,
   PermissionsStep,
   ReviewStep,
 } from "./draft-flow-steps.redesign";
 import { type DraftState, draftSchema } from "./draft-model";
 import {
+  type DraftAccess,
   type LocalDraft,
   removeLocalDraft,
   restoreDraft,

@@ -46,7 +46,7 @@ interface IssuancePageProps {
  * Issuance on the new design: the project's tokens, searched, filtered, sorted and paged on
  * the server from the URL, and the API Playground's data beside them.
  */
-export default async function IssuancePage({ searchParams }: IssuancePageProps) {
+export async function IssuancePage({ searchParams }: IssuancePageProps) {
   const [t, { userId, orgId }, resolvedSearchParams] = await Promise.all([
     getTranslations(),
     auth(),
