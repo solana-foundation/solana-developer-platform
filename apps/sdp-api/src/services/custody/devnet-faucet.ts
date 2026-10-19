@@ -19,13 +19,11 @@ const DEVNET_FAUCET_LAMPORTS = solToLamports(sol("1"));
 
 const FAUCET_CONFIRMATION_TIMEOUT_MS = 15_000;
 const FAUCET_CONFIRMATION_POLL_MS = 1_000;
-/** The status reads one airdrop may cost: one per poll interval of the confirmation window. */
-const FAUCET_MAX_STATUS_READS = FAUCET_CONFIRMATION_TIMEOUT_MS / FAUCET_CONFIRMATION_POLL_MS;
 
 /**
  * Airdrops the devnet faucet amount to `walletAddress` and waits, bounded, for it to confirm, so
- * a caller that reads the balance next sees the funds. RPC: one `requestAirdrop` and at most
- * `FAUCET_MAX_STATUS_READS` `getSignatureStatuses`.
+ * a caller that reads the balance next sees the funds. RPC: one `requestAirdrop` and one
+ * `getSignatureStatuses` per poll interval that ends inside the window, 14 at most.
  *
  * @param walletAddress - The custody wallet to fund.
  * @returns The airdrop's signature, where it stood when the wait ended, and its amount.
@@ -78,7 +76,7 @@ async function waitForAirdropConfirmation(
   signature: Signature
 ): Promise<WalletFaucetStatus> {
   const deadline = Date.now() + FAUCET_CONFIRMATION_TIMEOUT_MS;
-  for (let statusRead = 0; statusRead < FAUCET_MAX_STATUS_READS; statusRead += 1) {
+  for (;;) {
     await new Promise((resolve) => setTimeout(resolve, FAUCET_CONFIRMATION_POLL_MS));
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) break;
