@@ -225,7 +225,10 @@ function ActivityTable({
             <TableCell className={PAYMENTS_TABLE_CELL}>
               <StatusText tone={status.tone}>{status.label}</StatusText>
             </TableCell>
-            <TableCell className={`${PAYMENTS_TABLE_CELL} text-primary tabular-nums`}>
+            {/* The date may wrap: at a phone's width its column is narrower than a date and time. */}
+            <TableCell
+              className={`${PAYMENTS_TABLE_CELL} whitespace-normal text-primary tabular-nums`}
+            >
               {formatter.format(new Date(event.createdAt))}
             </TableCell>
             <TableCell className={`${PAYMENTS_TABLE_CELL} text-right`}>

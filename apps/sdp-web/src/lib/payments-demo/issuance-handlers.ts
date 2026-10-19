@@ -681,6 +681,26 @@ const authoritySchema = z.strictObject({
   options: options.optional(),
 });
 
+type AuthorityRole = z.infer<typeof authoritySchema>["authority"]["role"];
+
+/** The address holding `role` on the token now, or null once that authority is given up. */
+function currentAuthority(token: PublicToken, role: AuthorityRole): string | null {
+  switch (role) {
+    case "mint":
+      return token.mintAuthority;
+    case "freeze":
+      return token.freezeAuthority;
+    case "metadata":
+      return metadataAuthorityOf(token);
+    case "permanentDelegate":
+      return token.extensions?.permanentDelegate ?? null;
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`Unknown authority role: ${String(exhaustive)}`);
+    }
+  }
+}
+
 /** `POST /tokens/:id/authority`: hands an authority to another address, or gives it up. */
 function changeAuthority(context: WriteContext): DemoWriteResult {
   const entry = tokenFor(context);
@@ -691,14 +711,7 @@ function changeAuthority(context: WriteContext): DemoWriteResult {
   const refusal = notDeployed(entry.token) ?? walletRefusal(context, body.signingCustodyWalletId);
   if (refusal) return refusal;
   const { token } = entry;
-  const current =
-    body.authority.role === "mint"
-      ? token.mintAuthority
-      : body.authority.role === "freeze"
-        ? token.freezeAuthority
-        : body.authority.role === "metadata"
-          ? metadataAuthorityOf(token)
-          : (token.extensions?.permanentDelegate ?? null);
+  const current = currentAuthority(token, body.authority.role);
   if (current === null) {
     return badRequest("That authority has already been given up.");
   }

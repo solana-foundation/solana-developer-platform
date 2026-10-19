@@ -677,8 +677,11 @@ function buildToken(
   clock: Clock
 ): DemoIssuedToken {
   const signer = wallets[spec.signer];
-  const signerKey = signer?.publicKey ?? demoAddress(`wallet:${spec.signer}`);
-  const walletId = signer?.id ?? `demo_cwlt_${spec.signer}`;
+  if (!signer) {
+    throw new Error(`Demo token ${spec.key} names signer ${spec.signer}, which no demo wallet is`);
+  }
+  const signerKey = signer.publicKey;
+  const walletId = signer.id;
   const id = demoTokenId(spec.key);
   const createdAt = clock.ago(
     spec.createdDaysAgo * DAY_MS + (spec.createdDaysAgo ? 0 : 6 * MINUTE_MS)

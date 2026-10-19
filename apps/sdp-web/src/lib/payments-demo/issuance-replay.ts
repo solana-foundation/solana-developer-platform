@@ -383,19 +383,28 @@ function applyFreeze(entry: DemoIssuedToken, op: DemoOpOf<"iss-freeze">) {
 
 function applyAuthority(entry: DemoIssuedToken, op: DemoOpOf<"iss-authority">) {
   const { token } = entry;
-  const current =
-    op.role === "mint"
-      ? token.mintAuthority
-      : op.role === "freeze"
-        ? token.freezeAuthority
-        : op.role === "metadata"
-          ? (token.metadataAuthority ?? null)
-          : (token.extensions?.permanentDelegate ?? null);
-  if (op.role === "mint") token.mintAuthority = op.next;
-  if (op.role === "freeze") token.freezeAuthority = op.next;
-  if (op.role === "metadata") token.metadataAuthority = op.next;
-  if (op.role === "permanentDelegate") {
-    token.extensions = { ...token.extensions, permanentDelegate: op.next ?? undefined };
+  let current: string | null;
+  switch (op.role) {
+    case "mint":
+      current = token.mintAuthority;
+      token.mintAuthority = op.next;
+      break;
+    case "freeze":
+      current = token.freezeAuthority;
+      token.freezeAuthority = op.next;
+      break;
+    case "metadata":
+      current = token.metadataAuthority ?? null;
+      token.metadataAuthority = op.next;
+      break;
+    case "permanentDelegate":
+      current = token.extensions?.permanentDelegate ?? null;
+      token.extensions = { ...token.extensions, permanentDelegate: op.next ?? undefined };
+      break;
+    default: {
+      const exhaustive: never = op.role;
+      throw new Error(`Unknown authority role: ${String(exhaustive)}`);
+    }
   }
   token.updatedAt = iso(op.at);
   pushSettled(
