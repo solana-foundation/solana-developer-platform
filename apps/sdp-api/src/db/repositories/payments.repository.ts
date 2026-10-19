@@ -278,55 +278,6 @@ export interface PaymentsRepository {
    * not a ramp transfer of those types).
    */
   transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
-  /**
-   * Merges `providerData` into the row only while `claimPath` inside
-   * provider_data is still unset and the status is unchanged, so concurrent
-   * claims of the same field are decided by the row: exactly one writer
-   * matches, every other caller gets null and must re-read to compare.
-   *
-   * @param input.transferId - The transfer being claimed.
-   * @param input.organizationId - Tenant scope.
-   * @param input.projectId - Tenant scope.
-   * @param input.expectedStatus - The status the claim was computed from.
-   * @param input.claimPath - JSON path inside provider_data that must be NULL for the write to apply.
-   * @param input.providerData - Top-level provider_data keys to merge on success.
-   * @param input.updatedAt - Timestamp written on success.
-   * @returns The updated row, or null when the field was already claimed or the row moved.
-   */
-  claimTransferProviderData(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    expectedStatus: PaymentTransferStatus;
-    claimPath: readonly string[];
-    providerData: Record<string, unknown>;
-    updatedAt: string;
-  }): Promise<PaymentTransferRow | null>;
-  /**
-   * Removes a claim written by `claimTransferProviderData` when the guarded
-   * action definitively did not happen. The delete applies only when the row
-   * still holds the exact claim value the caller wrote and is still in the
-   * status the claim was made from, so a claim taken by another caller in
-   * between is never released.
-   *
-   * @param input.transferId - The transfer holding the claim.
-   * @param input.organizationId - Tenant scope.
-   * @param input.projectId - Tenant scope.
-   * @param input.expectedStatus - The status the claim was made from.
-   * @param input.claimPath - JSON path inside provider_data to remove.
-   * @param input.claimValue - The exact value currently expected at claimPath.
-   * @param input.updatedAt - Timestamp written on success.
-   * @returns The updated row, or null when the claim was not ours or the row moved.
-   */
-  releaseTransferProviderDataClaim(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    expectedStatus: PaymentTransferStatus;
-    claimPath: readonly string[];
-    claimValue: Record<string, unknown>;
-    updatedAt: string;
-  }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled

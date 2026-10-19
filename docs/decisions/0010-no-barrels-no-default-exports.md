@@ -1,8 +1,7 @@
 # 0010. No barrel files, no default exports
 
 Date: 2026-10-18
-Status: Proposed (HOO-2136 step 1). Draft; numbers from the knip 6.41.0 baseline in
-`docs/_devlog/HOO-2136/01-dead-code-baseline.md`.
+Status: Proposed (HOO-2136). Numbers from a one-off knip 6.41.0 audit run outside the tree.
 
 ## Context
 
@@ -40,11 +39,34 @@ files import bare `@sdp/types` through its 38-line `src/index.ts`.
    `global-error`, `opengraph-image`, `twitter-image`, `sitemap`, `robots`, `manifest`,
    `middleware`, `proxy`, `instrumentation`) and tool config files at a workspace root
    (`next.config`, `vitest.config`, `playwright.config`, `postcss.config`).
-3. **Enforcement is Biome**, already in CI: `performance/noBarrelFile`, `performance/noReExportAll`,
-   `style/noDefaultExport`, with an `overrides` block for the exceptions above. No new tool.
+3. **Enforcement is Biome**, already in CI. Each rule turns on in the PR whose sweep makes it pass:
+   `style/noDefaultExport` (#2403, with an `overrides` block for the exceptions above);
+   `performance/noBarrelFile`, `performance/noReExportAll` and `style/noExportedImports` (#2404).
+   No new tool.
 4. **No dead-code tool in the repo.** knip was a one-off audit (`pnpm dlx knip`, config kept
    outside the tree). Without barrels, an unused export is a plain grep, and Biome's
    `noUnusedImports` / `noUnusedVariables` already cover the file-local half.
+
+## Module boundaries
+
+Four layers decide what one module may import. Each answers one question, and a boundary goes in
+the lowest layer that can express it; restating it in a higher layer adds config and no
+protection.
+
+| Layer | Question | Mechanism |
+|---|---|---|
+| Dependencies | Which workspaces may use a package at all | The importing workspace's `package.json` declares it. pnpm does not hoist, so an undeclared package fails in `tsc` and at runtime. |
+| Package surface | What a workspace package offers | Its `package.json` `exports` list. An unlisted file does not resolve from outside the package. |
+| Callers | Which files inside a consumer may use an export | Biome `style/noRestrictedImports`, e.g. only the cluster-scope entry points may import `runInClusterScope` (`0007-cluster-scope-ambient.md`). |
+| Capabilities | Which files may turn key material into signing authority | `pnpm check:value-movement` allowlists (`0007-money-admission.md`). Adding a file is a security-reviewed change. |
+
+Only `@sdp/custody` declares the `@solana/keychain-*` vendor SDKs, so the dependency layer already
+keeps them in custody, and `check:value-movement` pins their constructors to custody's adapter
+files. A Biome ban on them would need a custody exemption and add nothing.
+
+Biome override options replace each other rather than merge: an override that relaxes one entry
+of `noRestrictedImports` restates every other entry, and a file excluded from an override loses
+all of its entries. Grant a one-file exception with a `biome-ignore` comment that gives the reason.
 
 ## Consequences
 

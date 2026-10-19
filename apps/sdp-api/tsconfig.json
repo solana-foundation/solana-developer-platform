@@ -6,9 +6,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@sdp/types": ["../../packages/sdp-types/src/index.ts"]
-    },
-    "jsx": "react-jsx"
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
