@@ -117,7 +117,7 @@ export function publishedRampProviderIds(published: readonly RampProviderId[]): 
 }
 
 /** What each action module covers; which verbs it has comes from the manifest. */
-export const DOCS_ACTION_MODULES: Readonly<Record<ActionModule, string>> = {
+export const DOCS_ACTION_MODULES = {
   transfers: "Single transfers from a custody wallet",
   transfer_batches: "Batches of transfers, and their estimates",
   payment_requests: "Payment requests and their payment links",
@@ -139,4 +139,4 @@ export const DOCS_ACTION_MODULES: Readonly<Record<ActionModule, string>> = {
   earn: "Earn strategies, deposits, withdrawals and programs",
   private_channels: "Private channel instances, channels and movements",
   helius_rings: "Helius Rings wallets, rings and operations",
-};
+} as const satisfies Record<ActionModule, string>;
