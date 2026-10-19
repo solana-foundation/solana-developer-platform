@@ -1,12 +1,10 @@
-import type { Action, ApiKeyEnvironment, RateLimitTier } from "@sdp/types";
-import {
-  expandStoredGrants,
-  organizationStatusMayAuthenticate,
-  projectStatusMayAuthenticate,
-} from "@sdp/types";
+import { type Action, expandStoredGrants } from "@sdp/types/actions";
+import type { ApiKeyEnvironment, RateLimitTier } from "@sdp/types/api-keys";
+import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
+import { projectStatusMayAuthenticate } from "@sdp/types/projects";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { refuseTerminally } from "@/lib/api-key-refusal-cache";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
@@ -14,7 +12,7 @@ import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * The one uncached organization read every authenticated request makes, and

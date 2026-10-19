@@ -2,8 +2,8 @@ import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   type PrivateChannelEventStatus,
   type PrivateChannelEventType,
-} from "@sdp/types";
-import type { PrivateChannelTransferRow } from "@/db/repositories";
+} from "@sdp/types/private-channels";
+import type { PrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
 import { createPrivateChannelEventService } from "@/services/private-channels/event.service";
 import type { Env } from "@/types/env";
 

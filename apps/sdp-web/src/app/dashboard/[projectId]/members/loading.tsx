@@ -1,4 +1,4 @@
-import { SettingsPageSkeleton } from "../operations-card-page-skeletons";
+import { SettingsPageSkeleton } from "@/app/dashboard/[projectId]/operations-card-page-skeletons";
 
 // The route only redirects into Settings, so it loads as Settings instead of
 // inheriting the Home skeleton from the dashboard segment.

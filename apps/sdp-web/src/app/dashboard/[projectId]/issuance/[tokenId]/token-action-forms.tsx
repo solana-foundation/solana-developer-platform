@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Dispatch, SetStateAction } from "react";
 import { TokenActionAdminForms } from "./token-action-admin-forms";
 import { TokenActionPrimaryForms } from "./token-action-primary-forms";

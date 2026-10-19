@@ -1,4 +1,4 @@
-import { EarnIntegrationGuidePage } from "../integration-guide-page";
+import { EarnIntegrationGuidePage } from "@/app/dashboard/[projectId]/markets/embedded-yield/integration-guide-page";
 
 export const dynamic = "force-dynamic";
 

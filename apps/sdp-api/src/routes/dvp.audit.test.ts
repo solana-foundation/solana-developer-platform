@@ -1,21 +1,10 @@
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-/**
- * Audit-ledger parity for DvP money movement (PRO-1992).
- *
- * The money services are stubbed here on purpose: what these tests are about
- * is the bracket around them, and in particular the two postures the bracket
- * takes. Funding must not happen when the ledger cannot admit it; a close must
- * happen even when the ledger cannot record it, because refusing an exit
- * leaves both deposits in escrow. The services' own behaviour is covered in
- * `services/dvp/{fund,reclaim,settle}.test.ts`.
- */
-
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { badRequest } from "@/lib/errors";
 import { AuditService } from "@/services/audit.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";

@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { WORKSPACE_LOADING_RETRY_MS } from "@/lib/workspace-loading";

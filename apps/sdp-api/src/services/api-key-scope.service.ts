@@ -1,20 +1,22 @@
 import {
   type Action,
-  type ApiKeyWalletScope,
   actionOwnerOf,
   isApiKeyGrantableAction,
-  isModuleInReleaseChannel,
-  type OrganizationRole,
   organizationRoleMayPerform,
+} from "@sdp/types/actions";
+import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
+import {
+  isModuleInReleaseChannel,
   resolveSdpReleaseChannel,
   type SdpRampProviderStages,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 import { AppError, badRequest } from "@/lib/errors";
 import type { ApiKeySigningWalletScope } from "@/services/api-key.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * A signed-in person may grant a key only actions an API key may hold, and

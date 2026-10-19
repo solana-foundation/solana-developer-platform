@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import type { DatabaseClient, PreparedStatement, QueryManyResult } from "@/db/client";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";

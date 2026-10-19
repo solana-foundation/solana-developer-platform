@@ -1,4 +1,4 @@
-import type { SolanaCluster } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
 /**
  * Errors this package raises, mirroring `@sdp/earn/errors` in shape: a `code`

@@ -1,4 +1,4 @@
-import { API_KEY_FORBIDDEN_ACTIONS, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
+import { API_KEY_FORBIDDEN_ACTIONS, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import { describe, expect, it } from "vitest";
 import { assertGrantableApiKeyGrants, parseRequestedWalletScope } from "./api-key-scope.service";
 

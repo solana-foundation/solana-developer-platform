@@ -36,13 +36,15 @@
  * Adding a file to any list below is a security-reviewed change.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-fee-payment/src";
+/** The repo root, from this file's location, so the check runs from any directory. */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KEYCHAIN = "packages/sdp-custody/src/keychain";
 /**
  * The packages that define these constructors. They build, subclass and pass
@@ -114,11 +116,12 @@ export const CAPABILITIES = [
   {
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
-    symbols: [{ file: `${KEYCHAIN}/index.ts`, name: "*" }],
+    symbols: readdirSync(path.join(REPO_ROOT, KEYCHAIN))
+      .filter((file) => file.endsWith(".adapter.ts") && !file.endsWith(".test.ts"))
+      .sort()
+      .map((file) => ({ file: `${KEYCHAIN}/${file}`, name: "*" })),
     owners: [CUSTODY_PACKAGE],
     allow: [
-      `${API}/services/adapters/index.ts`,
-      `${API}/services/adapters/signing/index.ts`,
       `${API}/services/domain/signing.service.ts`,
       `${API}/services/domain/signing/provider-adapter-factory.ts`,
       `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
@@ -128,7 +131,10 @@ export const CAPABILITIES = [
     id: "provider-signer",
     why: "A provider signer or API client builds signing authority from a stored credential; only the signing service, the adapter factory and the wallet lifecycle may use one.",
     symbols: [
-      { file: "packages/sdp-custody/src/dfns/index.ts", name: "*" },
+      ...readdirSync(path.join(REPO_ROOT, "packages/sdp-custody/src/dfns"))
+        .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+        .sort()
+        .map((file) => ({ file: `packages/sdp-custody/src/dfns/${file}`, name: "*" })),
       ...KEYCHAIN_SDKS.map((module) => ({ module, name: "*" })),
     ],
     owners: [CUSTODY_PACKAGE],
@@ -143,7 +149,7 @@ export const CAPABILITIES = [
     why: "Signs as fee payer with a process key and no budget; the sponsorship waist builds fee payers.",
     symbols: [
       { file: `${FEE_PAYMENT}/native.adapter.ts`, name: "NativeAdapter" },
-      { file: `${FEE_PAYMENT}/index.ts`, name: "KoraClient" },
+      { module: "@solana/kora", name: "KoraClient" },
     ],
     owners: [FEE_PAYMENT_PACKAGE],
     allow: [],
@@ -357,8 +363,7 @@ function handsModuleOut(checker, node, pinnedNamespaces) {
 }
 
 /** Resolves a package specifier (an external constructor) the way the program does. */
-function resolveModuleSource(program, specifier) {
-  const containingFile = program.getRootFileNames()[0];
+function resolveModuleSource(program, specifier, containingFile) {
   const resolved = ts.resolveModuleName(
     specifier,
     containingFile,
@@ -368,10 +373,37 @@ function resolveModuleSource(program, specifier) {
   return resolved ? program.getSourceFile(resolved.resolvedFileName) : undefined;
 }
 
-/** Resolves a capability's declared symbols in the program (`name: "*"` is every value export). */
-function resolveSymbol(checker, program, rootDir, capabilitySymbol) {
+/**
+ * The file a capability's `module` symbols resolve from: the first program source file under its
+ * first owner directory, or the program's first root file for a capability every workspace may
+ * import (no owners).
+ */
+function ownerSourceFile(program, rootDir, capability) {
+  if (capability.owners.length === 0) {
+    return program.getRootFileNames()[0];
+  }
+  const ownerDir = path.join(rootDir, capability.owners[0], "/");
+  const source = program.getSourceFiles().find((file) => file.fileName.startsWith(ownerDir));
+  if (!source) {
+    throw new Error(
+      `Capability ${capability.id} owner ${capability.owners[0]} has no file in the program`
+    );
+  }
+  return source.fileName;
+}
+
+/**
+ * Resolves a capability's declared symbols in the program (`name: "*"` is every value export).
+ * A `module` symbol is resolved from a source file inside the capability's first owner, since
+ * only the owner declares the dependency and pnpm's strict `node_modules` hides it everywhere else.
+ */
+function resolveSymbol(checker, program, rootDir, capability, capabilitySymbol) {
   const source = capabilitySymbol.module
-    ? resolveModuleSource(program, capabilitySymbol.module)
+    ? resolveModuleSource(
+        program,
+        capabilitySymbol.module,
+        ownerSourceFile(program, rootDir, capability)
+      )
     : program.getSourceFile(path.join(rootDir, capabilitySymbol.file));
   if (!source) {
     throw new Error(
@@ -427,7 +459,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
   const targets = new Map();
   for (const capability of capabilities) {
     for (const capabilitySymbol of capability.symbols) {
-      for (const symbol of resolveSymbol(checker, program, rootDir, capabilitySymbol)) {
+      for (const symbol of resolveSymbol(checker, program, rootDir, capability, capabilitySymbol)) {
         targets.set(symbol, capability);
       }
     }
@@ -588,7 +620,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) {
-  const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const rootDir = REPO_ROOT;
   const tsconfig = path.join(rootDir, "apps/sdp-api/tsconfig.json");
   if (!existsSync(tsconfig)) {
     console.error(`Missing ${tsconfig}`);

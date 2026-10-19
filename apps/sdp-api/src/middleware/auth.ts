@@ -11,9 +11,11 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { Action, ApiKeyEnvironment } from "@sdp/types";
+import type { Action } from "@sdp/types/actions";
+import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
-import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { assertNoCachedTerminalRefusal } from "@/lib/api-key-refusal-cache";
 import type { WalletAccess } from "@/lib/auth";
@@ -23,7 +25,7 @@ import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   API_KEY_PRE_READ_MAX_REQUESTS,
   apiKeyFloodGuardIdentifier,

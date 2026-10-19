@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { type PaymentRequest, SOL_MINT } from "@sdp/types";
+import type { PaymentRequest } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";

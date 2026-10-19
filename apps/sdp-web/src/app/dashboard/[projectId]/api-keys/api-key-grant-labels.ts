@@ -1,4 +1,4 @@
-import type { Action, ActionModule, ActionVerb } from "@sdp/types";
+import type { Action, ActionModule, ActionVerb } from "@sdp/types/actions";
 import type { useTranslations } from "@/i18n/provider";
 import { summarizeGrants } from "./api-key-authoring";
 

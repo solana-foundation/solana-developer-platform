@@ -6,7 +6,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   cancelTrade,
   createTrade,
@@ -20,7 +20,7 @@ import {
 } from "./handlers";
 import { createDvpTradeSchema, fundDvpTradeSchema } from "./schemas";
 
-const dvp = new Hono<{ Bindings: Env }>();
+export const dvp = new Hono<{ Bindings: Env }>();
 
 /**
  * Gates every DvP route behind the Markets module flag.
@@ -104,5 +104,3 @@ dvp.post(
   meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   cancelTrade
 );
-
-export default dvp;

@@ -1,4 +1,4 @@
-import type { DatabaseExecutor } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 
 export interface RetainedProviderCredentialSecretRow {
   id: string;

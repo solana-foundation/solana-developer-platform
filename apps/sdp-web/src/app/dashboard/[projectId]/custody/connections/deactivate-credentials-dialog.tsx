@@ -1,9 +1,9 @@
 "use client";
 
-import type { CustodyProvider } from "@sdp/types";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { Modal } from "@/components/ui/modal";
+import type { CustodyProvider } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { Modal } from "@sdp/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { deactivateCredentialAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";

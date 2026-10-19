@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
 
-import {
-  isModuleInReleaseChannel,
-  type PaymentsDashboardWallet,
-  SDP_RAMP_PROVIDER_STAGES,
-} from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { isModuleInReleaseChannel, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";

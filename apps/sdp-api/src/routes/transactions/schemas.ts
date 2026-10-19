@@ -5,7 +5,7 @@ import {
   type UnifiedTransaction,
   type UnifiedTransactionModule,
   type UnifiedTransactionsListResponse,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 import { z } from "zod";
 
 const commonFields = {

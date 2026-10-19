@@ -3,8 +3,8 @@ import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
-import { authorizeSubscriptionCreate } from "../access";
+import { authorizeSubscriptionCreate } from "@/routes/payments/access";
+import type { Env } from "@/types/env.d";
 import {
   createSubscription,
   getSubscription,
@@ -22,7 +22,7 @@ import {
   prepareSubscriptionLifecycleSchema,
 } from "./schemas";
 
-const subscriptions = new Hono<{ Bindings: Env }>();
+export const subscriptions = new Hono<{ Bindings: Env }>();
 
 subscriptions.post(
   "/",
@@ -63,5 +63,3 @@ subscriptions.get(
   requireAction("recurring.read"),
   listSubscriptionCollectionAttempts
 );
-
-export default subscriptions;

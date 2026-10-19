@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";

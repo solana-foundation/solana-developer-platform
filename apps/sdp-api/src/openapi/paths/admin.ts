@@ -1,13 +1,13 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
+import { addAdminAllowlistEntryRequestSchema } from "@/openapi/schemas/admin";
 import {
-  addAdminAllowlistEntryRequestSchema,
   allowlistEntryIdParamSchema,
   allowlistStatusQuerySchema,
   allowlistTypeQuerySchema,
   errorResponseSchema,
-} from "../schemas";
+} from "@/openapi/schemas/base";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { allowlistEntriesResponse, allowlistEntryResponse } from "./responses";
 

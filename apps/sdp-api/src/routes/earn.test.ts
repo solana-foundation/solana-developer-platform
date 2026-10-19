@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
-import { type SolanaCluster, wellKnownMint } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
+import { type SolanaCluster, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -20,14 +20,14 @@ vi.mock("@/routes/earn/handlers/curation", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnProviderWalletRow,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import type {
+  EarnProviderWalletRow,
+  EarnStrategyRow,
+  UpsertEarnStrategyInput,
+} from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";

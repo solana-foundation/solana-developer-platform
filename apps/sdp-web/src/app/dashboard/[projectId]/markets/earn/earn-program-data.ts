@@ -30,18 +30,18 @@ import {
   type EarnVaultWithdrawalRequest,
   type EarnVaultWithdrawalRequestRecord,
   type EarnVaultWithdrawalRequestStatus,
-  earnProviderWithdrawalSettlement,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
-  type SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import {
   earnBalanceReadContextSchema,
   earnVaultDepositRecordSchema,
   earnVaultDepositSchema,
   earnVaultWithdrawalSchema,
 } from "@sdp/types/earn-wire";
+import { earnProviderWithdrawalSettlement } from "@sdp/types/provider-access";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -53,17 +53,6 @@ import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { earnQueryKeys } from "./earn-query-key";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
 import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
-
-export type {
-  EarnProgram,
-  EarnVaultDeposit,
-  EarnVaultDepositRecord,
-  EarnVaultParRedemptionPreview,
-  EarnVaultQueuedWithdrawalPreview,
-  EarnVaultWithdrawal,
-  EarnVaultWithdrawalOptions,
-  EarnVaultWithdrawalRequestRecord,
-} from "@sdp/types";
 
 /**
  * Live Earn data access for the dashboard, over the /api/dashboard/markets/earn

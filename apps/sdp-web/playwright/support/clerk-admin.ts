@@ -1,5 +1,5 @@
 import { createClerkClient } from "@clerk/backend";
-import type { OrganizationTier } from "@sdp/types";
+import type { OrganizationTier } from "@sdp/types/organizations";
 import { getE2EEnv } from "../env";
 
 export type ClerkTestIdentity = {

@@ -1,13 +1,13 @@
+import type { Action } from "@sdp/types/actions";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
-  Action,
   OrganizationProviderOverrides,
   ProjectProviderAvailability,
   ProjectProviderAvailabilityEntry,
-  SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
 import { clerkHeadersWithoutProject } from "@/test/helpers/clerk";
@@ -23,18 +23,25 @@ import {
 import { providerStages } from "@/test/helpers/provider-stages";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
-  return mockCustodyReleaseChannels(
-    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelStages(
+    mockCustodyReleaseChannels(
+      await importOriginal<typeof import("@sdp/types/release-channels")>()
+    ),
+    RAMP_PROVIDERS
   );
 });
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-stages");
+  return mockEarnProviderSurfacing(
+    await importOriginal<typeof import("@sdp/types/provider-access")>()
+  );
 });
 
 const earnPublication = vi.hoisted(() => ({ published: true }));

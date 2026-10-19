@@ -1,4 +1,4 @@
-import type { EarnVaultWithdrawalOptions } from "@sdp/types";
+import type { EarnVaultWithdrawalOptions } from "@sdp/types/earn";
 import { describe, expect, it } from "vitest";
 import { earnVaultAsyncWithdrawalRoute } from "./earn-vault-async-withdrawal";
 

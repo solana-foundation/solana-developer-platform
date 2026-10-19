@@ -10,7 +10,7 @@
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import { type Address, address, unixTimestamp as toUnixTimestamp } from "@solana/kit";
 import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { AccountState, getTokenEncoder } from "@solana-program/token-2022";

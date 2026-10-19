@@ -7,14 +7,12 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
   createPaymentTransferBatchesRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
-
-export { resolveSdpEnvironment } from "@/lib/sdp-environment";
 
 export function rampRuntime(c: AppContext): RampRuntimeContext {
   return {

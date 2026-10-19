@@ -1,11 +1,11 @@
 "use client";
 
-import type { CustodyProvider } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import { RefreshCwIcon, Undo2Icon } from "lucide-react";
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cancelRotationAction, completeRotationAction } from "./connection-actions";
 import type {

@@ -16,7 +16,7 @@ import type {
   MintApiResponse,
   TokenApiResponse,
   UnfreezeApiResponse,
-} from "../helpers/api-types";
+} from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -24,7 +24,7 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 
 // Test wallet addresses (valid Base58)
 const TEST_WALLETS = {

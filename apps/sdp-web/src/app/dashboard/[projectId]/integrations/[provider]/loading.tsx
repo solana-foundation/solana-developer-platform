@@ -1,4 +1,4 @@
-import { IntegrationDetailSkeleton } from "../integrations-skeleton";
+import { IntegrationDetailSkeleton } from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
 
 /**
  * The server and client loading paths render one component on purpose: this

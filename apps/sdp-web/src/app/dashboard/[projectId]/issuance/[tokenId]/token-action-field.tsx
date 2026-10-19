@@ -1,7 +1,7 @@
 "use client";
 
+import { Input } from "@sdp/ui/input";
 import { type ComponentProps, useId, useState } from "react";
-import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
 import { TokenValidationMessage } from "./token-validation-message";
 import { useInlineValidationMessage } from "./use-inline-validation-message";

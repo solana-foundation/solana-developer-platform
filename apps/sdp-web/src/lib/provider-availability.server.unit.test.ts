@@ -4,7 +4,6 @@ import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
 
-vi.mock("server-only", () => ({}));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
 import { fetchProjectProviderAvailability } from "./provider-availability.server";

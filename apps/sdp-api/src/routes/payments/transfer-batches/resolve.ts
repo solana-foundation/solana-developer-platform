@@ -2,11 +2,21 @@ import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS, SOL_MINT } from "@sdp/types";
+import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
+import { type AppContext, getCounterpartyAccountsRepository } from "@/routes/payments/context";
+import {
+  resolveMintTokenProgram,
+  resolveSourceTokenAccount,
+} from "@/routes/payments/token-accounts";
+import {
+  type ResolvedScope,
+  resolveScope,
+  resolveWalletByCustodyWalletId,
+} from "@/routes/payments/wallets";
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
@@ -14,9 +24,6 @@ import {
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import { type AppContext, getCounterpartyAccountsRepository } from "../context";
-import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../token-accounts";
-import { type ResolvedScope, resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,

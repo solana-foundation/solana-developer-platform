@@ -1,10 +1,10 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 
 /**

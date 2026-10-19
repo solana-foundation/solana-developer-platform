@@ -1,4 +1,4 @@
-import { MOVEMENTS, type MovementOf } from "@sdp/types";
+import { MOVEMENTS, type MovementOf } from "@sdp/types/movements";
 
 const EARN_MOUNT_PATH = "/v1/earn";
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 const SECTION_IDS = ["operations", "permissions", "settings", "activity"];
 const ROW_IDS = ["first", "second"];

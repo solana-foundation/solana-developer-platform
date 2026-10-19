@@ -1,4 +1,4 @@
-import type { OrganizationSettings } from "@sdp/types";
+import type { OrganizationSettings } from "@sdp/types/organizations";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { Env } from "@/types/env";
 import type { ClerkOrganization } from "./clerk-organizations.service";

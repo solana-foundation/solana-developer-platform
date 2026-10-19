@@ -1,10 +1,8 @@
 import { Hono } from "hono";
 import { requireAction } from "@/middleware/require-action";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { getWalletBalances } from "./handlers";
 
-const walletBalances = new Hono<{ Bindings: Env }>();
+export const walletBalances = new Hono<{ Bindings: Env }>();
 
 walletBalances.get("/:walletId/balances", requireAction("wallets.read"), getWalletBalances);
-
-export default walletBalances;

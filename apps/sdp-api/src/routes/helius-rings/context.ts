@@ -1,18 +1,18 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import type { Context } from "hono";
+import type { HeliusRingsOperationRow } from "@/db/repositories/helius-rings-operation.repository";
+import type { HeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";
 import {
   createHeliusRingsOperationRepository,
   createHeliusRingsWalletRepository,
   createHeliusRingsZoneRepository,
-  type HeliusRingsOperationRow,
-  type HeliusRingsWalletRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { getAuth } from "@/lib/auth";
 import { AppError, type ErrorCode, notFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
-import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings";
-import type { Env } from "@/types/env";
+import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings/service";
+import type { Env } from "@/types/env.d";
 
 /** Hono request context bound to the app `Env`. */
 export type AppContext = Context<{ Bindings: Env }>;

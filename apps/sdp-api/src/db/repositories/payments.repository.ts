@@ -1,28 +1,16 @@
 import { PAYMENT_TRANSFER_ID_PREFIX } from "@sdp/payments/ramps/shared";
-import {
-  isRampTransferType,
-  type PaymentTransactionKind,
-  type PaymentTransferStatus,
-  type PaymentTransferType,
-  RAMP_TRANSFER_TRANSITIONS,
-  RAMP_TRANSFER_TYPES,
-  type RampTransferTransitionId,
-  type RampTransferType,
-  type SdpEnvironment,
-  WALLET_TRANSFER_TYPES,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type {
+  PaymentTransferStatus,
+  PaymentTransferType,
+  RampTransferTransitionId,
+} from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
-import type { RepositoryDbClient } from "./base";
+import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export {
-  isRampTransferType,
-  RAMP_TRANSFER_TRANSITIONS,
-  RAMP_TRANSFER_TYPES,
-  WALLET_TRANSFER_TYPES,
-};
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
-export type { PaymentTransferStatus, PaymentTransferType, RampTransferType };
 
 export interface PaymentTransferRow {
   id: string;
@@ -273,55 +261,6 @@ export interface PaymentsRepository {
    * not a ramp transfer of those types).
    */
   transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
-  /**
-   * Merges `providerData` into the row only while `claimPath` inside
-   * provider_data is still unset and the status is unchanged, so concurrent
-   * claims of the same field are decided by the row: exactly one writer
-   * matches, every other caller gets null and must re-read to compare.
-   *
-   * @param input.transferId - The transfer being claimed.
-   * @param input.organizationId - Tenant scope.
-   * @param input.projectId - Tenant scope.
-   * @param input.expectedStatus - The status the claim was computed from.
-   * @param input.claimPath - JSON path inside provider_data that must be NULL for the write to apply.
-   * @param input.providerData - Top-level provider_data keys to merge on success.
-   * @param input.updatedAt - Timestamp written on success.
-   * @returns The updated row, or null when the field was already claimed or the row moved.
-   */
-  claimTransferProviderData(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    expectedStatus: PaymentTransferStatus;
-    claimPath: readonly string[];
-    providerData: Record<string, unknown>;
-    updatedAt: string;
-  }): Promise<PaymentTransferRow | null>;
-  /**
-   * Removes a claim written by `claimTransferProviderData` when the guarded
-   * action definitively did not happen. The delete applies only when the row
-   * still holds the exact claim value the caller wrote and is still in the
-   * status the claim was made from, so a claim taken by another caller in
-   * between is never released.
-   *
-   * @param input.transferId - The transfer holding the claim.
-   * @param input.organizationId - Tenant scope.
-   * @param input.projectId - Tenant scope.
-   * @param input.expectedStatus - The status the claim was made from.
-   * @param input.claimPath - JSON path inside provider_data to remove.
-   * @param input.claimValue - The exact value currently expected at claimPath.
-   * @param input.updatedAt - Timestamp written on success.
-   * @returns The updated row, or null when the claim was not ours or the row moved.
-   */
-  releaseTransferProviderDataClaim(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    expectedStatus: PaymentTransferStatus;
-    claimPath: readonly string[];
-    claimValue: Record<string, unknown>;
-    updatedAt: string;
-  }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled
@@ -372,6 +311,10 @@ export interface PaymentsRepository {
   getTransferByProviderReference(
     params: GetTransferByProviderReferenceInput
   ): Promise<PaymentTransferRow | null>;
+  getTransferProjectEnvironment(input: {
+    transferId: string;
+    provider: RampProviderId;
+  }): Promise<SdpEnvironment | null>;
   /**
    * Atomically binds a provider-owned reference to a provider transfer selected
    * by SDP's internal correlation ID. Replays with the same reference succeed;
@@ -381,6 +324,7 @@ export interface PaymentsRepository {
     transferId: string;
     provider: RampProviderId;
     providerReference: string;
+    environment: SdpEnvironment;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
   listTransfersBySignatures(params: {

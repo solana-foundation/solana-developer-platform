@@ -1,4 +1,4 @@
-import type { TokenAllowlistEntry } from "@sdp/types";
+import type { TokenAllowlistEntry } from "@sdp/types/tokens";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";

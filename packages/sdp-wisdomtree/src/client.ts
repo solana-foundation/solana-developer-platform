@@ -17,7 +17,7 @@ import {
   type SolanaCluster,
   wellKnownDecimals,
   wellKnownMint,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import {
   type WisdomTreeFund,
   wisdomTreeFundByMint,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

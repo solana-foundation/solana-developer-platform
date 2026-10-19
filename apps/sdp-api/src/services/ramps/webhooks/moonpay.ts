@@ -8,12 +8,14 @@ import {
   moonpayTransactionSettlementEvent,
 } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { RampWebhookProcessResult } from "@sdp/types/payments";
 import { z } from "zod";
-import { createSystemPaymentsRepository } from "@/db/repositories";
+import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
@@ -196,23 +198,45 @@ export const moonpayWebhook = {
     );
   },
 
-  async process(env: Env, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {
+  async process(
+    env: Env,
+    environment: SdpEnvironment,
+    event: MoonpaySettlementEvent
+  ): Promise<RampWebhookProcessResult> {
     if (event.kind === "ignore") {
       getLogger().info(`[moonpay webhook] ignored event: ${event.reason}`);
-      return "ignored" as const;
+      return { outcome: "ignored" };
     }
-    const transfer = await createSystemPaymentsRepository(env).setProviderReferenceIfEmpty({
+    const repo = createSystemPaymentsRepository(env);
+    const transfer = await repo.setProviderReferenceIfEmpty({
       provider: event.provider,
       transferId: event.transferId,
       providerReference: event.reference,
+      environment,
       updatedAt: new Date().toISOString(),
     });
     if (!transfer) {
+      const transferEnvironment = await repo.getTransferProjectEnvironment({
+        transferId: event.transferId,
+        provider: event.provider,
+      });
+      if (transferEnvironment !== null && transferEnvironment !== environment) {
+        logEvent("error", {
+          event: "sdp_api_ramp_settlement_environment_mismatch",
+          flow: "ramp-settlement",
+          provider: event.provider,
+          provider_reference: event.reference,
+          transfer_id: event.transferId,
+          environment,
+          transfer_environment: transferEnvironment,
+        });
+        return { outcome: "refused", reason: "environment_mismatch" };
+      }
       getLogger().warn(
         `[moonpay webhook] refused provider reference for transfer ${event.transferId}`
       );
-      return "unmatched" as const;
+      return { outcome: "unmatched" };
     }
-    return (await applyRampSettlementEvent(env, event)).outcome;
+    return applyRampSettlementEvent(env, environment, event);
   },
 } satisfies WebhookProcessor<MoonpaySettlementEvent>;

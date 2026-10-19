@@ -1,4 +1,4 @@
-import { PrivateChannelDetailSkeleton } from "../../../private-channels-route-skeletons";
+import { PrivateChannelDetailSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
 
 export default function PrivateChannelDetailLoading() {
   return <PrivateChannelDetailSkeleton />;

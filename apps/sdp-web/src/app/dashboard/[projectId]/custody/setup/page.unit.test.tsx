@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
-vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));

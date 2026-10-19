@@ -1,12 +1,8 @@
-import {
-  type CustodyWalletTokenBalance,
-  PAYMENT_TRANSFER_STATUS_TONE,
-  PAYMENT_TRANSFER_STATUSES,
-  SOL_MINT,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { PAYMENT_TRANSFER_STATUS_TONE, PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import { describe, expect, it } from "vitest";
-import type { BadgeVariant } from "@/components/ui/badge";
 import {
   formatTokenAmount,
   isHttpUrl,

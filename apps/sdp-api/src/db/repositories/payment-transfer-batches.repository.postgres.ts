@@ -1,33 +1,31 @@
-import type { AppDb, DatabaseExecutor } from "@/db";
+import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
-import type {
-  CreatePaymentTransferBatchInput,
-  CreatePaymentTransferBatchWithRecipientsInput,
-  CreatePaymentTransferRecipientInput,
-  DeletePaymentTransferBatchInput,
-  DeletePaymentTransferRecipientInput,
-  GetPaymentTransferBatchInput,
-  GetPaymentTransferRecipientInput,
-  ListPaymentTransferBatchesInput,
-  ListPaymentTransferBatchesResult,
-  ListPaymentTransferRecipientsInput,
-  ListPaymentTransferRecipientsResult,
-  PaymentTransferBatchesRepository,
-  PaymentTransferBatchRow,
-  PaymentTransferRecipientRow,
-  RecomputeTransferBatchStatusInput,
-  SettlePaymentTransferBatchInput,
-  UpdatePaymentTransferBatchInput,
-  UpdatePaymentTransferRecipientInput,
-  UpdatePaymentTransferRecipientsStatusInput,
-  UpsertPaymentTransferBatchInput,
-  UpsertPaymentTransferRecipientInput,
-} from "./payment-transfer-batches.repository";
 import {
+  type CreatePaymentTransferBatchInput,
+  type CreatePaymentTransferBatchWithRecipientsInput,
+  type CreatePaymentTransferRecipientInput,
+  type DeletePaymentTransferBatchInput,
+  type DeletePaymentTransferRecipientInput,
   deriveTransferBatchStatus,
+  type GetPaymentTransferBatchInput,
+  type GetPaymentTransferRecipientInput,
   generatePaymentTransferBatchId,
   generatePaymentTransferRecipientId,
+  type ListPaymentTransferBatchesInput,
+  type ListPaymentTransferBatchesResult,
+  type ListPaymentTransferRecipientsInput,
+  type ListPaymentTransferRecipientsResult,
+  type PaymentTransferBatchesRepository,
+  type PaymentTransferBatchRow,
+  type PaymentTransferRecipientRow,
+  type RecomputeTransferBatchStatusInput,
+  type SettlePaymentTransferBatchInput,
+  type UpdatePaymentTransferBatchInput,
+  type UpdatePaymentTransferRecipientInput,
+  type UpdatePaymentTransferRecipientsStatusInput,
+  type UpsertPaymentTransferBatchInput,
+  type UpsertPaymentTransferRecipientInput,
 } from "./payment-transfer-batches.repository";
 
 function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransferBatchRow {

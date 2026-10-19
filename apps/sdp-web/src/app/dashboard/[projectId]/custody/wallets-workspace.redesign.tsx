@@ -1,6 +1,7 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
+import { cn } from "@sdp/ui/cn";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
@@ -11,7 +12,6 @@ import {
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { cn } from "@/lib/utils";
 import type { KnownCustodyProvider } from "./provider-catalog";
 import { WalletsOverview } from "./wallets-overview.redesign";
 

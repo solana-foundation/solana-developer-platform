@@ -1,4 +1,4 @@
-import { isWellKnownTokenSymbol } from "@sdp/types";
+import { isWellKnownTokenSymbol } from "@sdp/types/well-known-tokens";
 
 export interface BulkImportRow {
   accountId: string;

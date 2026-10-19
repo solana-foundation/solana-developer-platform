@@ -1,4 +1,4 @@
-import type { AppDb } from "@/db";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import { conflict } from "@/lib/errors";
 import {
   generatePrivateChannelVerifiedWalletId,

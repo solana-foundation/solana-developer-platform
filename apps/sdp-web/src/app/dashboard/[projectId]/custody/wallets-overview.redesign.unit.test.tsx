@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { CustodyWalletSummary } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

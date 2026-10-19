@@ -4,7 +4,6 @@ import {
   asOrganizationAdmin,
   cleanupIntegrationSuite,
   createMosaicService,
-  env,
   type IntegrationCustodyWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
@@ -12,7 +11,8 @@ import {
   SOLANA_CONFIGURED,
   TEST_ORG,
   TEST_PROJECT,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const { createOrgSignerForCustodyWallet } = apiTestSupport;
 

@@ -10,17 +10,20 @@ import {
   actionVerbOf,
   COARSE_ACTION_MODULES,
   isAction,
+} from "@sdp/types/actions";
+import {
   isModuleInReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNEL_NAMES,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import { beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { publicRoute, requireAction } from "@/middleware/require-action";
+import routeActionsJson from "@/openapi/route-actions.generated.json";
 import type { RegisteredRouteAuthorization } from "@/routes/route-actions";
-import { registeredRouteAuthorizations } from "@/routes/route-actions";
+import { registeredRouteAuthorizations, routeActionsByOperation } from "@/routes/route-actions";
 import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 import { noopObservability } from "@/runtime/observability";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
@@ -51,6 +54,12 @@ function declared(kind: "action" | "public") {
 describe("route actions", () => {
   it("finds the app's routes", () => {
     expect(routes.length).toBeGreaterThan(250);
+  });
+
+  // The OpenAPI document reads each route's action from this file, so it never
+  // imports the app that mounts it. A route or action change regenerates it.
+  it("matches the generated route-action map (pnpm -C apps/sdp-api route-actions:generate)", () => {
+    expect(routeActionsJson).toEqual(routeActionsByOperation(app));
   });
 
   it("declares exactly one action or public reason on every route", () => {

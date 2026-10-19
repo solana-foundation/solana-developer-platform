@@ -1,4 +1,5 @@
-import type { PaymentRampQuote, RampDirection, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { PaymentRampQuote, RampDirection } from "@sdp/types/payments";
 import type {
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,

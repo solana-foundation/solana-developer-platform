@@ -1,4 +1,4 @@
-import { COMPLIANCE_PROVIDERS, type ComplianceProviderId } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, type ComplianceProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { dashboardRequest } from "./dashboard-fetch";
 

@@ -1,4 +1,4 @@
-import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
+import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
 import { generateKeyPairSigner } from "@solana/kit";
 import { customAlphabet } from "nanoid";
 

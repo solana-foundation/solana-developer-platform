@@ -1,9 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { resolveSdpReleaseChannel } from "@sdp/types";
+import { resolveSdpReleaseChannel } from "@sdp/types/release-channels";
 
-import { createPublicOpenApiDocument, createPublicSurfaceManifest } from "../src/openapi/spec";
+import { createPublicOpenApiDocument, createPublicSurfaceManifest } from "@/openapi/spec";
 
 // The docs build sets SDP_RELEASE_CHANNEL so each deployment documents only the
 // modules it runs. Unset (local runs, CI drift checks), it documents every

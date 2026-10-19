@@ -1,19 +1,17 @@
-import type { AssetBalance } from "@sdp/helius-rings";
-import type { CustodyWalletTokenBalance } from "@sdp/types";
-import {
-  mapHeliusRingsOperationSummaryRow,
-  mapHeliusRingsWalletRow,
-  mapHeliusRingsZoneRow,
-} from "@/db/repositories";
+import type { AssetBalance } from "@sdp/helius-rings/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { mapHeliusRingsOperationSummaryRow } from "@/db/repositories/helius-rings-operation.repository";
+import { mapHeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";
+import { mapHeliusRingsZoneRow } from "@/db/repositories/helius-rings-zone.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
-import type { HeliusRingsActor } from "@/services/helius-rings";
 import { getRingsSetupStatus } from "@/services/helius-rings/connection.service";
-import type { Env } from "@/types/env";
+import type { HeliusRingsActor } from "@/services/helius-rings/service";
+import type { Env } from "@/types/env.d";
 import {
   type AppContext,
   getHeliusRingsOperationRepository,

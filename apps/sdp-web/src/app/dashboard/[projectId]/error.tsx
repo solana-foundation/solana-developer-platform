@@ -1,10 +1,10 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import * as Sentry from "@sentry/nextjs";
 import { TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useTransition } from "react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 // Without a boundary here, a throw in any dashboard page escapes all the way to

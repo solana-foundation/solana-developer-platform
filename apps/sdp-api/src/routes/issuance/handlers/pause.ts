@@ -1,16 +1,16 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { AuditService } from "@/services/audit.service";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
-} from "../helpers";
-import type { pauseTokenSchema } from "../schemas";
+} from "@/routes/issuance/helpers";
+import type { pauseTokenSchema } from "@/routes/issuance/schemas";
+import { AuditService } from "@/services/audit.service";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,

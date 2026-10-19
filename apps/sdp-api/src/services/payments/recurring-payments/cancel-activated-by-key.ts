@@ -1,9 +1,9 @@
-import { isCollectableRecurringPaymentStatus } from "@sdp/types";
-import { getDb } from "@/db";
-import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories";
+import { isCollectableRecurringPaymentStatus } from "@sdp/types/payments";
+import { getDb } from "@/db/client";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { cancelRecurringPayment } from "./lifecycle";
 
 export interface CancelActivatedByKeyResult {

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -21,7 +21,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import internalCustody from "./index";
+import { internalCustody } from "./index";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");

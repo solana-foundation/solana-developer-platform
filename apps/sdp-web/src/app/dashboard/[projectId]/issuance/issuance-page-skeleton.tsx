@@ -1,7 +1,7 @@
 "use client";
 
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { IssuanceListSkeleton } from "./issuance-list-skeleton";
 import { LegacyIssuanceTokenCardSkeleton } from "./legacy-issuance-token-card-skeleton";
 

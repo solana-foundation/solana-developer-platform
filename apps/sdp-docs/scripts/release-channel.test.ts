@@ -7,8 +7,8 @@ import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
-import { expandDocsBlocks, remarkDocsBlocks } from "../src/lib/docs-blocks";
-import { isPagePublished, type PublicSurface } from "../src/lib/release-channel";
+import { expandDocsBlocks, remarkDocsBlocks } from "@/lib/docs-blocks";
+import { isPagePublished, type PublicSurface } from "@/lib/release-channel";
 
 const ALL: Pick<PublicSurface, "allModules" | "allRampProviders"> = {
   allModules: ["custody", "payments", "ramps", "issuance", "compliance", "earn"],

@@ -1,5 +1,5 @@
-import { RecurringPaymentCreateSkeleton } from "../../payments-route-skeletons.redesign";
+import { RecurringPaymentCreateSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
 
-export default function RecurringPaymentCreateLoading() {
+export function RecurringPaymentCreateLoading() {
   return <RecurringPaymentCreateSkeleton />;
 }

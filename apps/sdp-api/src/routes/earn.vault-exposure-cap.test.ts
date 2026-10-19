@@ -1,16 +1,13 @@
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";

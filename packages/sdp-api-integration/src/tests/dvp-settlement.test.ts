@@ -12,7 +12,6 @@ import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
   createMosaicService,
-  env,
   fundAddressToLamports,
   INTEGRATION_CUSTODY_PROVIDER,
   type IntegrationCustodyWallet,
@@ -22,7 +21,8 @@ import {
   SOLANA_CONFIGURED,
   TEST_ORG,
   TEST_PROJECT,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const { createOrgSignerForCustodyWallet, createSigningService, CustodyConfigStore, getDb } =
   apiTestSupport;

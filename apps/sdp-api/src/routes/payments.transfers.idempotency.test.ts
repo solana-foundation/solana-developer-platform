@@ -1,8 +1,8 @@
-import type * as feePaymentAdapters from "@sdp/fee-payment";
-import { FeePaymentError } from "@sdp/fee-payment";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { createFeePaymentAdapter } from "@sdp/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment/port";
+import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -47,7 +47,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -95,7 +95,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
     const otherKey = {
       id: "key_payments_other",
       raw: "sk_test_payments_other",
@@ -134,7 +134,7 @@ describe("Payments routes — transfer idempotency", () => {
     // A new transfer signs new bytes: a fresh blockhash keeps its signature distinct.
     getRecentBlockhashMock.mockResolvedValue({
       blockhash: TEST_SOLANA_ADDRESSES.wallet3 as Awaited<
-        ReturnType<typeof solanaRpc.getRecentBlockhash>
+        ReturnType<typeof getRecentBlockhash>
       >["blockhash"],
       lastValidBlockHeight: 1000n,
     });
@@ -161,7 +161,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: signAsFeePayerMock,
       signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -341,7 +341,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const _headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -356,13 +356,13 @@ describe("Payments routes — transfer idempotency", () => {
     getRecentBlockhashMock
       .mockResolvedValueOnce({
         blockhash: "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2" as Awaited<
-          ReturnType<typeof solanaRpc.getRecentBlockhash>
+          ReturnType<typeof getRecentBlockhash>
         >["blockhash"],
         lastValidBlockHeight: 1000n,
       })
       .mockResolvedValueOnce({
         blockhash: "3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3" as Awaited<
-          ReturnType<typeof solanaRpc.getRecentBlockhash>
+          ReturnType<typeof getRecentBlockhash>
         >["blockhash"],
         lastValidBlockHeight: 1000n,
       });
@@ -393,7 +393,7 @@ describe("Payments routes — transfer idempotency", () => {
         .mockResolvedValue(
           "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
         ),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
     await seedCachedKey({ walletScope: "selected", walletIds: [] });
     const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,

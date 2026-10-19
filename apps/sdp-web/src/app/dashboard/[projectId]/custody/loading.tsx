@@ -1,1 +1,1 @@
-export { default } from "../wallets/loading";
+export { default } from "@/app/dashboard/[projectId]/wallets/loading";

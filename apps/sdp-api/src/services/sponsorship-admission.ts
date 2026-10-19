@@ -1,4 +1,4 @@
-import type { MovementId } from "@sdp/types";
+import type { MovementId } from "@sdp/types/movements";
 import {
   assertMovementAdmitted,
   decideMovement,
@@ -6,7 +6,7 @@ import {
   movementNeedsAdmissionFacts,
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * A sponsor signs fees, never with a custody wallet, so no wallet scope

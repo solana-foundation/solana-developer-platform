@@ -1,4 +1,4 @@
-import type { EarnStrategy } from "@sdp/types";
+import type { EarnStrategy } from "@sdp/types/earn";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildEarnServerIntegration } from "./earn-integration-snippets";

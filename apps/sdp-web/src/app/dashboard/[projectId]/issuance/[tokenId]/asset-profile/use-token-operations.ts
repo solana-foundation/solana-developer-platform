@@ -1,19 +1,16 @@
 "use client";
 
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token } from "@sdp/types/tokens";
 import { useState } from "react";
 import { toast } from "sonner";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
-import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
-import { buildDraftDeployRequest } from "../../draft-permissions";
-import type { FundManagementModalAction } from "../token-fund-management-section";
+import type { FundManagementModalAction } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-fund-management-section";
 import type {
   ActionExecutionInput,
   AdminAction,
   PermissionRow,
   RunActionOptions,
-} from "../token-management-workspace.types";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";
 import {
   asOptionalString,
   createInitialAllowlistForm,
@@ -23,6 +20,7 @@ import {
   createInitialFreezeForm,
   createInitialMintForm,
   createInitialSeizeForm,
+  deployNetworkName,
   findWalletByCustodyWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
@@ -41,8 +39,15 @@ import {
   isPositiveAmount,
   isValidSolanaAddressInput,
   resolveAuthorityAddressForRole,
-} from "../token-management-workspace.utils";
-import { useTokenActionRunner } from "../use-token-action-runner";
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.utils";
+import { useTokenActionRunner } from "@/app/dashboard/[projectId]/issuance/[tokenId]/use-token-action-runner";
+import {
+  getTokenAccessControlMode,
+  hasAccessControlList,
+} from "@/app/dashboard/[projectId]/issuance/access-control.utils";
+import { buildDraftDeployRequest } from "@/app/dashboard/[projectId]/issuance/draft-permissions";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { getTokenOperationPermissions } from "./token-operation-permissions";
 import { useTokenOperationData } from "./use-token-operation-data";
 
@@ -364,7 +369,12 @@ export function useTokenOperations({
         body: buildDraftDeployRequest(signingCustodyWalletId, assignments),
       },
       {
-        submitToast: t("DashboardIssuance.management.submittingDeploy"),
+        submitToast: t("DashboardIssuance.newDesign.overview.deployToastTitle", {
+          symbol: token.symbol,
+        }),
+        submitToastDescription: t("DashboardIssuance.newDesign.overview.deployToastBody", {
+          network: deployNetworkName(sdpEnvironment, t),
+        }),
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
     );
@@ -684,7 +694,8 @@ export function useTokenOperations({
     );
   };
 
-  const handlePause = (pause: boolean) => {
+  /** `confirmed` when the caller already asked (the new design's in-place pause); else a dialog asks. */
+  const handlePause = (pause: boolean, { confirmed = false }: { confirmed?: boolean } = {}) => {
     if (effectivePauseDisabledReason) {
       toast.error(effectivePauseDisabledReason);
       return;
@@ -700,7 +711,7 @@ export function useTokenOperations({
         body: {},
       },
       {
-        requiresConfirmation: true,
+        requiresConfirmation: !confirmed,
         confirmationTitle: pause
           ? t("DashboardIssuance.management.pauseConfirmationTitle")
           : t("DashboardIssuance.management.unpauseConfirmationTitle"),
@@ -971,6 +982,8 @@ export function useTokenOperations({
         break;
     }
 
+    // One supply operation is open at a time.
+    setLockSupplyModalOpen(false);
     setFundManagementModalAction(action);
   };
 
@@ -986,6 +999,7 @@ export function useTokenOperations({
     });
     setLockSupplyMinted(false);
     setLockSupplyRevokeFailed(false);
+    setFundManagementModalAction(null);
     setLockSupplyModalOpen(true);
   };
 

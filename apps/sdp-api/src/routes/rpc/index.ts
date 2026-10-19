@@ -6,7 +6,7 @@ import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quot
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { relayRpcRequest } from "./handlers";
 import { rpcRelayPayloadSchema } from "./schemas";
 
@@ -20,7 +20,7 @@ const RPC_QUOTA: MeteredQuotaConfig = { name: "rpc", actorMax: 300, orgMax: 1200
 // bytes before validation runs.
 const MAX_BODY_BYTES = 1024 * 1024;
 
-const rpc = new Hono<{ Bindings: Env }>();
+export const rpc = new Hono<{ Bindings: Env }>();
 
 rpc.use("*", unifiedAuthMiddleware());
 rpc.use("*", projectContextMiddleware());
@@ -51,5 +51,3 @@ rpc.post(
   }),
   relayRpcRequest
 );
-
-export default rpc;

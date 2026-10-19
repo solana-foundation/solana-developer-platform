@@ -1,8 +1,7 @@
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import { callerMayPerform } from "@/middleware/require-action";
-import type { AppContext } from "./context";
-import { getPrivateChannelUserRepository } from "./context";
+import { type AppContext, getPrivateChannelUserRepository } from "./context";
 
 export type EventViewer =
   | { scope: "all" }

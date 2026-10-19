@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 

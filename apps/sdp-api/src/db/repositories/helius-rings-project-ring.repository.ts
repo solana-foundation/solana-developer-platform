@@ -1,4 +1,5 @@
-import type { HeliusRingsErrorCode, ProjectRing, RingStatus } from "@sdp/helius-rings";
+import type { HeliusRingsErrorCode } from "@sdp/helius-rings/errors";
+import type { ProjectRing, RingStatus } from "@sdp/helius-rings/types";
 import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 
 export function generateHeliusRingsProjectRingId(): string {

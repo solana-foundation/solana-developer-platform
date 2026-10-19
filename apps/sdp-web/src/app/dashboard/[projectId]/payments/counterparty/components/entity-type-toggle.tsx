@@ -1,8 +1,8 @@
 "use client";
 
-import { COUNTERPARTY_ENTITY_TYPES, type CounterpartyEntityType } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES, type CounterpartyEntityType } from "@sdp/types/counterparties";
+import { cn } from "@sdp/ui/cn";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 interface EntityTypeToggleProps {
   value: CounterpartyEntityType;

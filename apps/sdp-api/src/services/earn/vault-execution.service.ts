@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import * as rpcCore from "@sdp/rpc";
-import * as solanaRpc from "@sdp/rpc/solana";
-import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
+import { createRpc, getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
+import { withTransientRpcRetry } from "@sdp/rpc/transient";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   type AddressesByLookupTableAddress,
@@ -202,9 +203,9 @@ async function resolveLookupTables(
   input: VaultExecutionScope & { plan: EarnVaultTransactionPlan; rpcUrl: string }
 ): Promise<AddressesByLookupTableAddress> {
   if (input.plan.lookupTables.length === 0) return {};
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
   return input.deadline.run("Fetching the vault lookup tables", () =>
-    rpcCore.withTransientRpcRetry(() =>
+    withTransientRpcRetry(() =>
       fetchAddressesForLookupTables(
         input.plan.lookupTables.map((table) => address(table)),
         rpc
@@ -295,11 +296,11 @@ export async function signVaultPlan(
   }
   if (!prepared) {
     await verifyVaultRpc(env, input);
-    const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+    const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
     const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
       resolveLookupTables(env, input),
       input.deadline.run("Fetching the vault transaction blockhash", () =>
-        solanaRpc.getRecentBlockhash(rpc, "confirmed")
+        getRecentBlockhash(rpc, "confirmed")
       ),
     ]);
     prepared = { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight };
@@ -468,9 +469,9 @@ export async function broadcastVaultTransaction(
   input: VaultExecutionScope & { bytes: Uint8Array; rpcUrl: string }
 ): Promise<void> {
   await verifyVaultRpc(env, input);
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
   await input.deadline.run("Broadcasting the vault transaction", () =>
-    solanaRpc.sendTransaction(rpc, input.bytes)
+    sendTransaction(rpc, input.bytes)
   );
 }
 
@@ -542,14 +543,14 @@ export async function simulateVaultPlan(
   }
 
   await verifyVaultRpc(env, input);
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
   // Lookup-table transport failures are infrastructure failures, not a
   // program simulation verdict. Let them reject so callers preserve their
   // idempotency key and return a retryable 5xx instead of a caller-fault 400.
   const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
     resolveLookupTables(env, input),
     input.deadline.run("Fetching the vault simulation blockhash", () =>
-      solanaRpc.getRecentBlockhash(rpc, "confirmed")
+      getRecentBlockhash(rpc, "confirmed")
     ),
   ]);
   // The owner stays a writable signer through the plan's own instruction

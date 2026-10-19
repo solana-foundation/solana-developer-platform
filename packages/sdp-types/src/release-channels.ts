@@ -72,16 +72,16 @@ export const SDP_MODULE_STAGES = {
  * pair is a one-line change here.
  */
 export const SDP_MANAGED_CUSTODY_PROVIDER_STAGES = {
-  local: "stable",
-  fireblocks: "stable",
+  local: "beta",
+  fireblocks: "beta",
   privy: "stable",
-  coinbase_cdp: "stable",
-  para: "stable",
-  turnkey: "stable",
-  dfns: "stable",
-  ibm_haven: "stable",
-  anchorage: "stable",
-  utila: "stable",
+  coinbase_cdp: "beta",
+  para: "beta",
+  turnkey: "beta",
+  dfns: "beta",
+  ibm_haven: "beta",
+  anchorage: "beta",
+  utila: "beta",
 } as const satisfies Record<CustodyProvider, SdpReleaseChannel>;
 
 export const SDP_BYOK_CUSTODY_PROVIDER_STAGES = {

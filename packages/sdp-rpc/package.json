@@ -4,15 +4,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
     "./blocked-address": {
       "types": "./src/blocked-address.ts",
       "import": "./src/blocked-address.ts",
       "default": "./src/blocked-address.ts"
+    },
+    "./config": {
+      "types": "./src/config.ts",
+      "import": "./src/config.ts",
+      "default": "./src/config.ts"
     },
     "./errors": {
       "types": "./src/errors.ts",
@@ -29,30 +29,45 @@
       "import": "./src/helius-das.ts",
       "default": "./src/helius-das.ts"
     },
+    "./read-context": {
+      "types": "./src/read-context.ts",
+      "import": "./src/read-context.ts",
+      "default": "./src/read-context.ts"
+    },
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts",
       "default": "./src/relay.ts"
+    },
+    "./scope": {
+      "types": "./src/scope.ts",
+      "import": "./src/scope.ts",
+      "default": "./src/scope.ts"
+    },
+    "./socket-retry": {
+      "types": "./src/socket-retry.ts",
+      "import": "./src/socket-retry.ts",
+      "default": "./src/socket-retry.ts"
     },
     "./solana": {
       "types": "./src/solana.ts",
       "import": "./src/solana.ts",
       "default": "./src/solana.ts"
     },
+    "./transient": {
+      "types": "./src/transient.ts",
+      "import": "./src/transient.ts",
+      "default": "./src/transient.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
     "./verified-confirmation": {
       "types": "./src/verified-confirmation.ts",
       "import": "./src/verified-confirmation.ts",
       "default": "./src/verified-confirmation.ts"
-    },
-    "./read-context": {
-      "types": "./src/read-context.ts",
-      "import": "./src/read-context.ts",
-      "default": "./src/read-context.ts"
-    },
-    "./scope": {
-      "types": "./src/scope.ts",
-      "import": "./src/scope.ts",
-      "default": "./src/scope.ts"
     }
   },
   "scripts": {

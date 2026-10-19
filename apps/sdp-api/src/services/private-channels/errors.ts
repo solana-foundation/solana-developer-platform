@@ -1,4 +1,4 @@
-import { PrivateChannelError, type PrivateChannelErrorCode } from "@sdp/private-channels";
+import { PrivateChannelError, type PrivateChannelErrorCode } from "@sdp/private-channels/errors";
 import { AppError, type ErrorCode } from "@/lib/errors";
 
 const PRIVATE_CHANNEL_TO_APP_ERROR: Record<PrivateChannelErrorCode, ErrorCode> = {

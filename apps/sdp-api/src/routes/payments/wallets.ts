@@ -1,6 +1,6 @@
 import { badRequest } from "@sdp/payments/errors";
-import { isAddress } from "@sdp/solana/address";
-import { getDb } from "@/db";
+import { isAddress } from "@solana/addresses";
+import { getDb } from "@/db/client";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { conflict, walletNotFound } from "@/lib/errors";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";

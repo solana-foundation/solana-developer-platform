@@ -1,7 +1,7 @@
+import { EarnIntegrationGuide } from "@/app/dashboard/[projectId]/markets/earn/earn-integration-guide";
+import { loadEarnProviderAccess } from "@/app/dashboard/[projectId]/markets/earn/earn-provider-access.server";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
-import { EarnIntegrationGuide } from "../earn/earn-integration-guide";
-import { loadEarnProviderAccess } from "../earn/earn-provider-access.server";
 
 /**
  * The body shared by the two Embedded Yield guide routes (`configure` and

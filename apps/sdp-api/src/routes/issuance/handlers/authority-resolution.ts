@@ -1,19 +1,20 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
 import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { MovementOf, TokenTransaction, TokenTransactionType } from "@sdp/types";
+import type { MovementOf } from "@sdp/types/movements";
+import type { TokenTransaction, TokenTransactionType } from "@sdp/types/tokens";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
 import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { createSigningService } from "@/services/domain/signing.service";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 export type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
@@ -403,7 +404,7 @@ async function loadResolvedAuthoritySigner(params: {
   currentAuthority: string;
   movement: IssuanceMovement;
 }): Promise<TransactionSigner> {
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet(
     params.env,
     params.auth.organizationId,
     requireAuthProjectId(params.auth),
@@ -502,7 +503,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw walletNotFound();
   }
 
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet(
     env,
     auth.organizationId,
     projectId,

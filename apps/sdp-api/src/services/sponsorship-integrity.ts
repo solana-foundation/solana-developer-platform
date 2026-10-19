@@ -1,4 +1,4 @@
-import { FeePaymentError } from "@sdp/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import {
   type Address,
   bytesEqual,

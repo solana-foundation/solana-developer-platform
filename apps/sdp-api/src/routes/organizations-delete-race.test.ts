@@ -1,25 +1,13 @@
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-/**
- * Regression test for the Hacktron finding: an API key created concurrently
- * with organization deletion, before the revocation batch commits, must not
- * keep authenticating. Authentication reads the key and organization rows on
- * every request (HOO-2099), so both the key the batch revoked and one that
- * commits after it are refused on their next request.
- *
- * The interleaving is made deterministic by mocking @/db: getDb returns a
- * proxy whose batch() runs a one-shot hook (insert the "concurrent" key)
- * before delegating to the real batch.
- */
-
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 
 const raceState = vi.hoisted(() => ({
   onBatch: null as null | (() => Promise<void>),
 }));
 
-vi.mock("@/db", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/db")>();
+vi.mock("@/db/client", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/db/client")>();
   return {
     ...original,
     getDb: (bindings: Parameters<typeof original.getDb>[0]) => {
@@ -44,8 +32,8 @@ vi.mock("@/db", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

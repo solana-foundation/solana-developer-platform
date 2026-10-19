@@ -1,10 +1,11 @@
 "use client";
 
-import type { PaymentRampQuote } from "@sdp/types";
+import type { PaymentRampQuote } from "@sdp/types/payments";
 import { useEffect, useRef, useState } from "react";
-import { getApiError } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { getPaymentApiError as getApiError } from "@/app/dashboard/[projectId]/payments/payment-api-errors";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { TranslationValues } from "@/i18n/translate";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;

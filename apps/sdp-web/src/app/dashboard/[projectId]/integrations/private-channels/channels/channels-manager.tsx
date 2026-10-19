@@ -1,13 +1,13 @@
 "use client";
 
-import type { PrivateChannelDto } from "@sdp/types";
+import type { PrivateChannelDto } from "@sdp/types/private-channels";
+import { Badge } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { Loader2Icon, Trash2Icon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { createChannelAction, deleteChannelAction } from "./actions";
 

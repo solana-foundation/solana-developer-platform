@@ -1,9 +1,9 @@
 "use client";
 
-import type { PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 
 // The Private Channels connection's confirmation dialogs. Both designs of the connect form and the

@@ -1,10 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { fetchPaymentsAggregate } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsAggregate } from "../payments/payments-page.data";
 import { HoldingsWorkspace } from "./holdings-workspace";
 
 export default async function TokenHoldingsPage() {

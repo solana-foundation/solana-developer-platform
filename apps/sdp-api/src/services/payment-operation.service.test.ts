@@ -1,5 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { type SdpEnvironment, type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { normalizePaymentToken, rampTransferTokenMint } from "@/services/payment-operation.service";
 

@@ -2,7 +2,7 @@ import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   type PrivateChannelEventListEnvelope,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({

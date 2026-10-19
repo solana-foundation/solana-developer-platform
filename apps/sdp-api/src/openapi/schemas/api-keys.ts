@@ -1,16 +1,17 @@
-import { API_KEY_GRANTABLE_ACTIONS, API_KEY_WALLET_SCOPES } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
+import { API_KEY_WALLET_SCOPES } from "@sdp/types/api-keys";
+import { z } from "zod";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
-} from "../../routes/api-keys/schemas";
+} from "@/routes/api-keys/schemas";
 import {
   apiKeyIdParamSchema,
   apiKeyPrefixSchema,
   isoDateTimeSchema,
   projectIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const apiKeyGrantSchema = z.enum(API_KEY_GRANTABLE_ACTIONS).openapi({

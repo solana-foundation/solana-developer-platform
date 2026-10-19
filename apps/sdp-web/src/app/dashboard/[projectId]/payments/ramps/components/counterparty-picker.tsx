@@ -1,8 +1,8 @@
 "use client";
 
 import { PlusIcon } from "lucide-react";
+import type { CounterpartiesResult } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
-import type { CounterpartiesResult } from "../../payments-workspace.data";
 import { CounterpartySelector } from "./counterparty-selector";
 
 interface CounterpartyPickerProps {

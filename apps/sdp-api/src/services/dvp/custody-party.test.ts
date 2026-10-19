@@ -2,7 +2,7 @@
 
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";

@@ -1,12 +1,12 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { CopyIcon } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 function QrCodeBox({

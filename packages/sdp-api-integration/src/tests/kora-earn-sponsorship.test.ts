@@ -27,7 +27,8 @@
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
-import { EARN_DEPOSIT_TOKEN_SYMBOLS, SOL_MINT, wellKnownMint } from "@sdp/types";
+import { EARN_DEPOSIT_TOKEN_SYMBOLS } from "@sdp/types/earn";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -42,8 +43,9 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { beforeAll, describe, expect, it } from "vitest";
-import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
-import { requireKoraEndpoint } from "../helpers/kora";
+import { KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "#/helpers/integration";
+import { requireKoraEndpoint } from "#/helpers/kora";
+import { env } from "#env-impl";
 
 const {
   KoraAdapter,

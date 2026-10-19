@@ -2,7 +2,7 @@
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import esbuild from "esbuild";
+import { build } from "esbuild";
 
 /**
  * WASM binaries that must sit BESIDE the bundle.
@@ -83,7 +83,7 @@ const entryPoints = {
 
 const zkSdkNodeEntries = new Set();
 
-await esbuild.build({
+await build({
   entryPoints,
   bundle: true,
   platform: "node",

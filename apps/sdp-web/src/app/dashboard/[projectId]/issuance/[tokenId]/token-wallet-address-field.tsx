@@ -1,9 +1,9 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Input } from "@sdp/ui/input";
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Input } from "@/components/ui/input";
 import { useTranslations } from "@/i18n/provider";
 import { TokenValidationMessage } from "./token-validation-message";
 import { useInlineValidationMessage } from "./use-inline-validation-message";

@@ -1,9 +1,5 @@
-import {
-  type Action,
-  normalizeOrganizationRole,
-  type OrganizationRole,
-  organizationRoleMayPerform,
-} from "@sdp/types";
+import { type Action, organizationRoleMayPerform } from "@sdp/types/actions";
+import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 
 export interface DashboardCapabilities {
   canManageApiKeys: boolean;

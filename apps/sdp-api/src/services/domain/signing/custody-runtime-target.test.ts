@@ -1,23 +1,23 @@
-import type { CustodyProvider } from "@sdp/custody";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import type { FullSigningPort } from "@sdp/custody/signing";
 import {
   CUSTODY_CONNECTION_LIFECYCLES,
   type CustodyConnectionCheckStatus,
   type CustodyConnectionLifecycle,
   type CustodyMode,
-  type MovementId,
+  type CustodyProvider,
   type ProviderCredentialStatus,
-} from "@sdp/types";
-import { PrivySigner } from "@solana/keychain-privy";
+} from "@sdp/types/custody";
+import type { MovementId } from "@sdp/types/movements";
 import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import type { SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -33,10 +33,11 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { SeededApiKey } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -199,7 +200,7 @@ describe("CustodyRuntimeTargets", () => {
   it("admits an active Connection wallet without reading credentials", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
-    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const getPrivySigner = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -210,7 +211,7 @@ describe("CustodyRuntimeTargets", () => {
       })
     ).resolves.toBeUndefined();
     expect(read).not.toHaveBeenCalled();
-    expect(createPrivySigner).not.toHaveBeenCalled();
+    expect(getPrivySigner).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -1043,7 +1044,7 @@ describe("CustodyRuntimeTargets", () => {
       connection.id,
     ]);
     mockStoredCredentialRead();
-    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const getPrivySigner = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
     const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
 
     await expect(
@@ -1055,9 +1056,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(createPrivySigner).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestDelayMs: 0 })
-    );
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(0);
 
     await getDb(env).execute(
       "UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?",
@@ -1072,9 +1071,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(createPrivySigner).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestDelayMs: 250 })
-    );
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(250);
   });
 
   it.each([

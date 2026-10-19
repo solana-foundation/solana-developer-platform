@@ -1,5 +1,5 @@
 import { readFloor, readStamp, withRpcReadContext } from "@sdp/rpc/read-context";
-import { withReadSocketRetry } from "@sdp/rpc/solana";
+import { withReadSocketRetry } from "@sdp/rpc/socket-retry";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,

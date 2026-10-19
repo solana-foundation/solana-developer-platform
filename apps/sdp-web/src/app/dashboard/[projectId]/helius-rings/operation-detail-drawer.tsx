@@ -1,10 +1,10 @@
 "use client";
 
+import { Badge } from "@sdp/ui/badge";
+import { Callout } from "@sdp/ui/callout";
+import { Modal } from "@sdp/ui/modal";
 import { Check } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Callout } from "@/components/ui/callout";
-import { Modal } from "@/components/ui/modal";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {

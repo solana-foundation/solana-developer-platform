@@ -1,4 +1,8 @@
-import { SDP_RAMP_PROVIDER_STAGES, SDP_RELEASE_CHANNELS, type SdpModule } from "@sdp/types";
+import {
+  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RELEASE_CHANNELS,
+  type SdpModule,
+} from "@sdp/types/release-channels";
 import { createApp } from "@/app";
 import type { RouteHandler } from "@/middleware/authorize";
 import { routeOwnerOf } from "@/routes/route-modules";

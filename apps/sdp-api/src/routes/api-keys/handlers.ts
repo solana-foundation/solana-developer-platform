@@ -1,17 +1,18 @@
 import type {
   CreateApiKeyResponse,
   ListApiKeysResponse,
-  OrganizationRole,
   RotateApiKeyResponse,
-} from "@sdp/types";
+} from "@sdp/types/api-keys";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveCreateWalletScope } from "@/routes/api-keys/wallet-scope";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
@@ -25,15 +26,15 @@ import { type AuditLogEntry, AuditService } from "@/services/audit.service";
 import {
   type CancelActivatedByKeyResult,
   cancelRecurringPaymentsActivatedByKey,
-} from "@/services/payments/recurring-payments";
-import type { Env } from "@/types/env";
+} from "@/services/payments/recurring-payments/cancel-activated-by-key";
+import type { Env } from "@/types/env.d";
 import type {
   apiKeyCreateSchema,
   apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
 } from "./schemas";
-import { resolveCreateWalletScope, walletScopeAuditMetadata } from "./wallet-scope";
+import { walletScopeAuditMetadata } from "./wallet-scope";
 
 type AppContext = Context<{ Bindings: Env }>;
 

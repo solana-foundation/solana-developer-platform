@@ -4,10 +4,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/components/ui/input", () => ({
+vi.mock("@sdp/ui/input", () => ({
   Input: (props: ComponentProps<"input">) => <input {...props} />,
 }));
-vi.mock("@/components/ui/label", () => ({
+vi.mock("@sdp/ui/label", () => ({
   Label: (props: ComponentProps<"label">) => (
     // biome-ignore lint/a11y/noLabelWithoutControl: This test double forwards associations supplied by the component.
     <label {...props} />

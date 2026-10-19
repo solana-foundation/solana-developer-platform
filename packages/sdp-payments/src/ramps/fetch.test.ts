@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { z } from "zod";
-import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "#/errors";
 import {
   classifyProviderFailure,
   isDefinitiveProviderRejection,

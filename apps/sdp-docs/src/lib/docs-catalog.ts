@@ -9,7 +9,9 @@
  * source.config.ts loads it.
  */
 
-import type { ActionModule, RampProviderId, SdpModule } from "@sdp/types";
+import type { ActionModule } from "@sdp/types/actions";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import type { SdpModule } from "@sdp/types/release-channels";
 
 /** One product module as the introduction and the AI guide describe it. */
 export type ModuleEntry = {

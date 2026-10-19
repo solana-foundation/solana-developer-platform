@@ -3,7 +3,7 @@ import type {
   Token,
   TokenTransaction,
   TokenTransactionListItem,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
 
 /** Keep rollback and operation identity fields internal to Issuance persistence. */
 export function toPublicToken<T extends Token>(token: T): Omit<T, "signingWalletId"> {

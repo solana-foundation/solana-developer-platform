@@ -10,7 +10,7 @@ import {
 } from "./counterparty-page.data";
 import { CounterpartyWorkspace } from "./counterparty-workspace.redesign";
 
-async function CounterpartyPage({
+export async function CounterpartyPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -59,5 +59,3 @@ async function CounterpartyPage({
     );
   });
 }
-
-export default CounterpartyPage;

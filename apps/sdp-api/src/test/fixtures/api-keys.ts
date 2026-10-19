@@ -2,7 +2,7 @@
  * API Key test fixtures
  */
 
-import { type Action, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
+import { type Action, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import type { SeededApiKey } from "@/test/mocks/kv";
 import { TEST_ORG } from "./organizations";
 import { TEST_PROJECT } from "./tokens";

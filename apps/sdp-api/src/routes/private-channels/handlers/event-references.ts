@@ -1,10 +1,12 @@
-import type { PrivateChannelReferenceWalletScope } from "@/db/repositories";
+import type { PrivateChannelReferenceWalletScope } from "@/db/repositories/private-channel-reference.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { callerMayPerform } from "@/middleware/require-action";
-import type { AppContext } from "../context";
-import { getPrivateChannelReferenceRepository } from "../context";
-import { resolveEventViewer } from "../event-access";
+import {
+  type AppContext,
+  getPrivateChannelReferenceRepository,
+} from "@/routes/private-channels/context";
+import { resolveEventViewer } from "@/routes/private-channels/event-access";
 
 /** Wallet labels follow `wallets.read`, project-wide like every read but the wallet list (HOO-2099). */
 function resolveWalletScope(c: AppContext): PrivateChannelReferenceWalletScope {

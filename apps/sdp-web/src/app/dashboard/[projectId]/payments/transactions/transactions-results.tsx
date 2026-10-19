@@ -1,31 +1,28 @@
 "use client";
 
-import type { UnifiedTransaction, UnifiedTransactionStatus } from "@sdp/types";
+import type { UnifiedTransaction, UnifiedTransactionStatus } from "@sdp/types/unified-transactions";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { Modal } from "@sdp/ui/modal";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { ExternalLinkIcon, ReceiptTextIcon } from "lucide-react";
 import { useState } from "react";
-import { EntityLink } from "@/components/entity-link";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { Modal } from "@/components/ui/modal";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  formatTimestamp,
+  resolveTokenByMint,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { EntityLink } from "@/components/entity-link";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatTimestamp, resolveTokenByMint } from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { useTransactionFilters } from "./transaction-filters-context";
 import { counterpartyHref, TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs";
 import type { TransactionsPageResult } from "./transactions-page.data";
-import { useTransactionFilters } from "./transactions-workspace";
 import { useCursorPagination } from "./use-cursor-pagination";
 
 const statusVariants = {

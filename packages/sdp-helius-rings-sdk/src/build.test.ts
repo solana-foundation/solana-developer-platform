@@ -1,5 +1,5 @@
 import { DEFAULT_TREE_ADDRESS } from "@heliuslabs/zolana/interface";
-import type { BuildOperationInput } from "@sdp/helius-rings";
+import type { BuildOperationInput } from "@sdp/helius-rings/port";
 import {
   address,
   type Blockhash,

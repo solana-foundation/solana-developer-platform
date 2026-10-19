@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { fetchWallets } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";

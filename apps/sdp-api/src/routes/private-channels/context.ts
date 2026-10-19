@@ -10,7 +10,7 @@ import {
   createPrivateChannelVerifiedWalletRepository,
   createPrivateChannelWithdrawalRepository,
   createProjectUserRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { createPrivateChannelEventService } from "@/services/private-channels/event.service";
 import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
