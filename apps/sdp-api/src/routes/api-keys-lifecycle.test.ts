@@ -338,11 +338,12 @@ describe("API key lifecycle", () => {
       await insertKey({ id: TARGET_KEY_ID });
       expect((await rotate(TARGET_KEY_ID)).status).toBe(201);
       const [replacement] = await replacementsOf(TARGET_KEY_ID);
+      if (!replacement) throw new Error("Expected rotation replacement");
 
       expect((await revoke(TARGET_KEY_ID)).status).toBe(200);
 
       expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
-      expect((await readKey(replacement?.id ?? ""))?.status).toBe("active");
+      expect((await readKey(replacement.id))?.status).toBe("active");
       expect((await apiKeyAudits()).at(-1)).toMatchObject({
         action: "delete",
         resource_id: TARGET_KEY_ID,

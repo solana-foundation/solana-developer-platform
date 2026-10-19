@@ -105,6 +105,12 @@ export interface SignRingsOuterTransactionInput {
    * money.
    */
   owner: string;
+  /**
+   * The custody record the Rings wallet links to, when the caller has it: the
+   * record its wallet scope was checked on, signed with when it still holds
+   * the owner's key (HOO-2099).
+   */
+  custodyWalletId?: string | null;
   unsignedTxBase64: string;
   /**
    * The movement the transaction serves; the custody signer refuses a start
@@ -198,7 +204,7 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
 /** The test-seam signer, or the owner's custody signer with failures mapped once. */
 type OwnerSignerInput = Pick<
   SignRingsOuterTransactionInput,
-  "env" | "organizationId" | "projectId" | "owner"
+  "env" | "organizationId" | "projectId" | "owner" | "custodyWalletId"
 > & { movement: MovementId };
 
 /** The derivation message is an exit; every other message is bring-up. */
@@ -312,13 +318,20 @@ export async function signRingsMessage(input: SignRingsMessageInput): Promise<st
  * wallet: that link is the durable audit trail, but the only thing that makes
  * a signature valid is that it comes from the key the transaction names. The
  * lookup is scoped to the organization and to active wallets, so an owner
- * custody no longer controls fails here rather than at the chain.
+ * custody no longer controls fails here rather than at the chain. When
+ * several active records hold the key, the linked record is preferred, so the
+ * signer decides the same record the route's scope check named (HOO-2099).
  */
 async function resolveOwnerSigner(input: OwnerSignerInput): Promise<TransactionSigner> {
   const wallet = await new CustodyConfigStore(
     getDb(input.env),
     input.env
-  ).findActiveWalletByPublicKey(input.organizationId, input.projectId, input.owner);
+  ).findActiveWalletByPublicKey(
+    input.organizationId,
+    input.projectId,
+    input.owner,
+    input.custodyWalletId ?? null
+  );
   if (!wallet) {
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
   }
