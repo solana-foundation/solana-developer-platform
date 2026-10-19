@@ -68,10 +68,6 @@ export interface Env extends ManagedRpcEnv {
   // release channels). Required: a missing or unknown name fails at boot.
   SDP_RELEASE_CHANNEL?: string;
 
-  // Dashboard (Clerk) rate limit profile: "standard" (today's limits, also when unset) or
-  // "e2e" for the local browser E2E stack. Boot refuses anything but "standard" on Cloud Run.
-  SDP_DASHBOARD_RATE_LIMIT_PROFILE?: string;
-
   // Credential secret store selection for BYO custody credentials.
   // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
   // to encrypted DB storage.

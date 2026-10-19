@@ -12,12 +12,12 @@ import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootst
 
 type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" | "permissions";
 
-// One page load costs about 20 dashboard requests (every server render and dashboard route
-// also reads /v1/projects), past the API's standard per-user limits over a whole suite. The CI
-// job runs the local API with SDP_DASHBOARD_RATE_LIMIT_PROFILE=e2e, which lifts them. A run
-// against an API on the standard profile can still meet a 429.
-// It never polls by reloading: an operation refreshes the page itself once it lands, and a
-// wait reloads once at most, when the in-place refresh did not show the change.
+// The API admits 300 dashboard requests a minute per user. One page load costs about 20
+// (every server render and dashboard route also reads /v1/projects); the whole suite makes about
+// 220 and runs in under a minute, so it fits one window with no waiting. If it grows past 300 in a
+// minute, cut requests (a test that loads a page it does not need) before waiting out the limit.
+// It never polls by reloading: an operation refreshes the page itself once it lands, and a wait
+// reloads once at most, when the in-place refresh did not show the change.
 
 async function eventually(reopen: () => Promise<void>, check: () => Promise<void>) {
   await check().catch(async () => {

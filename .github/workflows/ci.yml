@@ -996,22 +996,17 @@ jobs:
           - name: Issuance E2E (new design)
             issuance_group: redesign
             new_design_issuance: "true"
-            dashboard_rate_limit_profile: e2e
             artifact_suffix: issuance-redesign
     env:
       E2E_AFFECTED: ${{ needs.unit_test_scope.outputs.e2e }}
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED,SDP_FLAG_NEW_DESIGN_ISSUANCE,SDP_DASHBOARD_RATE_LIMIT_PROFILE
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED,SDP_FLAG_NEW_DESIGN_ISSUANCE
       ISSUANCE_ENABLED: "true"
       # issuance.e2e.spec.ts drives the previous Issuance design, which production still serves
       # (NEW DESIGN is off there). A matrix entry sets new_design_issuance to run the new one.
       SDP_FLAG_NEW_DESIGN_ISSUANCE: ${{ matrix.new_design_issuance || 'false' }}
-      # issuance-redesign.e2e.spec.ts drives one Clerk user through hundreds of page loads, past
-      # the dashboard's per-user limits. "e2e" lifts them on this job's local API only; the API
-      # refuses any profile but "standard" on Cloud Run (apps/sdp-api/src/middleware/rate-limit.ts).
-      SDP_DASHBOARD_RATE_LIMIT_PROFILE: ${{ matrix.dashboard_rate_limit_profile || 'standard' }}
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"

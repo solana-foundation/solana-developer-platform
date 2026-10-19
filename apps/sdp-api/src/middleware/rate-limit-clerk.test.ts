@@ -18,12 +18,7 @@ vi.mock("@/lib/clerk-token", async (importOriginal) => ({
   verifyClerkJwtForRequest,
 }));
 
-const {
-  CLERK_USER_MAX_REQUESTS,
-  DASHBOARD_RATE_LIMIT_PROFILES,
-  dashboardRateLimits,
-  skipRateLimitPaths,
-} = await import("@/middleware/rate-limit");
+const { CLERK_USER_MAX_REQUESTS, skipRateLimitPaths } = await import("@/middleware/rate-limit");
 
 const USER_ID = "user_ratelimit_test";
 const ISSUER = "https://clerk.rate-limit-test.example";
@@ -86,24 +81,6 @@ describe("dashboard rate limiting", () => {
     expect(res.status).toBe(429);
   });
 
-  it("admits the same caller past the standard ceiling under the e2e profile", async () => {
-    const { createKVStoreSet } = await import("@/runtime/kv-redis");
-    const kv = createKVStoreSet(env);
-    const windowStart = Math.floor(Date.now() / 60_000) * 60_000;
-    await kv.rateLimits.put(
-      `ratelimit:clerk:${USER_ID}:${windowStart}`,
-      String(CLERK_USER_MAX_REQUESTS)
-    );
-    const e2eEnv: Env = { ...clerkEnv, SDP_DASHBOARD_RATE_LIMIT_PROFILE: "e2e" };
-
-    const res = await buildApp().request("/v1/thing", { headers: AUTH }, e2eEnv);
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get("X-RateLimit-Limit")).toBe(
-      String(DASHBOARD_RATE_LIMIT_PROFILES.e2e.userMax)
-    );
-  });
-
   it("leaves exempt paths uncounted", async () => {
     await buildApp().request("/health", { headers: AUTH }, clerkEnv);
     expect(await readRateLimitCount(env, `clerk:${USER_ID}`)).toBe(0);
@@ -116,32 +93,5 @@ describe("dashboard rate limiting", () => {
 
     // Falls through to the anonymous per-IP limit, which is what bounds signature spray.
     expect(await readRateLimitCount(env, `clerk:${USER_ID}`)).toBe(0);
-  });
-});
-
-describe("dashboardRateLimits", () => {
-  it("keeps today's limits when the profile is unset or standard", () => {
-    expect(dashboardRateLimits({})).toEqual(DASHBOARD_RATE_LIMIT_PROFILES.standard);
-    expect(
-      dashboardRateLimits({ SDP_DASHBOARD_RATE_LIMIT_PROFILE: "standard", K_SERVICE: "sdp-api" })
-    ).toEqual(DASHBOARD_RATE_LIMIT_PROFILES.standard);
-  });
-
-  it("rejects an unknown or empty profile instead of picking one", () => {
-    expect(() => dashboardRateLimits({ SDP_DASHBOARD_RATE_LIMIT_PROFILE: "unlimited" })).toThrow(
-      /Invalid SDP_DASHBOARD_RATE_LIMIT_PROFILE/
-    );
-    expect(() => dashboardRateLimits({ SDP_DASHBOARD_RATE_LIMIT_PROFILE: "" })).toThrow(
-      /Invalid SDP_DASHBOARD_RATE_LIMIT_PROFILE/
-    );
-  });
-
-  it("refuses the e2e profile on Cloud Run", () => {
-    expect(() =>
-      dashboardRateLimits({ SDP_DASHBOARD_RATE_LIMIT_PROFILE: "e2e", K_SERVICE: "sdp-api" })
-    ).toThrow(/refused on Cloud Run/);
-    expect(() =>
-      dashboardRateLimits({ SDP_DASHBOARD_RATE_LIMIT_PROFILE: "e2e", CLOUD_RUN_JOB: "sdp-job" })
-    ).toThrow(/refused on Cloud Run/);
   });
 });

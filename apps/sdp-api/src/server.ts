@@ -21,7 +21,6 @@ import {
 import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
-import { assertDashboardRateLimitProfile } from "@/middleware/rate-limit";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
@@ -119,7 +118,6 @@ export function assertRequiredEnv(env: Env): void {
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
-  assertDashboardRateLimitProfile(env);
 }
 
 async function main(): Promise<void> {
