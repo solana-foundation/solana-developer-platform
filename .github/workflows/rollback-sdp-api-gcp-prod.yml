@@ -91,15 +91,8 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${previous}=100"
-          describe_err="$(mktemp)"
-          if gcloud run services describe "${WORKER_SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
-            gcloud run services update "${WORKER_SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" --image "${image}"
-          elif ! grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
-            cat "${describe_err}" >&2
-            exit 1
-          fi
+          gcloud run services update "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${image}"
 
           for attempt in {1..12}; do
             if curl --fail --silent --show-error --max-time 10 "https://api.solana.com/health/ready" |

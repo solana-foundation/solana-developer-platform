@@ -448,19 +448,15 @@ jobs:
             ' <<<"${service_json}"
           )"
           echo "traffic=${previous_traffic}" >> "${GITHUB_OUTPUT}"
-          worker_describe_err="$(mktemp)"
           previous_worker_image="$(
             gcloud run services describe "${WORKER_SERVICE}" \
               --region "${REGION}" --project "${PROJECT_ID}" \
-              --format='value(spec.template.spec.containers[0].image)' 2>"${worker_describe_err}"
-          )" || {
-            if grep -qiE "NOT_FOUND|could not be found" "${worker_describe_err}"; then
-              previous_worker_image=""
-            else
-              cat "${worker_describe_err}" >&2
-              exit 1
-            fi
-          }
+              --format='value(spec.template.spec.containers[0].image)'
+          )"
+          if [[ -z "${previous_worker_image}" ]]; then
+            echo "Could not resolve the current worker image." >&2
+            exit 1
+          fi
           echo "worker_image=${previous_worker_image}" >> "${GITHUB_OUTPUT}"
 
       - name: Hold prod for a manual deploy
@@ -597,17 +593,10 @@ jobs:
             sleep 10
           done
 
-          describe_err="$(mktemp)"
-          if gcloud run services describe "${WORKER_SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
-            gcloud run services update "${WORKER_SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          elif grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
-            echo "worker service ${WORKER_SERVICE} not created yet; skipping image update"
-          else
-            cat "${describe_err}" >&2
-            exit 1
-          fi
+          # The Worker is the only scheduler (ADR 0011): a missing service means no Money Exit
+          # runs, so this fails the deploy instead of skipping.
+          gcloud run services update "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           echo "revision=${CANDIDATE_REVISION}" >> "${GITHUB_OUTPUT}"
 
       # Three failed runs in a row hold prod on this revision for a deliberate
@@ -714,11 +703,9 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${PREVIOUS_TRAFFIC}" || rollback_failed=1
           "${hold[@]}" || rollback_failed=1
-          if [[ -n "${PREVIOUS_WORKER_IMAGE:-}" ]]; then
-            gcloud run services update "${WORKER_SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
-          fi
+          gcloud run services update "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
           if [[ "${rollback_failed}" -ne 0 ]]; then
             echo "Automatic restore was incomplete; escalate immediately. The quick rollback can finish it." >&2
             exit 1

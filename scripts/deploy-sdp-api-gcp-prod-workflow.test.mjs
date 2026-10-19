@@ -1178,6 +1178,51 @@ test("each promotion records the build it replaced, and a breaking migration ret
   assert.deepEqual(labelCalls(plainRun), []);
 });
 
+test("a missing Worker fails the deploy at capture and at promotion instead of being skipped", () => {
+  const missingWorker =
+    'echo "ERROR: (gcloud.run.services) NOT_FOUND: Service [sdp-prod-worker] could not be found." >&2; exit 1';
+  const capture = runStep("Capture rollback state", {
+    env: {
+      ...deployEnv,
+      SERVICE_JSON: serviceJson([{ revisionName: servingRevision, percent: 100 }]),
+    },
+    stubs: {
+      gcloud: `case "$*" in
+  "run services describe sdp-prod-worker "*) ${missingWorker} ;;
+  *) printf '%s' "$SERVICE_JSON" ;;
+esac`,
+    },
+  });
+  assert.notEqual(capture.code, 0);
+  assert.equal(capture.output, `traffic=${servingRevision}=100\n`);
+
+  const candidateRevision = "sdp-prod-api-public-00042-new";
+  const healthy = JSON.stringify({
+    status: "ready",
+    revision: candidateRevision,
+    checks: { database: "ok", redis: "ok" },
+  });
+  const promote = runStep("Promote service and worker with rollback", {
+    env: {
+      ...deployEnv,
+      CANDIDATE_REVISION: candidateRevision,
+      IMAGE: "registry.example/api@sha256:new",
+      PREVIOUS_TRAFFIC: `${servingRevision}=100`,
+      BREAKING_MIGRATIONS: "",
+    },
+    stubs: {
+      gcloud: `case "$*" in *" sdp-prod-worker "*) ${missingWorker} ;; esac`,
+      curl: `printf '%s' '${healthy}'`,
+    },
+  });
+  assert.notEqual(promote.code, 0);
+  assert.equal(
+    promote.calls.at(-1),
+    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/api@sha256:new`
+  );
+  assert.equal(promote.output, "");
+});
+
 const rollbackWorkflow = fs.readFileSync(
   path.resolve(here, "../.github/workflows/rollback-sdp-api-gcp-prod.yml"),
   "utf8"

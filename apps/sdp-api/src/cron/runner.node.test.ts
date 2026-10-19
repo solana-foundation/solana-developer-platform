@@ -154,7 +154,7 @@ function runEvents(cron: string, environment: SdpEnvironment | null) {
 }
 
 function slotEvent(cron: string, environment: SdpEnvironment | null, status: CronRunStatus) {
-  return { event: CRON_RUN_EVENT, cron, environment, status };
+  return { event: CRON_RUN_EVENT, cron, environment, status, monitor: `sdp-api-${cron}` };
 }
 
 function okEvent(cron: string, environment: SdpEnvironment | null) {

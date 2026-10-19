@@ -38,6 +38,11 @@ export function logCronRun(registration: CronRegistration, record: CronRunRecord
     cron: registration.cron,
     environment: registration.environment,
     status: record.status,
+    // Transitional: the pre-ADR-0011 field, kept for one release so the live sdp-infra alerts
+    // (keyed on `jsonPayload_monitor`) and the renamed ones (keyed on `cron`) both match whatever
+    // order the API and alert deploys land in, and across a rollback. Drop it once the renamed
+    // alerts are live (HOO-2165).
+    monitor: `sdp-api-${registration.cron}`,
   };
   switch (record.status) {
     case "ok":
