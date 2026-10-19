@@ -85,14 +85,12 @@ function transition(id: string, name: RampTransferTransitionId) {
 }
 
 describe("RAMP_TRANSFER_TRANSITIONS", () => {
-  it("keeps the source sets the settlement core enforced before the table", () => {
+  it("keeps each provider transition's source set, with no wallet-send status", () => {
     // Spelled out on purpose: a table edit that widens or narrows a provider
     // transition must fail here, not pass by comparing the table to itself.
     const observable: PaymentTransferStatus[] = [
       "awaiting_payment",
-      "confirmed",
       "expired",
-      "finalized",
       "pending",
       "processing",
       "settling",

@@ -230,9 +230,16 @@ export interface RampTransferTransition {
   readonly types: readonly RampTransferType[];
 }
 
-/** Any open status, plus `expired`, which a provider observation proves was premature. */
+/**
+ * Every status a ramp row is open in, plus `expired`, which a provider
+ * observation proves was premature. `confirmed` and `finalized` belong to wallet
+ * sends; no writer puts a ramp row there.
+ */
 export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
-  ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  "pending",
+  "processing",
+  "awaiting_payment",
+  "settling",
   "expired",
 ] as const satisfies readonly PaymentTransferStatus[];
 
