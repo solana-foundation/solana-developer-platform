@@ -90,6 +90,7 @@ describe("database client connection management", () => {
   });
 
   beforeEach(async () => {
+    vi.stubEnv("PG_POOL_MAX", undefined);
     await closeDatabasePools();
     pgMock.pools.length = 0;
     pgMock.poolQuery = async () => ({ rows: [], rowCount: 0 });
@@ -100,6 +101,7 @@ describe("database client connection management", () => {
   afterEach(async () => {
     pgMock.poolEnd = async () => {};
     await closeDatabasePools();
+    vi.unstubAllEnvs();
   });
 
   it("reuses one configured pool and starts independent Node queries concurrently", async () => {
@@ -134,11 +136,7 @@ describe("database client connection management", () => {
 
   it("sizes the pool from PG_POOL_MAX", async () => {
     vi.stubEnv("PG_POOL_MAX", "25");
-    try {
-      await createDatabaseClient("postgresql://node-pool-max/sdp").queryOne("SELECT 1");
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    await createDatabaseClient("postgresql://node-pool-max/sdp").queryOne("SELECT 1");
 
     expect(pgMock.pools[0]?.config).toMatchObject({ max: 25 });
   });

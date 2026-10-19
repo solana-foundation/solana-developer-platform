@@ -1,4 +1,5 @@
 import { Pool, type QueryResult, types } from "pg";
+import { z } from "zod";
 import {
   currentDatabaseIdentity,
   type DatabaseIdentity,
@@ -78,15 +79,17 @@ const pooledClients = new Map<string, PooledPostgresClient>();
 const DEFAULT_POOL_MAX = 10;
 const POOL_STATS_INTERVAL_MS = 15_000;
 
+const poolMaxSchema = z.coerce.number().int().positive();
+
 export function resolvePoolMax(raw: string | undefined = process.env.PG_POOL_MAX): number {
   if (raw === undefined) {
     return DEFAULT_POOL_MAX;
   }
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  const parsed = poolMaxSchema.safeParse(raw);
+  if (!parsed.success) {
     throw new Error(`Invalid PG_POOL_MAX: ${JSON.stringify(raw)}`);
   }
-  return parsed;
+  return parsed.data;
 }
 
 const NODE_POOL_OPTIONS = {
