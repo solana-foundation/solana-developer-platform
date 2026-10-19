@@ -251,9 +251,10 @@ test("merge deploys promote signed per-merge images and migrate before rollout",
     '--update-labels "sdp_schema_sha=$' + "{DEPLOY_IMAGE_SHA}",
     execute
   );
-  const capture = workflow.indexOf("- name: Capture rollback state", migrate);
+  const capture = workflow.indexOf("- name: Capture rollback state");
+  assert.ok(capture !== -1 && capture < migrate);
   assert.ok(migrate !== -1 && migrate < execute);
-  assert.ok(execute < label && label < capture);
+  assert.ok(execute < label);
 });
 
 test("pending migrations are detected before the prod workflow is called", () => {
