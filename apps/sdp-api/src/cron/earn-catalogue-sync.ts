@@ -55,7 +55,8 @@ import { defineCron } from "./define-cron";
 
 // Every run claims this Redis slot first, so exactly one run per hourly window
 // syncs (a Worker boot run, the scheduled run, two Workers overlapping during a
-// deploy) and the rest lose cleanly.
+// deploy) and the rest lose cleanly. The claim itself runs before the sync
+// deadline starts, so it is bounded only by the Redis client.
 //
 // The slot value is a unique claim token that embeds its own expiry
 // (`<expiresAtEpochMs>:<uuid>`), and every transition is atomic on the exact

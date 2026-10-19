@@ -64,12 +64,15 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
  * How long a registration's run may stay in flight before the overlap guard gives up on it.
  * Without a bound, one run that never settles would turn every later slot into
  * `skipped_overlap` (which still reads as alive) until the Worker restarted. Past it the slot is
- * logged as `error` and the next slot may start; the abandoned work is not cancelled, so it can
- * still finish beside its successor, which every job's own claims and compare-and-set already
- * tolerate. Ten minutes is far above any healthy run and short enough that a wedged money exit
- * resumes the same hour. It matches the catalogue sync's own 600 s deadline rather than
- * exceeding it, so a sync that runs into its deadline can log two `error` events for one slot
- * (this one first, then the sync's own rejection).
+ * logged as `error` and the next slot may start. The deadline frees the registration and
+ * classifies the slot; it cancels nothing (Node cannot stop an async call tree in process), so
+ * the abandoned work keeps running beside its successor. Definitions that write per row tolerate
+ * that through their claims and compare-and-set; a definition whose writes are set- or
+ * snapshot-based holds its own lock until its work settles (the catalogue sync is the exemplar).
+ * Real cancellation is HOO-2163. Ten minutes is far above any healthy run and short enough that
+ * a wedged money exit resumes the same hour. It equals the catalogue sync's own 600 s deadline,
+ * so a sync that runs into its deadline logs two `error` events for one slot (this one first,
+ * then the sync's own rejection).
  */
 const CRON_SLOT_DEADLINE_MS = 10 * 60_000;
 

@@ -36,7 +36,12 @@ names and a no-op `Observability` layer.
   alerts count a fixed set of crons.
 - **A definition never overlaps itself in process.** A slot that fires while
   the previous run is in flight is skipped and logged as `skipped_overlap`;
-  with `duration_ms`, that shows whether a cadence is too tight.
+  with `duration_ms`, that shows whether a cadence is too tight. A 10-minute
+  slot deadline frees the registration and logs `error`, but cancels nothing:
+  per-row writers tolerate the abandoned run through claims and
+  compare-and-set, and a definition with set- or snapshot-based writes holds
+  its own lock until its work settles (the Earn catalogue sync). Real
+  cancellation is a follow-up (HOO-2163).
 - **Run events go to Loki/Grafana only.** Every run logs `sdp_cron_run` with
   `cron`, `environment` (cluster scope), `status`, and `duration_ms`. The
   leftover Sentry abstraction is removed from sdp-api.
