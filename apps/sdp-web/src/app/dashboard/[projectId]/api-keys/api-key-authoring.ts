@@ -27,6 +27,8 @@ export interface ApiKeyAuthoringDraft {
   defaultWalletId: string;
   /** The key's explicit grants, in registry order. */
   grants: Action[];
+  /** The key's IP allowlist as typed: one address or CIDR range per line. */
+  allowedIps: string;
 }
 
 export interface ApiKeyAuthoringExistingKey {
@@ -38,6 +40,8 @@ export interface ApiKeyAuthoringExistingKey {
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
+  /** Null: the key may be used from any address. */
+  allowedIps: string[] | null;
 }
 
 export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
@@ -48,7 +52,16 @@ export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
     selectedWalletIds: [],
     defaultWalletId: "",
     grants: [],
+    allowedIps: "",
   };
+}
+
+/**
+ * The allowlist entries in the draft, split on whitespace and commas, each
+ * once. Empty means any address. The API validates each entry.
+ */
+export function parseAllowedIps(value: string): string[] {
+  return Array.from(new Set(value.split(/[\s,]+/).filter((entry) => entry.length > 0)));
 }
 
 /**

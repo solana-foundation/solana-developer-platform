@@ -140,6 +140,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
       walletScope: "all",
       signingWalletId: null,
       signingWalletIds: [],
+      allowedIps: null,
     };
     const user = userEvent.setup();
     render(
