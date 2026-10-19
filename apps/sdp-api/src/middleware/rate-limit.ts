@@ -6,7 +6,7 @@ import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
 import { rateLimited, serviceUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
 
 /** Length of every rate limit window; counter buckets align to it. */

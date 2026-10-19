@@ -7,7 +7,7 @@ import {
   parseRequestedWalletScope,
   resolveSigningWalletsInProject,
 } from "@/services/api-key-scope.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import type { apiKeyCreateSchema } from "./schemas";
 
 /**

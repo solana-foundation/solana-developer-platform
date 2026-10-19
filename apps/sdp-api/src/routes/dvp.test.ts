@@ -9,8 +9,8 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -25,7 +25,7 @@ const TEST_PROJECT = { id: "prj_dvp_test", slug: "dvp-test-project" };
 const TEST_USER = { id: "usr_dvp_test", email: "dvp-test@example.com" };
 const TEST_API_KEY = { id: "key_dvp_test", raw: "sk_test_dvp_routes", prefix: "sk_test_dvp" };
 
-const TEST_CACHED_API_KEY: SeededApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -72,7 +72,7 @@ let originalMarkets: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -831,7 +831,7 @@ describe("DvP routes", () => {
     it("refuses a side whose wallet the key does not list, writing no claim", async () => {
       const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
       await seedApiKeyRow(env, keyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         walletScope: "selected",
         walletIds: [],
       });
@@ -950,7 +950,7 @@ describe("DvP routes", () => {
     it("keeps a read-only caller's party visible without offering a funding wallet", async () => {
       const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
       await seedApiKeyRow(env, keyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         grants: ["dvp.read", "wallets.read"],
       });
       await seedTradeFor({ tradeId: "dvp_read_only" });

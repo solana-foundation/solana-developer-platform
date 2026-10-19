@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { Action } from "@sdp/types/actions";
 import type { DatabaseClient } from "@/db/client";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export interface TestApiKeyMaterial {
   id: string;

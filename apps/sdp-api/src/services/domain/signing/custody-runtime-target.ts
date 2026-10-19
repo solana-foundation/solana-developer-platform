@@ -42,7 +42,7 @@ import {
   isManagedCustodyUseAllowed,
 } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { privyWalletExternalId } from "./provider-wallet-lifecycle";
 import { boundSigningTime, custodySigningTimeoutMs } from "./signing-timeout";
 

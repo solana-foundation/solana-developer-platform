@@ -7,7 +7,7 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
@@ -27,7 +27,7 @@ import {
   type CancelActivatedByKeyResult,
   cancelRecurringPaymentsActivatedByKey,
 } from "@/services/payments/recurring-payments/cancel-activated-by-key";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import type {
   apiKeyCreateSchema,
   apiKeyRevokeSchema,
@@ -342,9 +342,12 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   }
 
   if (existing.status === "deactivated" || existing.status === "revoked") {
+    if (existing.revoked_at === null) {
+      throw internalError("A deactivated API key has no revocation time");
+    }
     return success(c, {
       success: true,
-      revokedAt: existing.revoked_at ?? new Date().toISOString(),
+      revokedAt: existing.revoked_at,
       recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
     });
   }
@@ -381,7 +384,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
 
   return success(c, {
     success: true,
-    revokedAt: revokedKey.revokedAt ?? new Date().toISOString(),
+    revokedAt: revokedKey.revokedAt,
     recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
   });
 };

@@ -35,7 +35,7 @@ import {
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments/lifecycle";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 // Rows are independent: collection, activation, and lifecycle recovery each
 // claim their recurring payment under a row lock before touching the chain.

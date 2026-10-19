@@ -10,7 +10,7 @@ import type { Address } from "@solana/kit";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { type WalletAccess, walletAccessAllows } from "@/lib/auth";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * Resolves the active custody wallet for a party address — the single "can

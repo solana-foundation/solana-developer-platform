@@ -8,8 +8,8 @@ import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_api_key_wallet_scope",
@@ -33,7 +33,7 @@ const TEST_API_KEY = {
   prefix: "sk_test_api",
 };
 
-const TEST_CACHED_API_KEY: SeededApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -70,7 +70,7 @@ async function installListFailureConstraint(): Promise<void> {
 
 async function seedAuthAndWallets(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -377,7 +377,7 @@ describe("API key wallet scope routes", () => {
     expect(await listed()).toEqual(["cwlt_scope_a", "cwlt_scope_b"]);
 
     await seedApiKeyRow(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       walletScope: "selected",
       walletIds: ["cwlt_scope_a"],
     });
@@ -386,7 +386,7 @@ describe("API key wallet scope routes", () => {
     expect((await asKey("/v1/wallets/wal_scope_a?includeBalance=false")).status).toBe(200);
 
     await seedApiKeyRow(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       walletScope: "selected",
       walletIds: [],
     });

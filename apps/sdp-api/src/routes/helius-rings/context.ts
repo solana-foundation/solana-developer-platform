@@ -12,7 +12,7 @@ import { AppError, type ErrorCode, notFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings/service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /** Hono request context bound to the app `Env`. */
 export type AppContext = Context<{ Bindings: Env }>;

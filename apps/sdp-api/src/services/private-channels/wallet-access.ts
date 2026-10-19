@@ -7,7 +7,7 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export function listPrivateChannelCustodyWallets(
   env: Env,

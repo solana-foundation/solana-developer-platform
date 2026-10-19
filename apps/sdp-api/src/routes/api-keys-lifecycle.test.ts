@@ -350,6 +350,24 @@ describe("API key lifecycle", () => {
       });
     });
 
+    it("answers a repeat revocation with the time it was revoked", async () => {
+      await insertKey({ id: TARGET_KEY_ID });
+      const first = await revoke(TARGET_KEY_ID);
+      const second = await revoke(TARGET_KEY_ID);
+
+      const revokedAt = z.object({ data: z.object({ revokedAt: z.string() }) });
+      expect(revokedAt.parse(await second.json()).data.revokedAt).toBe(
+        revokedAt.parse(await first.json()).data.revokedAt
+      );
+    });
+
+    it("refuses to report a revocation for an expired key that was never revoked", async () => {
+      await insertKey({ id: TARGET_KEY_ID, status: "expired" });
+
+      expect((await revoke(TARGET_KEY_ID)).status).toBe(409);
+      expect((await readKey(TARGET_KEY_ID))?.status).toBe("expired");
+    });
+
     it("leaves the replacement of a retired predecessor alone", async () => {
       await insertKey({
         id: TARGET_KEY_ID,

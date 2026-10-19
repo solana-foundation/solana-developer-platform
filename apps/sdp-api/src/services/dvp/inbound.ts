@@ -19,7 +19,7 @@ import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import type { ApiKeyContext } from "@/lib/auth";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /** How many inbound trades a single read returns. */
 export const DVP_INBOUND_LIMIT = 50;

@@ -9,7 +9,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { addMemberSchema, updateMemberSchema } from "@/routes/projects/schemas";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
 

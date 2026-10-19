@@ -29,7 +29,7 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { MosaicFeePayment } from "@/services/issuance/mosaic";
 import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import {
   admitIssuanceRuntimeExecution,

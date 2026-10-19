@@ -15,7 +15,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;

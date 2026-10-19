@@ -676,7 +676,7 @@ export class ApiKeyService {
     projectId: string
   ): Promise<
     | { revokedAt: string; alreadyRevoked: false }
-    | { revokedAt: string | null; alreadyRevoked: true }
+    | { revokedAt: string; alreadyRevoked: true }
     | null
   > {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.revokeApiKey");
@@ -694,7 +694,14 @@ export class ApiKeyService {
         "SELECT revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?",
         [keyId, organizationId, projectId]
       );
-      return existing ? { revokedAt: existing.revoked_at, alreadyRevoked: true } : null;
+      if (!existing) {
+        return null;
+      }
+      // Not active and never revoked (an expired key): there is no revocation to report.
+      if (existing.revoked_at === null) {
+        throw conflict("Only an active API key can be deactivated");
+      }
+      return { revokedAt: existing.revoked_at, alreadyRevoked: true };
     }
 
     return { revokedAt, alreadyRevoked: false };

@@ -38,8 +38,8 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const depositIntoVault = vi.hoisted(() => vi.fn());
 
@@ -85,7 +85,7 @@ const PROD_API_KEY = {
   raw: "sk_live_earn_vault",
   prefix: "sk_live_ear",
 };
-const TEST_CACHED_API_KEY: SeededApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -97,7 +97,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   expiresAt: null,
 };
 const PROD_CACHED_API_KEY: SeededApiKey = {
-  ...TEST_CACHED_API_KEY,
+  ...TEST_SEEDED_API_KEY,
   id: PROD_API_KEY.id,
   projectId: TEST_PRODUCTION_PROJECT.id,
   environment: "production",
@@ -244,7 +244,7 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, prodKeyHash, PROD_CACHED_API_KEY);
 

@@ -18,7 +18,7 @@ import {
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,

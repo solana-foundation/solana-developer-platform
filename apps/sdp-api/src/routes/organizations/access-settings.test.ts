@@ -4,16 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { API_KEY_PRE_READ_MAX_REQUESTS, apiKeyFloodGuardIdentifier } from "@/middleware/rate-limit";
-import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
-const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
+const ORGANIZATION_ID = TEST_SEEDED_API_KEY.organizationId;
 
 const PROJECT_ID = "prj_access_settings";
 
@@ -32,7 +32,7 @@ async function seedOrganization(settings: OrganizationSettings | null): Promise<
     )
     .run();
   await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-    ...TEST_CACHED_API_KEY,
+    ...TEST_SEEDED_API_KEY,
     projectId: PROJECT_ID,
     grants: ALL_API_KEY_GRANTS,
   });
@@ -108,7 +108,7 @@ describe("Organization access settings", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, grants: ALL_API_KEY_GRANTS });
+    await seedApiKeyRow(env, validKeyHash, { ...TEST_SEEDED_API_KEY, grants: ALL_API_KEY_GRANTS });
   });
   afterEach(async () => {
     await clearKVStores(env);
@@ -428,7 +428,7 @@ describe("Organization access settings", () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await clearKVStores(env);
       await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
+        ...TEST_SEEDED_API_KEY,
         grants: ALL_API_KEY_GRANTS,
         allowedIps: ["203.0.113.7/32"],
       });

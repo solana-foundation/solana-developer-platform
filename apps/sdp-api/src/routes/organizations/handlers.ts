@@ -18,7 +18,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { getProviderAvailability } from "@/services/provider-availability.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import type { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

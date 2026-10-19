@@ -19,7 +19,7 @@ import {
   isRampProviderInChannel,
 } from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   PAYMENT_TRANSACTION_KIND_ACTIONS,
   permittedPaymentTransactionKinds,

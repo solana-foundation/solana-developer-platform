@@ -15,7 +15,7 @@ import {
   requestApiKeyGrantChannel,
 } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
 

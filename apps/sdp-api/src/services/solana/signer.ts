@@ -1,7 +1,7 @@
 import type { MovementId } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import { createSigningService } from "@/services/domain/signing.service";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 /**
  * Resolve the signer for one already-authorized custody-wallet database row,

@@ -4,7 +4,7 @@ import {
   parseRouteAuthorizationDeclaration,
   type RouteAuthorizationDeclaration,
 } from "@/middleware/require-action";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 export interface RegisteredRouteAuthorization {
   method: string;

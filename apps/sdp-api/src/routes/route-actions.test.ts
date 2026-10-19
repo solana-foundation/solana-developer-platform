@@ -26,11 +26,11 @@ import type { RegisteredRouteAuthorization } from "@/routes/route-actions";
 import { registeredRouteAuthorizations, routeActionsByOperation } from "@/routes/route-actions";
 import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 import { noopObservability } from "@/runtime/observability";
-import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 /**
  * Every route declares exactly one action, or is public with a reason
@@ -140,7 +140,7 @@ describe("route actions", () => {
 /** A concrete URL for a route pattern. */
 function concretePath(routePath: string): string {
   return routePath
-    .replace(":projectId", TEST_CACHED_API_KEY.projectId)
+    .replace(":projectId", TEST_SEEDED_API_KEY.projectId)
     .replace(":orgId", TEST_ORG.id)
     .replace(/:[A-Za-z0-9_]+(\{[^}]*\})?\??/g, "unused_id")
     .replace(/\*/g, "unused_id");
@@ -191,7 +191,7 @@ async function seedTestKey(): Promise<void> {
     .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
     .run();
   await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-    ...TEST_CACHED_API_KEY,
+    ...TEST_SEEDED_API_KEY,
     grants: ALL_API_KEY_GRANTS,
     rateLimitTier: "unlimited",
   });
@@ -200,7 +200,7 @@ async function seedTestKey(): Promise<void> {
 async function setTestKeyGrants(grants: readonly string[]): Promise<void> {
   await getDb(env)
     .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
-    .bind([...grants], TEST_CACHED_API_KEY.id)
+    .bind([...grants], TEST_SEEDED_API_KEY.id)
     .run();
 }
 

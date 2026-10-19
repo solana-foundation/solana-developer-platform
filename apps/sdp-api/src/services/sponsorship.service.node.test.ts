@@ -33,7 +33,7 @@ import {
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/sponsor-signing";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 const projectMocks = { getProject: vi.fn() };
 
