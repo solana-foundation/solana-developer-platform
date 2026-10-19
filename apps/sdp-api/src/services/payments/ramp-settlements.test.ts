@@ -138,11 +138,17 @@ describe("applyRampSettlementEvent", () => {
     });
 
     expect(await readTransfer("xfr_onchain_settlement")).toMatchObject({
-      status: "completed",
-      amount: "9.75",
-      source_address: "provider-reported-source",
-      destination_address: "provider-reported-destination",
+      status: "settling",
+      amount: "10",
+      source_address: null,
+      destination_address: "destination",
       signature: "provider-reported-signature",
+      provider_data: {
+        providerSettlement: {
+          reference: "order_onchain_settlement",
+          onchain: { amount: "9.75", destinationAddress: "provider-reported-destination" },
+        },
+      },
     });
   });
 
@@ -170,12 +176,15 @@ describe("applyRampSettlementEvent", () => {
     });
 
     expect(await readTransfer("xfr_onchain_payment")).toMatchObject({
-      status: "completed",
-      amount: "9.75",
-      fiat_amount: "19.50",
-      source_address: "provider-reported-source",
-      destination_address: "provider-reported-destination",
+      status: "settling",
+      amount: "10",
+      fiat_amount: "10",
+      source_address: "source",
+      destination_address: "destination",
       signature: "sdp-submitted-signature",
+      provider_data: {
+        providerSettlement: { receivedAmount: "19.50" },
+      },
     });
   });
 
@@ -309,8 +318,8 @@ describe("applyRampSettlementEvent", () => {
     });
 
     expect(await readTransfer("xfr_expired")).toMatchObject({
-      status: "completed",
-      amount: "42",
+      status: "settling",
+      amount: "10",
     });
   });
 
@@ -330,9 +339,9 @@ describe("applyRampSettlementEvent", () => {
     });
 
     expect(await readTransfer("xfr_processing_deposit")).toMatchObject({
-      status: "completed",
+      status: "settling",
       amount: "10",
-      fiat_amount: "42",
+      fiat_amount: "10",
     });
   });
 
@@ -351,24 +360,31 @@ describe("applyRampSettlementEvent", () => {
   it("serializes concurrent terminal events", async () => {
     await seedTransfer({ id: "xfr_race", reference: "order_race", status: "settling" });
     const events: RampSettlementEvent[] = [
-      { provider: "moonpay", kind: "settled", reference: "order_race", receivedAmount: "9" },
-      { provider: "moonpay", kind: "failed", reference: "order_race", error: "declined" },
+      {
+        provider: "moonpay",
+        kind: "settled",
+        reference: "order_race",
+        providerObservedAt: "2026-10-19T00:01:00.000Z",
+        receivedAmount: "9",
+      },
+      {
+        provider: "moonpay",
+        kind: "failed",
+        reference: "order_race",
+        providerObservedAt: "2026-10-19T00:02:00.000Z",
+        error: "declined",
+      },
     ];
 
     const results = await Promise.all(
       events.map((event) => applyRampSettlementEvent(env, "sandbox", event))
     );
-    expect(results.map((result) => result.outcome).sort()).toEqual(["applied", "ignored"]);
+    expect(results.some((result) => result.outcome === "applied")).toBe(true);
 
     const transfer = await readTransfer("xfr_race");
-    expect(["completed", "failed"]).toContain(transfer?.status);
-    if (transfer?.status === "completed") {
-      expect(transfer.amount).toBe("9");
-      expect(transfer.error).toBeNull();
-    } else {
-      expect(transfer?.amount).toBe("10");
-      expect(transfer?.error).toBe("declined");
-    }
+    expect(transfer?.status).toBe("failed");
+    expect(transfer?.amount).toBe("10");
+    expect(transfer?.error).toBe("declined");
   });
 
   it("keeps the first provider customer canonical and records a later mismatch", async () => {
@@ -446,6 +462,7 @@ describe("applyRampSettlementEvent", () => {
       kind: "settled",
       reference: "order_retry",
       receivedAmount: "9",
+      onchain: { signature: "provider-settlement-signature" },
     };
 
     expect(await applyRampSettlementEvent(env, "sandbox", event)).toEqual({
@@ -460,8 +477,8 @@ describe("applyRampSettlementEvent", () => {
     });
 
     expect(await readTransfer("xfr_retry")).toMatchObject({
-      status: "completed",
-      amount: "9",
+      status: "settling",
+      amount: "10",
     });
   });
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Open or update the ramp-support refresh PR with the regenerated matrix + dumps.
-# Required env: GH_TOKEN, DRIFT_SUMMARY (path to diff text). Optional: RUN_URL, BASE_BRANCH (default main).
+# Required env: GH_TOKEN (pushes the branch and opens the PR), DRIFT_SUMMARY (path to diff text).
+# Optional: RUN_URL, BASE_BRANCH (default main).
 set -euo pipefail
 
 BRANCH="automation/ramp-support-refresh"
@@ -11,6 +12,7 @@ PATHS=(apps/sdp-api/.ramp-support packages/sdp-types/src/generated/ramp.generate
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+gh auth setup-git
 
 git fetch origin "$BRANCH" 2>/dev/null || true
 git checkout -B "$BRANCH"

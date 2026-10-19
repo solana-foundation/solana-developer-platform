@@ -229,7 +229,7 @@ describe("Ramp webhook event inbox", () => {
     const { res } = await sendMoonpayWebhook(completedPayload);
     expect(res.status).toBe(200);
 
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
     expect(await readInboxRows()).toMatchObject([
       {
         status: "discharged",
@@ -480,7 +480,7 @@ describe("Ramp webhook event inbox", () => {
     const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
 
     expect(applied).toBe(1);
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
     expect(await readInboxRows()).toMatchObject([{ status: "discharged" }]);
   });
 
@@ -494,7 +494,7 @@ describe("Ramp webhook event inbox", () => {
 
     expect(stored.rawBody).toBe(rawBody);
     expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(true);
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
   });
 
   it("does not claim events still inside the background pass's window", async () => {
@@ -773,7 +773,7 @@ describe("Ramp webhook event inbox", () => {
 
     expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(1);
 
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
     expect(await readInboxRows()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: unknown, status: "pending", attempts: 0, last_error: null }),
@@ -796,7 +796,7 @@ describe("Ramp webhook event inbox", () => {
         target: { app: betaApp, env: betaEnv() },
       });
       expect(res.status).toBe(200);
-      expect(await readTransferStatus()).toBe("completed");
+      expect(await readTransferStatus()).toBe("settling");
 
       const refused = await betaApp.request(
         "/webhooks/payments/ramps/sandbox/stripe",
@@ -859,7 +859,7 @@ describe("Ramp webhook event inbox", () => {
       const applied = await replayRampWebhookEvents(betaEnv(), MOONPAY_ONLY);
 
       expect(applied).toBe(1);
-      expect(await readTransferStatus()).toBe("completed");
+      expect(await readTransferStatus()).toBe("settling");
       const rows = await getDb(env)
         .prepare("SELECT id, status, attempts, last_error FROM ramp_webhook_events")
         .all<{ id: string; status: string; attempts: number; last_error: string | null }>();

@@ -116,8 +116,8 @@ function buildMoonpaySettlement(
 
 /**
  * Maps one MoonPay transaction to the provider-agnostic settlement event, the
- * single mapping used by both the webhook processor and the reconciliation
- * cron so the two delivery paths cannot diverge.
+ * single mapping used by both the webhook processor and the status pull
+ * (`fetchTransferStatus`) so the two delivery paths cannot diverge.
  *
  * @param data - The MoonPay transaction payload (webhook `data` or API transaction object).
  * @returns The settlement event, or an ignore event for unmatchable payloads.
@@ -146,6 +146,7 @@ export function moonpayTransactionSettlementEvent(
       provider: "moonpay",
       kind: "ignore",
       reason: `unsupported_status:${data.status}`,
+      unmappedStatus: data.status,
     };
   }
   const kind = MOONPAY_TRANSACTION_STATUS[data.status as keyof typeof MOONPAY_TRANSACTION_STATUS];
@@ -217,9 +218,6 @@ function moonpaySellOnchainTransfer(
     return undefined;
   }
   const onchain: RampOnchainTransfer = { signature: data.depositHash };
-  if (data.refundWalletAddress) {
-    onchain.sourceAddress = data.refundWalletAddress;
-  }
   if (data.depositWallet) {
     onchain.destinationAddress = data.depositWallet.walletAddress;
   }
@@ -266,6 +264,7 @@ export function moonpaySellTransactionSettlementEvent(
       provider: "moonpay",
       kind: "ignore",
       reason: `unsupported_status:${data.status}`,
+      unmappedStatus: data.status,
     };
   }
   const kind =
@@ -297,16 +296,19 @@ export function moonpaySellTransactionSettlementEvent(
           : {}),
       };
     }
-    case "settled":
-      return {
+    case "settled": {
+      const event: MoonpaySettlementEvent = {
         provider: "moonpay",
         kind,
         ...identity,
         ...providerCustomer,
-        ...(data.quoteCurrencyAmount !== undefined
-          ? { receivedAmount: decimalStringFromNumber(data.quoteCurrencyAmount) }
-          : {}),
       };
+      if (data.refundWalletAddress) event.refundAddress = data.refundWalletAddress;
+      if (data.quoteCurrencyAmount !== undefined) {
+        event.receivedAmount = decimalStringFromNumber(data.quoteCurrencyAmount);
+      }
+      return event;
+    }
     case "failed":
       return {
         provider: "moonpay",

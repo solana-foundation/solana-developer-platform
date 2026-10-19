@@ -18,11 +18,11 @@ Read the current `RampOnrampQuoteInput` from `packages/sdp-payments/src/ramps/ty
 
 `PaymentRampQuote` is a closed union discriminated by both `provider` and `deliveryMode` in `packages/sdp-types/src/payments.ts`. Add the provider-specific quote arm, and add a `PaymentRampInstruction` arm for new manual instruction fields:
 
-- `deliveryMode: "manual_instructions"` — return `paymentInstructions` (bank/wire or on-chain funding details).
+- `deliveryMode: "manual_instructions"` — bank/wire or on-chain funding details. No provider uses it today (`PaymentRampInstruction` is `never`), so the first one adds its quote arm and instruction arm.
 - `deliveryMode: "hosted"` — return a `hostedUrl` the client renders (widget/redirect).
 - `deliveryMode: "session_widget"` — return the session fields required by an embedded SDK/frame.
 
-Prefer the upstream quote/session id. If the upstream does not mint one, use `rampId("ramp_quote")` from `@sdp/payments/ramps/shared` and pass that reference upstream. The webhook or reconciliation path must return the same reference.
+Prefer the upstream quote/session id. If the upstream does not mint one, use `rampId("ramp_quote")` from `@sdp/payments/ramps/shared` and pass that reference upstream. The webhook and `fetchTransferStatus` must return the same reference.
 
 ## Handler wiring (the DB side)
 
@@ -31,7 +31,7 @@ Add a branch to `apps/sdp-api/src/routes/payments/ramps/onramp/handlers.ts`. The
 - resolves the counterparty + destination wallet,
 - ensures any provider-side customer/account exists (DB-touching `ensure*` helpers live in `apps/sdp-api/src/routes/payments/ramps/providers/<id>.ts`),
 - calls your HTTP-only `createOnrampQuote` with pre-resolved inputs,
-- persists the transfer via `persistRampQuoteTransfer` (dedups by `(provider, providerReference)`; `rampQuoteTransferStatus` maps a `manual_instructions` + `pending` quote to `awaiting_payment`). A `reservedTransferId` is minted before the provider call so it can travel upstream as the reference; a provider whose failed calls must still be attributable to a row pre-creates the pending transfer instead and skips the post-quote persist.
+- persists the transfer via `persistRampQuoteTransfer` (dedups by `(provider, providerReference)` and stores the quote's own status; provider events move it from there). A `reservedTransferId` is minted before the provider call so it can travel upstream as the reference; a provider whose failed calls must still be attributable to a row pre-creates the pending transfer instead and skips the post-quote persist.
 
 Runtime route: `POST /v1/payments/ramps/onramp/quote`, gated by provider availability, metered quota, and the `onramp.execute` action. This route is public OpenAPI today; update `apps/sdp-api/src/openapi/**` when the new provider changes its request/response shape and regenerate owned artifacts.
 

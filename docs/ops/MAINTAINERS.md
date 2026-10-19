@@ -76,8 +76,8 @@ Cloud Run image deployment does not fetch Doppler. The API service and jobs rece
 | `DEPLOY_WIF_PROVIDER` | Variable | Google Workload Identity provider used by Cloud Run deploy workflows |
 | `DEPLOY_SA` | Variable | Google service account used by Cloud Run deploy workflows |
 | `DOPPLER_CI_IDENTITY_ID` | Variable | Doppler service-account identity for OIDC access to `dev_ci` in secret-aware CI |
-| `RELEASE_APP_ID` | Repository secret | GitHub App used by release automation |
-| `RELEASE_APP_PRIVATE_KEY` | Repository secret | GitHub App private key used by release automation |
+| `RELEASE_APP_ID` | Repository secret | GitHub App used by release automation and the ramp-rails refresh PR |
+| `RELEASE_APP_PRIVATE_KEY` | Repository secret | GitHub App private key used by release automation and the ramp-rails refresh PR |
 
 The production deploy job uses the `production` GitHub environment. The generated release pull request is the release approval gate.
 

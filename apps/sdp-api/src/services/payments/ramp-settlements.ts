@@ -54,6 +54,47 @@ function settlementTransition(
     : "moonpay_sell_failed";
 }
 
+function settlementObservationFields(
+  transfer: PaymentTransferRow,
+  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
+): Pick<
+  Parameters<PaymentsRepository["transitionRampTransfer"]>[0],
+  "providerData" | "providerSettlementUnclaimed" | "providerSettlementMissingSignature"
+> {
+  const providerData: Record<string, unknown> = {};
+  const receivedAmount = "receivedAmount" in event ? event.receivedAmount : undefined;
+  const observation: Record<string, unknown> = {
+    kind: event.kind,
+    reference: event.reference,
+  };
+  if (event.providerObservedAt) observation.observedAt = event.providerObservedAt;
+  if (event.onchain) observation.onchain = event.onchain;
+  if (receivedAmount !== undefined) observation.receivedAmount = receivedAmount;
+  if (event.refundAddress !== undefined) observation.refundAddress = event.refundAddress;
+  providerData.observedDelivery = observation;
+  if (event.kind === "settled") {
+    const settlement: Record<string, unknown> = { reference: event.reference };
+    if (event.providerObservedAt) settlement.observedAt = event.providerObservedAt;
+    if (event.onchain) settlement.onchain = event.onchain;
+    if (event.receivedAmount !== undefined) settlement.receivedAmount = event.receivedAmount;
+    if (event.refundAddress !== undefined) settlement.refundAddress = event.refundAddress;
+    providerData.providerSettlement = settlement;
+    if (event.providerObservedAt !== undefined) return { providerData };
+    if (event.onchain?.signature && transfer.type === "onramp") {
+      return { providerData, providerSettlementMissingSignature: true };
+    }
+    return { providerData, providerSettlementUnclaimed: true };
+  }
+  // Stripe has no per-session observation time. An untimed event cannot
+  // supersede an accepted settled claim while chain proof is pending.
+  if (event.providerObservedAt === undefined) {
+    providerData.providerSettlement = null;
+    return { providerData, providerSettlementUnclaimed: true };
+  }
+  providerData.providerSettlement = null;
+  return { providerData };
+}
+
 /**
  * Builds the guarded transfer update one settlement event produces.
  *
@@ -71,6 +112,7 @@ function buildRampSettlementUpdate(
     projectId: transfer.project_id,
     transition: settlementTransition(transfer, event),
     updatedAt: new Date().toISOString(),
+    ...settlementObservationFields(transfer, event),
   };
   if (event.providerObservedAt !== undefined) {
     update.providerObservation = {
@@ -78,31 +120,14 @@ function buildRampSettlementUpdate(
       observedAt: event.providerObservedAt,
     };
   }
-  if (event.onchain) {
-    if (transfer.signature === null) {
-      update.signature = event.onchain.signature;
-    }
-    update.sourceAddress = event.onchain.sourceAddress;
-    update.destinationAddress = event.onchain.destinationAddress;
-    update.amount = event.onchain.amount;
-  }
-  // Record the actual amount the provider reports: for `settled` the fiat
-  // payout (off-ramp) or delivered crypto (on-ramp); for `settling` an on-ramp
-  // pay-in observed on the funding wallet writes the fiat the bank delivered.
-  if (event.kind === "settling" || event.kind === "settled") {
-    if (event.receivedAmount !== undefined) {
-      if (event.kind === "settled" ? transfer.type === "offramp" : transfer.type === "onramp") {
-        update.fiatAmount = event.receivedAmount;
-      } else {
-        update.amount = event.receivedAmount;
-      }
-    }
+  if (event.onchain && transfer.type === "onramp" && transfer.signature === null) {
+    update.signature = event.onchain.signature;
   }
   if ((event.kind === "failed" || event.kind === "expired") && event.error) {
     update.error = event.error;
   }
   if (event.kind === "failed" && transfer.type === "offramp") {
-    update.providerData = { cryptoDeposit: null };
+    update.providerData = { ...update.providerData, cryptoDeposit: null };
   }
   // The provider's deposit instruction lets the dashboard send the crypto on
   // the customer's behalf; each event replaces the previous instruction, and

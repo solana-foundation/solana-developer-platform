@@ -38,9 +38,9 @@ export class <Id>RampClient implements RampProvider {
 }
 ```
 
-`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` is optional.
+`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` is optional. `fetchTransferStatus` is optional on the contract but required in practice: the status sweep's `RAMP_STATUS_PULLS` table fails typecheck without it. It makes one request per lookup and returns the events the provider's webhook would carry, oldest first, through the package status mapping the webhook parser also calls; an empty answer must mean the provider holds no transaction, never that SDP could not ask.
 
-Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests, with a zod schema of exactly the response fields the adapter reads (a mismatch fails closed as `PROVIDER_UNAVAILABLE`), and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`. An error's message and `details` are returned to callers, so they carry only SDP's own wording; the provider's message, codes and field errors go in its `diagnostics` (ADR 0008), which the API logs and never returns. Add `providers/<id>/test-kit.ts` (recorded exchanges per direction, the mode-credential check, one malformed reply) and register it in `KITS` in `packages/sdp-payments/src/ramps/contract.test.ts`; typecheck fails until you do.
+Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests, with a zod schema of exactly the response fields the adapter reads (a mismatch fails closed as `PROVIDER_RESPONSE_INVALID`, 502), and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`. An error's message and `details` are returned to callers, so they carry only SDP's own wording; the provider's message, codes and field errors go in its `diagnostics` (ADR 0008), which the API logs and never returns. Add `providers/<id>/test-kit.ts` (recorded exchanges per direction, `transferStatus` lookups including the provider's answer for a transfer it holds nothing for, the mode-credential check, one malformed reply) and register it in `KITS` in `packages/sdp-payments/src/ramps/contract.test.ts`; typecheck fails until you do, and the suite pins one request per status lookup.
 
 If API-side handlers import provider-specific public helpers or types through package subpaths, add explicit exports in `packages/sdp-payments/package.json`.
 
@@ -54,7 +54,8 @@ Update every applicable site:
 | `apps/sdp-api/src/services/provider-setup-registry.ts` | add `rampSetup("<id>")`; ramps are deployment-managed today |
 | `apps/sdp-api/src/routes/counterparties/schemas.ts` | add the provider-specific submit-requirements schema arm; add the id only to the directions actually supported |
 | `apps/sdp-api/src/routes/payments/ramps/{onramp,offramp}/handlers.ts` + `ramps/shared.ts` | add quote branches per direction and `advanceCounterpartyRequirements` branches in `shared.ts` for every provider; unsupported directions reject explicitly; keep DB work here or in `ramps/providers/<id>.ts` |
-| `apps/sdp-api/src/routes/webhooks/handlers.ts` | register a processor, or explicitly add the id to the excluded no-webhook providers |
+| `apps/sdp-api/src/services/ramps/webhooks/registry.ts` | register the provider's `WebhookProcessor`; the registry covers every provider id, so typecheck fails until you do |
+| `apps/sdp-api/src/services/jobs/sweep-ramp-transfer-statuses.ts` | add the provider to `RAMP_STATUS_PULLS` (its client paired with its processor) and `RAMP_ABANDONMENT_HORIZON_MS` (how long a quiet checkout stays open per direction: a product call, recorded with its reason) |
 
 Availability is tri-state by environment:
 
@@ -122,7 +123,7 @@ pnpm --filter sdp-docs build
 
 ## Verify
 
-Add mocked provider-client tests and focused API tests for supported directions, unsupported directions, malformed responses, missing credentials, counterparty gating, and webhook verification when applicable. Then run:
+Add mocked provider-client tests and focused API tests for supported directions, unsupported directions, malformed responses, missing credentials, counterparty gating, webhook verification, and status lookups (a known transaction, nothing held, a provider error). Then run:
 
 ```bash
 pnpm --filter @sdp/payments typecheck
@@ -135,4 +136,4 @@ pnpm --filter sdp-web check:i18n
 pnpm check:module-boundaries
 ```
 
-Continue with `rail-discovery`, `integrate-estimate`, `counterparty-requirements` for every provider, the needed quote direction skill, and `integrate-webhook` when settlement is server-notified.
+Continue with `rail-discovery`, `integrate-estimate`, `counterparty-requirements` for every provider, the needed quote direction skill, and `integrate-webhook` for settlement and the status pull.

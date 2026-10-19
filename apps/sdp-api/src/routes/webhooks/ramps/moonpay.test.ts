@@ -418,8 +418,11 @@ describe("moonpayWebhook.process", () => {
     expect(row).toMatchObject({
       status: "settling",
       provider_reference: MOONPAY_TRANSACTION_ID,
-      signature: "moonpay-deposit-hash",
-      provider_data: { cryptoDeposit: null },
+      signature: null,
+      provider_data: {
+        cryptoDeposit: null,
+        observedDelivery: { onchain: { signature: "moonpay-deposit-hash" } },
+      },
     });
   });
 
@@ -449,8 +452,11 @@ describe("moonpayWebhook.process", () => {
     expect(row).toMatchObject({
       status: "settling",
       provider_reference: MOONPAY_TRANSACTION_ID,
-      signature: "moonpay-first-deposit-hash",
-      provider_data: { cryptoDeposit: null },
+      signature: null,
+      provider_data: {
+        cryptoDeposit: null,
+        observedDelivery: { onchain: { signature: "moonpay-first-deposit-hash" } },
+      },
     });
   });
 

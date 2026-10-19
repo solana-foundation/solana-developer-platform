@@ -145,6 +145,12 @@ export const PAYMENT_TRANSFER_STATUSES = [
 
 export type PaymentTransferStatus = (typeof PAYMENT_TRANSFER_STATUSES)[number];
 
+/** Statuses in which a signed transfer may persist or begin its submission. */
+export const SIGNED_TRANSFER_SUBMISSION_STATUSES = {
+  standard: ["processing"],
+  offramp: ["processing", "settling"],
+} as const satisfies Record<"standard" | "offramp", readonly PaymentTransferStatus[]>;
+
 export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
   "completed",
   "confirmed",
@@ -248,6 +254,10 @@ export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
   "expired",
 ] as const satisfies readonly PaymentTransferStatus[];
 
+/** The open ones among them, which a provider status pull checks; `expired` has its own queue. */
+export const OPEN_PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES =
+  PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES.filter((status) => status !== "expired");
+
 /** A MoonPay attempt with no SDP deposit claim can safely stop taking payment. */
 const MOONPAY_UNCLAIMED_TRANSFER_STATUSES = [
   "pending",
@@ -277,6 +287,12 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   },
   provider_settled: {
     from: PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+    to: "settling",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // A provider's word is not delivery. Only the chain verifier may complete.
+  delivery_verified: {
+    from: ["settling"],
     to: "completed",
     types: RAMP_TRANSFER_TYPES,
   },
@@ -302,6 +318,14 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   // Not from `settling`: a stale redelivered expiry must not undo a transfer
   // another event already revived.
   provider_expired: {
+    from: ["pending", "awaiting_payment"],
+    to: "expired",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // SDP's own verdict from provider silence (HOO-2040): no provider activity
+  // past the abandonment horizon. Never from `processing` or `settling`, where
+  // funds may be moving; a later provider observation revives it.
+  checkout_abandoned: {
     from: ["pending", "awaiting_payment"],
     to: "expired",
     types: RAMP_TRANSFER_TYPES,

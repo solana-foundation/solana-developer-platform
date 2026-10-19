@@ -5,6 +5,7 @@ import type {
   PaymentTransferType,
   RampTransferSettlement,
   RampTransferTransitionId,
+  RampTransferType,
 } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
@@ -58,6 +59,9 @@ export interface PaymentTransferRow {
   created_at: string;
   updated_at: string;
 }
+
+/** A transfer row the repository has proven is a ramp transfer. */
+export type RampPaymentTransferRow = PaymentTransferRow & { type: RampTransferType };
 
 export function generatePaymentTransferId(): string {
   return `${PAYMENT_TRANSFER_ID_PREFIX}${crypto.randomUUID()}`;
@@ -142,6 +146,13 @@ export interface RampTransferTransitionInput extends TransferStatusChangeFields 
   transition: RampTransferTransitionId;
   /** MoonPay observations compare this timestamp only for the bound reference. */
   providerObservation?: { reference: string; observedAt: string };
+  /** Chain verdict must still match the provider observation and row signature it checked. */
+  deliveryEvidence?: { providerSettlement: Record<string, unknown>; signature: string };
+  /** Untimed providers may claim completion evidence once, never replace it by redelivery. */
+  providerSettlementUnclaimed?: boolean;
+  providerSettlementMissingSignature?: boolean;
+  /** Matches only while `updated_at` still holds this value: a write decided on a read refuses a row that moved since. */
+  expectedUpdatedAt?: string;
   updatedAt: string;
 }
 
@@ -262,6 +273,35 @@ export interface PaymentsRepository {
    * not a ramp transfer of those types).
    */
   transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
+  /** Fair, cluster-scoped page of provider-settled rows awaiting chain proof. */
+  listRampTransfersToVerify(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<PaymentTransferRow[]>;
+  /** Rotate polled rows without changing their business updated_at or status. */
+  markRampTransfersVerificationPolled(params: {
+    transferIds: readonly string[];
+    polledAt: string;
+  }): Promise<void>;
+  /**
+   * Claims the next ramp transfer a provider status pull should ask about: never
+   * polled first, then least recently polled, then oldest. Stamps
+   * `provider_status_last_polled_at` in the same statement, so a concurrent sweep
+   * skips the row, and leaves `updated_at` alone. A settling row whose provider
+   * evidence the chain verifier already holds is left to the verifier. System-only.
+   */
+  claimRampTransferForStatusPull(params: {
+    provider: RampProviderId;
+    environments: readonly SdpEnvironment[];
+    statuses: readonly PaymentTransferStatus[];
+    /** Rows updated since are left to the webhooks that may still be in flight. */
+    updatedBefore: string;
+    /** Rows polled since are not due yet. */
+    polledBefore: string;
+    /** Rows quiet since before this are past their revival window. */
+    updatedAfter?: string;
+    polledAt: string;
+  }): Promise<{ transfer: RampPaymentTransferRow; environment: SdpEnvironment } | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled
