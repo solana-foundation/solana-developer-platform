@@ -347,6 +347,15 @@ describe("a live token's operations", () => {
     ).toEqual([403, "ON_TOKEN_BLOCKLIST"]);
   });
 
+  it("refuses a mint into a frozen account until it is unfrozen", () => {
+    const account = holderAddress("vusd", 9);
+    const mint = { mint: { destination: account, amount: "1" } };
+    expect(write("POST", `${VUSD}/freeze`, { accountAddress: account }).status).toBe(201);
+    expect(refusal(write("POST", `${VUSD}/mint`, mint))).toEqual([400, "ACCOUNT_FROZEN"]);
+    expect(write("POST", `${VUSD}/unfreeze`, { accountAddress: account }).status).toBe(200);
+    expect(refusal(write("POST", `${VUSD}/mint`, mint))).toEqual([200, undefined]);
+  });
+
   it("freezes and unfreezes an account", () => {
     const frozen = write("POST", `${VUSD}/freeze`, { accountAddress: ADDRESS, reason: "Review" });
     expect(frozen.status).toBe(201);

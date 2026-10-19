@@ -467,7 +467,7 @@ function applyListRemove(entry: DemoIssuedToken, op: DemoOpOf<"iss-list-remove">
 }
 
 /** The patch fields that differ from what the token holds now. */
-function changedFields<T extends object>(current: T, patch: Partial<T>): Partial<T> {
+function changedFields<T>(current: T, patch: Partial<T>): Partial<T> {
   const changed: Partial<T> = {};
   // SAFETY: Object.keys of a Partial<T> yields only keys of T.
   for (const key of Object.keys(patch) as (keyof T)[]) {

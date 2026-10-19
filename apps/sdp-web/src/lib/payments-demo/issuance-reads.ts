@@ -6,6 +6,7 @@ import {
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
 } from "@sdp/types";
+import { z } from "zod";
 import type { DemoAnswer } from "./demo-handlers";
 import {
   type DemoIssuedToken,
@@ -23,7 +24,7 @@ import {
 
 const REQUEST_ID = "demo_request";
 
-function success(data: unknown, status = 200): DemoAnswer {
+function success<T>(data: T, status = 200): DemoAnswer {
   return {
     status,
     body: { data, meta: { requestId: REQUEST_ID, timestamp: new Date().toISOString() } },
@@ -35,17 +36,28 @@ function notFound(resource: string): DemoAnswer {
 }
 
 function badQuery(message: string, details?: Record<string, unknown>): DemoAnswer {
-  return {
-    status: 400,
-    body: { error: { code: "BAD_REQUEST", message, ...(details ? { details } : {}) } },
-  };
+  const error: Record<string, unknown> = { code: "BAD_REQUEST", message };
+  if (details) error.details = details;
+  return { status: 400, body: { error } };
 }
 
-function whole(value: string | null, fallback: number): number {
-  if (value === null || !/^\d+$/.test(value)) return fallback;
-  const parsed = Number(value);
-  return parsed > 0 ? parsed : fallback;
-}
+/*
+ * The query schemas. Each route parses its query once, at the boundary. A count the API would
+ * ignore (not a positive whole number) reads as absent, so the route's default applies.
+ */
+const countParam = z
+  .string()
+  .regex(/^\d+$/)
+  .transform((value) => Number(value))
+  .pipe(z.number().positive())
+  .optional()
+  .catch(undefined);
+
+const pageQuery = z.object({ page: countParam, pageSize: countParam });
+
+const flagParam = z.enum(["true", "false"]).optional();
+const transactionType = z.enum(TOKEN_TRANSACTION_TYPES);
+const transactionStatus = z.enum(TOKEN_TRANSACTION_STATUSES);
 
 /** One page of rows in the API's paginated envelope. */
 function paginated<T>(
@@ -53,8 +65,9 @@ function paginated<T>(
   params: URLSearchParams,
   defaults: { pageSize: number; maxPageSize: number }
 ): DemoAnswer {
-  const page = whole(params.get("page"), 1);
-  const pageSize = Math.min(whole(params.get("pageSize"), defaults.pageSize), defaults.maxPageSize);
+  const query = pageQuery.parse(Object.fromEntries(params));
+  const page = query.page ?? 1;
+  const pageSize = Math.min(query.pageSize ?? defaults.pageSize, defaults.maxPageSize);
   return {
     status: 200,
     body: {
@@ -80,13 +93,23 @@ function deploymentStatusOf(token: PublicToken): "draft" | "active" | "paused" {
 }
 
 /** `GET /tokens`: search, status, deployment status, template, created range, then sort. */
+const tokenListQuery = pageQuery.extend({
+  search: z.string().optional(),
+  status: z.string().optional(),
+  deploymentStatus: z.string().optional(),
+  template: z.string().optional(),
+  createdAfter: z.string().optional(),
+  createdBefore: z.string().optional(),
+  sortBy: z.string().optional(),
+  sortDirection: z.string().optional(),
+});
+
 function tokenList(world: IssuanceWorld, params: URLSearchParams): DemoAnswer {
-  const search = params.get("search")?.trim().toLowerCase() ?? "";
-  const status = params.get("status");
-  const deploymentStatus = params.get("deploymentStatus");
-  const template = params.get("template");
-  const after = params.get("createdAfter");
-  const before = params.get("createdBefore");
+  const query = tokenListQuery.parse(Object.fromEntries(params));
+  const search = query.search?.trim().toLowerCase() ?? "";
+  const { status, deploymentStatus, template } = query;
+  const after = query.createdAfter;
+  const before = query.createdBefore;
   if (after && before && Date.parse(after) > Date.parse(before)) {
     return badQuery("Invalid query parameters", {
       errors: { createdBefore: ["createdBefore must be at or after createdAfter"] },
@@ -107,8 +130,8 @@ function tokenList(world: IssuanceWorld, params: URLSearchParams): DemoAnswer {
     .filter((token) => (after ? Date.parse(token.createdAt) >= Date.parse(after) : true))
     .filter((token) => (before ? Date.parse(token.createdAt) <= Date.parse(before) : true));
 
-  const byName = params.get("sortBy") === "name";
-  const direction = params.get("sortDirection") === "asc" ? 1 : -1;
+  const byName = query.sortBy === "name";
+  const direction = query.sortDirection === "asc" ? 1 : -1;
   rows.sort((left, right) => {
     const order = byName
       ? left.name.toLowerCase().localeCompare(right.name.toLowerCase())
@@ -135,54 +158,49 @@ function tokenFacets(world: IssuanceWorld): DemoAnswer {
   });
 }
 
-const INCLUDE_FLAGS = [
-  "includeAllowlistAuthority",
-  "includeFreezeAuthority",
-  "includeMetadataAuthority",
-  "includePauseAuthority",
-] as const;
+const includeQuery = z.object({
+  includeAllowlistAuthority: flagParam,
+  includeFreezeAuthority: flagParam,
+  includeMetadataAuthority: flagParam,
+  includePauseAuthority: flagParam,
+});
 
 /** `GET /tokens/:id`: the token, with each authority it was asked for beside it. */
 function tokenDetail(entry: DemoIssuedToken, params: URLSearchParams): DemoAnswer {
-  for (const flag of INCLUDE_FLAGS) {
-    const value = params.get(flag);
-    if (value !== null && value !== "true" && value !== "false") {
-      return badQuery("Invalid query parameters", { errors: { [flag]: ["Invalid input"] } });
-    }
+  const parsed = includeQuery.safeParse(Object.fromEntries(params));
+  if (!parsed.success) {
+    const flag = String(parsed.error.issues[0]?.path[0]);
+    return badQuery("Invalid query parameters", { errors: { [flag]: ["Invalid input"] } });
   }
+  const query = parsed.data;
   const { token } = entry;
-  const asked = (flag: (typeof INCLUDE_FLAGS)[number]) => params.get(flag) === "true";
-  return success({
-    token,
-    ...(asked("includeAllowlistAuthority")
-      ? { allowlistAuthority: token.ablListAddress ? token.mintAuthority : null }
-      : {}),
-    ...(asked("includeFreezeAuthority") ? { freezeAuthority: token.freezeAuthority } : {}),
-    ...(asked("includeMetadataAuthority") ? { metadataAuthority: metadataAuthorityOf(token) } : {}),
-    ...(asked("includePauseAuthority")
-      ? {
-          pauseAuthority: token.extensions?.pausable
-            ? (token.extensions.pausable.authority ?? token.mintAuthority)
-            : null,
-        }
-      : {}),
-  });
+  const asked = (flag: keyof typeof query) => query[flag] === "true";
+  const authorities: Record<string, unknown> = {};
+  if (asked("includeAllowlistAuthority")) {
+    authorities.allowlistAuthority = token.ablListAddress ? token.mintAuthority : null;
+  }
+  if (asked("includeFreezeAuthority")) authorities.freezeAuthority = token.freezeAuthority;
+  if (asked("includeMetadataAuthority")) {
+    authorities.metadataAuthority = metadataAuthorityOf(token);
+  }
+  if (asked("includePauseAuthority")) {
+    authorities.pauseAuthority = token.extensions?.pausable
+      ? (token.extensions.pausable.authority ?? token.mintAuthority)
+      : null;
+  }
+  return success({ token, ...authorities });
 }
 
-function oneOf<T extends string>(value: string | null, allowed: readonly T[]): value is T {
-  return value !== null && (allowed as readonly string[]).includes(value);
-}
+const tokenTransactionsQuery = pageQuery.extend({
+  type: transactionType.optional(),
+  status: transactionStatus.optional(),
+});
 
 /** `GET /tokens/:id/transactions`: newest first, one type and one status at most. */
 function tokenTransactions(entry: DemoIssuedToken, params: URLSearchParams): DemoAnswer {
-  const type = params.get("type");
-  const status = params.get("status");
-  if (type !== null && !oneOf(type, TOKEN_TRANSACTION_TYPES)) {
-    return badQuery("Invalid query parameters");
-  }
-  if (status !== null && !oneOf(status, TOKEN_TRANSACTION_STATUSES)) {
-    return badQuery("Invalid query parameters");
-  }
+  const parsed = tokenTransactionsQuery.safeParse(Object.fromEntries(params));
+  if (!parsed.success) return badQuery("Invalid query parameters");
+  const { type, status } = parsed.data;
   const rows = entry.transactions.filter(
     (row) => (type ? row.type === type : true) && (status ? row.status === status : true)
   );
@@ -190,21 +208,24 @@ function tokenTransactions(entry: DemoIssuedToken, params: URLSearchParams): Dem
 }
 
 /** `GET /transactions`: every token's, each with the token it belongs to. */
+const allTransactionsQuery = pageQuery.extend({ status: transactionStatus.optional() });
+
 function allTransactions(world: IssuanceWorld, params: URLSearchParams): DemoAnswer {
   const types = params.getAll("type");
-  const status = params.get("status");
-  const invalidTypes = types.filter((type) => !oneOf(type, TOKEN_TRANSACTION_TYPES));
+  const invalidTypes = types.filter((type) => !transactionType.safeParse(type).success);
   if (invalidTypes.length > 0) {
     return badQuery("Invalid type query parameter", {
       invalidTypes,
       allowedTypes: TOKEN_TRANSACTION_TYPES,
     });
   }
-  if (status !== null && !oneOf(status, TOKEN_TRANSACTION_STATUSES)) {
+  const parsed = allTransactionsQuery.safeParse(Object.fromEntries(params));
+  if (!parsed.success) {
     return badQuery("Invalid status query parameter", {
       allowedStatuses: TOKEN_TRANSACTION_STATUSES,
     });
   }
+  const status = parsed.data.status;
   const wantedTypes = new Set(types);
   const rows = world.tokens
     .flatMap(({ token, transactions }) =>
@@ -228,10 +249,16 @@ function allTransactions(world: IssuanceWorld, params: URLSearchParams): DemoAns
 }
 
 /** `GET /tokens/:id/audit`: the activity feed, filtered by action, outcome and actor. */
+const tokenAuditQuery = pageQuery.extend({
+  action: z.string().optional(),
+  status: z.string().optional(),
+  type: z.string().optional(),
+});
+
 function tokenAudit(entry: DemoIssuedToken, params: URLSearchParams): DemoAnswer {
-  const action = params.get("action");
-  const status = params.get("status");
-  const actorType = params.get("type");
+  const query = tokenAuditQuery.parse(Object.fromEntries(params));
+  const { action, status } = query;
+  const actorType = query.type;
   const rows = entry.audit.filter(
     (event) =>
       (action ? event.action === action : true) &&
@@ -242,9 +269,15 @@ function tokenAudit(entry: DemoIssuedToken, params: URLSearchParams): DemoAnswer
 }
 
 /** `GET /tokens/:id/allowlist`: the active entries, searched by address or label. */
+const controlListQuery = pageQuery.extend({
+  search: z.string().optional(),
+  label: z.string().optional(),
+});
+
 function controlList(entry: DemoIssuedToken, params: URLSearchParams): DemoAnswer {
-  const search = params.get("search")?.trim().toLowerCase() ?? "";
-  const label = params.get("label");
+  const query = controlListQuery.parse(Object.fromEntries(params));
+  const search = query.search?.trim().toLowerCase() ?? "";
+  const label = query.label;
   const rows = entry.controlList.filter(
     (row) =>
       row.status === "active" &&
@@ -296,6 +329,11 @@ function tokenRoute(world: IssuanceWorld, rest: readonly string[], params: URLSe
   return sub === "allowlist" && leaf === "labels" ? controlListLabels(entry) : undefined;
 }
 
+const assetProfilesQuery = pageQuery.extend({
+  tokenIds: z.string().optional(),
+  category: z.string().optional(),
+});
+
 function assetProfilesRoute(
   world: IssuanceWorld,
   rest: readonly string[],
@@ -303,15 +341,16 @@ function assetProfilesRoute(
 ): DemoAnswer | undefined {
   const [first, second] = rest;
   if (first === undefined) {
-    const tokenIds = params.get("tokenIds")?.split(",").filter(Boolean);
+    const query = assetProfilesQuery.parse(Object.fromEntries(params));
+    const tokenIds = query.tokenIds?.split(",").filter(Boolean);
     const wantedTokenIds = tokenIds ? new Set(tokenIds) : null;
-    const category = params.get("category");
+    const category = query.category;
     const profiles = world.tokens
       .map((entry) => entry.profile)
       .filter((profile) => (wantedTokenIds ? wantedTokenIds.has(profile.tokenId) : true))
       .filter((profile) => (category ? profile.assetCategory === category : true));
-    const page = whole(params.get("page"), 1);
-    const pageSize = Math.min(whole(params.get("pageSize"), 20), 100);
+    const page = query.page ?? 1;
+    const pageSize = Math.min(query.pageSize ?? 20, 100);
     return success({
       assetProfiles: profiles.slice((page - 1) * pageSize, page * pageSize),
       total: profiles.length,

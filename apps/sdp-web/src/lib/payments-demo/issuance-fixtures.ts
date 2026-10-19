@@ -646,14 +646,15 @@ function seedDeployAttempt(context: SeedContext) {
 }
 
 function seededMetadata(spec: DemoTokenSpec, aclMode: string, walletIds: Record<string, string>) {
+  const asset: Record<string, unknown> = {
+    name: spec.name,
+    description: spec.description,
+    issuerName: spec.issuerName,
+  };
+  if (spec.website) asset.website = spec.website;
+  if (spec.pegCurrency) asset.pegCurrency = spec.pegCurrency;
   return {
-    asset: {
-      name: spec.name,
-      description: spec.description,
-      issuerName: spec.issuerName,
-      ...(spec.website ? { website: spec.website } : {}),
-      ...(spec.pegCurrency ? { pegCurrency: spec.pegCurrency } : {}),
-    },
+    asset,
     compliance: { accessControl: aclMode },
     chain: { decimals: spec.decimals },
     custom: { customer: { authorityWalletIds: walletIds } },
@@ -661,12 +662,13 @@ function seededMetadata(spec: DemoTokenSpec, aclMode: string, walletIds: Record<
 }
 
 function seededWalletIds(spec: DemoTokenSpec, walletId: string): Record<string, string> {
-  return {
+  const walletIds: Record<string, string> = {
     "mint-authority": walletId,
     "metadata-authority": walletId,
-    ...(spec.freezable ? { "freeze-authority": walletId } : {}),
-    ...(spec.delegate ? { "permanent-delegate": walletId } : {}),
   };
+  if (spec.freezable) walletIds["freeze-authority"] = walletId;
+  if (spec.delegate) walletIds["permanent-delegate"] = walletId;
+  return walletIds;
 }
 
 function buildToken(

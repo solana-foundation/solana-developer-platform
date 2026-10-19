@@ -363,6 +363,11 @@ function onBlocklist(entry: DemoIssuedToken, target: string) {
   );
 }
 
+/** Whether the account is frozen now: a freeze with no unfreeze after it. */
+function isFrozen(entry: DemoIssuedToken, account: string): boolean {
+  return entry.frozen.some((row) => row.accountAddress === account && row.unfrozenAt === null);
+}
+
 const mintSchema = z.strictObject({
   signingCustodyWalletId: walletId.optional(),
   mint: z.strictObject({ destination: address, amount, memo }),
@@ -387,6 +392,10 @@ function mint(context: WriteContext): DemoWriteResult {
   }
   if (onBlocklist(entry, body.mint.destination)) {
     return fail(403, "ON_TOKEN_BLOCKLIST", "That address is on the token's blocklist.");
+  }
+  // The API refuses a mint into a frozen account (ACCOUNT_FROZEN, a 400), so the demo does too.
+  if (isFrozen(entry, body.mint.destination)) {
+    return fail(400, "ACCOUNT_FROZEN", "Account is frozen");
   }
   if (
     token.maxSupply !== null &&
@@ -773,7 +782,7 @@ function refreshSupply(context: WriteContext): DemoWriteResult {
 
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
-const ISSUANCE_WRITES: ReadonlyArray<[method: string, shape: string, handler: Handler]> = [
+const ISSUANCE_WRITES: ReadonlyArray<[method: string, path: string, handler: Handler]> = [
   ["POST", "issuance/asset-profiles", createDraft],
   ["PATCH", "issuance/asset-profiles/*", updateProfile],
   ["POST", "issuance/tokens", createDraft],
@@ -793,8 +802,9 @@ const ISSUANCE_WRITES: ReadonlyArray<[method: string, shape: string, handler: Ha
   ["POST", "issuance/tokens/*/supply/refresh", refreshSupply],
 ];
 
-function matchesShape(segments: readonly string[], shape: string): boolean {
-  const parts = shape.split("/");
+/** Whether the path's segments match a route's pattern, where `*` matches any one segment. */
+function matchesPath(segments: readonly string[], path: string): boolean {
+  const parts = path.split("/");
   return (
     parts.length === segments.length &&
     parts.every((part, index) => part === "*" || part === segments[index])
@@ -804,7 +814,7 @@ function matchesShape(segments: readonly string[], shape: string): boolean {
 /** The demo's handling of an Issuance write, or undefined when it has no stand-in for it. */
 export function issuanceWrite(method: string, context: WriteContext): DemoWriteResult | undefined {
   const route = ISSUANCE_WRITES.find(
-    ([routeMethod, shape]) => routeMethod === method && matchesShape(context.segments, shape)
+    ([routeMethod, path]) => routeMethod === method && matchesPath(context.segments, path)
   );
   return route?.[2](context);
 }
