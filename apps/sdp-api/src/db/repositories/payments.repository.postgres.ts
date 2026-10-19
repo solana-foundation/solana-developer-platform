@@ -1,6 +1,7 @@
 import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
   type PaymentTransferStatus,
+  PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
   RAMP_TRANSFER_TRANSITIONS,
   type RampTransferType,
   WALLET_TRANSFER_TYPES,
@@ -182,6 +183,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
     status: row.status as PaymentTransferRow["status"],
     provider: storedTransferProviderSchema.parse(row.provider),
     provider_reference: row.provider_reference as string | null,
+    provider_observed_at: row.provider_observed_at as string | null,
     delivery_mode: row.delivery_mode as PaymentTransferRow["delivery_mode"],
     fiat_currency: row.fiat_currency as string | null,
     fiat_amount: row.fiat_amount as string | null,
@@ -254,6 +256,7 @@ export function createPostgresPaymentsRepository(
       organizationId: string;
       projectId: string;
       updatedAt: string;
+      providerObservation?: { reference: string; observedAt: string };
     },
     guard: {
       fromStatuses: readonly PaymentTransferStatus[];
@@ -267,6 +270,12 @@ export function createPostgresPaymentsRepository(
     if (guard.types !== undefined) {
       extraClauses.push("type = ANY(?)");
       extraValues.push([...guard.types]);
+    }
+    if (input.providerObservation !== undefined) {
+      extraClauses.push("provider_reference = ?");
+      extraValues.push(input.providerObservation.reference);
+      extraClauses.push("(provider_observed_at IS NULL OR provider_observed_at < ?)");
+      extraValues.push(input.providerObservation.observedAt);
     }
     const scope = buildTransferScopeWhere({
       organizationId: input.organizationId,
@@ -305,6 +314,10 @@ export function createPostgresPaymentsRepository(
     if (input.error !== undefined) {
       assignments.push("error = ?");
       assignmentValues.push(input.error);
+    }
+    if (input.providerObservation !== undefined) {
+      assignments.push("provider_observed_at = ?");
+      assignmentValues.push(input.providerObservation.observedAt);
     }
     const row = await db
       .prepare(
@@ -792,7 +805,60 @@ export function createPostgresPaymentsRepository(
       return row ? z.enum(SDP_ENVIRONMENTS).parse(row.environment) : null;
     },
 
-    async setProviderReferenceIfEmpty(input) {
+    async lockTransferForProvider(input) {
+      if (tenantScope) throw new Error("MoonPay transfer locking requires system scope");
+      const row = await db
+        .prepare(
+          `SELECT pt.*, p.environment AS project_environment,
+                  ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           JOIN projects p ON p.id = pt.project_id
+           WHERE pt.id = ? AND pt.provider = ?
+           FOR UPDATE OF pt`
+        )
+        .bind(input.transferId, input.provider)
+        .first<PaymentTransferProjectionRow & { project_environment: unknown }>();
+      return row
+        ? {
+            transfer: mapTransferRow(row),
+            environment: z.enum(SDP_ENVIRONMENTS).parse(row.project_environment),
+          }
+        : null;
+    },
+
+    async getFailedMoonpayTransaction(transactionId) {
+      if (tenantScope) throw new Error("MoonPay failed-attempt reads require system scope");
+      const row = await db
+        .prepare(
+          `SELECT transfer_id, provider_observed_at
+           FROM moonpay_failed_transactions WHERE transaction_id = ?`
+        )
+        .bind(transactionId)
+        .first<{ transfer_id: string; provider_observed_at: string }>();
+      return row
+        ? { transferId: row.transfer_id, providerObservedAt: row.provider_observed_at }
+        : null;
+    },
+
+    async recordFailedMoonpayTransaction(input) {
+      if (tenantScope) throw new Error("MoonPay failed-attempt writes require system scope");
+      await db
+        .prepare(
+          `INSERT INTO moonpay_failed_transactions
+             (transaction_id, transfer_id, provider_observed_at, failure_reason, settlement)
+           VALUES (?, ?, ?, ?, ?::jsonb)`
+        )
+        .bind(
+          input.transactionId,
+          input.transferId,
+          input.providerObservedAt,
+          input.failureReason ?? null,
+          input.settlement === undefined ? null : JSON.stringify(input.settlement)
+        )
+        .run();
+    },
+
+    async claimProviderReference(input) {
       const clauses = ["id = ?", "provider = ?"];
       const values: unknown[] = [input.transferId, input.provider];
       if (tenantScope) {
@@ -803,9 +869,15 @@ export function createPostgresPaymentsRepository(
         .prepare(
           `WITH pt AS (
            UPDATE payment_transfers
-           SET provider_reference = ?, updated_at = ?
+           SET provider_reference = ?,
+               updated_at = CASE WHEN provider_reference IS NULL THEN ? ELSE updated_at END
            WHERE ${clauses.join(" AND ")}
              AND (provider_reference IS NULL OR provider_reference = ?)
+             AND (provider_reference IS NOT NULL OR status = ANY(?))
+             AND (provider <> 'moonpay' OR NOT EXISTS (
+               SELECT 1 FROM moonpay_failed_transactions failed
+               WHERE failed.transaction_id = ?
+             ))
              AND EXISTS (
                SELECT 1 FROM projects p
                WHERE p.id = payment_transfers.project_id AND p.environment = ?
@@ -819,11 +891,32 @@ export function createPostgresPaymentsRepository(
           input.updatedAt,
           ...values,
           input.providerReference,
+          [...PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES],
+          input.providerReference,
           input.environment
         )
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
+    },
+
+    async releaseMoonpayProviderReference(input) {
+      if (tenantScope) throw new Error("MoonPay reference release requires system scope");
+      const changed = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET provider_reference = NULL,
+               provider_observed_at = NULL,
+               provider_data = provider_data || '{"cryptoDeposit":null}'::jsonb,
+               error = NULL
+           WHERE id = ? AND provider = 'moonpay' AND status = 'awaiting_payment'
+             AND provider_reference IS NOT DISTINCT FROM ?
+             AND provider_observed_at IS NOT DISTINCT FROM ?
+             AND signature IS NULL AND submission_started_at IS NULL`
+        )
+        .bind(input.transferId, input.providerReference, input.providerObservedAt)
+        .run();
+      if (changed !== 1) throw new Error("MoonPay reference changed before failure release");
     },
 
     async listTransfersBySignatures(params) {

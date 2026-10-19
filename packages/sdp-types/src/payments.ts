@@ -102,6 +102,11 @@ export const RAMP_WEBHOOK_REFUSAL_REASONS = [
   "transfer_type_mismatch",
   "asset_mismatch",
   "settled_after_cancel",
+  "provider_reference_conflict",
+  "moonpay_attempt_revived",
+  "moonpay_failure_after_funding",
+  "moonpay_terminal_conflict",
+  "moonpay_sell_failed",
 ] as const;
 export type RampWebhookRefusalReason = (typeof RAMP_WEBHOOK_REFUSAL_REASONS)[number];
 
@@ -265,6 +270,13 @@ export const RAMP_TRANSFER_TRANSITIONS = {
     from: PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
     to: "failed",
     types: RAMP_TRANSFER_TYPES,
+  },
+  // A failed MoonPay checkout attempt releases its transaction reference so
+  // the same transfer can be retried. The caller separately guards funding.
+  moonpay_attempt_failed: {
+    from: ["pending", "awaiting_payment", "settling", "expired"],
+    to: "awaiting_payment",
+    types: ["onramp"],
   },
   // Not from `settling`: a stale redelivered expiry must not undo a transfer
   // another event already revived.

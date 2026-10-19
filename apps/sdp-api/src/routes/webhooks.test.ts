@@ -931,6 +931,7 @@ describe("MoonPay ramp webhook", () => {
     data: {
       id: MOONPAY_TRANSACTION_ID,
       status: "completed",
+      updatedAt: "2026-06-18T11:00:00.000Z",
       customerId: MOONPAY_CUSTOMER_ID,
       externalTransactionId: TRANSFER_ID,
       failureReason: null,
@@ -1015,6 +1016,7 @@ describe("MoonPay ramp webhook", () => {
       data: {
         id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
         status: "completed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         externalTransactionId: TRANSFER_ID,
         quoteCurrencyAmount: 16.31,
       },
@@ -1036,6 +1038,7 @@ describe("MoonPay ramp webhook", () => {
       data: {
         id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
         status: "completed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         customerId: MOONPAY_CUSTOMER_ID,
         externalTransactionId: TRANSFER_ID,
         baseCurrencyAmount: 0.2,
@@ -1066,6 +1069,7 @@ describe("MoonPay ramp webhook", () => {
       data: {
         id: moonpayTransactionId,
         status: "completed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         customerId: MOONPAY_CUSTOMER_ID,
         externalTransactionId: TRANSFER_ID,
         baseCurrencyAmount: 0.2,
@@ -1134,31 +1138,41 @@ describe("MoonPay ramp webhook", () => {
     expect(rows.results).toHaveLength(1);
     expect(rows.results[0].id).toBe(required(link).id);
   });
-  it("still marks a transfer failed when an early-stage failure omits economics", async () => {
+  it("keeps an unfunded transfer retryable when a buy attempt fails without economics", async () => {
     const res = await sendMoonpayWebhook({
       type: "transaction_failed",
       externalCustomerId: "MOONPAY-ONRAMP-0001",
       data: {
         id: MOONPAY_TRANSACTION_ID,
         status: "failed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         externalTransactionId: TRANSFER_ID,
         failureReason: "kyc_rejected",
       },
     });
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
-      .prepare("SELECT status, error, provider_data FROM payment_transfers WHERE id = ?")
+      .prepare(
+        "SELECT status, error, provider_reference, provider_data FROM payment_transfers WHERE id = ?"
+      )
       .bind(TRANSFER_ID)
       .first<{
         status: string;
         error: string | null;
+        provider_reference: string | null;
         provider_data: {
           settlement?: unknown;
         };
       }>();
-    expect(required(transfer).status).toBe("failed");
-    expect(required(transfer).error).toBe("kyc_rejected");
+    expect(required(transfer).status).toBe("awaiting_payment");
+    expect(required(transfer).error).toBeNull();
+    expect(required(transfer).provider_reference).toBeNull();
     expect(required(transfer).provider_data.settlement).toBeUndefined();
+    const retired = await getDb(env)
+      .prepare("SELECT failure_reason FROM moonpay_failed_transactions WHERE transaction_id = ?")
+      .bind(MOONPAY_TRANSACTION_ID)
+      .first<{ failure_reason: string | null }>();
+    expect(retired).toEqual({ failure_reason: "kyc_rejected" });
   });
   it("rejects a moonpay webhook whose signed timestamp is outside the replay window", async () => {
     const body = JSON.stringify(completedPayload);

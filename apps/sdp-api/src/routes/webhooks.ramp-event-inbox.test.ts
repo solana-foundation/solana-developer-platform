@@ -174,6 +174,7 @@ describe("Ramp webhook event inbox", () => {
     data: {
       id: MOONPAY_TRANSACTION_ID,
       status: "completed",
+      updatedAt: "2026-06-18T11:00:00.000Z",
       externalTransactionId: TRANSFER_ID,
       failureReason: null,
       baseCurrencyAmount: 47.73,

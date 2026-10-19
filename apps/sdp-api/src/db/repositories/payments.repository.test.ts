@@ -314,26 +314,26 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       updatedAt: "2026-08-31T11:00:00.000Z",
     };
     await expect(
-      repo.setProviderReferenceIfEmpty({ ...input, environment: "production" })
+      repo.claimProviderReference({ ...input, environment: "production" })
     ).resolves.toBeNull();
     await expect(
       repo.getTransferProjectEnvironment({ transferId: transfer.id, provider: "moonpay" })
     ).resolves.toBe("sandbox");
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    await expect(repo.claimProviderReference(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    await expect(repo.claimProviderReference(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
     await expect(
-      repo.setProviderReferenceIfEmpty({
+      repo.claimProviderReference({
         ...input,
         providerReference: "moonpay-transaction-2",
         updatedAt: "2026-08-31T11:01:00.000Z",
       })
     ).resolves.toBeNull();
     await expect(
-      repo.setProviderReferenceIfEmpty({
+      repo.claimProviderReference({
         ...input,
         provider: "stripe",
       })
