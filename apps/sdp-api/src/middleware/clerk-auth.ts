@@ -20,7 +20,7 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
-import { enforceOrganizationAccess, organizationNotActive } from "@/lib/organization-access";
+import { organizationNotActive, readActiveOrganizationSettings } from "@/lib/organization-access";
 import {
   loadOrganizationEntitlements,
   recordOrganizationEntitlements,
@@ -429,11 +429,11 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
 
   // Everything below writes — user provisioning, membership, default projects,
   // email repair — so organization access gates entry here rather than the
-  // response after: a deleted organization or a blocked origin must not leave
-  // state behind. A Clerk organization outlives an SDP deletion, so without
+  // response after: a deleted organization must not leave state behind. The
+  // organization's IP allowlist is not checked: it governs API keys only. A Clerk organization outlives an SDP deletion, so without
   // this a member could sign back into a deleted organization and be given a
   // fresh active membership. Only an organization that already exists can be
-  // deleted or carry a restriction; one first provisioned by this request
+  // deleted; one first provisioned by this request
   // cannot, so the callers need no second check.
   const knownOrganization = await resolveClerkOrganization(
     getDb(c.env),
@@ -442,7 +442,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   if (knownOrganization) {
     recordOrganizationEntitlements(
       c,
-      await enforceOrganizationAccess(c, knownOrganization.organization_id)
+      await readActiveOrganizationSettings(c.env, knownOrganization.organization_id)
     );
   }
 
