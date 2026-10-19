@@ -9,10 +9,12 @@ import {
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { Action } from "@sdp/types/actions";
 import {
   isRampTransferType,
   isSuccessfulPaymentTransferStatus,
   OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS,
+  PAYMENT_TRANSFER_TYPES,
   RAMP_TRANSFER_TYPES,
   TRANSFER_CHAIN_VERDICT_STATUSES,
   type PaymentTransferStatus as TransferStatus,
@@ -70,6 +72,7 @@ import {
 } from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
+import { callerMayPerform } from "@/middleware/require-action";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
@@ -965,6 +968,38 @@ function observedTransferTarget(wallet: CustodyWallet): ObservedTransferTarget {
   };
 }
 
+/**
+ * The read that shows each type of transfer row, as the unified feed asks
+ * for each kind: a ramp or batch row is that module's record, so
+ * `transfers.read` alone does not show it (HOO-2099).
+ */
+const TRANSFER_TYPE_READ_ACTIONS = {
+  transfer: "transfers.read",
+  transfer_batch: "transfer_batches.read",
+  onramp: "onramp.read",
+  offramp: "offramp.read",
+} as const satisfies Record<TransferType, Action>;
+
+/**
+ * The transfer types this caller may list: an explicitly requested type it
+ * cannot read is refused, naming the read; a category or the default set is
+ * narrowed to what it can read.
+ */
+function readableTransferTypes(
+  c: AppContext,
+  requested: readonly TransferType[] | undefined,
+  candidates: readonly TransferType[]
+): TransferType[] {
+  const unreadable = (requested ?? []).find(
+    (type) => !callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type])
+  );
+  if (unreadable) {
+    const action = TRANSFER_TYPE_READ_ACTIONS[unreadable];
+    throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+  }
+  return candidates.filter((type) => callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type]));
+}
+
 export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
@@ -996,7 +1031,6 @@ export async function listTransfers(c: AppContext) {
       : category === "ramp"
         ? RAMP_TRANSFER_TYPES
         : undefined;
-  const transferTypes = requestedTypes ?? categoryTypes;
   if (
     requestedTypes &&
     categoryTypes &&
@@ -1004,6 +1038,11 @@ export async function listTransfers(c: AppContext) {
   ) {
     throw badRequest("type must match the requested transfer category");
   }
+  const transferTypes = readableTransferTypes(
+    c,
+    requestedTypes,
+    requestedTypes ?? categoryTypes ?? PAYMENT_TRANSFER_TYPES
+  );
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
   // Rows store mints, so a symbol or native-SOL filter must be normalized to
   // the same canonical mint before either the in-memory or SQL comparison.
@@ -1233,7 +1272,10 @@ export async function getTransfer(c: AppContext) {
     projectId: requireProjectId(c),
   });
 
-  if (!row) throw notFound("Transfer");
+  // A row of a module the caller cannot read is not disclosed.
+  if (!row || !callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[row.type])) {
+    throw notFound("Transfer");
+  }
 
   return success(c, { transfer: mapTransferRow(row) });
 }

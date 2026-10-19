@@ -13,7 +13,7 @@ export function OrganizationIpAllowlistForm({
   initialAllowedIps: string[];
 }) {
   const t = useTranslations();
-  const [value, setValue] = useState(initialAllowedIps.join("\n"));
+  const [value, setValue] = useState(() => initialAllowedIps.join("\n"));
   const [isPending, startTransition] = useTransition();
 
   const save = () => {

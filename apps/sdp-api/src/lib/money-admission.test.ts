@@ -326,7 +326,7 @@ describe("decidePrincipal", () => {
   const WALLET = { custodyWalletId: "cwlt_signing" } as const;
   const readAt = Date.parse("2026-10-14T00:00:00.000Z");
   const liveKey = (
-    key: Partial<Extract<MoneyPrincipalFacts, { kind: "api_key" }>["key"] & object> = {}
+    key: Partial<NonNullable<Extract<MoneyPrincipalFacts, { kind: "api_key" }>["key"]>> = {}
   ): MoneyPrincipalFacts => ({
     kind: "api_key",
     key: {

@@ -49,9 +49,17 @@ function effectiveExpiry(key: ApiKeyRecord): string | null {
   return key.rotationDeadline ?? key.expiresAt;
 }
 
-/** A rotated key that still works until its deadline. Revocation keeps the deadline. */
-function isRotating(key: ApiKeyRecord): boolean {
-  return key.status === "active" && key.rotationDeadline !== null;
+/**
+ * A rotated key that still works until its deadline. Revocation keeps the
+ * deadline, and a key past it stays `active` in the row while authentication
+ * refuses it, so the deadline itself decides.
+ */
+function isRotating(key: ApiKeyRecord, now = Date.now()): boolean {
+  return (
+    key.status === "active" &&
+    key.rotationDeadline !== null &&
+    new Date(key.rotationDeadline).getTime() > now
+  );
 }
 
 function statusLabel(key: ApiKeyRecord, t: ReturnType<typeof useTranslations>): string {
