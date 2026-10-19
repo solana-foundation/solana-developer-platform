@@ -3,20 +3,17 @@ import type { Env } from "@/types/env";
 /**
  * What a Cron Definition does to money (HOO-1955).
  *
- * - `starts`: can sign or pay out something new, so it names how it is admitted
- *   (`lib/money-admission.ts`, or the HTTP pipeline it re-enters), or names the gap until its
- *   module's admission lands.
+ * - `starts`: can sign or pay out something new. Admission is enforced where the money moves,
+ *   not here: the custody signer and fee sponsor decide on the movement they are handed, and a
+ *   start that signs nothing calls `assertMoneyStartAdmitted` (`lib/money-admission.ts`). The
+ *   definitions test pins the list of `starts` crons, so a new one is reviewed for admission.
  * - `finishes`: completes movement already signed or funded, a Money Exit. Its `enabled` is
  *   always true: switching it off would strand money (ADR 0002).
  * - `observes`: reads, reconciles bookkeeping, or cleans up. Moves nothing.
  */
-export type CronMoneyEffect =
-  | {
-      effect: "starts";
-      admission: { via: "money_admission" } | { via: "http_pipeline" } | { gap: string };
-    }
-  | { effect: "finishes" }
-  | { effect: "observes" };
+export const CRON_MONEY_EFFECTS = ["starts", "finishes", "observes"] as const;
+
+export type CronMoneyEffect = (typeof CRON_MONEY_EFFECTS)[number];
 
 /**
  * One named piece of recurring background work, run by the Worker (ADR 0011).
@@ -29,10 +26,11 @@ export type CronMoneyEffect =
  * - `enabled` is decided once, when the Worker registers the definition.
  * - `runOnStart` also runs one slot as soon as the Worker registers the definition.
  */
-export type CronDefinition = CronMoneyEffect & {
+export type CronDefinition = {
   name: string;
   schedule: string;
   scope: "global" | "cluster";
+  effect: CronMoneyEffect;
   enabled: (env: Env) => boolean;
   run: (env: Env) => Promise<void>;
   runOnStart?: boolean;

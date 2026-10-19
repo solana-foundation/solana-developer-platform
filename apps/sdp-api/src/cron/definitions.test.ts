@@ -9,12 +9,12 @@ describe("CRON_DEFINITIONS", () => {
     expect(names).toEqual([...new Set(names)]);
   });
 
-  it("pins the definitions that start money without admission, so the list only shrinks", () => {
-    const gaps = CRON_DEFINITIONS.filter(
-      (definition) => definition.effect === "starts" && "gap" in definition.admission
-    ).map((definition) => definition.name);
+  it("pins the definitions that start money, so a new one is reviewed for admission", () => {
+    const starts = CRON_DEFINITIONS.filter((definition) => definition.effect === "starts").map(
+      (definition) => definition.name
+    );
 
-    expect(gaps).toEqual(["poll-rings-indexing"]);
+    expect(starts).toEqual(["collect-recurring-payments"]);
   });
 
   it("keeps every Money Exit but track-pending-withdrawals enabled with every feature flag off", () => {

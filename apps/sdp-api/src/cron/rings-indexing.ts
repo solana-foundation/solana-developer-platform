@@ -6,15 +6,18 @@ import { defineCron } from "./define-cron";
 // purpose for now: it reads through the Helius Rings gateway configured from env (devnet only),
 // not the shared cluster pool, so it is not cluster-scoped yet. Do not copy this shape for a
 // chain-touching cron; use `scope: "cluster"`.
-/** Rings indexing poll: builds and signs proving rows. */
+//
+// NOTE: classified `observes` for now, while Helius Rings is experimental. That understates it:
+// its in-flight pass calls `executeOperation`, which rebuilds an operation that died in
+// `proving`, has custody sign it and broadcasts a new transaction. Revisit before promoting
+// `helius_rings` to the stable release channel: `starts` (admitted where it signs) or
+// `finishes` (a Money Exit, which needs a named security reviewer).
+/** Rings indexing poll: settles broadcast Rings operations and resumes in-flight ones. */
 export const ringsIndexingCron = defineCron({
   name: "poll-rings-indexing",
   schedule: "* * * * *",
   scope: "global",
-  effect: "starts",
-  admission: {
-    gap: "Helius Rings builds and signs proving rows with no admission; it is devnet-only today, and the Rings slice adds it.",
-  },
+  effect: "observes",
   enabled: isHeliusRingsEnabled,
   run: pollRingsIndexing,
 });

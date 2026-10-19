@@ -12,13 +12,12 @@ async function collectDueNow(env: Env): Promise<void> {
   await collectDueRecurringPayments(env, new Date());
 }
 
-/** Recurring payment collection: signs new collections, admitted through money admission. */
+/** Recurring payment collection: signs new collections, each admitted through `assertMoneyStartAdmitted`. */
 export const recurringPaymentsCron = defineCron({
   name: "collect-recurring-payments",
   schedule: "*/5 * * * *",
   scope: "cluster",
   effect: "starts",
-  admission: { via: "money_admission" },
   enabled: alwaysEnabled,
   run: collectDueNow,
 });
