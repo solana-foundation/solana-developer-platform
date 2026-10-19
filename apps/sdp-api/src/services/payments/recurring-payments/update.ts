@@ -5,7 +5,7 @@ import {
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { createRpc } from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { PaymentRecurringPaymentUpdateAttemptMode } from "@sdp/types/payments";
@@ -1010,7 +1010,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
-  rpc: ReturnType<typeof createRpc>;
+  rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
