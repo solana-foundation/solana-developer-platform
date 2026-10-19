@@ -25,7 +25,6 @@ import routeActionsJson from "@/openapi/route-actions.generated.json";
 import type { RegisteredRouteAuthorization } from "@/routes/route-actions";
 import { registeredRouteAuthorizations, routeActionsByOperation } from "@/routes/route-actions";
 import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
-import { noopObservability } from "@/runtime/observability";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -38,7 +37,6 @@ import { clearKVStores } from "@/test/mocks/kv";
  * until it declares one.
  */
 const app = createApp({
-  observability: noopObservability,
   rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
 });
 const routes = registeredRouteAuthorizations(app);
@@ -311,7 +309,6 @@ describe("plugin routes", () => {
     };
     const withPlugin = registeredRouteAuthorizations(
       createApp({
-        observability: noopObservability,
         rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
         plugins: [plugin],
       })

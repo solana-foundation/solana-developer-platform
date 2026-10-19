@@ -1,7 +1,7 @@
 /**
  * SDP API — Node.js entrypoint.
  *
- * Owns the HTTP transport, reconciliation scheduler, observability startup,
+ * Owns the HTTP transport, the Worker's cron scheduler, logging startup,
  * and background-task tracking needed for graceful shutdown.
  *
  * The shutdown sequence lives in `runtime/shutdown-node.ts`.
@@ -12,12 +12,7 @@ import { type ServerType, serve } from "@hono/node-server";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 
 import { createApp } from "@/app";
-import {
-  assertCronConfig,
-  type CronHandle,
-  startCron,
-  startEarnCatalogueBootSync,
-} from "@/cron/runner";
+import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
 import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
@@ -25,7 +20,6 @@ import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/back
 import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
-import { noopObservability } from "@/runtime/observability";
 import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
@@ -144,7 +138,6 @@ async function main(): Promise<void> {
 
   const app = createNodeHttpApp(
     createApp({
-      observability: noopObservability,
       rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
       egressReadiness: egress?.state,
     })
@@ -203,8 +196,7 @@ async function main(): Promise<void> {
   // Unhandled rejections: by default initiate a graceful shutdown so the
   // orchestrator restarts a clean process. Setting
   // FATAL_ON_UNHANDLED_REJECTION=false keeps the process running and just
-  // logs the rejection — @sentry/node, when initialised, captures it
-  // regardless via its own listener. The default mirrors Node's terminate
+  // logs the rejection. The default mirrors Node's terminate
   // semantics from v15+ without being more aggressive; teams that
   // tolerate transient rejections from third-party libraries can opt out.
   process.on("unhandledRejection", (reason) => {
@@ -228,7 +220,6 @@ async function main(): Promise<void> {
   await egress?.settled;
   if (shuttingDown === null) {
     cron = startCron({ env, bg });
-    startEarnCatalogueBootSync({ env, bg });
   }
 }
 

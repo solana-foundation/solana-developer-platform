@@ -8,11 +8,23 @@ import {
 } from "./event-status-mapping";
 
 describe("moonpayTransactionSettlementEvent", () => {
+  it("requires the transaction's top-level observation time", () => {
+    assert.equal(
+      moonpayBuyTransactionSchema.safeParse({ id: "buy", status: "pending" }).success,
+      false
+    );
+    assert.equal(
+      moonpaySellTransactionSchema.safeParse({ id: "sell", status: "pending" }).success,
+      false
+    );
+  });
+
   it("keeps MoonPay's transaction id separate from SDP's correlation id", () => {
     const data = moonpayBuyTransactionSchema.parse({
       id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
       externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
       status: "pending",
+      updatedAt: "2026-08-31T11:00:00.000Z",
     });
 
     assert.deepEqual(moonpayTransactionSettlementEvent(data), {
@@ -20,6 +32,8 @@ describe("moonpayTransactionSettlementEvent", () => {
       kind: "settling",
       reference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
       transferId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+      rampType: "onramp",
+      providerObservedAt: "2026-08-31T11:00:00.000Z",
     });
   });
 
@@ -28,6 +42,7 @@ describe("moonpayTransactionSettlementEvent", () => {
       id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
       externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
       status: "completed",
+      updatedAt: "2026-08-31T11:01:00.000Z",
       quoteCurrencyAmount: 0.206,
       walletAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
       cryptoTransactionId:
@@ -39,6 +54,8 @@ describe("moonpayTransactionSettlementEvent", () => {
       kind: "settled",
       reference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
       transferId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+      rampType: "onramp",
+      providerObservedAt: "2026-08-31T11:01:00.000Z",
       receivedAmount: "0.206",
       onchain: {
         signature:
@@ -61,6 +78,7 @@ const waitingForDepositPayload = {
   quoteCurrencyAmount: 16.31,
   flow: "principal",
   status: "waitingForDeposit",
+  updatedAt: "2026-08-28T11:00:00.000Z",
   customerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
   refundWalletAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
   externalTransactionId: SDP_TRANSFER_ID,
@@ -87,6 +105,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       kind: "awaiting_payment",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
       transferId: SDP_TRANSFER_ID,
+      rampType: "offramp",
+      providerObservedAt: "2026-08-28T11:00:00.000Z",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       cryptoDeposit: {
         destinationAddress: "NEQhyijWMWBYq1khA2YaeG6FyxMBVMbnFsasxa9DZvU",
@@ -104,6 +124,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       kind: "awaiting_payment",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
       transferId: SDP_TRANSFER_ID,
+      rampType: "offramp",
+      providerObservedAt: "2026-08-28T11:00:00.000Z",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       cryptoDeposit: null,
     });
@@ -124,6 +146,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       kind: "settled",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
       transferId: SDP_TRANSFER_ID,
+      rampType: "offramp",
+      providerObservedAt: "2026-08-28T11:00:00.000Z",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       receivedAmount: "16.31",
       onchain: {
@@ -145,6 +169,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       kind: "settled",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
       transferId: SDP_TRANSFER_ID,
+      rampType: "offramp",
+      providerObservedAt: "2026-08-28T11:00:00.000Z",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       receivedAmount: "16.31",
     });
@@ -159,6 +185,8 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       kind: "failed",
       reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
       transferId: SDP_TRANSFER_ID,
+      rampType: "offramp",
+      providerObservedAt: "2026-08-28T11:00:00.000Z",
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       error: "Deposit timeout",
     });

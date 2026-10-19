@@ -60,8 +60,6 @@ const EXEMPT = {
  * first.
  */
 const NAMES_NOTHING = {
-  "POST /v1/compliance/address-screenings":
-    "screens an on-chain address the caller supplies; it names no resource of any project",
   "POST /v1/counterparties":
     "creates a counterparty in the caller's own project; it names no existing resource",
 } as const satisfies Record<string, string>;
