@@ -3,11 +3,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { HUMAN_SESSION_REQUIRED_MESSAGE } from "@/middleware/human-session";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { seedApiKeyRow } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 
 /**
  * API keys are credentials, not administrators (HOO-2099): key management,
@@ -48,7 +47,7 @@ describe("human-only routes", () => {
     await seedApiKeyRow(
       env,
       await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
-      TEST_CACHED_API_KEY
+      TEST_SEEDED_API_KEY
     );
   });
 
@@ -79,7 +78,7 @@ describe("human-only routes", () => {
   it.each(humanOnlyRoutes())("refuses an api_admin API key on %s", async (route) => {
     const [method, path] = route.split(" ");
     const url = path
-      .replace(":projectId", TEST_CACHED_API_KEY.projectId)
+      .replace(":projectId", TEST_SEEDED_API_KEY.projectId)
       .replace(":orgId", TEST_ORG.id)
       .replace(/:[A-Za-z]+/g, "unused_id");
 

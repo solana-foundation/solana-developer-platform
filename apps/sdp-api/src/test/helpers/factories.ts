@@ -6,7 +6,7 @@
  */
 
 import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
-import type { SeededApiKey } from "@/test/mocks/kv";
+import type { SeededApiKey } from "@/test/mocks/db";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Counters for unique IDs

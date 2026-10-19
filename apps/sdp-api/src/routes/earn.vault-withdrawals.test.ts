@@ -26,8 +26,8 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const withdrawFromVault = vi.hoisted(() => vi.fn());
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
@@ -101,7 +101,7 @@ const TEST_PRODUCTION_PROJECT = { id: "prj_test_earn_vw_prod", slug: "test-earn-
 const TEST_USER = { id: "usr_earn_vw", email: "earn-vw@example.com" };
 const TEST_API_KEY = { id: "key_earn_vw", raw: "sk_test_earn_vw", prefix: "sk_test_ear" };
 const PROD_API_KEY = { id: "key_earn_vw_prod", raw: "sk_live_earn_vw", prefix: "sk_live_ear" };
-const TEST_CACHED_API_KEY: SeededApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -128,7 +128,7 @@ let originalEncryptionKey: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -156,7 +156,7 @@ async function seedAuth(): Promise<void> {
     permissions: ["*"],
   });
   await seedApiKeyRow(env, productionKeyHash, {
-    ...TEST_CACHED_API_KEY,
+    ...TEST_SEEDED_API_KEY,
     id: PROD_API_KEY.id,
     projectId: TEST_PRODUCTION_PROJECT.id,
     environment: "production",
@@ -679,7 +679,7 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
     // position exists, or the fail-close itself would trap funds.
     const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
     await seedApiKeyRow(env, prodKeyHash, {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       id: PROD_API_KEY.id,
       projectId: TEST_PRODUCTION_PROJECT.id,
       environment: "production",
@@ -1156,7 +1156,7 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     const positionId = await seedPosition({ provider: "veda" });
     const readOnlyKey = { id: "key_earn_vw_ro", raw: "sk_test_earn_vw_ro" };
     await seedApiKeyRow(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       id: readOnlyKey.id,
       permissions: ["earn:read"],
     });

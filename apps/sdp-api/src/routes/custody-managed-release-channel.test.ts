@@ -9,8 +9,8 @@ import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");

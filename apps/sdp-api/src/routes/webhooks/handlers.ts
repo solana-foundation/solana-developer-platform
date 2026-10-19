@@ -31,7 +31,7 @@ import {
   parseRampWebhookProvider,
   RAMP_PROVIDER_WEBHOOK_PROCESSOR,
 } from "@/services/ramps/webhooks/registry";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
 

@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { requireHumanSession } from "@/middleware/human-session";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env.d";
+import type { Env } from "@/types/env";
 import {
   deleteOrganization,
   getOrganization,

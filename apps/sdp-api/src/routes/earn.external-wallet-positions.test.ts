@@ -14,8 +14,8 @@ import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
