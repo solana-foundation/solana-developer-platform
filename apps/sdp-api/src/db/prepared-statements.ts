@@ -6,8 +6,9 @@
  * here) and plans it again on every execution. On the request path that
  * planning, not execution, is the largest database cost: the API-key auth
  * query spends 2.35 ms planning for a 0.06 ms execution. A named statement is
- * parsed once per connection, and after five executions PostgreSQL reuses one
- * generic plan, so a 2 vCPU database serves several times the request rate.
+ * parsed once per connection, and from its sixth execution PostgreSQL switches
+ * to one generic plan whenever that costs no more than planning each run, so a
+ * 2 vCPU database serves several times the request rate.
  *
  * Names derive from the statement text, so one statement has the same name on
  * every connection and node-postgres skips the `Parse` message for a name it
