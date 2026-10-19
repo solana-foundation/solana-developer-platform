@@ -11,3 +11,12 @@ CREATE TABLE IF NOT EXISTS moonpay_failed_transactions (
   failure_reason TEXT,
   settlement JSONB
 );
+
+-- Webhook retry bookkeeping is read and written in system scope. Keep
+-- tenant requests from seeing another customer's retired transaction ids.
+ALTER TABLE moonpay_failed_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE moonpay_failed_transactions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS sdp_moonpay_failed_transactions_system ON moonpay_failed_transactions;
+CREATE POLICY sdp_moonpay_failed_transactions_system ON moonpay_failed_transactions
+  USING (sdp_tenant_isolation_is_privileged())
+  WITH CHECK (sdp_tenant_isolation_is_privileged());

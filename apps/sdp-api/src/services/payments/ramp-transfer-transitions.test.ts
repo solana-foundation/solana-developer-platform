@@ -106,6 +106,11 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
     expect(sortedSources("provider_settled")).toEqual(observable);
     expect(sortedSources("provider_failed")).toEqual(observable);
     expect(sortedSources("provider_expired")).toEqual(["awaiting_payment", "pending"]);
+    expect(sortedSources("moonpay_attempt_failed")).toEqual([
+      "awaiting_payment",
+      "expired",
+      "pending",
+    ]);
   });
 
   it("lands each provider event on the status it names, for both ramp types", () => {
@@ -114,7 +119,12 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
     expect(RAMP_TRANSFER_TRANSITIONS.provider_settled.to).toBe("completed");
     expect(RAMP_TRANSFER_TRANSITIONS.provider_failed.to).toBe("failed");
     expect(RAMP_TRANSFER_TRANSITIONS.provider_expired.to).toBe("expired");
-    for (const entry of Object.values(RAMP_TRANSFER_TRANSITIONS)) {
+    for (const [name, entry] of Object.entries(RAMP_TRANSFER_TRANSITIONS)) {
+      if (name === "moonpay_attempt_failed") {
+        expect(entry.types).toEqual(["onramp"]);
+        expect(entry.to).toBe("awaiting_payment");
+        continue;
+      }
       expect(entry.types).toEqual(RAMP_TRANSFER_TYPES);
     }
   });
@@ -230,6 +240,13 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
     writer: "provider settlement events (webhooks and replay)",
     file: "apps/sdp-api/src/services/payments/ramp-settlements.ts",
     evidence: ".transitionRampTransfer(update)",
+    route: "table",
+    guardedCalls: 1,
+  },
+  {
+    writer: "MoonPay failed buy attempt",
+    file: "apps/sdp-api/src/services/ramps/webhooks/moonpay.ts",
+    evidence: 'transition: "moonpay_attempt_failed"',
     route: "table",
     guardedCalls: 1,
   },

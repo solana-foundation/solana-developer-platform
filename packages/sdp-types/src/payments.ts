@@ -274,7 +274,7 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   // A failed MoonPay checkout attempt releases its transaction reference so
   // the same transfer can be retried. The caller separately guards funding.
   moonpay_attempt_failed: {
-    from: ["pending", "awaiting_payment", "settling", "expired"],
+    from: ["pending", "awaiting_payment", "expired"],
     to: "awaiting_payment",
     types: ["onramp"],
   },

@@ -117,6 +117,33 @@ describe("moonpayWebhook.process", () => {
     });
   });
 
+  it("lets only one of two concurrent MoonPay ids claim a transfer", async () => {
+    const event = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "offramp",
+      transferId: TRANSFER_ID,
+      providerObservedAt: OBSERVED_AT,
+    } as const;
+    const results = await Promise.all([
+      processor.process(env, "sandbox", { ...event, reference: "moonpay-first" }),
+      processor.process(env, "sandbox", { ...event, reference: "moonpay-second" }),
+    ]);
+    expect(results.map((result) => result.outcome).sort()).toEqual(["applied", "refused"]);
+    expect(results.find((result) => result.outcome === "refused")).toEqual({
+      outcome: "refused",
+      reason: "provider_reference_conflict",
+    });
+    const row = await getDb(env)
+      .prepare(
+        "SELECT provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{ provider_reference: string; provider_observed_at: string }>();
+    expect(["moonpay-first", "moonpay-second"]).toContain(row?.provider_reference);
+    expect(row?.provider_observed_at).toBe(OBSERVED_AT);
+  });
+
   it("keeps the newest deposit instruction for one sale", async () => {
     const event = {
       provider: "moonpay",
@@ -159,7 +186,29 @@ describe("moonpayWebhook.process", () => {
       providerObservedAt: OBSERVED_AT,
       error: "card_declined",
     } as const;
+    expect(
+      await processor.process(env, "sandbox", {
+        ...failed,
+        kind: "awaiting_payment",
+        providerObservedAt: "2026-08-31T10:59:00.000Z",
+      })
+    ).toMatchObject({ outcome: "applied" });
     expect(await processor.process(env, "sandbox", failed)).toEqual({ outcome: "applied" });
+    const released = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        provider_observed_at: string | null;
+      }>();
+    expect(released).toEqual({
+      status: "awaiting_payment",
+      provider_reference: null,
+      provider_observed_at: null,
+    });
     expect(await processor.process(env, "sandbox", failed)).toEqual({ outcome: "ignored" });
     expect(
       await processor.process(env, "sandbox", {
