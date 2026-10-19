@@ -6,14 +6,13 @@ import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectId } from "@/lib/use-dashboard-project";
+import { useFireblocksWarning } from "@/lib/use-fireblocks-warning";
 
 type State = "approved" | "pending" | "not_whitelisted" | "unknown" | "failed";
 type Result = {
   data: {
     state: State;
     assetId: string;
-    failureReason?: "credentials" | "permissions" | "request";
-    providerCode?: number;
   };
 };
 interface Selection {
@@ -24,7 +23,7 @@ interface Selection {
   token: string | null;
   address: string | null;
 }
-/** Advisory only: selecting a destination performs reads; only the toast action proposes it. */
+/** Advisory only. Whitelist changes are made by the customer in Fireblocks. */
 export function useFireblocksDestination({
   enabled,
   walletId,
@@ -36,64 +35,26 @@ export function useFireblocksDestination({
   const t = useTranslations();
   const projectId = useProjectId();
   const offered = useRef(new Set<string>());
-  const proposing = useRef(new Set<string>());
+  const { suppressed, suppress, canSuppress, scopeKey } = useFireblocksWarning("whitelist");
+  const suppressRef = useRef(suppress);
+  suppressRef.current = suppress;
   useEffect(() => {
-    if (!enabled || !walletId || !counterpartyId || !accountId || !token || !address || !projectId)
+    if (
+      suppressed ||
+      !enabled ||
+      !walletId ||
+      !counterpartyId ||
+      !accountId ||
+      !token ||
+      !address ||
+      !projectId
+    )
       return;
     const input = { walletId, counterpartyId, accountId, token, address };
-    const key = JSON.stringify([projectId, input]);
+    const key = JSON.stringify([scopeKey, projectId, input]);
     const controller = new AbortController();
     let active = true;
     let toastId: string | number | undefined;
-    const propose = async () => {
-      if (!active || proposing.current.has(key)) return;
-      proposing.current.add(key);
-      const result = await dashboardFetch<Result>("/api/dashboard/fireblocks/whitelist", {
-        method: "POST",
-        body: input,
-      });
-      proposing.current.delete(key);
-      // A proposal already sent remains real even if the selection changes; show its result.
-      if (!result.ok) {
-        toast.error(t("DashboardPayments.onchainSend.whitelistFailed"), {
-          description: result.error,
-        });
-        return;
-      }
-      const { state, failureReason, providerCode } = result.data.data;
-      if (state === "failed") {
-        toast(
-          t(
-            failureReason === "credentials"
-              ? "DashboardPayments.onchainSend.whitelistCredentials"
-              : failureReason === "permissions"
-                ? "DashboardPayments.onchainSend.whitelistPermissions"
-                : "DashboardPayments.onchainSend.whitelistFailed"
-          ),
-          {
-            duration: 10000,
-            ...(providerCode === undefined
-              ? {}
-              : {
-                  description: t("DashboardPayments.onchainSend.whitelistErrorCode", {
-                    code: providerCode,
-                  }),
-                }),
-          }
-        );
-        return;
-      }
-      toast(
-        t(
-          state === "approved"
-            ? "DashboardPayments.onchainSend.whitelistApproved"
-            : state === "pending"
-              ? "DashboardPayments.onchainSend.whitelistPending"
-              : "DashboardPayments.onchainSend.whitelistUnknown"
-        ),
-        { duration: 10000 }
-      );
-    };
     const timer = setTimeout(async () => {
       const result = await dashboardFetch<Result>(
         `/api/dashboard/fireblocks/destination?${new URLSearchParams(input)}`,
@@ -107,20 +68,29 @@ export function useFireblocksDestination({
       )
         return;
       offered.current.add(key);
-      toastId = toast(t("DashboardPayments.onchainSend.whitelistOffer"), {
+      toastId = toast(t("DashboardPayments.onchainSend.whitelistWarning"), {
         description: t("DashboardPayments.onchainSend.whitelistDescription", {
           address: `${address.slice(0, 6)}…${address.slice(-6)}`,
           asset: token === "SOL" || token === SOL_MINT ? "SOL" : "USDC",
         }),
         duration: 15000,
-        action: {
-          label: t("DashboardPayments.onchainSend.whitelistAction"),
-          onClick: () => {
-            void propose();
-          },
-        },
+        style: { flexWrap: "wrap" },
+        classNames: { content: "!basis-full" },
+        ...(canSuppress
+          ? {
+              action: {
+                label: t("DashboardPayments.fireblocksWarnings.suppress"),
+                onClick: () => {
+                  if (active && !suppressRef.current()) {
+                    toast.error(t("DashboardPayments.fireblocksWarnings.saveFailed"));
+                    offered.current.delete(key);
+                  }
+                },
+              },
+            }
+          : {}),
         cancel: {
-          label: t("DashboardPayments.onchainSend.whitelistDismiss"),
+          label: t("DashboardPayments.fireblocksWarnings.dismiss"),
           onClick: () => undefined,
         },
       });
@@ -131,5 +101,17 @@ export function useFireblocksDestination({
       controller.abort();
       if (toastId !== undefined) toast.dismiss(toastId);
     };
-  }, [enabled, walletId, counterpartyId, accountId, token, address, projectId, t]);
+  }, [
+    enabled,
+    walletId,
+    counterpartyId,
+    accountId,
+    token,
+    address,
+    projectId,
+    t,
+    suppressed,
+    canSuppress,
+    scopeKey,
+  ]);
 }

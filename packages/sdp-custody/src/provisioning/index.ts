@@ -996,9 +996,7 @@ function findSolanaAddress(
 }
 
 export {
-  createFireblocksExternalWallet,
   type FireblocksAddressEntry,
   invalidateFireblocksAddressBook,
-  proposeFireblocksAddress,
   readFireblocksAddressBook,
 } from "./fireblocks-address-book";

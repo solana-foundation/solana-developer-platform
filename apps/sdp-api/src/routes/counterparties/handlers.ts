@@ -28,7 +28,6 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { admitRamp } from "@/routes/payments/ramps/admission";
 import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
-import { syncFireblocksContacts } from "@/services/custody/fireblocks-address-book.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -80,9 +79,6 @@ export const listCounterparties = async (c: AppContext) => {
   }
 
   const { page, pageSize, includeArchived } = parsed.data;
-  await syncFireblocksContacts(c.env, { organizationId: auth.organizationId, projectId }).catch(
-    () => undefined
-  );
 
   const repo = getCounterpartiesRepository(c);
   const { rows, total } = await repo.listCounterparties({
@@ -113,9 +109,6 @@ export const listProjectCounterpartyAccounts = async (c: AppContext) => {
   }
 
   const { page, pageSize, search } = parsed.data;
-  await syncFireblocksContacts(c.env, { organizationId: auth.organizationId, projectId }).catch(
-    () => undefined
-  );
   const accountIds = parsed.data.ids
     ? parsed.data.ids
         .split(",")

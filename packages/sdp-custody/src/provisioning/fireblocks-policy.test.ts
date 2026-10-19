@@ -29,7 +29,7 @@ const envelope = {
   policy: { rules: [], metadata: {} },
   validation: { status: "SUCCESS", checkResult: { errors: 0, results: [] } },
 };
-test("shares successful policy reads and bypasses the cache for pre-write verification", async () => {
+test("shares successful policy reads and supports a fresh read", async () => {
   let calls = 0;
   const credentials = access();
   const rt = runtime(async (url, init) => {
@@ -68,7 +68,7 @@ test("denial and malformed responses never become cached empty policies", async 
   assert.equal((await readFireblocksPolicy(rt, credentials)).valid, true);
   assert.equal(calls, 3);
 });
-test("nonzero validation errors and unvalidated policies cannot be published", async () => {
+test("nonzero validation errors and unvalidated policies cannot be treated as valid", async () => {
   for (const validation of [
     { status: "INVALID_CONFIGURATION", checkResult: { errors: 1, results: [] } },
     { status: "UNVALIDATED", checkResult: { errors: 0, results: [] } },

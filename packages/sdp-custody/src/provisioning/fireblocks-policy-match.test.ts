@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FireblocksPolicyRule } from "./fireblocks-policy";
-import {
-  evaluateFireblocksTransferPolicy,
-  isFireblocksDefaultBlock,
-} from "./fireblocks-policy-match";
+import { evaluateFireblocksTransferPolicy } from "./fireblocks-policy-match";
 
 const transfer = {
   initiatorId: "api-user",
@@ -102,22 +99,6 @@ test("irrelevant unsupported rules do not mask a later match; native amounts com
     }).state,
     "missing"
   );
-});
-test("only a fully understood catch-all block is eligible for insertion", () => {
-  const block = rule({
-    initiator: "*",
-    source: { operator: "INCLUDES", type: ["*"] },
-    destination: { operator: "INCLUDES", addressType: "*", type: ["*"] },
-    asset: { nftTransfer: false, assetTypes: ["*"] },
-    verdict: { action: "BLOCK" },
-  });
-  assert.equal(isFireblocksDefaultBlock(block), true);
-  assert.equal(isFireblocksDefaultBlock({ ...block, screeningMetadata: {} }), false);
-  assert.equal(
-    isFireblocksDefaultBlock({ ...block, amount: { currency: "USD", range: { min: "100" } } }),
-    false
-  );
-  assert.equal(isFireblocksDefaultBlock(rule({ verdict: { action: "BLOCK" } })), false);
 });
 test("inconsistent precedence and unknown rule types require review", () => {
   assert.equal(

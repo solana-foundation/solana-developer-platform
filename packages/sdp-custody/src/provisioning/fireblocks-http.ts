@@ -20,7 +20,7 @@ interface FireblocksRequestParams {
   apiBaseUrl: string;
   apiKey: string;
   apiSecretPem: string;
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST";
   uri: string;
   body?: unknown;
   allowStatuses?: number[];

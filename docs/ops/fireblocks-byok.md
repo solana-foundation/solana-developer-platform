@@ -75,8 +75,7 @@ the existing solana-keychain adapter; they have not been converted to native tra
 
 SDP resolves an approved matching Fireblocks whitelist entry to its internal/external wallet ID.
 An unmatched destination uses `ONE_TIME_ADDRESS`, which must be allowed by the workspace.
-An SDP contact alone does not whitelist an address; the proposal and import features are described
-below. The SDP memo becomes a Fireblocks note, not a Solana memo instruction.
+An SDP contact alone does not whitelist an address. Manage whitelisting in Fireblocks. The SDP memo becomes a Fireblocks note, not a Solana memo instruction.
 
 Before submission, SDP durably stores the intent and atomically claims a single create attempt.
 The SDP transfer ID is both Fireblocks' permanent `externalTxId` and the request idempotency key.
@@ -195,89 +194,45 @@ implementation with mocked Fireblocks HTTP responses and a locally generated Ed2
 Dashboard tests cover submission, rotation, and the existing Privy lifecycle. These tests do not
 replace an approval-policy check against a real Fireblocks workspace.
 
-## Address book and contact imports
+## Read-only checks on Pay
 
-`FIREBLOCKS_CONTACT_SYNC_ENABLED` is a host-level API setting, enabled when unset or
-`true`. Set it to `false` to stop automatic imports; existing contacts remain.
-The pending-transfer reconciliation tick refreshes active Fireblocks connections at most
-once every five minutes. Opening the contact directory also triggers a due refresh, including
-on local deployments with cron disabled. A database lease prevents duplicate work across replicas.
+The minimal integration retains server-generated RSA-4096 keys, CSR download, API user ID
+connection, named vault selection and native SOL/USDC transfers. SDP does not create whitelist
+entries, edit or publish Fireblocks policies, or automatically import Fireblocks contacts.
+Customers manage their address books and transfer policies in Fireblocks. Previously imported
+SDP contacts remain intact. Historical migrations 0129 and 0130 are retained for compatibility
+with existing databases; their proposal/import tables have no runtime readers or writers here.
 
-Approved SOL and USDC addresses from Fireblocks internal and external whitelisted wallets
-are imported into the connection's SDP project, using their Fireblocks names. Other chains,
-assets, and pending entries are excluded. Existing Solana addresses are linked instead of
-creating duplicates; edited names and archived contacts are preserved. Remote removals never
-silently delete an SDP contact or redirect its address. This is an inbound sync; edits to SDP
-contacts do not automatically change Fireblocks.
+Selecting a destination checks its exact address, asset and network against internal and external
+Fireblocks wallets. Only a successful lookup confirming absence shows the whitelist warning.
+Pending and approved entries do not prompt. Sending still resolves approved whitelist IDs and
+otherwise uses a one-time address, subject to the customer's Fireblocks workspace settings.
 
-Selecting a destination for a Fireblocks payment checks the exact address, asset and network.
-A neutral toast offers to request whitelisting only after a successful lookup confirms absence.
-Approved and pending addresses do not prompt. Lookup failures never count as an empty address book.
-The action creates an external wallet and adds its asset address using the organization's
-BYOK API user. Fireblocks retains its workspace approval and activation-delay controls.
-The API user must have permission to create external wallets and add their assets.
-See [Fireblocks' endpoint permissions](https://developers.fireblocks.com/api-reference/external-wallets/add-an-asset-to-an-external-wallet).
-
-The internal dashboard endpoints require the current project, exact wallet access and contact
-read permission; proposing additionally requires contact write permission. Contact addresses
-are resolved on the server and compared with the selected address. A durable claim and separate
-provider idempotency keys prevent repeated clicks or ambiguous responses from duplicating requests.
-Unconfirmed submissions require inspection in Fireblocks; SDP never automatically resubmits.
-Definite rejections can be retried through a new explicit toast action after correcting the cause.
-Apply migration `0129_fireblocks_address_book.sql` before deploying.
-
-Request budget: previously selecting a contact made zero Fireblocks requests. Now a cold lookup
-makes two parallel GETs (internal/external wallets), shared for 30 seconds within an API process.
-USDC adds one asset-catalogue GET on a cold five-minute catalogue cache. Changing payment amounts
-makes no additional lookups. Sync reuses these caches. An explicit proposal makes two fresh GETs
-and, only if absent, two POSTs; selecting a contact never proposes or sends a payment. No Solana
-RPC calls are added.
-
-## Transfer policy setup from Pay
-
-Apply `0130_fireblocks_policy_proposals.sql` before deploying this feature. Pay reads the active
-TRANSFER policy using the selected wallet's BYOK credential and evaluates the first matching
-rule for the API user, source vault, exact asset, destination category/whitelist ID, and amount.
+Pay also reads the active TRANSFER policy using the selected wallet's BYOK credential. It evaluates
+the first matching rule for the API user, source vault, exact asset, destination and amount.
 Denied reads and unrecognized conditions never count as missing policies. Bounded fiat amounts,
-amount-over-time quotas, group-based initiators and mixed account selectors require review in
-Fireblocks; SDP does not guess exchange rates, group membership or policy precedence.
-A custom blocking rule also requires review there. Only an understood catch-all block can have
-a new rule inserted immediately before it; earlier rules retain their order and contents.
+amount-over-time quotas, group-based initiators and mixed selectors require review in Fireblocks;
+SDP does not guess exchange rates, group membership or policy precedence. A matching rule is
+advisory, not a guarantee of execution: Fireblocks enforces its approvals and workspace controls.
+An API user without policy-read access can still submit payments and sees an explanatory warning.
 
-Policy reads require a Fireblocks Owner, Admin or Non-Signing Admin API user; directory reads
-require Admin or Non-Signing Admin. Policy Editor API availability may require enablement by
-Fireblocks. An Editor connection continues to send payments but cannot use this management
-feature. See the [official Policy Editor API](https://github.com/fireblocks/ts-sdk/blob/master/docs/apis/PolicyEditorV2Api.md)
-and [console user directory](https://github.com/fireblocks/ts-sdk/blob/master/docs/apis/ConsoleUserApi.md).
+Each warning category has a “Don’t show again” action. The preference has no expiry and is stored
+in this browser, scoped to the signed-in user, organization and project. It survives reloads and
+sign-ins; clearing browser storage restores warnings. It neither changes Fireblocks policy nor
+suppresses actual payment failures. No backend preferences or extra management permissions are
+needed. If browser storage is unavailable, SDP reports that the preference could not be saved.
 
-Only signed-in SDP users with `custody:admin` can configure or submit a policy; SDP API keys
-cannot. The setup form reads active human approvers/signers and approved user groups from the
-connected workspace. Its defaults are the selected vault and asset, any whitelisted address,
-zero to unlimited USD per transaction, request approval, and initiator approval disabled.
-Users must explicitly choose approval sets, thresholds and human designated signers.
-The API user is never offered as an approver or signer. Destination alternatives are the selected
-whitelisted wallet or any one-time address; the latter still requires the workspace setting.
+The internal check endpoints require project context, exact wallet access and contact read
+permission. Contact addresses are resolved on the server and compared with the selected address.
+The former whitelist, policy setup, draft and publish endpoints are absent, including for admins.
 
-Saving uses `PUT /v1/policy/draft` for TRANSFER only. It preserves existing rules, validates the
-provider response against the reviewed rule set, and records an audited, tenant-isolated claim.
-A separate click uses `POST /v1/policy/draft` with the exact saved draft ID after re-reading the
-active policy and draft revisions. This asks Fireblocks to publish under its governance; it does
-not approve a policy or send a payment on the user's behalf. A saved draft can be resumed for the
-same payment selection. Existing external drafts, changed revisions and uncertain writes block
-further edits until reviewed; ambiguous requests are never automatically repeated.
+Request budget compared with the full integration: a cold destination check still makes two
+parallel GETs (internal/external wallets), shared for 30 seconds. A cold policy check still adds
+one GET, shared for 15 seconds, and reuses those address-book reads. USDC adds one asset-catalogue
+GET on a cold five-minute cache. Failed reads are never cached. Suppressed warnings skip their
+advisory checks; payment-time validation remains active. Background imports and all proposal GET,
+POST and PUT requests are eliminated. No Solana RPC calls are added.
 
-Fireblocks' documented draft API does not expose a conditional-write revision/ETag. SDP checks
-immediately before writes and again before submission, but cannot eliminate a simultaneous Console
-edit between a GET and PUT. Serialize policy edits across SDP and Fireblocks. Unknown submission
-states need operator reconciliation in Fireblocks before a local proposal is released.
-
-Budget: this feature adds zero Solana RPCs. A cold policy check adds one Fireblocks policy GET
-and reuses the address-book lookup (two GETs on cache miss); successful policy reads are shared
-for 15 seconds. Opening setup uses eight fresh GETs: policy, both address books, draft, three
-directories, and vault metadata. Saving revalidates those inputs and adds two revision GETs and
-one PUT. Submission uses two GETs and one POST. USDC adds the existing catalogue GET on a cache
-miss. Nothing writes merely because a source, destination, asset or amount was selected.
-
-The local workspace returned HTTP 403 for policy/directory reads during implementation, so live
-policy creation/publication has not been verified. Regression tests use recording HTTP fixtures
-and isolated PostgreSQL/Redis; production handlers always call the real Fireblocks API.
+Regression tests use recording HTTP fixtures and isolated PostgreSQL/Redis. Production handlers
+continue to call the real Fireblocks API. Live policy checks depend on the connected API user's
+permissions; HTTP 403 is reported as unavailable permission, never an empty policy.

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useFireblocksDestination } from "./use-fireblocks-destination";
 
 const mocks = vi.hoisted(() => ({
+  projectId: "project-one",
+  userId: "user-one",
   fetch: vi.fn(),
   toast: Object.assign(
     vi.fn(() => "toast-book"),
@@ -14,7 +16,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 vi.mock("@/lib/dashboard-fetch", () => ({ dashboardFetch: mocks.fetch }));
 vi.mock("@/i18n/provider", () => ({ useTranslations: () => mocks.t }));
-vi.mock("@/lib/use-dashboard-project", () => ({ useProjectId: () => "project-one" }));
+vi.mock("@/lib/use-dashboard-project", () => ({ useProjectId: () => mocks.projectId }));
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => ({
+    dashboardCacheScope: { userId: mocks.userId, orgId: "org" },
+  }),
+}));
 const selection = {
   enabled: true,
   walletId: "wallet",
@@ -36,36 +43,54 @@ function action() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  window.localStorage.clear();
+  mocks.projectId = "project-one";
+  mocks.userId = "user-one";
   mocks.fetch.mockResolvedValue(response("not_whitelisted"));
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
-describe("Fireblocks destination prompt", () => {
-  it("reads after selection and writes only after the user clicks the toast action", async () => {
-    renderHook(() => useFireblocksDestination(selection));
+describe("Fireblocks destination warning", () => {
+  it("only reads, and saves suppression across remounts without proposing anything", async () => {
+    const view = renderHook(() => useFireblocksDestination(selection));
     await tick();
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
     expect(mocks.fetch.mock.calls[0]?.[0]).toContain("/destination?");
     expect(mocks.toast).toHaveBeenCalledOnce();
-    mocks.fetch.mockResolvedValue(response("pending"));
     await act(async () => {
       action()();
     });
-    expect(mocks.fetch).toHaveBeenLastCalledWith("/api/dashboard/fireblocks/whitelist", {
-      method: "POST",
-      body: {
-        walletId: "wallet",
-        counterpartyId: "contact",
-        accountId: "address",
-        token: "SOL",
-        address: selection.address,
-      },
+    view.unmount();
+    renderHook(() => useFireblocksDestination(selection));
+    await tick();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.toast).toHaveBeenCalledOnce();
+    expect(window.localStorage.length).toBe(1);
+    expect(mocks.fetch.mock.calls.every(([, opts]) => !opts.method || opts.method === "GET")).toBe(
+      true
+    );
+  });
+  it("does not suppress warnings for another user or project", async () => {
+    const view = renderHook(() => useFireblocksDestination(selection));
+    await tick();
+    await act(async () => {
+      action()();
     });
+    mocks.projectId = "project-two";
+    view.rerender();
+    await tick();
+    expect(mocks.toast).toHaveBeenCalledTimes(2);
+    mocks.projectId = "project-one";
+    mocks.userId = "user-two";
+    view.unmount();
+    renderHook(() => useFireblocksDestination(selection));
+    await tick();
+    expect(mocks.toast).toHaveBeenCalledTimes(3);
   });
   it.each(["approved", "pending", "unknown", "failed"])(
-    "does not offer another proposal for %s",
+    "does not warn about absence for %s",
     async (state) => {
       mocks.fetch.mockResolvedValue(response(state));
       renderHook(() => useFireblocksDestination(selection));
@@ -78,33 +103,8 @@ describe("Fireblocks destination prompt", () => {
     renderHook(() => useFireblocksDestination(selection));
     await tick();
     expect(mocks.toast).not.toHaveBeenCalled();
-    expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
-  it.each([
-    ["request", "whitelistFailed"],
-    ["permissions", "whitelistPermissions"],
-    ["credentials", "whitelistCredentials"],
-  ])(
-    "shows the actual %s failure category without automatically retrying",
-    async (failureReason, message) => {
-      renderHook(() => useFireblocksDestination(selection));
-      await tick();
-      mocks.fetch.mockResolvedValue({
-        ok: true,
-        data: { data: { state: "failed", assetId: "SOL", failureReason, providerCode: 9003 } },
-      });
-      await act(async () => {
-        action()();
-      });
-      expect(mocks.toast).toHaveBeenLastCalledWith(`DashboardPayments.onchainSend.${message}`, {
-        duration: 10000,
-        description: "DashboardPayments.onchainSend.whitelistErrorCode",
-      });
-      await tick();
-      expect(mocks.fetch).toHaveBeenCalledTimes(2);
-    }
-  );
-  it("ignores stale responses and dismisses an old destination's action", async () => {
+  it("ignores stale responses, aborts old lookups and dismisses old warnings", async () => {
     let resolve: (value: unknown) => void = () => undefined;
     mocks.fetch.mockImplementationOnce(
       () =>
@@ -112,35 +112,50 @@ describe("Fireblocks destination prompt", () => {
           resolve = done;
         })
     );
-    const { rerender } = renderHook((props) => useFireblocksDestination(props), {
+    const view = renderHook((props) => useFireblocksDestination(props), {
       initialProps: selection,
     });
     await tick();
-    rerender({ ...selection, accountId: "next" });
+    const signal = mocks.fetch.mock.calls[0]?.[1].signal;
+    view.rerender({ ...selection, accountId: "next" });
+    expect(signal.aborted).toBe(true);
     await act(async () => {
       resolve(response("not_whitelisted"));
     });
     expect(mocks.toast).not.toHaveBeenCalled();
     await tick();
     const oldAction = action();
-    rerender({ ...selection, enabled: false });
+    view.rerender({ ...selection, enabled: false });
     expect(mocks.toast.dismiss).toHaveBeenCalledWith("toast-book");
-    const count = mocks.fetch.mock.calls.length;
     await act(async () => {
       oldAction();
     });
-    expect(mocks.fetch).toHaveBeenCalledTimes(count);
+    expect(window.localStorage.length).toBe(0);
   });
-  it("does not repeat the check on unrelated renders or use another wallet provider", async () => {
-    const { rerender } = renderHook((props) => useFireblocksDestination(props), {
+  it("does not repeat reads on unrelated renders or for another provider", async () => {
+    const view = renderHook((props) => useFireblocksDestination(props), {
       initialProps: selection,
     });
     await tick();
-    rerender({ ...selection });
+    view.rerender({ ...selection });
     await tick();
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
-    rerender({ ...selection, enabled: false });
+    view.rerender({ ...selection, enabled: false });
     await tick();
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+  it("reports a storage failure instead of claiming permanent suppression", async () => {
+    const storage = vi.spyOn(window.Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("Blocked");
+    });
+    renderHook(() => useFireblocksDestination(selection));
+    await tick();
+    await act(async () => {
+      action()();
+    });
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      "DashboardPayments.fireblocksWarnings.saveFailed"
+    );
+    storage.mockRestore();
   });
 });

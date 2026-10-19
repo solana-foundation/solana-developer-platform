@@ -10,8 +10,8 @@ const params = {
   apiKey: "test-api-user",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   method: "POST" as const,
-  uri: "/v1/external_wallets",
-  body: { name: "Test contact" },
+  uri: "/v1/transactions",
+  body: { operation: "TRANSFER", assetId: "SOL" },
 };
 function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisioningRuntime {
   return {
@@ -25,18 +25,18 @@ function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisionin
 }
 
 describe("Fireblocks HTTP contract", () => {
-  it("keeps retries stable and wallet/address steps distinct within the 40-character limit", async () => {
+  it("keeps retries stable and separate requests distinct within the 40-character limit", async () => {
     const keys: string[] = [];
     const rt = runtime(async (_url, init) => {
       const key = new Headers(init?.headers).get("Idempotency-Key");
       assert.ok(key && key.length <= 40, "Fireblocks rejects longer keys with HTTP 400 / 9003");
       assert.deepEqual(JSON.parse(String(init?.body)), params.body);
       keys.push(key);
-      return Response.json({ id: "external-wallet" });
+      return Response.json({ id: "transaction" });
     });
-    const proposal = "fbwl_cf0c4bee-ff03-4112-9ebf-2b84be8126a6";
-    for (const suffix of ["wallet", "wallet", "address"])
-      await fireblocksRequest(rt, { ...params, idempotencyKey: `${proposal}-${suffix}` });
+    const request = "payment-cf0c4bee-ff03-4112-9ebf-2b84be8126a6";
+    for (const suffix of ["first", "first", "second"])
+      await fireblocksRequest(rt, { ...params, idempotencyKey: `${request}-${suffix}` });
     assert.equal(keys[0], keys[1]);
     assert.notEqual(keys[0], keys[2]);
     // Existing valid payment keys must not change after deploying this fix.

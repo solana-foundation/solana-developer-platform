@@ -108,38 +108,3 @@ export async function readFireblocksAddressBook(
   }
   return cached.entries;
 }
-export async function createFireblocksExternalWallet(
-  runtime: CustodyProvisioningRuntime,
-  access: FireblocksTransferAccess,
-  name: string,
-  idempotencyKey: string
-): Promise<string> {
-  const result = await fireblocksRequest<{ id?: unknown }>(runtime, {
-    ...config(access),
-    method: "POST",
-    uri: "/v1/external_wallets",
-    body: { name },
-    idempotencyKey,
-  });
-  if (typeof result?.id !== "string" || !result.id || result.id.length > 256) return invalid();
-  return result.id;
-}
-export async function proposeFireblocksAddress(
-  runtime: CustodyProvisioningRuntime,
-  access: FireblocksTransferAccess,
-  walletId: string,
-  assetId: string,
-  address: string,
-  idempotencyKey: string
-): Promise<string> {
-  const result = await fireblocksRequest<{ status?: unknown }>(runtime, {
-    ...config(access),
-    method: "POST",
-    uri: `/v1/external_wallets/${encodeURIComponent(walletId)}/${encodeURIComponent(assetId)}`,
-    body: { address },
-    idempotencyKey,
-  });
-  if (typeof result?.status !== "string" || !STATUSES.has(result.status)) return invalid();
-  invalidateFireblocksAddressBook(access);
-  return result.status;
-}
