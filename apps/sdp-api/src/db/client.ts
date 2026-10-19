@@ -1,4 +1,5 @@
 import { Pool, type QueryResult, types } from "pg";
+import { z } from "zod";
 import {
   currentDatabaseIdentity,
   type DatabaseIdentity,
@@ -75,8 +76,23 @@ type Queryable = {
 
 const pooledClients = new Map<string, PooledPostgresClient>();
 
+const DEFAULT_POOL_MAX = 10;
+const POOL_STATS_INTERVAL_MS = 15_000;
+
+const poolMaxSchema = z.coerce.number().int().positive();
+
+export function resolvePoolMax(raw: string | undefined = process.env.PG_POOL_MAX): number {
+  if (raw === undefined) {
+    return DEFAULT_POOL_MAX;
+  }
+  const parsed = poolMaxSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`Invalid PG_POOL_MAX: ${JSON.stringify(raw)}`);
+  }
+  return parsed.data;
+}
+
 const NODE_POOL_OPTIONS = {
-  max: 10,
   // Bounds every statement and every idle-in-transaction session (HOO-1918):
   // a hung query fails its request instead of holding its Idempotency-Key and
   // a pooled connection. Generous for OLTP. `job.ts` shares this pool, so a
@@ -347,14 +363,19 @@ class IdentityStampingPoolQueryable implements Queryable {
 
 class PooledPostgresClient extends BasePostgresClient {
   private readonly pool: Pool;
+  private readonly statsTimer: NodeJS.Timeout;
 
   constructor(connectionString: string) {
+    const max = resolvePoolMax();
     const pool = new Pool({
       connectionString,
       ...NODE_POOL_OPTIONS,
+      max,
     });
     super(new IdentityStampingPoolQueryable(pool));
     this.pool = pool;
+    this.statsTimer = setInterval(() => logPoolStats(pool, max), POOL_STATS_INTERVAL_MS);
+    this.statsTimer.unref();
 
     // Idle pool errors are EventEmitter errors; without a listener Node treats
     // them as uncaught exceptions and terminates the process.
@@ -475,8 +496,23 @@ class PooledPostgresClient extends BasePostgresClient {
   }
 
   close(): Promise<void> {
+    clearInterval(this.statsTimer);
     return this.pool.end();
   }
+}
+
+function logPoolStats(pool: Pool, max: number): void {
+  getLogger().info(
+    {
+      event: "sdp_db_pool_stats",
+      service: process.env.K_SERVICE ?? null,
+      max,
+      total: pool.totalCount,
+      idle: pool.idleCount,
+      waiting: pool.waitingCount,
+    },
+    "database pool stats"
+  );
 }
 
 /**

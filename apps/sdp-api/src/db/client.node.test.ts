@@ -30,6 +30,9 @@ vi.mock("pg", () => {
     readonly queries: unknown[] = [];
     readonly connectedClients: MockPoolClient[] = [];
     readonly end = vi.fn(() => pgMock.poolEnd());
+    totalCount = 0;
+    idleCount = 0;
+    waitingCount = 0;
 
     constructor(config: Record<string, unknown>) {
       this.config = config;
@@ -70,6 +73,8 @@ vi.mock("pg", () => {
 let closeDatabasePools: typeof import("./client").closeDatabasePools;
 let createDatabaseClient: typeof import("./client").createDatabaseClient;
 let SessionLockUnavailableError: typeof import("./client").SessionLockUnavailableError;
+let resolvePoolMax: typeof import("./client").resolvePoolMax;
+let getLogger: typeof import("@/runtime/logger").getLogger;
 
 describe("database client connection management", () => {
   beforeAll(async () => {
@@ -80,9 +85,12 @@ describe("database client connection management", () => {
     closeDatabasePools = database.closeDatabasePools;
     createDatabaseClient = database.createDatabaseClient;
     SessionLockUnavailableError = database.SessionLockUnavailableError;
+    resolvePoolMax = database.resolvePoolMax;
+    getLogger = (await import("@/runtime/logger")).getLogger;
   });
 
   beforeEach(async () => {
+    vi.stubEnv("PG_POOL_MAX", undefined);
     await closeDatabasePools();
     pgMock.pools.length = 0;
     pgMock.poolQuery = async () => ({ rows: [], rowCount: 0 });
@@ -93,6 +101,7 @@ describe("database client connection management", () => {
   afterEach(async () => {
     pgMock.poolEnd = async () => {};
     await closeDatabasePools();
+    vi.unstubAllEnvs();
   });
 
   it("reuses one configured pool and starts independent Node queries concurrently", async () => {
@@ -123,6 +132,55 @@ describe("database client connection management", () => {
       resolve();
     }
     await Promise.all(queries);
+  });
+
+  it("sizes the pool from PG_POOL_MAX", async () => {
+    vi.stubEnv("PG_POOL_MAX", "25");
+    await createDatabaseClient("postgresql://node-pool-max/sdp").queryOne("SELECT 1");
+
+    expect(pgMock.pools[0]?.config).toMatchObject({ max: 25 });
+  });
+
+  it.each(["", "0", "-1", "2.5", "10abc"])("refuses PG_POOL_MAX=%j", (raw) => {
+    expect(() => resolvePoolMax(raw)).toThrow(`Invalid PG_POOL_MAX: ${JSON.stringify(raw)}`);
+  });
+
+  it("logs pool counters on an interval until the pool is closed", async () => {
+    vi.useFakeTimers();
+    const info = vi.spyOn(getLogger(), "info");
+    try {
+      createDatabaseClient("postgresql://node-pool-stats/sdp");
+      const pool = pgMock.pools[0];
+      if (!pool) {
+        throw new Error("pool was not created");
+      }
+      Object.assign(pool, { totalCount: 10, idleCount: 0, waitingCount: 7 });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      expect(info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_db_pool_stats",
+          max: 10,
+          total: 10,
+          idle: 0,
+          waiting: 7,
+        }),
+        "database pool stats"
+      );
+
+      await closeDatabasePools();
+      info.mockClear();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(info).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: "sdp_db_pool_stats" }),
+        expect.anything()
+      );
+    } finally {
+      info.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("checks out one pooled connection and commits a successful transaction", async () => {
