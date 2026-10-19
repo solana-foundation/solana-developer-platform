@@ -18,7 +18,7 @@ import {
   type Replay,
   replayExchanges,
 } from "./test-kit";
-import type { RampProvider } from "./types";
+import type { RampProvider, RampSettlementEvent, RampTransferLookup } from "./types";
 
 /**
  * Every registered provider has a kit. A provider on its way out names the
@@ -93,6 +93,16 @@ async function runQuote(
   }
   assert.ok(kit.offramp, "the kit records an offramp");
   return client.createOfframpQuote(ctx, kit.offramp.quote.input);
+}
+
+async function runTransferStatus(
+  client: RampProvider,
+  kit: RampProviderTestKit,
+  lookup: RampTransferLookup,
+  mode: SdpEnvironment
+): Promise<readonly RampSettlementEvent[]> {
+  assert.ok(client.fetchTransferStatus, "a provider with status cases can look a transfer up");
+  return client.fetchTransferStatus({ env: kit.env, mode }, lookup);
 }
 
 function assertEstimateContract(
@@ -207,6 +217,37 @@ describe("ramp provider contract", () => {
             );
             assertQuoteContract(result, provider);
             assertQuoteCredentials(kit, replay, result, mode);
+          });
+        }
+      }
+
+      it("records status lookups exactly when it can look a transfer up", () => {
+        assert.equal(kit.transferStatus !== undefined, client.fetchTransferStatus !== undefined);
+      });
+
+      for (const [name, statusCase] of Object.entries(kit.transferStatus ?? {})) {
+        for (const mode of SDP_ENVIRONMENTS) {
+          if (!kit.managedModes.includes(mode)) {
+            it(`refuses to look up ${name} in ${mode} before any request`, async () => {
+              await assert.rejects(
+                replayed([], () => runTransferStatus(client, kit, statusCase.input, mode)),
+                (cause: unknown) => {
+                  assert.ok(cause instanceof SdpPaymentsError);
+                  assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
+                  return true;
+                }
+              );
+            });
+            continue;
+          }
+
+          it(`looks up ${name} in ${mode} with one request`, async () => {
+            const { result, replay } = await replayed(statusCase.exchanges, () =>
+              runTransferStatus(client, kit, statusCase.input, mode)
+            );
+            assert.equal(replay.requests.length, 1, "a status lookup makes one request");
+            assertRequestCredentials(kit, replay, mode);
+            assert.deepEqual(result, statusCase.events);
           });
         }
       }

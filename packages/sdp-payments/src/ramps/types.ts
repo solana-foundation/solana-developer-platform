@@ -16,6 +16,7 @@ import type {
   PaymentRampQuote,
   RampCryptoDeposit,
   RampTransferSettlement,
+  RampTransferType,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
@@ -247,6 +248,15 @@ export type ValidateCounterpartyOptions =
       collectedData?: CollectedFieldData;
     };
 
+/** The stored transfer a status lookup asks its provider about. */
+export interface RampTransferLookup {
+  /** SDP's transfer id, which a provider that takes a caller reference stores with it. */
+  transferId: string;
+  rampType: RampTransferType;
+  /** The provider reference the transfer row holds; null until one is bound. */
+  providerReference: string | null;
+}
+
 /**
  * Full provider contract: rail discovery plus the runtime quote/execute flow.
  * All HTTP lives behind this; the route handler owns DB interaction and passes
@@ -258,6 +268,17 @@ export interface RampProvider {
   /** Optional webhook contract. Ingress verifies signed bytes before persisting;
    * parsing is pure and runs from the durable inbox after acknowledgement. */
   webhook?: RampProviderWebhook;
+  /**
+   * Optional status pull, for a sweep that recovers missed webhooks. Answers
+   * the events the provider's webhook would carry for each transaction it
+   * holds for the transfer, oldest update first, and none when it holds no
+   * transaction. Throws when SDP could not ask, so a failure never reads as
+   * absence.
+   */
+  fetchTransferStatus?: (
+    ctx: RampRuntimeContext,
+    lookup: RampTransferLookup
+  ) => Promise<readonly RampSettlementEvent[]>;
   /**
    * Support-matrix generation hook (ramp-support script only, never runtime):
    * fetches the provider's raw support dumps via `context.fetchJson` and
