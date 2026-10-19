@@ -2,13 +2,13 @@ import {
   decideRecurringPaymentUpdateTransition,
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import type {
-  ListPaymentRecurringPaymentsResponse,
-  PaymentRecurringPayment,
-  PaymentRecurringPaymentCollectionResponse,
-  PaymentRecurringPaymentResponse,
-} from "@sdp/types";
-import { isInFlightRecurringPaymentAttemptStatus } from "@sdp/types";
+import {
+  isInFlightRecurringPaymentAttemptStatus,
+  type ListPaymentRecurringPaymentsResponse,
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentCollectionResponse,
+  type PaymentRecurringPaymentResponse,
+} from "@sdp/types/payments";
 import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -32,25 +32,25 @@ import {
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
-  activateRecurringPayment as activateRecurringPaymentRecord,
-  cancelRecurringPayment as cancelRecurringPaymentRecord,
-  collectRecurringPayment as collectRecurringPaymentRecord,
-  createRecurringPayment as createRecurringPaymentRecord,
-  resumeRecurringPayment as resumeRecurringPaymentRecord,
-  updateRecurringPayment as updateRecurringPaymentRecord,
-} from "@/services/payments/recurring-payments";
-import {
-  findKeyedRecurringPayment,
-  type RecurringPaymentIdempotency,
-} from "@/services/payments/recurring-payments/create";
-import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import {
   type AppContext,
   getPaymentRecurringPaymentsRepository,
   getPaymentSubscriptionsRepository,
   getPaymentsRepository,
-} from "../context";
-import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
+} from "@/routes/payments/context";
+import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
+import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
+import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
+import {
+  createRecurringPayment as createRecurringPaymentRecord,
+  findKeyedRecurringPayment,
+  type RecurringPaymentIdempotency,
+} from "@/services/payments/recurring-payments/create";
+import {
+  cancelRecurringPayment as cancelRecurringPaymentRecord,
+  resumeRecurringPayment as resumeRecurringPaymentRecord,
+} from "@/services/payments/recurring-payments/lifecycle";
+import { updateRecurringPayment as updateRecurringPaymentRecord } from "@/services/payments/recurring-payments/update";
+import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
   AuthorizedRecurringPayment,
   AuthorizedRecurringPaymentCreate,

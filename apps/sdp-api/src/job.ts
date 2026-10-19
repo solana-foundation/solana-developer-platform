@@ -1,6 +1,5 @@
 import { pathToFileURL } from "node:url";
-import * as solanaRpc from "@sdp/rpc/solana";
-
+import { createRpc } from "@sdp/rpc/solana";
 import { parse as parseCron, validate as validateCron } from "node-cron";
 import { DVP_TRADES_MONITOR } from "@/cron/dvp-trades";
 import { EARN_CATALOGUE_SYNC_MONITOR, runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
@@ -49,7 +48,7 @@ import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
 const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
@@ -140,9 +139,9 @@ export async function runCronJob(): Promise<void> {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
 
-  let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
+  let probeRpc: ReturnType<typeof createRpc> | null = null;
   try {
-    probeRpc = solanaRpc.createRpc(env, { requestTimeoutMs: 5_000 });
+    probeRpc = createRpc(env, { requestTimeoutMs: 5_000 });
   } catch {
     // No RPC endpoint configured (some self-hosted setups): nothing to probe.
   }

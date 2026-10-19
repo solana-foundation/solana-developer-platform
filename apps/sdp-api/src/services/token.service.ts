@@ -18,7 +18,7 @@ import type {
   TokenTransactionListItem,
   TokenTransactionStatus,
   TokenTransactionType,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
 import type { DatabaseExecutor } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { AppError, badRequest } from "@/lib/errors";

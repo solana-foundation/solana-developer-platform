@@ -1,13 +1,12 @@
+import { CUSTODY_PROVIDERS, type CustodyMode, type CustodyProvider } from "@sdp/types/custody";
 import {
-  type CustodyMode,
-  type CustodyProvider,
   EARN_PROVIDERS,
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
-  SDP_RAMP_PROVIDER_STAGES,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
 import {
   admitByokCustodySetup,
@@ -337,8 +336,21 @@ describe("provider-availability.service", () => {
       if (!onExperimental.providers.earn[provider]?.enabled) continue;
       expect(onStable.providers.earn[provider]?.enabled).toBe(false);
     }
-    // Stable modules are unchanged.
-    expect(onStable.providers.custody).toEqual(onExperimental.providers.custody);
+    expect(onStable.providers.custody.privy).toEqual({
+      entitled: true,
+      configured: true,
+      enabled: true,
+    });
+    const enabledManagedOnlyCustody = CUSTODY_PROVIDERS.filter(
+      (provider) => provider !== "privy" && onExperimental.providers.custody[provider].enabled
+    );
+    expect(enabledManagedOnlyCustody.length).toBeGreaterThan(0);
+    for (const provider of enabledManagedOnlyCustody) {
+      expect(onStable.providers.custody[provider]).toEqual({
+        ...onExperimental.providers.custody[provider],
+        enabled: false,
+      });
+    }
     expect(onStable.providers.compliance).toEqual(onExperimental.providers.compliance);
   });
 

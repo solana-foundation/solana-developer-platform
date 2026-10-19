@@ -1,6 +1,6 @@
-import type { CreateApiKeyResponse } from "@sdp/types";
+import type { CreateApiKeyResponse } from "@sdp/types/api-keys";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -15,7 +15,7 @@ import {
   requestApiKeyGrantChannel,
 } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 type AppContext = Context<{ Bindings: Env }>;
 

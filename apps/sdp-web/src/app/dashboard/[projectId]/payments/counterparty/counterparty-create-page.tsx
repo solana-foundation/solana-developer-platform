@@ -1,8 +1,8 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";

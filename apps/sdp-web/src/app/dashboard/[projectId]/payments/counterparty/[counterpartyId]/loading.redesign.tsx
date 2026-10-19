@@ -1,5 +1,5 @@
-import { CounterpartyDetailSkeleton } from "../../payments-route-skeletons.redesign";
+import { CounterpartyDetailSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
 
-export default function CounterpartyDetailLoading() {
+export function CounterpartyDetailLoading() {
   return <CounterpartyDetailSkeleton />;
 }

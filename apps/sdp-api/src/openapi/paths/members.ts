@@ -1,14 +1,15 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-
 import {
-  acceptInvitationRequestSchema,
   errorResponseSchema,
   invitationIdSchema,
+  memberIdParamSchema,
+} from "@/openapi/schemas/base";
+import {
+  acceptInvitationRequestSchema,
   inviteMemberRequestSchema,
   listMembersQuerySchema,
-  memberIdParamSchema,
-} from "../schemas";
+} from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { actionSuccessResponse, inviteMemberResponse, listMembersResponse } from "./responses";
 

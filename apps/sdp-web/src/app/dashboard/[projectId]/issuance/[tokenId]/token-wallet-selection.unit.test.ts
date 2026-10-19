@@ -1,4 +1,5 @@
-import type { PaymentsDashboardWallet, Token } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token } from "@sdp/types/tokens";
 import { describe, expect, it } from "vitest";
 import {
   findWalletByCustodyWalletId,

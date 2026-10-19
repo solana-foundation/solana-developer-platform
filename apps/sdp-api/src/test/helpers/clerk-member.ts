@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 export async function signSeededClerkMember(
   env: Env,

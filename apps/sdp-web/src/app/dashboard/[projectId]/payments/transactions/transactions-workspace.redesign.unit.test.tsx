@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 
-import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransactionModule } from "@sdp/types";
+import {
+  UNIFIED_TRANSACTION_MODULES,
+  type UnifiedTransactionModule,
+} from "@sdp/types/unified-transactions";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -46,7 +49,7 @@ vi.mock("next/navigation", () => ({
 
 // The real menu is a Radix dropdown; render its sections flat so a test can read the options (labels
 // stay out of the text, so the chips are the only text match).
-vi.mock("@/components/ui/filter-menu", () => ({
+vi.mock("@sdp/ui/filter-menu", () => ({
   FilterMenu: ({ sections }: { sections: { id: string; content: ReactNode }[] }) => (
     <div>
       {sections.map((section) => (

@@ -1,8 +1,8 @@
-import type { Token } from "@sdp/types";
+import type { Token } from "@sdp/types/tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
-import * as solanaServices from "@/services/solana";
+import * as solanaSigner from "@/services/solana/signer";
 import { env as testEnv } from "@/test/helpers/env";
 import { createTokenTransaction } from "@/test/helpers/factories";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -543,7 +543,7 @@ describe("authority-resolution", () => {
       status: "inactive",
     });
     const exactSigner = vi
-      .spyOn(solanaServices, "createOrgSignerForCustodyWallet")
+      .spyOn(solanaSigner, "createOrgSignerForCustodyWallet")
       .mockRejectedValueOnce(
         Object.assign(new Error("Custody wallet is unavailable"), {
           code: "CONFLICT",
@@ -575,7 +575,7 @@ describe("authority-resolution", () => {
       walletId: "wal_draft",
       status: "inactive",
     });
-    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+    const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
     await expect(
       resolveIssuanceWallet({
@@ -662,7 +662,7 @@ describe("authority-resolution", () => {
       publicKey: OTHER_AUTHORITY,
     });
     const exactSigner = vi
-      .spyOn(solanaServices, "createOrgSignerForCustodyWallet")
+      .spyOn(solanaSigner, "createOrgSignerForCustodyWallet")
       .mockResolvedValueOnce({ address: OTHER_AUTHORITY } as never);
 
     await expect(
@@ -680,7 +680,7 @@ describe("authority-resolution", () => {
   it("reports a signer that diverges from its wallet record as a conflict", async () => {
     await resetScope();
     await seedConfigWallet({ id: "cwlt_authority", walletId: "wal_authority" });
-    vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet").mockResolvedValueOnce({
+    vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet").mockResolvedValueOnce({
       address: OTHER_AUTHORITY,
     } as never);
 
@@ -698,7 +698,7 @@ describe("authority-resolution", () => {
   it("keeps legacy prepare signers Config-only", async () => {
     await resetScope();
     await seedConnectionWallet({ id: "cwlt_connection", walletId: "wal_connection" });
-    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+    const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
     await expect(
       createLegacyResolvedAuthoritySigner({
@@ -715,7 +715,7 @@ describe("authority-resolution", () => {
   it("rejects a divergent legacy provider mirror before loading secrets", async () => {
     await resetScope();
     await seedConfigWallet({ id: "cwlt_pinned", walletId: "wal_pinned" });
-    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+    const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
     await expect(
       createLegacyResolvedAuthoritySigner({

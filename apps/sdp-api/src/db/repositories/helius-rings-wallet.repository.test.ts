@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
-import { mapHeliusRingsWalletRow } from "./helius-rings-wallet.repository";
+import {
+  type HeliusRingsWalletRepository,
+  mapHeliusRingsWalletRow,
+} from "./helius-rings-wallet.repository";
 import { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_hrw_repo_test";

@@ -7,10 +7,9 @@ const mocks = vi.hoisted(() => ({
   logRouteResult: vi.fn(),
 }));
 
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: mocks.createSdpApiClient,
-  getSdpAuth: mocks.getSdpAuth,
-}));
+vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: mocks.createSdpApiClient }));
+
+vi.mock("@/lib/sdp-auth", () => ({ getSdpAuth: mocks.getSdpAuth }));
 
 vi.mock("@/lib/request-tracing", () => ({
   createTimedTrace: () => ({

@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { pickPartyWalletId } from "@/services/dvp/custody-party";
 import type { DvpCallerWallet, DvpInboundRequest } from "@/services/dvp/inbound";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 export interface DvpActionWallet extends DvpCallerWallet {
   isRuntimeExecutionAllowed: boolean;

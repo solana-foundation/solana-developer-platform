@@ -1,4 +1,4 @@
-import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import type { MoneyAdmissionFacts, MoneyPrincipalFacts } from "@/lib/money-admission";
 
 /** A live all-wallets API key holding every grantable action: admits any start. */

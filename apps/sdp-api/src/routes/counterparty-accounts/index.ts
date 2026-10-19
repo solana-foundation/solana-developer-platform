@@ -3,8 +3,11 @@ import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams } from "@/middleware/validate";
-import type { Env } from "@/types/env";
-import { authorizeCounterparty, authorizeCounterpartyAccount } from "../counterparties/access";
+import {
+  authorizeCounterparty,
+  authorizeCounterpartyAccount,
+} from "@/routes/counterparties/access";
+import type { Env } from "@/types/env.d";
 import {
   archiveCounterpartyAccount,
   createCounterpartyAccount,
@@ -21,7 +24,7 @@ import {
 
 // Mounted under /counterparties/:counterpartyId/accounts. Auth and project
 // context middleware are applied by the parent counterparties router.
-const counterpartyAccounts = new Hono<{ Bindings: Env }>();
+export const counterpartyAccounts = new Hono<{ Bindings: Env }>();
 
 counterpartyAccounts.get("/", requireAction("counterparties.read"), listCounterpartyAccounts);
 counterpartyAccounts.post(
@@ -55,5 +58,3 @@ counterpartyAccounts.delete(
   idempotent({ key: "accepted", serverErrors: "store" }),
   archiveCounterpartyAccount
 );
-
-export default counterpartyAccounts;

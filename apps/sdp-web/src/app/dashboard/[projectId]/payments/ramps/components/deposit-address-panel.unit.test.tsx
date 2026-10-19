@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";

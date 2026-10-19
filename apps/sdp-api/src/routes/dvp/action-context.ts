@@ -8,8 +8,9 @@
  */
 
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
+import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden, notFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
@@ -19,7 +20,7 @@ import {
   type DvpSettlementWallet,
   readDvpSettlementWallet,
 } from "@/services/dvp/settlement-wallet";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { type DvpTradeAuditActor, dvpTradeAuditActor } from "./trade-audit";
 
 export interface DvpLegActionContext {

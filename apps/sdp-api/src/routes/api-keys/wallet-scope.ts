@@ -1,13 +1,13 @@
 import type { Context } from "hono";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { badRequest } from "@/lib/errors";
 import type { ApiKeySigningWalletScope } from "@/services/api-key.service";
 import {
   parseRequestedWalletScope,
   resolveSigningWalletsInProject,
 } from "@/services/api-key-scope.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import type { apiKeyCreateSchema } from "./schemas";
 
 /**

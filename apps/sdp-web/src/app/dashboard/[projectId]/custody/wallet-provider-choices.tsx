@@ -1,6 +1,6 @@
 "use client";
 
-import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
+import { ProviderSelectionCard } from "@sdp/ui/provider-selection-card";
 import { useTranslations } from "@/i18n/provider";
 import {
   type KnownCustodyProvider,

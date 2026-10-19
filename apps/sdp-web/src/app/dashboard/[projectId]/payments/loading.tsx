@@ -1,5 +1,5 @@
 import { DesignSwitch } from "@/components/new-design";
-import RedesignPaymentsLoading from "./loading.redesign";
+import { PaymentsLoading as RedesignPaymentsLoading } from "./loading.redesign";
 import { PaymentsPageSkeleton } from "./payments-page-skeleton";
 
 export function PreviousPaymentsLoading() {

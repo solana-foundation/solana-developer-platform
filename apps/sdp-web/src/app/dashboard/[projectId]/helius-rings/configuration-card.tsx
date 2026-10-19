@@ -1,11 +1,11 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { createRingsConnection, type RingsSetupStatus } from "./helius-rings-configuration.data";
 

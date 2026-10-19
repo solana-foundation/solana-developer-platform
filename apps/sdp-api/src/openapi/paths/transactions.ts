@@ -1,10 +1,10 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
+import { errorResponseSchema } from "@/openapi/schemas/base";
 import {
   unifiedTransactionsListResponseSchema,
   unifiedTransactionsQuerySchema,
 } from "@/routes/transactions/schemas";
-import { errorResponseSchema } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 
 const responseSchema = z.object({ data: unifiedTransactionsListResponseSchema });

@@ -13,9 +13,9 @@
 // callers go through `openSpcAuthContext` (see ./gateway-auth), which always
 // supplies the cache when KV is configured.
 
-import { PrivateChannelError } from "@sdp/private-channels";
 import type { SpcAuthClient } from "@sdp/private-channels/auth";
-import type { PrivateChannelUserRow } from "@/db/repositories";
+import { PrivateChannelError } from "@sdp/private-channels/errors";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import { createSpcCredentialCipher } from "@/lib/spc-credential-crypto";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";

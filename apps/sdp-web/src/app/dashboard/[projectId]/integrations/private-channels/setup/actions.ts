@@ -1,12 +1,12 @@
 "use server";
 
-import { privateChannelInstanceInputSchema } from "@sdp/private-channels";
+import { privateChannelInstanceInputSchema } from "@sdp/private-channels/schema";
 import type {
   PrivateChannelHealth,
   PrivateChannelInstance,
   PrivateChannelInstanceInput,
   PrivateChannelProbeResult,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";

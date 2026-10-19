@@ -1,16 +1,17 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-
+import { createApiKeyRequestSchema } from "@/openapi/schemas/api-keys";
 import {
-  addProjectMemberRequestSchema,
-  createApiKeyRequestSchema,
   errorResponseSchema,
   includeArchivedQuerySchema,
   memberIdParamSchema,
   projectIdParamSchema,
+} from "@/openapi/schemas/base";
+import {
+  addProjectMemberRequestSchema,
   updateProjectMemberRequestSchema,
   updateProjectRequestSchema,
-} from "../schemas";
+} from "@/openapi/schemas/projects";
 import { errorResponses, jsonContent } from "./helpers";
 import {
   apiKeyCreateResponse,

@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db/client";
+import * as events from "@/runtime/money-path-events";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -13,6 +14,10 @@ const MOONPAY_TRANSACTION_ID = "772f7a7f-142e-43cf-824f-8d861aefe8bd";
 
 describe("moonpayWebhook.process", () => {
   const processor = moonpayWebhook;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -99,6 +104,45 @@ describe("moonpayWebhook.process", () => {
       provider_reference: MOONPAY_TRANSACTION_ID,
     });
   });
+
+  it.each([
+    { transferEnvironment: "sandbox", eventEnvironment: "production" },
+    { transferEnvironment: "production", eventEnvironment: "sandbox" },
+  ] as const)(
+    "logs and refuses a $eventEnvironment event aimed at a $transferEnvironment transfer",
+    async ({ transferEnvironment, eventEnvironment }) => {
+      if (transferEnvironment === "production") {
+        await getDb(env)
+          .prepare("UPDATE payment_transfers SET project_id = ? WHERE id = ?")
+          .bind(`${PROJECT_ID}_production`, TRANSFER_ID)
+          .run();
+      }
+      const logEvent = vi.spyOn(events, "logEvent").mockImplementation(() => {});
+
+      const result = await processor.process(env, eventEnvironment, {
+        provider: "moonpay",
+        kind: "awaiting_payment",
+        reference: MOONPAY_TRANSACTION_ID,
+        transferId: TRANSFER_ID,
+      });
+
+      expect(result).toEqual({ outcome: "refused", reason: "environment_mismatch" });
+      expect(logEvent).toHaveBeenCalledWith("error", {
+        event: "sdp_api_ramp_settlement_environment_mismatch",
+        flow: "ramp-settlement",
+        provider: "moonpay",
+        provider_reference: MOONPAY_TRANSACTION_ID,
+        transfer_id: TRANSFER_ID,
+        environment: eventEnvironment,
+        transfer_environment: transferEnvironment,
+      });
+      const row = await getDb(env)
+        .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+        .bind(TRANSFER_ID)
+        .first<{ status: string; provider_reference: string | null }>();
+      expect(row).toEqual({ status: "pending", provider_reference: null });
+    }
+  );
 });
 
 describe("moonpayWebhook.verify", () => {

@@ -1,14 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Browser, Page, Response } from "@playwright/test";
-import type {
-  CounterpartyAccountResponse,
-  CounterpartyResponse,
-  ListProjectsResponse,
-  OrganizationSettings,
-  OrganizationTier,
-  PaymentsDashboardWallet,
-} from "@sdp/types";
+import type { CounterpartyAccountResponse, CounterpartyResponse } from "@sdp/types/counterparties";
+import type { OrganizationSettings, OrganizationTier } from "@sdp/types/organizations";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { ListProjectsResponse } from "@sdp/types/projects";
 import {
   type Address,
   appendTransactionMessageInstructions,

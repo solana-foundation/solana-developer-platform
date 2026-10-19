@@ -8,8 +8,8 @@
  * Use KoraAdapter instead when you want gasless/relayed execution.
  */
 
-import { isTransientRpcError } from "@sdp/rpc";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createRpc, sendTransaction } from "@sdp/rpc/solana";
+import { isTransientRpcError } from "@sdp/rpc/transient";
 import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
@@ -76,7 +76,7 @@ export class NativeAdapter implements FeePaymentPort {
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
     const signedTransaction = await this.signTransactionAsFeePayer(transaction);
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signedTransaction));
-    return this.submitWithRetry(solanaRpc.createRpc(this.env), signedBytes);
+    return this.submitWithRetry(createRpc(this.env), signedBytes);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -105,12 +105,12 @@ export class NativeAdapter implements FeePaymentPort {
    * non-retryable error, or exhausts MAX_SUBMIT_RETRIES.
    */
   private async submitWithRetry(
-    rpc: ReturnType<typeof solanaRpc.createRpc>,
+    rpc: ReturnType<typeof createRpc>,
     signedBytes: Uint8Array,
     attempt: number = 1
   ): Promise<Signature> {
     try {
-      return await solanaRpc.sendTransaction(rpc, signedBytes);
+      return await sendTransaction(rpc, signedBytes);
     } catch (error) {
       if (attempt >= MAX_SUBMIT_RETRIES || !isTransientRpcError(error)) {
         throw wrapError(error, "Failed to submit transaction", "SUBMISSION_FAILED");

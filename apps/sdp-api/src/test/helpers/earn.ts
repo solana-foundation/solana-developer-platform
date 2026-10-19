@@ -1,10 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Action } from "@sdp/types";
+import type { Action } from "@sdp/types/actions";
 import { getDb } from "@/db/client";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 export interface EarnTestApiKey {
   id: string;

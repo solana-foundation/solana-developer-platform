@@ -4,7 +4,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateQuery } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { listUnifiedTransactions } from "./handlers";
 import { unifiedTransactionsQuerySchema } from "./schemas";
 
@@ -16,7 +16,7 @@ export const UNIFIED_TRANSACTIONS_QUOTA = {
   orgMax: 240,
 };
 
-const transactions = new Hono<{ Bindings: Env }>();
+export const transactions = new Hono<{ Bindings: Env }>();
 
 transactions.use("*", unifiedAuthMiddleware());
 transactions.use("*", projectContextMiddleware());
@@ -27,5 +27,3 @@ transactions.get(
   meteredQuota(UNIFIED_TRANSACTIONS_QUOTA),
   listUnifiedTransactions
 );
-
-export default transactions;

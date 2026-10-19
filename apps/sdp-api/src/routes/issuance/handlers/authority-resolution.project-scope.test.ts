@@ -1,8 +1,8 @@
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
-import * as solanaServices from "@/services/solana";
+import * as solanaSigner from "@/services/solana/signer";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
@@ -239,7 +239,7 @@ describe("issuance authority resolution across an organization's projects", () =
     await seedRequesterProjectWallet();
     const signer = await generateKeyPairSigner();
     const exactSigner = vi
-      .spyOn(solanaServices, "createOrgSignerForCustodyWallet")
+      .spyOn(solanaSigner, "createOrgSignerForCustodyWallet")
       .mockResolvedValue(signer);
 
     await expect(
@@ -260,7 +260,7 @@ describe("issuance authority resolution across an organization's projects", () =
   });
 
   it("refuses a legacy deploy naming a wallet only another project holds", async () => {
-    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+    const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
     await expect(
       createLegacyResolvedAuthoritySigner({
@@ -275,7 +275,7 @@ describe("issuance authority resolution across an organization's projects", () =
 
   it("refuses a legacy deploy that names no wallet before any signer is loaded", async () => {
     await seedRequesterProjectWallet();
-    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+    const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
     await expect(
       createLegacyResolvedAuthoritySigner({

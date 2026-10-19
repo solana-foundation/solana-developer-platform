@@ -7,11 +7,10 @@
 // it stays the custody signer's decision (HOO-2099).
 
 import type { Address } from "@solana/kit";
-import type { DatabaseClient } from "@/db/client";
-import { getDb } from "@/db/client";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { type WalletAccess, walletAccessAllows } from "@/lib/auth";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * Resolves the active custody wallet for a party address — the single "can

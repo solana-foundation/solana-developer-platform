@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
-import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types";
+import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
@@ -14,7 +14,7 @@ import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import type { acceptSchema, inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;

@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
+import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../../../private-channels-access";
-import { PrivateChannelsLoadError } from "../../../private-channels-load-error";
-import { loadInstance } from "../../../private-channels-page.data";
 import { CreateChannelScreen } from "./create-channel-screen";
 
 export default async function CreatePrivateChannelPage({

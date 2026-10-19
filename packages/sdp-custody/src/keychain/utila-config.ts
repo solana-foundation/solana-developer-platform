@@ -1,5 +1,5 @@
-import { normalizeUtilaWalletId } from "../provider-wallet-ids";
-import { SigningError } from "../signing";
+import { normalizeUtilaWalletId } from "#/provider-wallet-ids";
+import { SigningError } from "#/signing";
 import type { KeychainUtilaConfig } from "./types";
 
 type UtilaNetwork = "networks/solana-mainnet" | "networks/solana-devnet";

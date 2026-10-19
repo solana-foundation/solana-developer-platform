@@ -5,15 +5,11 @@
  * avoiding non-null assertions while adding defensive runtime checks.
  */
 
-import {
-  type Action,
-  apiKeyMayPerform,
-  type OrganizationRole,
-  organizationRoleMayPerform,
-} from "@sdp/types";
+import { type Action, apiKeyMayPerform, organizationRoleMayPerform } from "@sdp/types/actions";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { z } from "zod";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { AppError, badRequest } from "./errors";
 
 export type AuthType = "api_key" | "clerk";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,

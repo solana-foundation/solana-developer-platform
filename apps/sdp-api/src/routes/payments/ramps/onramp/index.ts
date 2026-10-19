@@ -3,7 +3,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   createOnrampQuote,
   estimateOnramp,
@@ -12,7 +12,7 @@ import {
 } from "./handlers";
 import { createOnrampQuoteSchema, estimateOnrampSchema } from "./schemas";
 
-const onramp = new Hono<{ Bindings: Env }>();
+export const onramp = new Hono<{ Bindings: Env }>();
 
 onramp.get("/currency", requireAction("onramp.read"), listOnrampCurrencies);
 onramp.post(
@@ -30,5 +30,3 @@ onramp.post(
   requestGate({ extract: extractOnrampQuoteRequest }),
   createOnrampQuote
 );
-
-export default onramp;

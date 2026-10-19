@@ -1,6 +1,10 @@
 "use client";
 
-import type { Counterparty, CounterpartyResponse, CreateCounterpartyRequest } from "@sdp/types";
+import type {
+  Counterparty,
+  CounterpartyResponse,
+  CreateCounterpartyRequest,
+} from "@sdp/types/counterparties";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";

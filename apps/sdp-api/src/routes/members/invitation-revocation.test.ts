@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { clerkHeaders, ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";

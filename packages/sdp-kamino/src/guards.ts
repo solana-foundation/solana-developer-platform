@@ -1,4 +1,5 @@
-import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Address, Instruction } from "@solana/kit";
 import { kaminoClusterConfig, kaminoProgramAllowlist } from "./programs";
 import type { KaminoInstructionPlan } from "./types";

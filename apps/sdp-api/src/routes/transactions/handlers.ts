@@ -1,14 +1,13 @@
+import { type Action, actionOwnerOf } from "@sdp/types/actions";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
-  type Action,
-  actionOwnerOf,
   PAYMENT_TRANSACTION_KINDS,
   type PaymentTransactionKind,
-  RAMP_PROVIDERS,
   UNIFIED_TRANSACTION_SDP_MODULES,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -20,7 +19,7 @@ import {
   isRampProviderInChannel,
 } from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   PAYMENT_TRANSACTION_KIND_ACTIONS,
   permittedPaymentTransactionKinds,

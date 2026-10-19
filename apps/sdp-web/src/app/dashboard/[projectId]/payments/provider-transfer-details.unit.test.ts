@@ -1,4 +1,4 @@
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 import { providerTransferDetailRows } from "./provider-transfer-details";
 

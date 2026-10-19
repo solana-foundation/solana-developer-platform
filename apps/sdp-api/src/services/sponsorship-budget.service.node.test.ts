@@ -1,6 +1,6 @@
-import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment";
+import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment/port";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type Blockhash,
   compileTransaction,
@@ -22,7 +22,7 @@ import {
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/sponsor-signing";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import type { SponsorshipMovementScope } from "./sponsorship.service";
 import { BudgetedFeePayment, createKoraClusterRpc } from "./sponsorship-budget.service";
 

@@ -1,5 +1,3 @@
-import "server-only";
-
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -16,10 +16,13 @@ const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 const verifySignedExternalWalletTransaction = vi.hoisted(() => vi.fn());
 const readConfirmedBlockHeight = vi.hoisted(() => vi.fn());
 
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultParRedemptionClient: () => ({ quoteParRedemption, buildParRedemptionRequest }),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("./vault-execution.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./vault-execution.service")>()),
@@ -28,8 +31,8 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   broadcastVaultTransaction,
   compileUnsignedVaultTransaction,
 }));
-vi.mock("@/services/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/solana")>()),
+vi.mock("@/services/solana/signer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet,
 }));
 vi.mock("./vault-sponsorship", async (importOriginal) => ({

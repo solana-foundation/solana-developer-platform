@@ -4,7 +4,7 @@ import {
   SDP_RELEASE_CHANNEL_NAMES,
   type SdpModule,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 
 /**
  * Reads the release channel the target API runs from its `/health`, so a smoke

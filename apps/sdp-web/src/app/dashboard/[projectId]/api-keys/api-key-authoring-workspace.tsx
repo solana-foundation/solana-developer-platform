@@ -1,19 +1,20 @@
 "use client";
 
-import type { Action, PaymentsDashboardWallet } from "@sdp/types";
+import type { Action } from "@sdp/types/actions";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { DateTimePicker } from "@sdp/ui/date-picker";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
 import { CircleCheck, FileText, KeyRound, Layers, Search, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { DateTimePicker } from "@/components/ui/date-picker";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { recordQuickStartStep } from "@/lib/dashboard-quick-start.redesign";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
   API_KEY_AUTHORING_STEPS,

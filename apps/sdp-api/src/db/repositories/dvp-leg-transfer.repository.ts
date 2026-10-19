@@ -8,7 +8,7 @@
 
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import { z } from "zod";
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type DvpLegTransferDirection = "in" | "out";
 

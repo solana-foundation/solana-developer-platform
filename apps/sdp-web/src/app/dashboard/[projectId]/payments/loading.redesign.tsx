@@ -1,5 +1,5 @@
 import { PaymentsPageSkeleton } from "./payments-page-skeleton.redesign";
 
-export default function PaymentsLoading() {
+export function PaymentsLoading() {
   return <PaymentsPageSkeleton />;
 }

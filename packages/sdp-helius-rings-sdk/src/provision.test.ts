@@ -1,4 +1,4 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const buildRegistrationTransaction = vi.fn();

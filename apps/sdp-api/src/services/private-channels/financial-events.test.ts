@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PrivateChannelDepositRow, PrivateChannelWithdrawalRow } from "@/db/repositories";
+import type { PrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
+import type { PrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";
 import * as eventService from "@/services/private-channels/event.service";
 import type { Env } from "@/types/env";
 import { emitDepositEvent } from "./deposit-events";

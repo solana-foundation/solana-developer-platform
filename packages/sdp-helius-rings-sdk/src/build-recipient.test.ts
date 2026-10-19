@@ -1,4 +1,4 @@
-import type { BuildOperationInput } from "@sdp/helius-rings";
+import type { BuildOperationInput } from "@sdp/helius-rings/port";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -39,7 +39,7 @@ vi.mock("@heliuslabs/zolana/wallet", async (importOriginal) => ({
 const { buildRingsOperation } = await import("./build.js");
 const { derivedIdentity, honestRecord, TEST_FOREIGN_REQUEST, TEST_OWNER, testSignMessage } =
   await import("./test/shielded-identity-fixtures.js");
-const { createCustodyMaterialSource } = await import("./custody-ka/index.js");
+const { createCustodyMaterialSource } = await import("./custody-ka/derivation.js");
 
 const RECIPIENT = TEST_FOREIGN_REQUEST.owner;
 const BLOCKHASH = "5DjPMLBWWLbNw3TRUEbCwPFvpXqhkdVv2VUb3RJhZmpJ";

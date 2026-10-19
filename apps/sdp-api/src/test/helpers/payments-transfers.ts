@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import type { SdpReleaseChannel } from "@sdp/types";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
-import app from "@/index";
+import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { transferResponse } from "@/openapi/paths/responses";
 import { errorResponseSchema } from "@/openapi/schemas/base";

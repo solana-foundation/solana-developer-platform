@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getClerkAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -11,7 +11,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { ApiKeyService } from "@/services/api-key.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 const verifyApiKeySchema = z.object({
   apiKey: z
@@ -22,7 +22,7 @@ const verifyApiKeySchema = z.object({
     .regex(/^sk_(test|live)_[A-Za-z0-9_-]+$/),
 });
 
-const playgroundInternal = new Hono<{ Bindings: Env }>();
+export const playgroundInternal = new Hono<{ Bindings: Env }>();
 
 playgroundInternal.use("*", unifiedAuthMiddleware());
 playgroundInternal.use("*", requireClerkSession());
@@ -62,5 +62,3 @@ playgroundInternal.post(
     return success(c, identity);
   }
 );
-
-export default playgroundInternal;

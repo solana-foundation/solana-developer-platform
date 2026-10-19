@@ -1,13 +1,19 @@
 "use client";
 
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type ByokCustodyProvider,
   CUSTODY_MODES,
   type CustodyMode,
   type CustodyWalletPurpose,
   isByokCustodyProvider,
-  type SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { useRouter } from "next/navigation";
 import {
   type ComponentProps,
@@ -33,11 +39,6 @@ import {
 import { PrivyCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
 import { useWalletInventoryRefresh } from "@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Button } from "@/components/ui/button";
-import { InfoHint } from "@/components/ui/info-hint";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectItem } from "@/components/ui/select";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -50,7 +51,6 @@ import type {
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 
 type SetupStep = "provider" | "details";
 

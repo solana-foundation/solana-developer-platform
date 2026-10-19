@@ -1,4 +1,4 @@
-import type { RepositoryDbClient } from "./base";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /** Kind of intent an observation attributes a settlement to. */
 export type PrivateChannelSettlementIntentKind = "deposit" | "withdrawal";

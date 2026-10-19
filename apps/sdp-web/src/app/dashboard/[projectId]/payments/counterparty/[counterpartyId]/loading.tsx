@@ -1,6 +1,6 @@
+import { CounterpartyDetailSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import { DesignSwitch } from "@/components/new-design";
-import { CounterpartyDetailSkeleton } from "../../payments-route-skeletons";
-import RedesignCounterpartyDetailLoading from "./loading.redesign";
+import { CounterpartyDetailLoading as RedesignCounterpartyDetailLoading } from "./loading.redesign";
 
 export function PreviousCounterpartyDetailLoading() {
   return <CounterpartyDetailSkeleton />;

@@ -1,4 +1,5 @@
-import { RAMP_PROVIDERS, SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
@@ -7,7 +8,7 @@ import { getCounterpartyRequirements } from "@/routes/counterparties/handlers";
 import { listCounterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts/handlers";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env as baseEnv } from "@/test/helpers/env";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { listOfframpCurrencies } from "./offramp/handlers";
 import { listOnrampCurrencies } from "./onramp/handlers";
 import { filterProviders } from "./shared";

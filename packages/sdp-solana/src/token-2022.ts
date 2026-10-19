@@ -4,7 +4,6 @@
  * Burn and unsigned burn transactions using the Mosaic SDK.
  */
 
-import type { RpcEnv } from "@sdp/rpc";
 import {
   confirmTransaction,
   createRpcForSdk,
@@ -12,6 +11,7 @@ import {
   type SolanaRpcSdkBridge,
   simulateTransaction,
 } from "@sdp/rpc/solana";
+import type { RpcEnv } from "@sdp/rpc/types";
 import {
   type Address,
   compileTransaction,

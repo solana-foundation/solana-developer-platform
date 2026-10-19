@@ -1,10 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
-import * as privateChannelsPkg from "@sdp/private-channels";
-import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
-import type { PrivateChannelInstanceEnvelope } from "@sdp/types";
+import * as privateChannelsAuth from "@sdp/private-channels/auth";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
+import * as privateChannelsProbe from "@sdp/private-channels/probe";
+import type { PrivateChannelInstanceEnvelope } from "@sdp/types/private-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
@@ -12,8 +13,8 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
-const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
-const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
+const probeConnectionMock = vi.spyOn(privateChannelsProbe, "probeConnection");
+const spcRegisterMock = vi.spyOn(privateChannelsAuth, "spcRegister");
 
 const TEST_ORG = {
   id: "org_pc_test",

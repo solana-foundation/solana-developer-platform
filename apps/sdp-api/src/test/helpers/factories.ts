@@ -1,12 +1,5 @@
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-/**
- * Test Factories
- *
- * Builder functions for creating test fixtures with sensible defaults.
- * Use these instead of verbose inline object creation in tests.
- */
-
-import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
 import type { SeededApiKey } from "@/test/mocks/kv";
 
 // ═══════════════════════════════════════════════════════════════════════════

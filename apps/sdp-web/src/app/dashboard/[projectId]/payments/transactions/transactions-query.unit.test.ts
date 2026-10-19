@@ -1,4 +1,4 @@
-import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types/unified-transactions";
 import { describe, expect, it } from "vitest";
 import {
   parseTransactionFilters,

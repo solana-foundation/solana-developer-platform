@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import type { EarnVaultPosition } from "@sdp/types";
+import type { EarnVaultPosition } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 
 const mocks = vi.hoisted(() => ({
   fetchOptions: vi.fn(),

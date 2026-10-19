@@ -1,13 +1,12 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { useState } from "react";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
 import { deactivateApiKeyInlineAction } from "./actions";

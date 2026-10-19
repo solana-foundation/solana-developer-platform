@@ -8,7 +8,7 @@ import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   createApiKey,
   getApiKey,
@@ -24,7 +24,7 @@ import {
   apiKeyUpdateSchema,
 } from "./schemas";
 
-const apiKeys = new Hono<{ Bindings: Env }>();
+export const apiKeys = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication, by a signed-in person: an API key is a
 // credential, not an administrator, so it cannot manage keys (HOO-2099).
@@ -53,5 +53,3 @@ apiKeys.delete(
   validateBody(apiKeyRevokeSchema),
   revokeApiKey
 );
-
-export default apiKeys;

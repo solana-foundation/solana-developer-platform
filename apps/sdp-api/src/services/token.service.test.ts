@@ -1,13 +1,9 @@
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-/**
- * Token Service Unit Tests
- */
-
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb, type PreparedStatement } from "@/db";
+import { getDb, type PreparedStatement } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";

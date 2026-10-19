@@ -1,4 +1,4 @@
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 import { walletComboboxOptions } from "./wallet-options";
 

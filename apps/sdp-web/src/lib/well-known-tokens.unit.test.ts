@@ -1,6 +1,5 @@
+import { PRIVATE_CHANNEL_TOKEN_SYMBOLS, privateChannelTokens } from "@sdp/types/private-channels";
 import {
-  PRIVATE_CHANNEL_TOKEN_SYMBOLS,
-  privateChannelTokens,
   SOL_MINT,
   type SolanaCluster,
   SPL_TOKEN_PROGRAMS,
@@ -9,7 +8,7 @@ import {
   type WellKnownToken,
   wellKnownDecimals,
   wellKnownMint,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 
 // The catalogue lives in @sdp/types, which carries no test runner of its own.

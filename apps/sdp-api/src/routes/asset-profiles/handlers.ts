@@ -7,9 +7,9 @@ import {
   getAssetTypeRegistryEntry,
   isAssetTypeSupported,
   type ListAssetProfilesResponse,
-} from "@sdp/types";
+} from "@sdp/types/asset-profiles";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {

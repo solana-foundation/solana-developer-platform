@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { paymentAmountSchema, paymentTokenSchema } from "../schemas";
+import { paymentAmountSchema, paymentTokenSchema } from "@/routes/payments/schemas";
 
 export const priorityFeeSchema = z.enum(["none", "low", "medium", "high", "auto"]);
 

@@ -5,7 +5,7 @@ import { idempotent } from "@/middleware/idempotency";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   admitTransferExecution,
   authorizeTransfer,
@@ -16,7 +16,7 @@ import {
 } from "./handlers";
 import { createTransferSchema } from "./schemas";
 
-const transfers = new Hono<{ Bindings: Env }>();
+export const transfers = new Hono<{ Bindings: Env }>();
 
 transfers.post(
   "/",
@@ -38,5 +38,3 @@ transfers.post(
 );
 transfers.get("/", requireAction("transfers.read"), listTransfers);
 transfers.get("/:transferId", requireAction("transfers.read"), getTransfer);
-
-export default transfers;

@@ -1,25 +1,28 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider, normalizePrivyWalletId } from "@sdp/custody";
+import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
-import type {
-  CustodyConfigStatus,
-  CustodyConnectionCheckStatus,
-  CustodyConnectionLifecycle,
-  CustodyMode,
-  CustodyWalletPurpose,
-  CustodyWalletStatus,
-  OrganizationProviderAvailabilityResponse,
-  ProviderCredentialStatus,
-} from "@sdp/types";
-import { type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import {
+  CUSTODY_PROVIDERS,
+  type CustodyConfigStatus,
+  type CustodyConnectionCheckStatus,
+  type CustodyConnectionLifecycle,
+  type CustodyMode,
+  type CustodyProvider,
+  type CustodyWalletPurpose,
+  type CustodyWalletStatus,
+  type ProviderCredentialStatus,
+} from "@sdp/types/custody";
+import type { MovementId } from "@sdp/types/movements";
+import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
-import type { DatabaseClient } from "@/db";
+import type { DatabaseClient } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { decideMovement, readMovementFactsWith } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
-import type { SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
 import {
   type CredentialSecretStorageBackend,
@@ -39,7 +42,7 @@ import {
   isManagedCustodyUseAllowed,
 } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { privyWalletExternalId } from "./provider-wallet-lifecycle";
 import { boundSigningTime, custodySigningTimeoutMs } from "./signing-timeout";
 

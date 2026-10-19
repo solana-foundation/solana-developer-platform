@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { PlusIcon } from "lucide-react";
 import { useMemo } from "react";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
 import {

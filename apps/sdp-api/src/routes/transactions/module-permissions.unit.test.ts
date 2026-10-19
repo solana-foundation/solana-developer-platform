@@ -1,4 +1,4 @@
-import { type Action, API_KEY_GRANTABLE_ACTIONS, apiKeyMayPerform } from "@sdp/types";
+import { type Action, API_KEY_GRANTABLE_ACTIONS, apiKeyMayPerform } from "@sdp/types/actions";
 import { describe, expect, it } from "vitest";
 import {
   permittedPaymentTransactionKinds,

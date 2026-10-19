@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { SdpEarnError } from "../../errors";
+import { SdpEarnError } from "#/errors";
 import { ONDO_ASSETS_API_URL, ondoPercentToDecimalString, readOndoUsdyRate } from "./usdy-rate";
 
 /**

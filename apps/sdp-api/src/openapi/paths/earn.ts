@@ -1,16 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import {
-  earnExternalWalletEarningsQuerySchema,
-  earnExternalWalletMovementParamsSchema,
-  earnExternalWalletMovementsQuerySchema,
-  earnExternalWalletPositionSummaryQuerySchema,
-  earnExternalWalletPositionsQuerySchema,
-  earnExternalWalletWithdrawalRequestsQuerySchema,
-  earnStrategyIdParamsSchema,
-  earnVaultWithdrawalRequestParamsSchema,
-  listEarnStrategiesQuerySchema,
-} from "@/routes/earn/schemas";
-import { errorResponseSchema } from "../schemas/base";
+import { errorResponseSchema } from "@/openapi/schemas/base";
 import {
   earnExternalWalletDepositResponse,
   earnExternalWalletDepositTransactionRequest,
@@ -40,7 +29,18 @@ import {
   earnVaultDepositPreviewRequest,
   earnVaultDepositPreviewResponse,
   earnVaultShareReconciliationResponse,
-} from "../schemas/earn";
+} from "@/openapi/schemas/earn";
+import {
+  earnExternalWalletEarningsQuerySchema,
+  earnExternalWalletMovementParamsSchema,
+  earnExternalWalletMovementsQuerySchema,
+  earnExternalWalletPositionSummaryQuerySchema,
+  earnExternalWalletPositionsQuerySchema,
+  earnExternalWalletWithdrawalRequestsQuerySchema,
+  earnStrategyIdParamsSchema,
+  earnVaultWithdrawalRequestParamsSchema,
+  listEarnStrategiesQuerySchema,
+} from "@/routes/earn/schemas";
 import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
   errorResponses,

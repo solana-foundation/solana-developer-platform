@@ -5,7 +5,7 @@ import type {
   TransactionApiResponse,
   TransactionListApiResponse,
   UnfreezeApiResponse,
-} from "../helpers/api-types";
+} from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -13,8 +13,8 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
-import { createAndDeployStablecoin, mintToWallet, TEST_WALLETS } from "../helpers/issuance";
+} from "#/helpers/integration";
+import { createAndDeployStablecoin, mintToWallet, TEST_WALLETS } from "#/helpers/issuance";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute Endpoints", () => {
   let apiKeyHash: string;

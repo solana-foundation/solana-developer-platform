@@ -1,13 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDatabaseClient, runWithSystemDatabaseIdentity } from "../src/db";
-import { ClerkOrganizationsService } from "../src/services/clerk-organizations.service";
+import { createDatabaseClient } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
   parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
-} from "../src/services/provider-availability.service";
-import type { Env } from "../src/types/env";
+} from "@/services/provider-availability.service";
+import type { Env } from "@/types/env";
 
 type Tier = "individual" | "enterprise";
 

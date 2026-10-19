@@ -1,9 +1,7 @@
-import type { OrganizationRpcProvider } from "@sdp/types";
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
 import { type ManagedRpcProvider, resolveManagedRpcProviders } from "./config";
 import { SdpRpcError } from "./errors";
 import type { KVStore, RpcEnv } from "./types";
-
-export { withHeliusApiKey } from "./config";
 
 export interface ResolveRpcTargetInput {
   env: RpcEnv;

@@ -1,18 +1,18 @@
-import { ASSET_CATEGORIES, ASSET_TYPES } from "@sdp/types";
+import { ASSET_CATEGORIES, ASSET_TYPES } from "@sdp/types/asset-profiles";
+import { z } from "zod";
 import {
   assetCategorySchema as assetCategorySchemaBase,
   assetProfileIdSchema as assetProfileIdSchemaBase,
   issuanceMetadataSchema as issuanceMetadataSchemaBase,
   listAssetProfilesQuerySchema as listAssetProfilesQuerySchemaBase,
   updateAssetProfileObjectSchema as updateAssetProfileObjectSchemaBase,
-} from "../../routes/asset-profiles/schemas";
+} from "@/routes/asset-profiles/schemas";
 import {
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const assetProfileIdParamSchema = withOpenApi(assetProfileIdSchemaBase, {

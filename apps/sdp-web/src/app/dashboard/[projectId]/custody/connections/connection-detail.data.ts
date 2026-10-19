@@ -4,7 +4,7 @@ import {
   type CustodyProvider,
   type CustodyWalletSummary,
   PROVIDER_CREDENTIAL_STATUSES,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { type CustodyConnectionListItem, connectionsPageEnvelopeSchema } from "./connections.data";

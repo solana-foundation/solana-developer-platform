@@ -1,10 +1,9 @@
+import { type GatewayHealthResult, probeGatewayHealth } from "@sdp/private-channels/health";
 import {
   type ConnectionProbeInput,
   type ConnectionProbeResult,
-  type GatewayHealthResult,
   probeConnection,
-  probeGatewayHealth,
-} from "@sdp/private-channels";
+} from "@sdp/private-channels/probe";
 import { type ProbeTransport, truncateProbeDetail } from "@sdp/private-channels/transport";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -13,7 +12,7 @@ import type {
   PrivateChannelInstance,
   PrivateChannelInstanceOverview,
   PrivateChannelProbeResult,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import type { Env } from "@/types/env";
 import { createPrivateChannelProbeTransport } from "./egress";
 

@@ -1,12 +1,11 @@
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
-  RAMP_PROVIDERS,
-  type RampProviderId,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
   type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import type { Adapter } from "flags";
 import { describe, expect, it } from "vitest";
 import { type DashboardFlagEntities, defineDashboardFlags } from "./definitions";
@@ -28,6 +27,7 @@ const FLAG_CAPS = {
   newDesignContacts: "uncapped",
   newDesignPayDeposit: "uncapped",
   newDesignActivity: "uncapped",
+  newDesignIssuance: "uncapped",
   issuance: { module: "issuance" },
   assetProfiles: { module: "issuance" },
   privateChannels: { module: "private_channels" },
@@ -114,6 +114,7 @@ describe("defineDashboardFlags", () => {
         "newDesignContacts",
         "newDesignPayDeposit",
         "newDesignActivity",
+        "newDesignIssuance",
       ].sort()
     );
     for (const name of delegated) {

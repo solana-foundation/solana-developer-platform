@@ -1,10 +1,10 @@
-import type * as feePaymentAdapters from "@sdp/fee-payment";
+import type { createFeePaymentAdapter } from "@sdp/fee-payment";
 import { getBase58Decoder } from "@solana/codecs";
 import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
-import { getDb } from "@/db";
-import baseApp from "@/index";
+import { getDb } from "@/db/client";
+import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
   paymentRecurringPaymentCollectionResponseSchema,
@@ -69,7 +69,7 @@ export function installRecurringExecutionHooks() {
       getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
       signAsFeePayer: signAsFeePayerMock,
       signAndSend: signAndSendMock,
-    } satisfies ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } satisfies ReturnType<typeof createFeePaymentAdapter>);
   });
 
   return {

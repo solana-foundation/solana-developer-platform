@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { HUMAN_SESSION_REQUIRED_MESSAGE } from "@/middleware/human-session";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";

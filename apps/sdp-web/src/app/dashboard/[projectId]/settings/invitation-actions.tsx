@@ -1,17 +1,17 @@
 "use client";
 
-import { MoreHorizontalIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
-import { revokeInvitation } from "@/app/members/actions";
-import { Button } from "@/components/ui/button";
+import { Button } from "@sdp/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@sdp/ui/dropdown-menu";
+import { MoreHorizontalIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
+import { revokeInvitation } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
 
 export function InvitationActions({

@@ -1,10 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { CounterpartyCreateProvider } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-context";
+import { CounterpartyCreatePage } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-page";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { CounterpartyCreateProvider } from "../counterparty-create-context";
-import { CounterpartyCreatePage } from "../counterparty-create-page";
-import RedesignCounterpartyCreateRoute from "./page.redesign";
+import { CounterpartyCreateRoute as RedesignCounterpartyCreateRoute } from "./page.redesign";
 
 async function CounterpartyCreateRoute() {
   const { userId, orgId } = await auth();

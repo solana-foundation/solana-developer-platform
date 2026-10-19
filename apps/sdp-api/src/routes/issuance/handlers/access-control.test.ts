@@ -1,4 +1,4 @@
-import type { Token, TokenTemplate } from "@sdp/types";
+import type { Token, TokenTemplate } from "@sdp/types/tokens";
 import { describe, expect, it } from "vitest";
 import {
   controlListMovement,

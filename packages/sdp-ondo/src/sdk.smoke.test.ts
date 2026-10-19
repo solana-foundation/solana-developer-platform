@@ -1,7 +1,7 @@
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import {
   address,
   appendTransactionMessageInstructions,

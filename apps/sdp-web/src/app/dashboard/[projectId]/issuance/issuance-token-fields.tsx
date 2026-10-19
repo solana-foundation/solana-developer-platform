@@ -1,12 +1,6 @@
-import type {
-  AssetCategory,
-  AssetProfile,
-  IssuanceMetadata,
-  PaymentsDashboardWallet,
-  Token,
-  TokenStatus,
-  TokenTemplate,
-} from "@sdp/types";
+import type { AssetCategory, AssetProfile, IssuanceMetadata } from "@sdp/types/asset-profiles";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { Token, TokenStatus, TokenTemplate } from "@sdp/types/tokens";
 import {
   Banknote,
   Calculator,
@@ -25,7 +19,8 @@ import {
   Vault,
 } from "lucide-react";
 import type { AppLocale } from "@/i18n/config";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { profileToDraftState } from "./[tokenId]/asset-profile/asset-profile-mapping";
 import {
   classifyAuthorityControl,

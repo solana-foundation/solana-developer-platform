@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as feePayment from "@sdp/fee-payment";
-import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/fee-payment";
+import { createFeePaymentAdapter } from "@sdp/fee-payment";
+import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type Blockhash,
@@ -32,7 +33,7 @@ import {
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/sponsor-signing";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 const projectMocks = { getProject: vi.fn() };
 

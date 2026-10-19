@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { renderUnifiedTransactionsView } from "../../../scripts/unified-transactions-view";
+import { renderUnifiedTransactionsView } from "@/scripts/unified-transactions-view";
 
 describe("unified transactions repeatable view", () => {
   it("matches the generated source", async () => {

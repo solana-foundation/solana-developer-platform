@@ -1,14 +1,12 @@
 import { Hono } from "hono";
 import { requireAction } from "@/middleware/require-action";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { listCounterpartyProviderAccounts } from "./handlers";
 
-const counterpartyProviderAccounts = new Hono<{ Bindings: Env }>();
+export const counterpartyProviderAccounts = new Hono<{ Bindings: Env }>();
 
 counterpartyProviderAccounts.get(
   "/",
   requireAction("counterparties.read"),
   listCounterpartyProviderAccounts
 );
-
-export default counterpartyProviderAccounts;

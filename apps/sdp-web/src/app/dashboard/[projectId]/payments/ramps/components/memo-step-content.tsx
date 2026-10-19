@@ -1,9 +1,8 @@
 "use client";
 
-import { RAMPS_MEMO_LIMITS } from "@sdp/types";
+import { RAMPS_MEMO_LIMITS } from "@sdp/types/payments";
 import { PlusIcon, XIcon } from "lucide-react";
 import { type ClipboardEvent, useState } from "react";
-import { useTranslations } from "@/i18n/provider";
 import {
   emptyMemoRow,
   isEmptyMemoRow,
@@ -12,7 +11,8 @@ import {
   memoRowsToRecord,
   splitPastedMemoRows,
   validateMemoRows,
-} from "../memo";
+} from "@/app/dashboard/[projectId]/payments/ramps/memo";
+import { useTranslations } from "@/i18n/provider";
 
 interface MemoStepContentProps {
   rows: MemoRow[];

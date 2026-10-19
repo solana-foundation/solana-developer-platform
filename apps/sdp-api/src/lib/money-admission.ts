@@ -1,22 +1,25 @@
 import {
   type Action,
-  type ApiKeyWalletScope,
   apiKeyMayPerform,
   expandStoredGrants,
+  organizationRoleMayPerform,
+} from "@sdp/types/actions";
+import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
+import {
   MANDATE_MOVEMENT_STATUSES,
   MOVEMENTS,
   type MovementId,
-  memberStatusMayMoveMoney,
   movementActions,
-  normalizeOrganizationRole,
-  organizationRoleMayPerform,
-  organizationStatusMayStartMoney,
   PAYMENT_REQUEST_MOVEMENT_STATUSES,
-  type ProjectEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/movements";
+import {
+  memberStatusMayMoveMoney,
+  organizationStatusMayStartMoney,
+} from "@sdp/types/organizations";
+import type { ProjectEnvironment } from "@sdp/types/projects";
+import { normalizeOrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
-import { getDb } from "@/db";
-import type { DatabaseExecutor } from "@/db/client";
+import { type DatabaseExecutor, getDb } from "@/db/client";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { type WalletAccess, walletAccessAllows } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -28,7 +31,7 @@ import {
 } from "@/lib/money-principal";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * Money admission (HOO-1955, HOO-2099): whether a principal may start new

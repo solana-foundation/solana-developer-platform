@@ -1,5 +1,3 @@
-export { parseErrorMessage } from "@/lib/api-error";
-
 export function toTitleCase(value: string): string {
   return value
     .replace(/_/g, " ")

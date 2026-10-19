@@ -6,7 +6,7 @@
 // single failed destroy left the superseded credential readable in Secret Manager
 // forever, with nothing referencing it and nothing retrying.
 
-import { createSecretRetirementsRepository } from "@/db/repositories";
+import { createSecretRetirementsRepository } from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
 import {
   type CredentialSecretStorageBackend,

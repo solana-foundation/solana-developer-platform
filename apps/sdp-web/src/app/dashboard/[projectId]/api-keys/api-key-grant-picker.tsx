@@ -1,10 +1,10 @@
 "use client";
 
-import { type Action, actionVerbOf } from "@sdp/types";
+import { type Action, actionVerbOf } from "@sdp/types/actions";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import { ShieldCheck } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import {
   clearModuleGrants,
   clearOfferedGrants,

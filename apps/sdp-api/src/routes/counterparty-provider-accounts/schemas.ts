@@ -1,4 +1,4 @@
-import { COUNTRY_CODES } from "@sdp/types";
+import { COUNTRY_CODES } from "@sdp/types/countries";
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { z } from "zod";
 

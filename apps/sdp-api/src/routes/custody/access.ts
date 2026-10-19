@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";

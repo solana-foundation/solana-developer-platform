@@ -1,4 +1,4 @@
-import type { ThemeScope } from "@/components/theme-scope";
+import type { ThemeScope } from "@sdp/ui/theme-scope";
 import { designModuleForPath } from "@/lib/design-modules";
 
 // The Private Channels connect form, with or without an instance: /private-channels/setup and

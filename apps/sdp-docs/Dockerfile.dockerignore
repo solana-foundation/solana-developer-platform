@@ -41,16 +41,11 @@ apps/sdp-api/.dev.vars.*
 apps/sdp-api/.cloudflare.*.env
 apps/sdp-docs/.cloudflare.*.env
 
-# Workspace siblings not used by the docs build. The packages kept are the
-# API's (apps/sdp-api/Dockerfile.dockerignore): openapi:generate loads the app.
+# Workspace siblings not used by the docs build.
 apps/sdp-web
 packages/*
 !packages/sdp-types
 !packages/sdp-env-config
-!packages/sdp-dvp
-!packages/sdp-earn
-!packages/sdp-helius-rings
-!packages/sdp-helius-rings-sdk
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-redaction
@@ -58,16 +53,6 @@ packages/*
 !packages/sdp-payments
 !packages/sdp-fee-payment
 !packages/sdp-issuance
-!packages/sdp-private-channels
-!packages/sdp-spc-escrow
-!packages/sdp-spc-withdraw
-!packages/sdp-kamino
-!packages/sdp-jupiter-lend
-!packages/sdp-hastra
-!packages/sdp-wisdomtree
-!packages/bigint-buffer
-!packages/sdp-veda
-!packages/sdp-ondo
 docs
 infra
 scripts/*

@@ -1,13 +1,13 @@
-import type { MovementId } from "@sdp/types";
-import { getDb } from "@/db";
+import type { MovementId } from "@sdp/types/movements";
+import { getDb } from "@/db/client";
 import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
 import { AppError, conflict, providerUnavailable, walletNotFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 export function listPrivateChannelCustodyWallets(
   env: Env,

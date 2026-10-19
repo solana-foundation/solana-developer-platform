@@ -6,15 +6,9 @@
 
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
-import {
-  type Action,
-  type ApiKeyEnvironment,
-  type ApiKeyStatus,
-  type ApiKeyWalletScope,
-  expandStoredGrants,
-  normalizeGrants,
-  type OrganizationRole,
-} from "@sdp/types";
+import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
+import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";

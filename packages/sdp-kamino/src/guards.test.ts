@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { KAMINO_KVAULT_PROGRAM_IDS } from "@sdp/types";
+import { KAMINO_KVAULT_PROGRAM_IDS } from "@sdp/types/kamino-programs";
 import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import {

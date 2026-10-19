@@ -1,4 +1,4 @@
-import type { MovementId } from "@sdp/types";
+import type { MovementId } from "@sdp/types/movements";
 import {
   assertIsTransactionSigner,
   isMessageModifyingSigner,

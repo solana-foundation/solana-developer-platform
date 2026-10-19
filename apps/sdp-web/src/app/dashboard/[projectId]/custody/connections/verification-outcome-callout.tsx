@@ -1,10 +1,10 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import { RefreshCwIcon } from "lucide-react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { docsHref } from "@/components/dashboard-nav";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
 import { useTranslations } from "@/i18n/provider";
 import type { CustodyOutcome, CustodyOutcomeKind } from "./verification-outcome";
 

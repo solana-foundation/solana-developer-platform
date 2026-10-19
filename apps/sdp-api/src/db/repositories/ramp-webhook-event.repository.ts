@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   RAMP_WEBHOOK_APPLY_OUTCOMES,
   RAMP_WEBHOOK_EVENT_STATUSES,
@@ -5,15 +6,14 @@ import {
   type RampWebhookDischargeOutcome,
   type RampWebhookEventStatus,
   type RampWebhookFailureOutcome,
-  type SdpEnvironment,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import {
   PERSISTED_RAMP_PROVIDERS,
   type PersistedRampProviderId,
   type RampProviderId,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
-import type { AppDb } from "@/db";
+import type { DatabaseClient as AppDb } from "@/db/client";
 
 export function generateRampWebhookEventId(): string {
   return `rwe_${crypto.randomUUID()}`;

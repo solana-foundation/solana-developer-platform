@@ -1,9 +1,10 @@
-import { type Action, wellKnownMint } from "@sdp/types";
+import type { Action } from "@sdp/types/actions";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
-import app from "@/index";
+import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";

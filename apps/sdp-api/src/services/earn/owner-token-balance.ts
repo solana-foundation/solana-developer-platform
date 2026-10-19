@@ -1,12 +1,9 @@
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address } from "@solana/kit";
 import { z } from "zod";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
+import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 
 /**

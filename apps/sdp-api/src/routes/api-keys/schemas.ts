@@ -1,4 +1,5 @@
-import { ACTIONS, API_KEY_WALLET_SCOPES, isApiKeyGrantableAction } from "@sdp/types";
+import { ACTIONS, isApiKeyGrantableAction } from "@sdp/types/actions";
+import { API_KEY_WALLET_SCOPES } from "@sdp/types/api-keys";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
 

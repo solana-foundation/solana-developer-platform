@@ -8,7 +8,7 @@ import { payloadTooLarge } from "@/lib/errors";
 import { localRateLimit } from "@/middleware/local-rate-limit";
 import { publicRoute } from "@/middleware/require-action";
 import { requireModule, requireRampProviderParam } from "@/middleware/require-module";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { handleClerkWebhook, handleRampProviderWebhook } from "./handlers";
 
 // Provider webhook payloads are a few kilobytes; the handlers buffer the body
@@ -22,7 +22,7 @@ const MAX_REQUESTS_PER_MINUTE = 120;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const MAX_TRACKED_ADDRESSES = 4096;
 
-const webhooks = new Hono<{ Bindings: Env }>();
+export const webhooks = new Hono<{ Bindings: Env }>();
 
 webhooks.use(
   "*",
@@ -61,5 +61,3 @@ webhooks.post(
   publicRoute("signed webhook: the ramp provider's signature authenticates it"),
   (c) => handleRampProviderWebhook(c, "production")
 );
-
-export default webhooks;

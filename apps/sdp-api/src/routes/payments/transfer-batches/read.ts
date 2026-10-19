@@ -2,8 +2,8 @@ import { z } from "zod";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
+import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
-import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
 import { buildTransferBatchResponse, mapBatchRow } from "./respond";
 import { listTransferBatchesQuerySchema, transferBatchIdParamsSchema } from "./schemas";
 

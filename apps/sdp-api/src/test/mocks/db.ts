@@ -5,13 +5,13 @@
  * during the cutover branch.
  */
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import {
   AUDIT_LEDGER_CHECKPOINT_KEY,
   AUDIT_LEDGER_SESSION_LOCK_KEY,
 } from "@/services/audit.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 // FK-dependency ordered: dependents before the rows they point at.
 //

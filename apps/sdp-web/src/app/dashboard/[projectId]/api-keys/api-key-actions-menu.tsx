@@ -1,16 +1,16 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@sdp/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Modal } from "@/components/ui/modal";
+} from "@sdp/ui/dropdown-menu";
+import { Modal } from "@sdp/ui/modal";
+import { ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { rotateApiKeyAction } from "./actions";

@@ -1,4 +1,4 @@
-import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types";
+import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
 import { describe, expect, it } from "vitest";
 import { declaredAuthorization } from "@/middleware/authorize";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";

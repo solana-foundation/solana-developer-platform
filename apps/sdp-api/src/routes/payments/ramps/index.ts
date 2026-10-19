@@ -1,13 +1,13 @@
 import { Hono } from "hono";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { cancelRampTransfer, simulateSandboxTransfer } from "./handlers";
-import offramp from "./offramp";
-import onramp from "./onramp";
+import { offramp } from "./offramp";
+import { onramp } from "./onramp";
 import { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
 
-const ramps = new Hono<{ Bindings: Env }>();
+export const ramps = new Hono<{ Bindings: Env }>();
 
 ramps.route("/onramp", onramp);
 ramps.route("/offramp", offramp);
@@ -23,5 +23,3 @@ ramps.post(
   validateBody(simulateSandboxTransferSchema),
   simulateSandboxTransfer
 );
-
-export default ramps;

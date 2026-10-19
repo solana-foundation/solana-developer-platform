@@ -1,8 +1,8 @@
 import { SdpEarnError } from "@sdp/earn/errors";
-import { OndoVaultDirectClient } from "@sdp/ondo";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { OndoVaultDirectClient } from "@sdp/ondo/client";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";

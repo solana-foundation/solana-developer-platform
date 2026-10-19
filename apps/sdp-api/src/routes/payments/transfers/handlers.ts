@@ -1,34 +1,44 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 // biome-ignore lint/style/noRestrictedImports: the transfers list reads wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc, createClusterRpc } from "@sdp/rpc/factory";
-import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  confirmTransaction,
+  getRecentBlockhash,
+  getSignaturesForAddress,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { isSuccessfulPaymentTransferStatus, TRANSFER_CHAIN_VERDICT_STATUSES } from "@sdp/types";
-import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
+  isSuccessfulPaymentTransferStatus,
+  RAMP_TRANSFER_TYPES,
+  TRANSFER_CHAIN_VERDICT_STATUSES,
+  type PaymentTransferStatus as TransferStatus,
+  type PaymentTransferType as TransferType,
+  WALLET_TRANSFER_TYPES,
+} from "@sdp/types/payments";
+import {
+  type Address,
   address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createTransactionMessage,
   getTransactionEncoder,
+  type Instruction,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  type TransactionSigner,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   generatePaymentTransferId,
-  RAMP_TRANSFER_TYPES,
   type PaymentTransferDirection as TransferDirection,
   type PaymentTransferRow as TransferRow,
-  type PaymentTransferStatus as TransferStatus,
-  type PaymentTransferType as TransferType,
-  WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -60,6 +70,16 @@ import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
+import { mapTransferRow } from "@/routes/payments/mappers";
+import { transferIdParamsSchema } from "@/routes/payments/schemas";
+import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
+import {
+  admitPaymentWalletRuntimeExecution,
+  type ResolvedScope,
+  resolveScope,
+  resolveWalletByCustodyWalletId,
+} from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
@@ -71,7 +91,7 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
@@ -82,16 +102,6 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import { type AppContext, getPaymentsRepository } from "../context";
-import { mapTransferRow } from "../mappers";
-import { transferIdParamsSchema } from "../schemas";
-import * as tokenAccounts from "../token-accounts";
-import {
-  admitPaymentWalletRuntimeExecution,
-  type ResolvedScope,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "../wallets";
 import {
   buildObservedTransfersForSignatures,
   dedupeSignatureHistory,
@@ -550,12 +560,12 @@ async function executeSponsoredTransfer(
     buildInstructions: (context: {
       signer: TransactionSigner;
       feePayer: Address;
-      rpc: solanaRpc.SolanaRpc;
+      rpc: SolanaRpc;
     }) => Promise<readonly Instruction[]>;
   }
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet(
     c.env,
     auth.organizationId,
     requireProjectId(c),
@@ -568,7 +578,7 @@ async function executeSponsoredTransfer(
   }
 
   const rpc = createClusterRpc();
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const feePayment = createSponsorshipFeePayment(
     c.env,
     resolveRequestSponsorshipScope(c),
@@ -596,7 +606,7 @@ async function executeSponsoredTransfer(
     store: params.submissionStore,
   });
 
-  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
+  const confirmation = await confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 
@@ -648,7 +658,7 @@ async function executeSplTransfer(
     submissionStore,
     buildInstructions: async ({ signer, feePayer, rpc }) => {
       const { createDestinationAtaInstruction, transferInstruction } =
-        await tokenAccounts.buildSplTransferInstructions(rpc, {
+        await buildSplTransferInstructions(rpc, {
           authority: signer,
           destination: destinationAddress,
           mint: mintAddress,
@@ -1068,7 +1078,7 @@ export async function listTransfers(c: AppContext) {
     });
 
     const [ownerSignatures, tokenAccountAddresses, persistedResult] = await Promise.all([
-      solanaRpc.getSignaturesForAddress(historyRpc, ownerAddress, {
+      getSignaturesForAddress(historyRpc, ownerAddress, {
         limit: historyLimit,
         commitment: "confirmed",
       }),
@@ -1105,7 +1115,7 @@ export async function listTransfers(c: AppContext) {
       signatureSearchAddresses.slice(1),
       SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
       (searchAddress) =>
-        solanaRpc.getSignaturesForAddress(historyRpc, searchAddress, {
+        getSignaturesForAddress(historyRpc, searchAddress, {
           limit: historyLimit,
           commitment: "confirmed",
         })

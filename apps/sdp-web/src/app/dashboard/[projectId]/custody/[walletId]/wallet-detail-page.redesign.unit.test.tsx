@@ -1,4 +1,4 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { type ComponentProps, isValidElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRODUCTION_PROJECT } from "@/test/projects";
@@ -23,7 +23,6 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
 }));
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mockFetchProjectProviderAvailability,
 }));
@@ -38,6 +37,7 @@ vi.mock("@/i18n/server", () => ({
 vi.mock("@/flags", () => ({
   issuance: mockIssuanceFlag,
 }));
+vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
@@ -55,7 +55,7 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (impor
   };
 });
 
-import WalletDetailPage from "./wallet-detail-page.redesign";
+import { WalletDetailPage } from "./wallet-detail-page.redesign";
 import { WalletDetailView } from "./wallet-detail-view";
 
 const solBalance: CustodyWalletTokenBalance = {

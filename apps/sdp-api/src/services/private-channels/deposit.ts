@@ -21,13 +21,13 @@
  * chain-heuristic oracle — reachable once SPC exposes an event stream.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   getDepositInstructionAsync,
   PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
 } from "@sdp/spc-escrow";
-import type { PrivateChannelDeposit, PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelDeposit, PrivateChannelInstance } from "@sdp/types/private-channels";
 import {
   type Address,
   address,
@@ -44,11 +44,11 @@ import {
 import { signTransactionMessageWithSigners } from "@solana/signers";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
-  createPrivateChannelDepositRepository,
   mapPrivateChannelDepositRow,
   type PrivateChannelDepositRepository,
   type PrivateChannelDepositRow,
-} from "@/db/repositories";
+} from "@/db/repositories/private-channel-deposit.repository";
+import { createPrivateChannelDepositRepository } from "@/db/repositories/repository-factory";
 import { AppError, badRequest } from "@/lib/errors";
 import { buildPrivateChannelDepositFingerprint } from "@/lib/idempotency";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
@@ -149,7 +149,7 @@ async function broadcastDeposit(input: {
       amount: input.amountBaseUnits,
       recipient: input.recipient,
     }),
-    solanaRpc.getRecentBlockhash(input.projectRpc.rpc, "confirmed"),
+    getRecentBlockhash(input.projectRpc.rpc, "confirmed"),
   ]);
 
   const message = pipe(
@@ -163,7 +163,7 @@ async function broadcastDeposit(input: {
   const signed = await signTransactionMessageWithSigners(message);
   await input.onSigned(getSignatureFromTransaction(signed));
   const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
-  return solanaRpc.sendTransaction(input.projectRpc.rpc, signedBytes);
+  return sendTransaction(input.projectRpc.rpc, signedBytes);
 }
 
 /**
