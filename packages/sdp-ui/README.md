@@ -26,10 +26,10 @@ or a prop:
 - `I18nProvider` (`apps/sdp-web/src/i18n/provider.tsx`) renders `UiI18nProvider` with the app's
   catalog, so every tree that has the app's translations, tests included, has the primitives'.
 - `ThemeScopeProvider` is the same one the dashboard shell already renders.
-- `apps/sdp-web/src/components/ui/<name>.tsx` re-exports `@sdp/ui/<name>`, so the app's
-  importers keep their `@/components/ui/...` paths. The `action-tile` shim passes `next/link`.
-  `components/theme-scope.ts`, `components/theme-scope-provider.tsx` and `lib/utils.ts`
-  (`cn`) re-export the package the same way.
+- The app imports each primitive from its subpath (`@sdp/ui/button`, `@sdp/ui/cn`, ...); it
+  keeps no re-export copies (ADR 0010). The one wrapper is
+  `apps/sdp-web/src/components/ui/action-tile.tsx`, which passes `next/link` as the tile's
+  `linkComponent`.
 - `apps/sdp-web/src/app/globals.css` adds `@source` for `packages/sdp-ui/src`, so Tailwind
   generates the classes the primitives use.
 

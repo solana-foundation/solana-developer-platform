@@ -39,6 +39,8 @@ import ts from "typescript";
 
 const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-fee-payment/src";
+/** The repo root, from this file's location, so the check runs from any directory. */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KEYCHAIN = "packages/sdp-custody/src/keychain";
 /**
  * The packages that define these constructors. They build, subclass and pass
@@ -110,7 +112,7 @@ export const CAPABILITIES = [
   {
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
-    symbols: readdirSync(path.join(process.cwd(), KEYCHAIN))
+    symbols: readdirSync(path.join(REPO_ROOT, KEYCHAIN))
       .filter((file) => file.endsWith(".adapter.ts") && !file.endsWith(".test.ts"))
       .sort()
       .map((file) => ({ file: `${KEYCHAIN}/${file}`, name: "*" })),
@@ -125,7 +127,7 @@ export const CAPABILITIES = [
     id: "provider-signer",
     why: "A provider signer or API client builds signing authority from a stored credential; only the signing service, the adapter factory and the wallet lifecycle may use one.",
     symbols: [
-      ...readdirSync(path.join(process.cwd(), "packages/sdp-custody/src/dfns"))
+      ...readdirSync(path.join(REPO_ROOT, "packages/sdp-custody/src/dfns"))
         .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
         .sort()
         .map((file) => ({ file: `packages/sdp-custody/src/dfns/${file}`, name: "*" })),
@@ -598,7 +600,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) {
-  const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const rootDir = REPO_ROOT;
   const tsconfig = path.join(rootDir, "apps/sdp-api/tsconfig.json");
   if (!existsSync(tsconfig)) {
     console.error(`Missing ${tsconfig}`);
