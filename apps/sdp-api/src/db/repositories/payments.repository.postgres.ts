@@ -2,6 +2,7 @@ import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
   type PaymentTransferStatus,
   RAMP_TRANSFER_TRANSITIONS,
+  RAMP_TRANSFER_TYPES,
   type RampTransferType,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
@@ -21,9 +22,27 @@ import type {
   ListTransfersResult,
   PaymentsRepository,
   PaymentTransferRow,
+  RampTransferTransitionInput,
   TransferStatusChangeFields,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
+
+/** SQL a repository method adds to a guarded status change, each list bound in order. */
+interface StatusChangeSql {
+  /** Preconditions beyond the row's id, status and type. */
+  clauses: readonly string[];
+  clauseValues: readonly unknown[];
+  /** Column writes beside the status and the fields. */
+  assignments: readonly string[];
+  assignmentValues: readonly unknown[];
+}
+
+const NO_STATUS_CHANGE_SQL: StatusChangeSql = {
+  clauses: [],
+  clauseValues: [],
+  assignments: [],
+  assignmentValues: [],
+};
 
 function paymentTransferSearchExpression(alias: string): string {
   return `(
@@ -238,6 +257,31 @@ function buildTransferScopeWhere(params: {
   };
 }
 
+function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
+  const clauses = ["id = ?"];
+  const values: unknown[] = [input.transferId];
+
+  if (input.organizationId) {
+    clauses.push("organization_id = ?");
+    values.push(input.organizationId);
+  }
+  if (input.projectId !== undefined) {
+    clauses.push("project_id = ?");
+    values.push(input.projectId);
+  }
+  if (input.expectedStatus !== undefined) {
+    clauses.push("status = ?");
+    values.push(input.expectedStatus);
+  }
+  // Ramp statuses move only through RAMP_TRANSFER_TRANSITIONS.
+  if (input.status !== undefined) {
+    clauses.push("type <> ALL(?)");
+    values.push([...RAMP_TRANSFER_TYPES]);
+  }
+
+  return { clauses, values };
+}
+
 export function createPostgresPaymentsRepository(
   db: DatabaseExecutor,
   tenantScope?: TenantScope
@@ -259,7 +303,8 @@ export function createPostgresPaymentsRepository(
       fromStatuses: readonly PaymentTransferStatus[];
       toStatus: PaymentTransferStatus;
       types?: readonly RampTransferType[];
-    }
+    },
+    sql: StatusChangeSql
   ): Promise<PaymentTransferRow | null> => {
     assertScope(input);
     const extraClauses = ["id = ?", "status = ANY(?)"];
@@ -268,6 +313,8 @@ export function createPostgresPaymentsRepository(
       extraClauses.push("type = ANY(?)");
       extraValues.push([...guard.types]);
     }
+    extraClauses.push(...sql.clauses);
+    extraValues.push(...sql.clauseValues);
     const scope = buildTransferScopeWhere({
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -276,8 +323,8 @@ export function createPostgresPaymentsRepository(
       extraValues,
     });
 
-    const assignments = ["status = ?", "updated_at = ?"];
-    const assignmentValues: unknown[] = [guard.toStatus, input.updatedAt];
+    const assignments = ["status = ?", "updated_at = ?", ...sql.assignments];
+    const assignmentValues: unknown[] = [guard.toStatus, input.updatedAt, ...sql.assignmentValues];
     if (input.sourceAddress !== undefined) {
       assignments.push("source_address = ?");
       assignmentValues.push(input.sourceAddress);
@@ -290,6 +337,22 @@ export function createPostgresPaymentsRepository(
       assignments.push("signature = ?");
       assignmentValues.push(input.signature);
     }
+    if (input.serializedTx !== undefined) {
+      assignments.push("serialized_tx = ?");
+      assignmentValues.push(input.serializedTx);
+    }
+    if (input.slot !== undefined) {
+      assignments.push("slot = ?");
+      assignmentValues.push(input.slot);
+    }
+    if (input.blockTime !== undefined) {
+      assignments.push("block_time = ?");
+      assignmentValues.push(input.blockTime);
+    }
+    if (input.fee !== undefined) {
+      assignments.push("fee = ?");
+      assignmentValues.push(input.fee);
+    }
     if (input.amount !== undefined) {
       assignments.push("amount = ?");
       assignmentValues.push(input.amount);
@@ -297,6 +360,10 @@ export function createPostgresPaymentsRepository(
     if (input.fiatAmount !== undefined) {
       assignments.push("fiat_amount = ?");
       assignmentValues.push(input.fiatAmount);
+    }
+    if (input.deliveryMode !== undefined) {
+      assignments.push("delivery_mode = ?");
+      assignmentValues.push(input.deliveryMode);
     }
     if (input.providerData !== undefined) {
       assignments.push("provider_data = provider_data || ?::jsonb");
@@ -320,6 +387,14 @@ export function createPostgresPaymentsRepository(
       .first<PaymentTransferProjectionRow>();
 
     return row ? mapTransferRow(row) : null;
+  };
+  const applyRampTransition = (input: RampTransferTransitionInput, sql: StatusChangeSql) => {
+    const transition = RAMP_TRANSFER_TRANSITIONS[input.transition];
+    return updateTransferStatusIf(
+      input,
+      { fromStatuses: transition.from, toStatus: transition.to, types: transition.types },
+      sql
+    );
   };
   return {
     async createTransfer(input: CreatePaymentTransferInput) {
@@ -432,21 +507,7 @@ export function createPostgresPaymentsRepository(
           projectId: canAccessAllOrganizationProjects ? undefined : tenantScope.projectId,
         };
       }
-      const clauses = ["id = ?"];
-      const values: unknown[] = [input.transferId];
-
-      if (input.organizationId) {
-        clauses.push("organization_id = ?");
-        values.push(input.organizationId);
-      }
-      if (input.projectId !== undefined) {
-        clauses.push("project_id = ?");
-        values.push(input.projectId);
-      }
-      if (input.expectedStatus !== undefined) {
-        clauses.push("status = ?");
-        values.push(input.expectedStatus);
-      }
+      const { clauses, values } = buildUpdateTransferWhere(input);
 
       const row = await db
         .prepare(
@@ -547,71 +608,57 @@ export function createPostgresPaymentsRepository(
     },
 
     async updateOnchainTransferForRamp(input) {
-      assertScope(input);
-      const scope = buildTransferScopeWhere({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: [
-          "id = ?",
-          "type = 'offramp'",
-          "direction = 'outbound'",
-          "status = 'awaiting_payment'",
-          "custody_wallet_id = ?",
-          "wallet_id = ?",
-          "source_address = ?",
-          "token = ?",
-          "amount::numeric = ?::numeric",
-          "provider_data #>> '{cryptoDeposit,destinationAddress}' = ?",
-          "(provider_data #>> '{cryptoDeposit,amount}')::numeric = ?::numeric",
-          "destination_address IS NULL",
-          "signature IS NULL",
-          "serialized_tx IS NULL",
-          "signed_transaction IS NULL",
-          "last_valid_block_height IS NULL",
-          "submission_started_at IS NULL",
-          "slot IS NULL",
-          "block_time IS NULL",
-          "fee IS NULL",
-        ],
-        extraValues: [
-          input.transferId,
-          input.custodyWalletId,
-          input.walletId,
-          input.sourceAddress,
-          input.token,
-          input.amount,
-          input.destinationAddress,
-          input.amount,
-        ],
-      });
-      const row = await db
-        .prepare(
-          `WITH pt AS (
-           UPDATE payment_transfers
-           SET destination_address = ?,
-               initiated_by_key_id = ?,
-               idempotency_key = COALESCE(?, idempotency_key),
-               idempotency_fingerprint = COALESCE(?, idempotency_fingerprint),
-               status = 'processing',
-               error = NULL,
-               updated_at = ?
-           WHERE ${scope.where}
-           RETURNING *
-           )
-           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
-        )
-        .bind(
-          input.destinationAddress,
-          input.initiatedByKeyId,
-          input.idempotency?.key ?? null,
-          input.idempotency?.fingerprint ?? null,
-          input.updatedAt,
-          ...scope.values
-        )
-        .first<PaymentTransferProjectionRow>();
-
-      return row ? mapTransferRow(row) : null;
+      return applyRampTransition(
+        {
+          transferId: input.transferId,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          transition: "offramp_deposit_claimed",
+          destinationAddress: input.destinationAddress,
+          error: null,
+          updatedAt: input.updatedAt,
+        },
+        {
+          clauses: [
+            "direction = 'outbound'",
+            "custody_wallet_id = ?",
+            "wallet_id = ?",
+            "source_address = ?",
+            "token = ?",
+            "amount::numeric = ?::numeric",
+            "provider_data #>> '{cryptoDeposit,destinationAddress}' = ?",
+            "(provider_data #>> '{cryptoDeposit,amount}')::numeric = ?::numeric",
+            "destination_address IS NULL",
+            "signature IS NULL",
+            "serialized_tx IS NULL",
+            "signed_transaction IS NULL",
+            "last_valid_block_height IS NULL",
+            "submission_started_at IS NULL",
+            "slot IS NULL",
+            "block_time IS NULL",
+            "fee IS NULL",
+          ],
+          clauseValues: [
+            input.custodyWalletId,
+            input.walletId,
+            input.sourceAddress,
+            input.token,
+            input.amount,
+            input.destinationAddress,
+            input.amount,
+          ],
+          assignments: [
+            "initiated_by_key_id = ?",
+            "idempotency_key = COALESCE(?, idempotency_key)",
+            "idempotency_fingerprint = COALESCE(?, idempotency_fingerprint)",
+          ],
+          assignmentValues: [
+            input.initiatedByKeyId,
+            input.idempotency?.key ?? null,
+            input.idempotency?.fingerprint ?? null,
+          ],
+        }
+      );
     },
 
     async markTransferSubmissionStarted(input) {
@@ -647,19 +694,15 @@ export function createPostgresPaymentsRepository(
     },
 
     async updateTransferStatusGuarded(input) {
-      return updateTransferStatusIf(input, {
-        fromStatuses: input.fromStatuses,
-        toStatus: input.toStatus,
-      });
+      return updateTransferStatusIf(
+        input,
+        { fromStatuses: input.fromStatuses, toStatus: input.toStatus },
+        NO_STATUS_CHANGE_SQL
+      );
     },
 
     async transitionRampTransfer(input) {
-      const transition = RAMP_TRANSFER_TRANSITIONS[input.transition];
-      return updateTransferStatusIf(input, {
-        fromStatuses: transition.from,
-        toStatus: transition.to,
-        types: transition.types,
-      });
+      return applyRampTransition(input, NO_STATUS_CHANGE_SQL);
     },
 
     async getTransferById(params) {

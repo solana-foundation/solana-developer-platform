@@ -10,7 +10,9 @@ import {
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
+  isRampTransferType,
   isSuccessfulPaymentTransferStatus,
+  OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS,
   RAMP_TRANSFER_TYPES,
   TRANSFER_CHAIN_VERDICT_STATUSES,
   type PaymentTransferStatus as TransferStatus,
@@ -414,7 +416,8 @@ async function updateTransferRecord(
   c: AppContext,
   transfer: TransferRow,
   patch: {
-    status: TransferStatus;
+    /** Where a wallet send lands; a funded off-ramp deposit takes its ramp transition instead. */
+    status: keyof typeof OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS;
     signature?: string | null;
     serializedTx?: string | null;
     slot?: number | null;
@@ -428,14 +431,10 @@ async function updateTransferRecord(
   { outcome: "updated"; row: TransferRow } | { outcome: "settled_concurrently"; row: TransferRow }
 > {
   const repository = getPaymentsRepository(c);
-  const now = new Date().toISOString();
-
-  const updated = await repository.updateTransfer({
+  const change = {
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
-    expectedStatus: "processing",
-    status: patch.status,
     signature: patch.signature,
     serializedTx: patch.serializedTx,
     slot: patch.slot,
@@ -444,8 +443,19 @@ async function updateTransferRecord(
     error: patch.error,
     providerData:
       patch.failureCode === undefined ? undefined : executionFailureData(patch.failureCode),
-    updatedAt: now,
-  });
+    updatedAt: new Date().toISOString(),
+  };
+
+  const updated = isRampTransferType(transfer.type)
+    ? await repository.transitionRampTransfer({
+        ...change,
+        transition: OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS[patch.status],
+      })
+    : await repository.updateTransfer({
+        ...change,
+        expectedStatus: "processing",
+        status: patch.status,
+      });
 
   if (updated) {
     return { outcome: "updated", row: updated };
@@ -768,7 +778,6 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const idempotency =
     recordKey !== undefined && fingerprint !== undefined ? { key: recordKey, fingerprint } : null;
 
-  const reusedRampTransfer = rampTransfer !== null;
   const { row: transfer, replayed } = rampTransfer
     ? {
         row: await updateOnchainTransferForRamp(c, {
@@ -846,7 +855,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       );
       const updated = resolveTransferUpdateResult(
         await updateTransferRecord(c, transfer, {
-          status: reusedRampTransfer ? "settling" : "confirmed",
+          status: "confirmed",
           signature: solResult.signature,
           slot: solResult.slot,
           blockTime: solResult.blockTime,
@@ -871,7 +880,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
 
     const updated = resolveTransferUpdateResult(
       await updateTransferRecord(c, transfer, {
-        status: reusedRampTransfer ? "settling" : "confirmed",
+        status: "confirmed",
         signature: result.signature,
         slot: result.slot,
         blockTime: result.blockTime,

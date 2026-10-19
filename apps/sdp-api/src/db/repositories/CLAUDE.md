@@ -120,8 +120,7 @@ invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`)
 ## Ramps: one transition table
 
 `RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
-status change that goes through it, with its source statuses, target and ramp
-types (HOO-2033).
+status change, with its source statuses, target and ramp types (HOO-2033).
 
 - **Sources come from the table, never the caller.**
   `PaymentsRepository.transitionRampTransfer` applies the named entry as a
@@ -131,13 +130,14 @@ types (HOO-2033).
   re-read and refused as `settled_after_cancel`.
 - **No terminal status is a source except `expired`**, which a provider
   observation revives.
-- **Only the settlement core writes through it so far.** Cancel, MoonPay quote
-  fill and failure, and the off-ramp deposit claim and outcome still set the
-  status themselves. The retired provider's writers were removed in HOO-2037.
-  The inventory is in
-  `../../services/payments/ramp-transfer-transitions.test.ts`; it counts guarded
-  writes per file, so a new `updateTransferStatusGuarded` call fails it
-  even in a listed file.
+- **Every ramp status write goes through it** (HOO-2087): settlement, cancel,
+  MoonPay quote fill and failure, and the off-ramp deposit claim and outcome.
+  `updateTransfer` with a `status` matches no ramp row. The deposit claim adds
+  its deposit-instruction preconditions to the same compare-and-swap inside
+  the repository, and a landed deposit moves to `settling`, never `confirmed`
+  (`OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS`). The inventory is in
+  `../../services/payments/ramp-transfer-transitions.test.ts`; it counts
+  guarded writes per file, so a new call fails it even in a listed file.
 - **Add a transition to the table, not a source set to a call site.** Mirror
   what the writer allows today, and let `transitionRampTransfer` read it.
 

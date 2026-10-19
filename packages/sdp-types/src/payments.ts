@@ -240,8 +240,8 @@ export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
  * Legal ramp transfer status changes, by name. `transitionRampTransfer` reads
  * the source statuses from here, never from its caller, so an illegal
  * transition matches zero rows, the same answer a lost race gives. No terminal
- * status is a source except `expired`. Writers that still set the status
- * themselves are listed in the API's `ramp-transfer-transitions.test.ts`.
+ * status is a source except `expired`. Every writer is listed in the API's
+ * `ramp-transfer-transitions.test.ts`.
  */
 export const RAMP_TRANSFER_TRANSITIONS = {
   // A provider may issue a new deposit wallet while still awaiting payment
@@ -273,9 +273,50 @@ export const RAMP_TRANSFER_TRANSITIONS = {
     to: "expired",
     types: RAMP_TRANSFER_TYPES,
   },
+
+  canceled: {
+    from: CANCELABLE_RAMP_TRANSFER_STATUSES,
+    to: "canceled",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // A quote that creates its row before calling the provider (MoonPay) records
+  // the provider's answer on that pending row.
+  quote_issued: {
+    from: ["pending"],
+    to: "pending",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  quote_failed: {
+    from: ["pending"],
+    to: "failed",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  offramp_deposit_claimed: {
+    from: ["awaiting_payment"],
+    to: "processing",
+    types: ["offramp"],
+  },
+  // A landed deposit waits on the provider's payout, so it settles instead of
+  // confirming like a wallet send.
+  offramp_deposit_confirmed: {
+    from: ["processing"],
+    to: "settling",
+    types: ["offramp"],
+  },
+  offramp_deposit_failed: {
+    from: ["processing"],
+    to: "failed",
+    types: ["offramp"],
+  },
 } as const satisfies Record<string, RampTransferTransition>;
 
 export type RampTransferTransitionId = keyof typeof RAMP_TRANSFER_TRANSITIONS;
+
+/** The transition a funded off-ramp deposit takes for the status a wallet send would land on. */
+export const OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS = {
+  confirmed: "offramp_deposit_confirmed",
+  failed: "offramp_deposit_failed",
+} as const satisfies Record<"confirmed" | "failed", RampTransferTransitionId>;
 
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
 export const ONCHAIN_TRANSFER_STATUSES = [
@@ -1145,8 +1186,6 @@ export interface ListPaymentSubscriptionCollectionAttemptsResponse {
   pageSize: number;
 }
 
-export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";
-
 export interface CryptoDepositPaymentRampInstruction {
   provider: RampProviderId;
   kind: "crypto_deposit";
@@ -1270,7 +1309,8 @@ export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "s
 interface BasePaymentRampQuote {
   id: string;
   provider: RampProviderId;
-  status: PaymentRampExecutionStatus;
+  /** Every provider's quote opens its transfer before the customer pays. */
+  status: "pending";
   deliveryMode: PaymentRampQuoteDeliveryMode;
 }
 
