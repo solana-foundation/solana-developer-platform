@@ -1282,6 +1282,7 @@
       "paymentRequest": "Payment request",
       "amountRequested": "Amount requested",
       "paymentLinkCopied": "Payment link copied",
+      "paymentLinkCopyFailed": "Could not copy the payment link.",
       "reference": "Reference",
       "expires": "Expires",
       "destinationWalletId": "Destination wallet ID",
