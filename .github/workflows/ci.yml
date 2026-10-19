@@ -146,6 +146,11 @@ jobs:
           git ls-files -z ':(glob)**/*.mjs' ':(glob)**/*.cjs' ':(glob)**/scripts/**' ':(glob).github/scripts/**' ':(exclude,glob)examples/**' \
             | xargs -0 pnpm exec biome lint --no-errors-on-unmatched --diagnostic-level=error
 
+      # A package.json edit changes what every file in its workspace may import, and the
+      # diff-scoped lint re-reads only the manifest, so the dependency rule runs over all sources.
+      - name: Lint declared dependencies
+        run: pnpm exec biome lint --only=correctness/noUndeclaredDependencies --diagnostic-level=error apps packages
+
       - name: Check pinned dependencies
         run: pnpm check:pinned-dependencies
 
