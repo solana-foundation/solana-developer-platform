@@ -233,7 +233,9 @@ describe("createConfiguredRingsGateway", () => {
           provisionIdentity: async () => {
             if (!signFromSdk) throw new Error("no sign callback");
             await signFromSdk();
-            return { status: "ready" } as never;
+            // SAFETY: the gateway returns the SDK's result untouched, and this
+            // test reads only the signer calls the flow made.
+            return {} as never;
           },
         });
       },
