@@ -6,9 +6,10 @@ import {
   databaseIdentityConfigStatement,
 } from "@/db/identity";
 import {
-  isStalePreparedStatementError,
   MAX_NAMED_STATEMENTS,
-  PreparedStatementNames,
+  type QueryArgs,
+  type Queryable,
+  StatementCache,
 } from "@/db/prepared-statements";
 import { getLogger } from "@/runtime/logger";
 
@@ -135,57 +136,6 @@ function acquireClient(pool: Pool): Promise<PoolClient> {
   return reportingUnavailable(pool, () => pool.connect());
 }
 
-/**
- * Whether a prepared statement went stale on the connection `error` came from.
- * Such a connection fails that statement until it is closed, so it must never
- * go back into the pool.
- */
-function isStaleStatement(error: Error): error is DatabaseError {
-  return error instanceof DatabaseError && isStalePreparedStatementError(error);
-}
-
-/** Connections a prepared statement went stale on, with the error that showed it. */
-const staleConnections = new WeakMap<PoolClient, DatabaseError>();
-
-/** Returns a connection to the pool, or closes it when a statement went stale on it. */
-function releaseConnection(client: PoolClient, failure: Error | undefined): void {
-  const stale = staleConnections.get(client);
-  client.release(failure === undefined ? stale : failure);
-}
-
-/** Runs a statement on a connection, remembering when it went stale there. */
-async function runStatement(client: PoolClient, args: QueryArgs): Promise<QueryResult> {
-  try {
-    return await client.query(args);
-  } catch (error) {
-    if (error instanceof Error && isStaleStatement(error)) {
-      staleConnections.set(client, error);
-    }
-    throw error;
-  }
-}
-
-interface QueryArgs {
-  text: string;
-  /** Server-side statement name, set for statements whose plan is cached (prepared-statements.ts). */
-  name?: string;
-  values?: unknown[];
-}
-
-type Queryable = {
-  query: (args: QueryArgs) => Promise<QueryResult>;
-};
-
-function withStatementName(args: QueryArgs, names: PreparedStatementNames): QueryArgs {
-  const name = names.nameFor(args.text);
-  return name === undefined ? args : { ...args, name };
-}
-
-/** A connection inside a transaction, running its statements under cached plans. */
-function namedQueryable(client: PoolClient, names: PreparedStatementNames): Queryable {
-  return { query: (args) => runStatement(client, withStatementName(args, names)) };
-}
-
 const pooledClients = new Map<string, PooledPostgresClient>();
 
 const NODE_POOL_OPTIONS = {
@@ -203,13 +153,6 @@ const NODE_POOL_OPTIONS = {
   keepAlive: true,
   keepAliveInitialDelayMillis: 10_000,
 } as const;
-
-/**
- * Stale prepared statements are found one connection at a time and each find
- * closes that connection, so no statement meets more stale connections than
- * the pool holds.
- */
-const MAX_STALE_STATEMENT_RETRIES = NODE_POOL_OPTIONS.max;
 
 function replacePositionalPlaceholders(query: string): string {
   let result = "";
@@ -438,29 +381,11 @@ async function beginWithDatabaseIdentity(
 class IdentityStampingPoolQueryable implements Queryable {
   constructor(
     private readonly pool: Pool,
-    private readonly statementNames: PreparedStatementNames
+    private readonly statements: StatementCache
   ) {}
 
-  async query(args: QueryArgs): Promise<QueryResult> {
-    const named = withStatementName(args, this.statementNames);
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        return await this.queryOnce(named);
-      } catch (error) {
-        // A migration can leave a prepared statement stale on the connections
-        // that prepared it. The statement fails before it runs and its
-        // connection is closed, so running it again on the next connection,
-        // or a new one, cannot repeat a write.
-        if (
-          named.name === undefined ||
-          attempt >= MAX_STALE_STATEMENT_RETRIES ||
-          !(error instanceof Error) ||
-          !isStaleStatement(error)
-        ) {
-          throw error;
-        }
-      }
-    }
+  query(args: QueryArgs): Promise<QueryResult> {
+    return this.statements.retryingStale(args, (named) => this.queryOnce(named));
   }
 
   private async queryOnce(args: QueryArgs): Promise<QueryResult> {
@@ -473,7 +398,7 @@ class IdentityStampingPoolQueryable implements Queryable {
     let releaseError: Error | undefined;
     try {
       await beginWithDatabaseIdentity(client, identity);
-      const result = await runStatement(client, args);
+      const result = await this.statements.run(client, args);
       await client.query("COMMIT");
       return result;
     } catch (error) {
@@ -485,27 +410,32 @@ class IdentityStampingPoolQueryable implements Queryable {
       }
       throw error;
     } finally {
-      releaseConnection(client, releaseError);
+      this.statements.release(client, releaseError);
     }
   }
 }
 
 class PooledPostgresClient extends BasePostgresClient {
   private readonly pool: Pool;
-  private readonly statementNames: PreparedStatementNames;
+  private readonly statements: StatementCache;
 
   constructor(connectionString: string) {
     const pool = new Pool({
       connectionString,
       ...NODE_POOL_OPTIONS,
     });
-    const statementNames = new PreparedStatementNames({
-      enabled: parseDatabaseEnv(process.env).DATABASE_PREPARED_STATEMENTS !== "off",
-      maxNames: MAX_NAMED_STATEMENTS,
-    });
-    super(new IdentityStampingPoolQueryable(pool, statementNames));
+    // Stale statements are found one connection at a time and each find closes
+    // that connection, so none meets more stale connections than the pool holds.
+    const statements = new StatementCache(
+      {
+        enabled: parseDatabaseEnv(process.env).DATABASE_PREPARED_STATEMENTS !== "off",
+        maxNames: MAX_NAMED_STATEMENTS,
+      },
+      NODE_POOL_OPTIONS.max
+    );
+    super(new IdentityStampingPoolQueryable(pool, statements));
     this.pool = pool;
-    this.statementNames = statementNames;
+    this.statements = statements;
 
     // Idle pool errors are EventEmitter errors; without a listener Node treats
     // them as uncaught exceptions and terminates the process.
@@ -520,7 +450,7 @@ class PooledPostgresClient extends BasePostgresClient {
 
     try {
       await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
-      const executor = new PostgresExecutor(namedQueryable(client, this.statementNames));
+      const executor = new PostgresExecutor(this.statements.on(client));
       const result = await callback(executor);
       await client.query("COMMIT");
       return result;
@@ -533,7 +463,7 @@ class PooledPostgresClient extends BasePostgresClient {
       }
       throw error;
     } finally {
-      releaseConnection(client, releaseError);
+      this.statements.release(client, releaseError);
     }
   }
 
@@ -576,7 +506,7 @@ class PooledPostgresClient extends BasePostgresClient {
       // defensive ROLLBACK on an idle connection is only a warning.
       transactionOpen = true;
       await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
-      const executor = new PostgresExecutor(namedQueryable(client, this.statementNames));
+      const executor = new PostgresExecutor(this.statements.on(client));
       const result = await callback(executor);
       callbackResult = result;
       callbackCompleted = true;
@@ -621,7 +551,7 @@ class PooledPostgresClient extends BasePostgresClient {
             unlockError instanceof Error ? unlockError : new Error(String(unlockError));
         }
       }
-      releaseConnection(client, releaseError);
+      this.statements.release(client, releaseError);
     }
   }
 

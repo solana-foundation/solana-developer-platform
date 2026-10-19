@@ -1,9 +1,12 @@
-import { DatabaseError } from "pg";
-import { describe, expect, it } from "vitest";
+import { DatabaseError, type QueryResult } from "pg";
+import { describe, expect, it, vi } from "vitest";
 import {
   isStalePreparedStatementError,
+  type LeasedConnection,
   MAX_NAMED_STATEMENTS,
   PreparedStatementNames,
+  type QueryArgs,
+  StatementCache,
 } from "./prepared-statements";
 
 const SELECT_ORG = "SELECT status FROM organizations WHERE id = $1";
@@ -140,5 +143,127 @@ describe("isStalePreparedStatementError", () => {
     expect(
       isStalePreparedStatementError(serverError("42P01", "cached plan must not change result type"))
     ).toBe(false);
+  });
+});
+
+const ROWS: QueryResult = { command: "SELECT", rowCount: 0, oid: 0, fields: [], rows: [] };
+const STALE = serverError("0A000", "cached plan must not change result type");
+
+function connection(query: LeasedConnection["query"]) {
+  return { query, release: vi.fn<LeasedConnection["release"]>() };
+}
+
+function cacheOf(maxStaleRetries: number): StatementCache {
+  return new StatementCache({ enabled: true, maxNames: MAX_NAMED_STATEMENTS }, maxStaleRetries);
+}
+
+describe("StatementCache", () => {
+  it("returns a connection that ran its statements fine", async () => {
+    const cache = cacheOf(3);
+    const conn = connection(async () => ROWS);
+
+    await cache.on(conn).query({ text: SELECT_ORG, values: ["org_1"] });
+    cache.release(conn, undefined);
+
+    expect(conn.release).toHaveBeenCalledWith(undefined);
+  });
+
+  it("closes a connection a statement went stale on, whatever else happened to it", async () => {
+    const cache = cacheOf(3);
+    const conn = connection(async () => {
+      throw STALE;
+    });
+
+    await expect(cache.on(conn).query({ text: SELECT_ORG })).rejects.toBe(STALE);
+    cache.release(conn, undefined);
+    expect(conn.release).toHaveBeenLastCalledWith(STALE);
+
+    const rollbackFailure = new Error("connection lost during rollback");
+    cache.release(conn, rollbackFailure);
+    expect(conn.release).toHaveBeenLastCalledWith(rollbackFailure);
+  });
+
+  it("does not close a connection over a failure that is not a stale statement", async () => {
+    const cache = cacheOf(3);
+    const conn = connection(async () => {
+      throw serverError("23505", "duplicate key value");
+    });
+
+    await expect(cache.on(conn).query({ text: SELECT_ORG })).rejects.toThrow("duplicate key");
+    cache.release(conn, undefined);
+
+    expect(conn.release).toHaveBeenCalledWith(undefined);
+  });
+
+  it("runs a statement under its name from the second time", async () => {
+    const cache = cacheOf(3);
+    const seen: QueryArgs[] = [];
+    const conn = connection(async (args) => {
+      seen.push(args);
+      return ROWS;
+    });
+
+    for (let run = 0; run < 3; run += 1) {
+      await cache.on(conn).query({ text: SELECT_ORG, values: ["org_1"] });
+    }
+
+    expect(seen.map((args) => args.name === undefined)).toEqual([true, false, false]);
+  });
+
+  describe("retryingStale", () => {
+    it("repeats a named attempt until it stops going stale", async () => {
+      const cache = cacheOf(5);
+      await cache.retryingStale({ text: SELECT_ORG }, async () => "warm");
+      let calls = 0;
+
+      const result = await cache.retryingStale({ text: SELECT_ORG }, async (named) => {
+        calls += 1;
+        expect(named.name).toMatch(/^sdp_/);
+        if (calls < 3) {
+          throw STALE;
+        }
+        return "done";
+      });
+
+      expect(result).toBe("done");
+      expect(calls).toBe(3);
+    });
+
+    it("gives up after the retry budget", async () => {
+      const cache = cacheOf(2);
+      await cache.retryingStale({ text: SELECT_ORG }, async () => "warm");
+      let calls = 0;
+
+      await expect(
+        cache.retryingStale({ text: SELECT_ORG }, async () => {
+          calls += 1;
+          throw STALE;
+        })
+      ).rejects.toBe(STALE);
+
+      expect(calls).toBe(3);
+    });
+
+    it("never repeats an unnamed statement or another kind of failure", async () => {
+      const cache = cacheOf(5);
+      let unnamedCalls = 0;
+      await expect(
+        cache.retryingStale({ text: SELECT_ORG }, async () => {
+          unnamedCalls += 1;
+          throw STALE;
+        })
+      ).rejects.toBe(STALE);
+      expect(unnamedCalls).toBe(1);
+
+      let namedCalls = 0;
+      const other = serverError("23505", "duplicate key value");
+      await expect(
+        cache.retryingStale({ text: SELECT_ORG }, async () => {
+          namedCalls += 1;
+          throw other;
+        })
+      ).rejects.toBe(other);
+      expect(namedCalls).toBe(1);
+    });
   });
 });

@@ -29,7 +29,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { DatabaseError } from "pg";
+import { DatabaseError, type QueryResult } from "pg";
 
 /**
  * The most statement texts that may hold a server-side name. Every pooled
@@ -104,6 +104,23 @@ export class PreparedStatementNames {
   }
 }
 
+/** What a statement needs to run: its text, its values, and its server-side name when it has one. */
+export interface QueryArgs {
+  text: string;
+  /** Server-side statement name; set only by the cache, for statements whose plan is cached. */
+  name?: string;
+  values?: unknown[];
+}
+
+export type Queryable = {
+  query: (args: QueryArgs) => Promise<QueryResult>;
+};
+
+/** A leased connection: what the cache needs from a pooled client. */
+export interface LeasedConnection extends Queryable {
+  release: (failure?: Error) => void;
+}
+
 /**
  * Whether `error` means a prepared statement went stale on its connection,
  * which only a fresh connection fixes:
@@ -115,9 +132,81 @@ export class PreparedStatementNames {
  * - `26000` "prepared statement does not exist": something deallocated the
  *   name behind the driver's back, for example a pooler.
  */
-export function isStalePreparedStatementError(error: DatabaseError): boolean {
+export function isStalePreparedStatementError(error: Error): boolean {
   return (
-    error.code === "26000" ||
-    (error.code === "0A000" && error.message.includes("cached plan must not change result type"))
+    error instanceof DatabaseError &&
+    (error.code === "26000" ||
+      (error.code === "0A000" && error.message.includes("cached plan must not change result type")))
   );
+}
+
+/**
+ * Everything the client does about cached plans, so a new way of leasing a
+ * connection cannot forget part of it:
+ *
+ * - `retryingStale` names a statement and runs an attempt at it again while it
+ *   keeps going stale on connections. A stale statement fails before it runs
+ *   and its connection is closed, so an attempt never repeats a write.
+ * - `on` and `run` execute statements on a leased connection under their
+ *   cached plans, remembering which connection a statement went stale on.
+ * - `release` returns a connection, or closes one a statement went stale on.
+ *
+ * Every connection a statement runs on must be released through `release`.
+ */
+export class StatementCache {
+  private readonly names: PreparedStatementNames;
+  /** Connections a statement went stale on, with the error that showed it. */
+  private readonly stale = new WeakMap<object, Error>();
+
+  constructor(
+    options: { enabled: boolean; maxNames: number },
+    /** No statement meets more stale connections than the pool holds. */
+    private readonly maxStaleRetries: number
+  ) {
+    this.names = new PreparedStatementNames(options);
+  }
+
+  async retryingStale<T>(args: QueryArgs, attempt: (named: QueryArgs) => Promise<T>): Promise<T> {
+    const name = this.names.nameFor(args.text);
+    const named = name === undefined ? args : { ...args, name };
+    for (let tries = 0; ; tries += 1) {
+      try {
+        return await attempt(named);
+      } catch (error) {
+        if (
+          name === undefined ||
+          tries >= this.maxStaleRetries ||
+          !(error instanceof Error) ||
+          !isStalePreparedStatementError(error)
+        ) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  /** Statements of one leased connection, each under its cached plan. */
+  on(connection: LeasedConnection): Queryable {
+    return { query: (args) => this.run(connection, this.withName(args)) };
+  }
+
+  /** Runs an already named statement, remembering when it went stale on this connection. */
+  run(connection: LeasedConnection, named: QueryArgs): Promise<QueryResult> {
+    return connection.query(named).catch((error: unknown) => {
+      if (error instanceof Error && isStalePreparedStatementError(error)) {
+        this.stale.set(connection, error);
+      }
+      throw error;
+    });
+  }
+
+  /** Returns a connection to the pool, or closes it when a statement went stale on it. */
+  release(connection: LeasedConnection, failure: Error | undefined): void {
+    connection.release(failure === undefined ? this.stale.get(connection) : failure);
+  }
+
+  private withName(args: QueryArgs): QueryArgs {
+    const name = this.names.nameFor(args.text);
+    return name === undefined ? args : { ...args, name };
+  }
 }
