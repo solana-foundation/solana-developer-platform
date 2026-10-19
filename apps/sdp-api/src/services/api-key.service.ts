@@ -4,6 +4,7 @@
  * Shared data access for API key operations.
  */
 
+// biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
 import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
 import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
