@@ -8,13 +8,16 @@ import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { ListProjectsResponse } from "@sdp/types/projects";
 import {
   type Address,
+  address,
   appendTransactionMessageInstructions,
   type Blockhash,
   compileTransaction,
   createNoopSigner,
+  createSolanaRpc,
   createTransactionMessage,
   generateKeyPairSigner,
   getTransactionEncoder,
+  lamports,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
@@ -71,10 +74,6 @@ interface InitializeWalletResponse {
 interface ListWalletsResponse {
   wallets: PaymentsDashboardWallet[];
 }
-
-type SolanaRpcResponse<T> =
-  | { jsonrpc: "2.0"; id: number | string; result: T }
-  | { jsonrpc: "2.0"; id: number | string; error: { code: number; message: string } };
 
 export interface PlaywrightWalletFixture {
   id: string;
@@ -414,24 +413,9 @@ export async function provisionLinkedOrgProjects(browser: Browser): Promise<Play
   });
 }
 
-/**
- * One JSON-RPC call straight to the cluster RPC the local API is configured with.
- *
- * @param method - The Solana JSON-RPC method.
- * @param params - The method's params.
- * @returns The call's result.
- */
-async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
-  const response = await fetch(getPlaywrightApiRuntimeEnv().solanaRpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
-  });
-  const payload = (await response.json()) as SolanaRpcResponse<T>;
-  if ("error" in payload) {
-    throw new Error(payload.error.message);
-  }
-  return payload.result;
+/** The cluster RPC the local API is configured with. */
+function localClusterRpc() {
+  return createSolanaRpc(getPlaywrightApiRuntimeEnv().solanaRpcUrl);
 }
 
 /**
@@ -441,10 +425,12 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
 async function requestWalletAirdropLamports(
   api: LocalApiClient,
   wallet: PlaywrightWalletFixture,
-  lamports: number
+  amountLamports: number
 ): Promise<void> {
   try {
-    await callSolanaRpc<string>("requestAirdrop", [wallet.publicKey, lamports]);
+    await localClusterRpc()
+      .requestAirdrop(address(wallet.publicKey), lamports(BigInt(amountLamports)))
+      .send();
     return;
   } catch (error) {
     if (!(error instanceof Error)) {
@@ -468,28 +454,12 @@ async function getLatestBlockhash(): Promise<{
   blockhash: Blockhash;
   lastValidBlockHeight: bigint;
 }> {
-  const { value } = await callSolanaRpc<{
-    value?: { blockhash?: string; lastValidBlockHeight?: number };
-  }>("getLatestBlockhash", [{ commitment: "confirmed" }]);
-
-  if (!value?.blockhash || typeof value.lastValidBlockHeight !== "number") {
-    throw new Error("RPC provider did not return a confirmed blockhash");
-  }
-
-  return {
-    blockhash: value.blockhash as Blockhash,
-    lastValidBlockHeight: BigInt(Math.max(0, Math.trunc(value.lastValidBlockHeight))),
-  };
+  const { value } = await localClusterRpc().getLatestBlockhash({ commitment: "confirmed" }).send();
+  return value;
 }
 
 async function getMinimumBalanceForRentExemption(): Promise<bigint> {
-  // biome-ignore lint/security/noSecrets: Solana RPC method name, not a credential.
-  const rentExemption = await callSolanaRpc<unknown>("getMinimumBalanceForRentExemption", [0]);
-  if (typeof rentExemption !== "number" || !Number.isFinite(rentExemption)) {
-    throw new Error("RPC provider did not return a valid rent exemption amount");
-  }
-
-  return BigInt(Math.max(0, Math.trunc(rentExemption)));
+  return localClusterRpc().getMinimumBalanceForRentExemption(0n).send();
 }
 
 async function fundAddressViaKoraFeePayer(address: string, lamports: bigint): Promise<boolean> {
@@ -542,11 +512,10 @@ async function fundAddressViaKoraFeePayer(address: string, lamports: bigint): Pr
 }
 
 async function getWalletLamports(walletAddress: string): Promise<number> {
-  const { value } = await callSolanaRpc<{ value: number }>("getBalance", [
-    walletAddress,
-    { commitment: "confirmed" },
-  ]);
-  return value;
+  const { value } = await localClusterRpc()
+    .getBalance(address(walletAddress), { commitment: "confirmed" })
+    .send();
+  return Number(value);
 }
 
 async function waitForWalletLamports(
