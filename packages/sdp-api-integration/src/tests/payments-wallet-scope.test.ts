@@ -1,4 +1,4 @@
-import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -10,7 +10,7 @@ import {
   resetIntegrationState,
   SOLANA_CONFIGURED,
   TEST_PROJECT,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 
 type CreateApiKeyResponse = {
   data: {

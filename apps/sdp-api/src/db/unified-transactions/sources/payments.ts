@@ -1,4 +1,4 @@
-import { PAYMENT_TRANSACTION_KIND_SQL } from "../../repositories/payments.kind";
+import { PAYMENT_TRANSACTION_KIND_SQL } from "@/db/repositories/payments.kind";
 import type { UnifiedTransactionSource } from "./types";
 
 export const paymentsUnifiedTransactionSource = {

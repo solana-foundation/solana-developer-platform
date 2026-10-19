@@ -1,8 +1,8 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { getSignerWalletUnavailableReason } from "./token-management-workspace.utils";
 import { TokenSignerSelect } from "./token-signer-select";

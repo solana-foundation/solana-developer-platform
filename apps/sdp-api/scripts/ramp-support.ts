@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
 import {
   type ProviderRailSupportSnapshot,
   providerRailSupportSnapshotSchema,
-  RAMP_PROVIDER_CLIENTS,
   type RampDiscoveryResponseDump,
-} from "@sdp/payments/ramps";
-import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
+} from "@sdp/payments/ramps/types";
 import {
   type CryptoRailId,
   OFFRAMP_CRYPTO_RAILS,

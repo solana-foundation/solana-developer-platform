@@ -1,4 +1,4 @@
-import type { RateLimitTier } from "@sdp/types";
+import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { BoundedLruMap } from "@/lib/bounded-lru";
@@ -6,7 +6,7 @@ import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
 import { rateLimited, serviceUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { matchesFreePath } from "./path-match";
 
 /** Length of every rate limit window; counter buckets align to it. */

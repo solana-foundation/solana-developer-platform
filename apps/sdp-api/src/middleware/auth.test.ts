@@ -2,8 +2,8 @@ import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { TERMINAL_REFUSAL_TTL_MS } from "@/lib/api-key-refusal-cache";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { AppError } from "@/lib/errors";
@@ -30,7 +30,7 @@ const errorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 });
 
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 describe("Auth Middleware", () => {
   const issuerReady = ensureTestClerkIssuer(env);

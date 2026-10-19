@@ -1,13 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { badRequest, conflict } from "@/lib/errors";
 import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
@@ -21,7 +18,7 @@ import {
   seedApiKeyRow,
   seedRateLimit,
 } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
 const buildExternalWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());

@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
+import PrivateChannelsOverviewPage from "@/app/dashboard/[projectId]/integrations/private-channels/overview/page";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
+import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import PrivateChannelsOverviewPage from "../overview/page";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadInstance } from "../private-channels-page.data";
 
 /** The selected connection is explicit in the URL, even though one is active per project today. */
 export default async function PrivateChannelsInstancePage({

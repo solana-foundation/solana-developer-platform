@@ -1,5 +1,5 @@
-import type { EarnVaultDirectMovementStatus, EarnVaultMovementStatus } from "@sdp/types";
-import type { BadgeVariant } from "@/components/ui/badge";
+import type { EarnVaultDirectMovementStatus, EarnVaultMovementStatus } from "@sdp/types/earn";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import type { useTranslations } from "@/i18n/provider";
 
 export type EarnVaultPositionUiStatus = "pending" | "active";

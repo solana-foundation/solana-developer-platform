@@ -1,10 +1,11 @@
 "use client";
 
-import type { EarnVaultPosition, EarnVaultWithdrawal, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { ArrowRightIcon, Clock3Icon, Loader2Icon, type LucideIcon, ZapIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDurationSeconds, positionDisplayName } from "./earn-format";
 import { fetchEarnVaultWithdrawalOptions } from "./earn-program-data";

@@ -1,11 +1,11 @@
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   PaymentTransactionKind,
-  RampProviderId,
   UnifiedTransaction,
   UnifiedTransactionModule,
   UnifiedTransactionStatus,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/types/unified-transactions";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface UnifiedTransactionModuleWalletScope {
   module: UnifiedTransactionModule;

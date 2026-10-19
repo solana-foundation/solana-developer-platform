@@ -4,11 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
     "./address": {
       "types": "./src/address.ts",
       "import": "./src/address.ts",

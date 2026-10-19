@@ -1,4 +1,4 @@
-import type { EarnStrategy } from "@sdp/types";
+import type { EarnStrategy } from "@sdp/types/earn";
 import { describe, expect, it } from "vitest";
 import { earnVaultDepositAvailability } from "./earn-surfacing";
 

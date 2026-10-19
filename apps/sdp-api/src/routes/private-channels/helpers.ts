@@ -2,8 +2,8 @@ import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   type PrivateChannelEventType,
-} from "@sdp/types";
-import type { PrivateChannelInstanceRow } from "@/db/repositories";
+} from "@sdp/types/private-channels";
+import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";

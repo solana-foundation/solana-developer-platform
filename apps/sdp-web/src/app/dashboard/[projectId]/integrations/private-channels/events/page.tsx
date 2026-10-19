@@ -1,11 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
+import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
+import {
+  loadEventReferences,
+  loadEvents,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { getTranslations } from "@/i18n/server";
 import { dashboardRoleMayPerform } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestProjectId } from "@/lib/sdp-api";
-import { requirePrivateChannelsAccess } from "../private-channels-access";
-import { PrivateChannelsLoadError } from "../private-channels-load-error";
-import { loadEventReferences, loadEvents } from "../private-channels-page.data";
 import { EventsList } from "./events-list";
 
 export default async function PrivateChannelsEventsPage() {

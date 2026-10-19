@@ -1,19 +1,18 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-
+import { errorResponseSchema } from "@/openapi/schemas/base";
 import {
   counterpartyAccountPathParamsSchema,
   counterpartyIdParamSchema,
   counterpartyRequirementsQuerySchema,
   createCounterpartyAccountRequestSchema,
   createCounterpartyRequestSchema,
-  errorResponseSchema,
   listCounterpartiesQuerySchema,
   listCounterpartyAccountsQuerySchema,
   listCounterpartyProviderAccountsQuerySchema,
   updateCounterpartyAccountRequestSchema,
   updateCounterpartyRequestSchema,
-} from "../schemas";
+} from "@/openapi/schemas/counterparties";
 import {
   errorResponses,
   jsonContent,

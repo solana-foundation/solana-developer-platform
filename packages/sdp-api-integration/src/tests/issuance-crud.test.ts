@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { TokenApiResponse } from "../helpers/api-types";
+import type { TokenApiResponse } from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -7,8 +7,8 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
-import { createStablecoin, TEST_WALLETS } from "../helpers/issuance";
+} from "#/helpers/integration";
+import { createStablecoin, TEST_WALLETS } from "#/helpers/issuance";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD Endpoints", () => {
   let apiKeyHash: string;

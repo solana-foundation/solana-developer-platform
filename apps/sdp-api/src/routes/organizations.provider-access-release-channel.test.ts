@@ -1,9 +1,9 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 import {

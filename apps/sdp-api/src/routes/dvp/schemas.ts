@@ -4,7 +4,7 @@ import {
   DVP_TRADE_STATUSES,
   type DvpSettlementAvailability,
   type DvpTradeStatus,
-} from "@sdp/types";
+} from "@sdp/types/dvp";
 import { address } from "@solana/kit";
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";

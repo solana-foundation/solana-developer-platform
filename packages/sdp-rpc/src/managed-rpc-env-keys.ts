@@ -1,4 +1,5 @@
-import type { OrganizationRpcProvider, SolanaCluster } from "@sdp/types";
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { ManagedRpcEnv } from "./types";
 
 /**

@@ -1,4 +1,5 @@
-import { CUSTODY_PROVIDERS } from "@sdp/types";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import { z } from "zod";
 import {
   connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
   createManagedWalletSchema as createManagedWalletSchemaBase,
@@ -7,14 +8,13 @@ import {
   managedWalletOwnerSchema as managedWalletOwnerSchemaBase,
   signerCheckSchema as signerCheckSchemaBase,
   updateWalletSchema as updateWalletSchemaBase,
-} from "../../routes/custody/schemas";
+} from "@/routes/custody/schemas";
 import {
   isoDateTimeSchema,
   projectIdParamSchema,
   solanaAddressSchema,
   walletIdParamSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {

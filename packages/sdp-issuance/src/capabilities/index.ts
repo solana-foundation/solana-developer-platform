@@ -4,17 +4,13 @@
 import type {
   AdvancedSetting,
   AssetCapability,
-  AssetCategory,
   ParamFieldSpec,
   SelectedSetting,
   SettingAvailability,
-} from "@sdp/types";
-import { ASSET_TYPES } from "@sdp/types";
-import {
-  normalizeTemplateId,
-  TEMPLATE_DEFINITIONS,
-  type TemplateOverrideError,
-} from "../templates/definitions";
+} from "@sdp/types/advanced-settings";
+import type { AssetCategory } from "@sdp/types/asset-profiles";
+import { ASSET_TYPES } from "@sdp/types/asset-profiles";
+import { normalizeTemplateId, TEMPLATE_DEFINITIONS } from "#/templates/definitions";
 import { ASSET_CAPABILITIES } from "./capabilities";
 import {
   ADVANCED_SETTINGS,
@@ -22,32 +18,6 @@ import {
   SETTING_KEYS,
   type SettingKey,
 } from "./settings";
-
-export {
-  AUTHORITY_VALUED_SETTINGS,
-  type ExtensionAuthorities,
-  type ResolveSettingsOptions,
-  resolveSettingsToExtensions,
-  type SettingsResolution,
-} from "./resolver";
-export {
-  DVP_BLOCKED_EXTENSIONS,
-  type DvpBlockReason,
-  dvpBlockReason,
-  expandLegacySettingKeys,
-  findIncompatibleExtensionPair,
-  INCOMPATIBLE_EXTENSION_PAIRS,
-  LEGACY_SETTING_ALIASES,
-} from "./settings";
-export {
-  buildSupportMatrix,
-  renderSupportMatrixMarkdown,
-  type SupportMatrix,
-  type SupportMatrixAvailabilityRow,
-  type SupportMatrixSettingRow,
-} from "./support-matrix";
-export type { SettingKey, TemplateOverrideError };
-export { ADVANCED_SETTINGS, ASSET_CAPABILITIES, SETTING_KEYS };
 
 // Drop conflicting settings; sanitizes persisted selections.
 export function pruneIncompatibleSettings(settingKeys: readonly string[]): SettingKey[] {

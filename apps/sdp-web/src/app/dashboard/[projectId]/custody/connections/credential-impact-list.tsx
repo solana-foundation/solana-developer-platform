@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyConnectionLifecycle, CustodyProvider } from "@sdp/types";
+import type { CustodyConnectionLifecycle, CustodyProvider } from "@sdp/types/custody";
 import { formatWalletMeta } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
 import { useTranslations } from "@/i18n/provider";

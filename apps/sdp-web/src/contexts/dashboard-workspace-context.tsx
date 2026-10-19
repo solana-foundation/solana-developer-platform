@@ -1,7 +1,8 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { Project, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { Project } from "@sdp/types/projects";
 import { useRouter } from "next/navigation";
 import {
   createContext,

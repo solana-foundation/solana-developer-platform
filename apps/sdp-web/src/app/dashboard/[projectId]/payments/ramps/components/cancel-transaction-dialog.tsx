@@ -1,7 +1,7 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Button } from "@sdp/ui/button";
+import { Modal } from "@sdp/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 
 interface CancelTransactionDialogProps {

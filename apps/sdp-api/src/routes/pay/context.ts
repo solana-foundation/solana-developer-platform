@@ -1,6 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { Context, Next } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";

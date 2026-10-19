@@ -15,7 +15,7 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
 import { permittedPlanPrograms } from "./guards";
@@ -29,8 +29,6 @@ import {
   readKaminoPositions,
 } from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
-
-export { KAMINO_POSITION_READ_CONCURRENCY } from "./concurrency";
 
 /**
  * API-owned execution guard for one provider operation. The API injects its

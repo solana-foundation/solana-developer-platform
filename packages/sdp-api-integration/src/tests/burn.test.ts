@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { TokenApiResponse, TransactionApiResponse } from "../helpers/api-types";
+import type { TokenApiResponse, TransactionApiResponse } from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -7,7 +7,7 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Burn Operations", () => {
   let apiKeyHash: string;

@@ -1,12 +1,12 @@
 "use client";
 
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { cn } from "@sdp/ui/cn";
 import {
   formatTokenAmount,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 export function AmountBalanceReadout({
   available,

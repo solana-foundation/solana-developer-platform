@@ -1,15 +1,10 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Hono } from "hono";
 import { inspectRoutes } from "hono/dev";
-// A cycle by design: the app mounts the OpenAPI routes, whose document reads
-// this module. `createApp` is only called lazily, never while modules load.
-import { createApp } from "@/app";
 import {
   parseRouteAuthorizationDeclaration,
   type RouteAuthorizationDeclaration,
 } from "@/middleware/require-action";
-import { noopObservability } from "@/runtime/observability";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 export interface RegisteredRouteAuthorization {
   method: string;
@@ -46,37 +41,30 @@ export function registeredRouteAuthorizations(
   }));
 }
 
-/** A route pattern with every parameter name erased, so Hono and OpenAPI paths compare. */
-function eraseRouteParameterNames(path: string): string {
-  return path.replace(/\{[A-Za-z0-9_]+\}/g, ":_").replace(/:[A-Za-z0-9_]+/g, ":_");
+/**
+ * An operation's key in the route-action map: the method and the path with
+ * every parameter name erased, so a Hono route and its OpenAPI path agree.
+ *
+ * @param method - HTTP method, either case.
+ * @param path - A Hono (`/v1/x/:id`) or OpenAPI (`/v1/x/{id}`) path.
+ */
+export function routeActionKey(method: string, path: string): string {
+  const shape = path.replace(/\{[A-Za-z0-9_]+\}/g, ":_").replace(/:[A-Za-z0-9_]+/g, ":_");
+  return `${method.toUpperCase()} ${shape}`;
 }
 
-let actionsByOperation: ReadonlyMap<string, string> | undefined;
-
 /**
- * The action a documented operation's route declares, for the OpenAPI
- * document's 403 descriptions. Built once, lazily, from the app itself.
- *
- * @param method - Lowercase or uppercase HTTP method.
- * @param openApiPath - An OpenAPI path (`/v1/x/{id}`).
+ * The one action each route declares, keyed by {@link routeActionKey}, sorted:
+ * what `route-actions.generated.json` holds for the OpenAPI document's 403
+ * descriptions. A route with no single action (public, or several) is left out.
  */
-export function declaredActionForOperation(
-  method: string,
-  openApiPath: string
-): string | undefined {
-  if (!actionsByOperation) {
-    const app = createApp({
-      observability: noopObservability,
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-    });
-    const map = new Map<string, string>();
-    for (const route of registeredRouteAuthorizations(app)) {
-      const [declaration] = route.declarations;
-      if (route.declarations.length === 1 && declaration?.kind === "action") {
-        map.set(`${route.method} ${eraseRouteParameterNames(route.path)}`, declaration.action);
-      }
+export function routeActionsByOperation(app: Hono<{ Bindings: Env }>): Record<string, string> {
+  const entries: [string, string][] = [];
+  for (const route of registeredRouteAuthorizations(app)) {
+    const [declaration] = route.declarations;
+    if (route.declarations.length === 1 && declaration?.kind === "action") {
+      entries.push([routeActionKey(route.method, route.path), declaration.action]);
     }
-    actionsByOperation = map;
   }
-  return actionsByOperation.get(`${method.toUpperCase()} ${eraseRouteParameterNames(openApiPath)}`);
+  return Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }

@@ -1,5 +1,5 @@
-import type { SolanaCluster } from "@sdp/types";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS } from "@sdp/types/wisdomtree-programs";
 import type { Address } from "@solana/kit";
 import type { WisdomTreeInstructionPlan } from "./types";

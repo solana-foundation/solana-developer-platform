@@ -1,6 +1,6 @@
 import { signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import type { DvpTradeRow } from "@/db/repositories";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import {
   type DvpTradeExpectation,
   type DvpTradeObservation,

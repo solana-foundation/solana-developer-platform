@@ -3,7 +3,7 @@ import {
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";

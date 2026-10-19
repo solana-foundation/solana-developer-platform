@@ -1,4 +1,5 @@
-import { COUNTERPARTY_ACCOUNT_SUMMARY_TYPES, COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import { COUNTERPARTY_ACCOUNT_SUMMARY_TYPES } from "@sdp/types/payments";
 import { z } from "zod";
 import { queryBooleanSchema } from "@/openapi/schemas/base";
 import {

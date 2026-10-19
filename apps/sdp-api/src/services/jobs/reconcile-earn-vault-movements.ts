@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { logEvent } from "@/runtime/money-path-events";
 import {

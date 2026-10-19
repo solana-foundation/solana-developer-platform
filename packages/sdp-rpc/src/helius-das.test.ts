@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
-import type { SdpEnvironment, SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { fetchHeliusDas, isHeliusDasConfigured } from "./helius-das";
 import { runInClusterScope } from "./scope";
 

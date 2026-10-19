@@ -9,7 +9,7 @@ import {
   type Wallet,
 } from "@heliuslabs/zolana/transaction";
 import { type Address, address, type Instruction } from "@solana/kit";
-import { type PreparedSpendIntent, validatePreparedTransferIntent } from "../intent-validation.js";
+import { type PreparedSpendIntent, validatePreparedTransferIntent } from "#/intent-validation";
 import { protocolMint, requireSpendMint } from "./mint.js";
 import { type NoteSelection, selectNotes } from "./notes.js";
 import { resolveWithdrawalSettlement } from "./settlement.js";

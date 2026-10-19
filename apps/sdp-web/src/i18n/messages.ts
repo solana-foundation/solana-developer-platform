@@ -1,20 +1,6 @@
 import type { AppLocale } from "@/i18n/config";
 import { englishSourceMessages } from "./locales/en";
-import {
-  type MessageKeyFor,
-  mergeLocalizedMessages,
-  mergeLocalizedMessagesWithEmbeddedYieldBrand,
-  type TranslationValues,
-  translate,
-} from "./translate";
-
-export type { MessageKeyFor, TranslationValues };
-export {
-  englishSourceMessages,
-  mergeLocalizedMessages,
-  mergeLocalizedMessagesWithEmbeddedYieldBrand,
-  translate,
-};
+import { type MessageKeyFor, mergeLocalizedMessagesWithEmbeddedYieldBrand } from "./translate";
 
 export type Messages = typeof englishSourceMessages;
 

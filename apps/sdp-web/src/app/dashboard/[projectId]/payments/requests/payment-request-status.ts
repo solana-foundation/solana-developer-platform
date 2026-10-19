@@ -1,5 +1,5 @@
-import type { PaymentRequestStatus } from "@sdp/types";
-import type { StatusTone } from "@/components/ui/status-text";
+import type { PaymentRequestStatus } from "@sdp/types/payments";
+import type { StatusTone } from "@sdp/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 
 export const REQUEST_STATUS_TRANSLATION_KEYS = {

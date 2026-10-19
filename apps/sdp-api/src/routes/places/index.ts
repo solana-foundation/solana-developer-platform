@@ -3,7 +3,7 @@ import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams, validateQuery } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { autocomplete, getPlace, getStaticMap } from "./handlers";
 import {
   placeDetailsQuerySchema,
@@ -16,7 +16,7 @@ import {
 // keystroke, so the actor ceiling stays interactive-typing friendly.
 const PLACES_QUOTA: MeteredQuotaConfig = { name: "places", actorMax: 120, orgMax: 600 };
 
-const places = new Hono<{ Bindings: Env }>();
+export const places = new Hono<{ Bindings: Env }>();
 
 places.use("*", unifiedAuthMiddleware());
 
@@ -44,5 +44,3 @@ places.get(
   meteredQuota(PLACES_QUOTA),
   getPlace
 );
-
-export default places;

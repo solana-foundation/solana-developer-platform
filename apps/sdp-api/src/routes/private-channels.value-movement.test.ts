@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import { hashString } from "@sdp/payments/hash";
-import type { PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types";
-import { PrivySigner } from "@solana/keychain-privy";
+import type { PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types/private-channels";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPrivateChannelDepositRepository,
   createPrivateChannelWithdrawalRepository,
-} from "@/db/repositories";
-import app from "@/index";
+} from "@/db/repositories/repository-factory";
+import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import {
   buildPrivateChannelDepositFingerprint,
@@ -25,6 +25,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -36,8 +37,8 @@ const { createChannelDepositMock, createChannelWithdrawalMock, resolveGatewayAut
     createChannelWithdrawalMock: vi.fn(),
     resolveGatewayAuthMock: vi.fn(),
   }));
-const createProviderSigner = PrivySigner.create;
-const providerSignerMock = vi.spyOn(PrivySigner, "create");
+const getProviderSigner = KeychainPrivyAdapter.prototype.getTransactionSigner;
+const providerSignerMock = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
 const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -47,13 +48,14 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-vi.mock("@/services/private-channels", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/private-channels")>();
-  return {
-    ...actual,
-    createChannelDeposit: createChannelDepositMock,
-    createChannelWithdrawal: createChannelWithdrawalMock,
-  };
+vi.mock("@/services/private-channels/deposit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/private-channels/deposit")>();
+  return { ...actual, createChannelDeposit: createChannelDepositMock };
+});
+
+vi.mock("@/services/private-channels/withdraw", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/private-channels/withdraw")>();
+  return { ...actual, createChannelWithdrawal: createChannelWithdrawalMock };
 });
 
 vi.mock("@/services/private-channels/auth/gateway-auth", async (importOriginal) => {
@@ -487,7 +489,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     env.PRIVATE_CHANNELS_ENABLED = "true";
     env.PRIVY_APP_ID = "pc-value-app";
     env.PRIVY_APP_SECRET = "pc-value-secret";
-    providerSignerMock.mockReset().mockImplementation(createProviderSigner);
+    providerSignerMock.mockReset().mockImplementation(getProviderSigner);
     await seedTestDatabase(env);
     await seedRouteState();
     CLERK_TOKEN = await signSeededClerkMember(env, getDb(env), ACTOR_USER_ID, ORGANIZATION_ID);
@@ -727,9 +729,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
       ).toBe(200);
     }
     expect(providerSignerMock).toHaveBeenCalledTimes(2);
-    expect(providerSignerMock).toHaveBeenCalledWith(
-      expect.objectContaining({ walletId: ACTOR_WALLET_ID, appId: "pc-value-connection-app" })
-    );
+    expect(providerSignerMock).toHaveBeenCalledWith(ACTOR_WALLET_ID, ACTOR_ADDRESS);
+    expect(lastPrivyAdapter(providerSignerMock).appId).toBe("pc-value-connection-app");
   });
 
   it("preserves Config execution while BYOK is out of channel", async () => {

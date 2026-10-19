@@ -1,1 +1,1 @@
-export { WalletSetupSkeleton as default } from "../wallet-route-skeletons.redesign";
+export { WalletSetupSkeleton as default } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons.redesign";

@@ -1,11 +1,13 @@
-import type { PrivateChannelReferenceWalletScope } from "@/db/repositories";
+import type { PrivateChannelReferenceWalletScope } from "@/db/repositories/private-channel-reference.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { callerMayPerform } from "@/middleware/require-action";
+import {
+  type AppContext,
+  getPrivateChannelReferenceRepository,
+} from "@/routes/private-channels/context";
+import { resolveEventViewer } from "@/routes/private-channels/event-access";
 import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
-import type { AppContext } from "../context";
-import { getPrivateChannelReferenceRepository } from "../context";
-import { resolveEventViewer } from "../event-access";
 
 function resolveWalletScope(c: AppContext): PrivateChannelReferenceWalletScope {
   if (!callerMayPerform(c, "wallets.read")) {

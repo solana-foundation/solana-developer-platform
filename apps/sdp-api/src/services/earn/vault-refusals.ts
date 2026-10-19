@@ -1,4 +1,4 @@
-import { isTransientRpcError } from "@sdp/rpc";
+import { isTransientRpcError } from "@sdp/rpc/transient";
 import { badRequest, conflict, providerUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 

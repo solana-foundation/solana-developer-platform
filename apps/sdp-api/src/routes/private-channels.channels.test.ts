@@ -1,8 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
-import type { PrivateChannelDto } from "@sdp/types";
+import type { PrivateChannelDto } from "@sdp/types/private-channels";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";

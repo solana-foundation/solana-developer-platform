@@ -13,7 +13,7 @@ import {
   isAction,
   ORGANIZATION_ROLE_ACTIONS,
   organizationRoleMayPerform,
-} from "@sdp/types";
+} from "@sdp/types/actions";
 import { describe, expect, it } from "vitest";
 
 /**

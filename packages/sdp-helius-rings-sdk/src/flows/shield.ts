@@ -1,8 +1,8 @@
 import { buildRingDepositTransaction } from "@heliuslabs/zolana/ring";
 import { buildDepositTransaction } from "@heliuslabs/zolana/wallet";
 import { address, type Transaction } from "@solana/kit";
-import { withConfiguredAddressErrorBridge } from "../error-bridge.js";
-import type { ShieldedMaterial } from "../material.js";
+import { withConfiguredAddressErrorBridge } from "#/error-bridge";
+import type { ShieldedMaterial } from "#/material";
 import { protocolMint } from "./mint.js";
 
 /**

@@ -1,6 +1,7 @@
 "use client";
 
 import { Popover } from "@base-ui/react/popover";
+import { cn } from "@sdp/ui/cn";
 import {
   ArrowLeftRight,
   ArrowUpRight,
@@ -20,7 +21,6 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 import type { AccessControlMode } from "./access-control.utils";
 import { safeLinkHref } from "./create/draft-mapping";
 import { type WalletIdentity, WalletIdentityBadge } from "./wallet-identity";

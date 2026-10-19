@@ -1,4 +1,4 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { describe, expect, it } from "vitest";
 import { resolveHomeHeroState } from "./home-first-run";
 

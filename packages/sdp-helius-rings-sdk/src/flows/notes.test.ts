@@ -1,5 +1,5 @@
 import type { Wallet, WalletUtxo } from "@heliuslabs/zolana/transaction";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { type Address, address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { MERGE_MAX_INPUTS, noteId, selectMergeNotes, selectNotes } from "./notes.js";

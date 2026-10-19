@@ -1,11 +1,9 @@
+import { type Action, API_KEY_GRANTABLE_ACTIONS, grantsCoverAction } from "@sdp/types/actions";
 import {
-  type Action,
-  API_KEY_GRANTABLE_ACTIONS,
-  grantsCoverAction,
   isModuleInReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import {
   type ApiKeyAuthoringDraft,

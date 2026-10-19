@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { wellKnownMint } from "@sdp/types";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { isStrategyWithinDeclaredSupport } from "./support";
 import type { EarnDeclaredStrategySupport } from "./types";
 

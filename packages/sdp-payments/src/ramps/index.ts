@@ -1,24 +1,8 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
-import { providerNotConfigured } from "../errors";
+import { providerNotConfigured } from "#/errors";
 import { MoonpayRampClient } from "./providers/moonpay/client";
 import { StripeRampClient } from "./providers/stripe/client";
 import type { RampProvider } from "./types";
-
-export { hasMoonpayManagedKeys, MoonpayRampClient } from "./providers/moonpay/client";
-export { hasStripeManagedKeys, StripeRampClient } from "./providers/stripe/client";
-export type {
-  ProviderDeclaredRailSupport,
-  ProviderRailSupportDistillation,
-  ProviderRailSupportSnapshot,
-  RampDiscoveryContext,
-  RampDiscoveryResponseDump,
-  RampDumpWriter,
-  RampFetchJson,
-  RampProvider,
-  RampRawDumpReader,
-  RampSettlementEvent,
-} from "./types";
-export { providerRailSupportSnapshotSchema } from "./types";
 
 export const RAMP_PROVIDER_CLIENTS = {
   moonpay: new MoonpayRampClient(),

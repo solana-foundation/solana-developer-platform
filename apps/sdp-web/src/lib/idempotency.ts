@@ -1,9 +1,9 @@
+import { isIdempotencyKeyOutcomeUnknown } from "@sdp/types/idempotency";
 import {
-  isIdempotencyKeyOutcomeUnknown,
   isMoneyMovementInFlight,
   isMoneyMovementStatus,
   type MoneyMovementStatus,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { z } from "zod";
 
 /**

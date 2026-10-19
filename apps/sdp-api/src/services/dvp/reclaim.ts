@@ -10,8 +10,8 @@
  */
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
-import * as solanaRpc from "@sdp/rpc/solana";
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -28,9 +28,9 @@ import {
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { fetchMaybeMint, findAssociatedTokenPda } from "@solana-program/token-2022";
 import type { Context } from "hono";
-import { getDb } from "@/db";
-import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
+import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -108,7 +108,7 @@ export async function reclaimDvpTradeLeg(
   const tokenProgram = isA ? trade.tokenProgramA : trade.tokenProgramB;
   const escrow = isA ? trade.escrowA : trade.escrowB;
 
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createRpc(env);
   const held = await readReclaimableEscrow(rpc, trade, side);
 
   await refuseTransferHookMint(rpc, trade.id, mint);
@@ -156,7 +156,7 @@ export async function reclaimDvpTradeLeg(
     createNoopSigner(sponsor)
   );
 
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
@@ -255,7 +255,7 @@ export async function reclaimDvpTradeLeg(
 }
 
 type FundingClaims = ReturnType<typeof createPostgresDvpLegFundingClaimRepository>;
-type Rpc = ReturnType<typeof solanaRpc.createRpc>;
+type Rpc = ReturnType<typeof createRpc>;
 
 /**
  * Reads the leg's escrow live and refuses anything reclaim cannot act on: a
@@ -382,7 +382,7 @@ async function releaseOnceConfirmed(
   reclaimSignature: Signature
 ) {
   try {
-    const confirmation = await solanaRpc.confirmTransaction(rpc, reclaimSignature, {
+    const confirmation = await confirmTransaction(rpc, reclaimSignature, {
       timeoutMs: RECLAIM_CONFIRM_TIMEOUT_MS,
     });
     if (

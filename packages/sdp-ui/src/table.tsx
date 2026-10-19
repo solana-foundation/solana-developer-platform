@@ -8,16 +8,6 @@ import type { Ref } from "react";
 import { cn } from "./cn";
 import { useThemeScope } from "./theme-scope";
 
-export {
-  Table,
-  TableBody,
-  TableCaption,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@solana/design-system/table";
-
 /**
  * A table cell. The design-system cell merges classes with its own tailwind-merge, which does not
  * know the app's ink names, so a cell's `text-primary` or `text-secondary` kept its default

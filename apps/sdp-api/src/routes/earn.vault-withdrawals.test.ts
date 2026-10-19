@@ -1,15 +1,15 @@
-import { SdpEarnError } from "@sdp/earn";
 import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
+import { SdpEarnError } from "@sdp/earn/errors";
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";

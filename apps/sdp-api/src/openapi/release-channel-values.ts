@@ -1,22 +1,21 @@
+import { ACTIONS, actionOwnerOf, actionsInModule, HIDDEN_ACTION_MODULES } from "@sdp/types/actions";
+import type { CustodyWalletPurpose } from "@sdp/types/custody";
+import { RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
+import type { Permission } from "@sdp/types/permissions";
 import {
-  ACTIONS,
-  actionOwnerOf,
-  actionsInModule,
-  type CustodyWalletPurpose,
-  HIDDEN_ACTION_MODULES,
-  isRampProviderInReleaseChannel,
-  type Permission,
   RAMP_PROVIDERS,
-  RAMP_TRANSFER_TYPES,
   type RampProviderId,
   RETIRED_RAMP_PROVIDERS,
+} from "@sdp/types/provider-access";
+import {
+  isRampProviderInReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
-  TOKEN_TRANSACTION_TYPES,
-  UNIFIED_TRANSACTION_SDP_MODULES,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
+import { TOKEN_TRANSACTION_TYPES } from "@sdp/types/tokens";
+import { UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types/unified-transactions";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { z } from "zod";
 

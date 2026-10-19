@@ -5,13 +5,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
-  env,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
+import { env } from "#env-impl";
 
 const { trackPendingTransfers } = apiTestSupport;
 

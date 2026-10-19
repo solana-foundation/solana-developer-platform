@@ -4,22 +4,22 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, notFound, walletNotFound } from "@/lib/errors";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import {
-  assertApiKeyCustodyWalletAccess,
-  getAllowedApiKeyWalletAuthorizationForPermissions,
-} from "@/services/api-key-scope.service";
-import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import {
   type AppContext,
   getCounterpartiesRepository,
   getCounterpartyAccountsRepository,
   getPaymentRecurringPaymentsRepository,
-} from "../context";
+} from "@/routes/payments/context";
 import {
   findRetainedPaymentWallet,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
-} from "../wallets";
+} from "@/routes/payments/wallets";
+import {
+  assertApiKeyCustodyWalletAccess,
+  getAllowedApiKeyWalletAuthorizationForPermissions,
+} from "@/services/api-key-scope.service";
+import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
 /**
  * Access checks for the recurring-payment routes (HOO-1918, ADR 0009). They

@@ -1,10 +1,11 @@
 import { createHmac } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
-import { type PaymentTransferStatus, wellKnownMint } from "@sdp/types";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";
@@ -12,11 +13,6 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
-
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
-});
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 

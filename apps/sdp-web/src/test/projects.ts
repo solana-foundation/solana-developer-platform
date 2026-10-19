@@ -1,4 +1,4 @@
-import type { Project } from "@sdp/types";
+import type { Project } from "@sdp/types/projects";
 
 const TEST_ORGANIZATION_ID = "org_test";
 

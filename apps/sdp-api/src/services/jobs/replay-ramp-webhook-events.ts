@@ -1,6 +1,7 @@
-import type { RampWebhookFailureOutcome, SdpRampProviderStages } from "@sdp/types";
-import { RAMP_PROVIDERS } from "@sdp/types";
-import { getDb } from "@/db";
+import type { RampWebhookFailureOutcome, RampWebhookProcessResult } from "@sdp/types/payments";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import { getDb } from "@/db/client";
 import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,
@@ -72,6 +73,10 @@ function failureOutcome(kind: RampWebhookFailureKind): RampWebhookFailureOutcome
   }
 }
 
+function businessFailureReason(result: RampWebhookProcessResult): string {
+  return result.outcome === "refused" ? result.reason : `provider event ${result.outcome}`;
+}
+
 /**
  * The identity a parked row is stamped with; a later deploy changes it.
  * Deliberately the image build SHA, NOT K_REVISION and not API_VERSION: the
@@ -139,10 +144,11 @@ export async function applyStoredRampWebhookEvent(
       throw error;
     }
 
-    const outcome = await processor.process(env, row.environment, parsed);
+    const result = await processor.process(env, row.environment, parsed);
+    const { outcome, reason } = result;
     if (outcome === "unmatched" || outcome === "refused") {
       if (row.environment === "sandbox") {
-        await events.dischargeEvent(row.id, "discarded", `provider event ${outcome}`);
+        await events.dischargeEvent(row.id, "discarded", businessFailureReason(result));
         logEvent("warn", {
           event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
           flow: "ramp-settlement",
@@ -150,6 +156,7 @@ export async function applyStoredRampWebhookEvent(
           provider: row.provider,
           environment: row.environment,
           outcome,
+          reason,
         });
         return false;
       }
@@ -157,7 +164,7 @@ export async function applyStoredRampWebhookEvent(
       const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
       await events.recordFailure({
         id: row.id,
-        error: `provider event ${outcome}`,
+        error: businessFailureReason(result),
         attempts: spentAttempts,
         maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
         appRevision: currentAppRevision(env),
@@ -172,6 +179,7 @@ export async function applyStoredRampWebhookEvent(
           provider: row.provider,
           environment: row.environment,
           outcome,
+          reason,
           attempts: spentAttempts,
         });
       }

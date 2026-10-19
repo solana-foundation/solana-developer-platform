@@ -3,7 +3,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   createOfframpQuote,
   estimateOfframp,
@@ -12,7 +12,7 @@ import {
 } from "./handlers";
 import { createOfframpQuoteSchema, estimateOfframpSchema } from "./schemas";
 
-const offramp = new Hono<{ Bindings: Env }>();
+export const offramp = new Hono<{ Bindings: Env }>();
 
 offramp.get("/currency", requireAction("offramp.read"), listOfframpCurrencies);
 offramp.post(
@@ -30,5 +30,3 @@ offramp.post(
   requestGate({ extract: extractOfframpQuoteRequest }),
   createOfframpQuote
 );
-
-export default offramp;

@@ -1,6 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SignatureInfo } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";

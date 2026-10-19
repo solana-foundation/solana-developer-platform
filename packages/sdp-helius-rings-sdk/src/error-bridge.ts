@@ -3,7 +3,12 @@ import {
   type ClientErrorCode,
   type ClientErrorDetailsMap,
 } from "@heliuslabs/zolana/client";
-import { InterfaceError, type InterfaceErrorCode } from "@heliuslabs/zolana/interface";
+import {
+  type DecodedShieldedPoolError,
+  decodeShieldedPoolError as decodeZolanaShieldedPoolError,
+  InterfaceError,
+  type InterfaceErrorCode,
+} from "@heliuslabs/zolana/interface";
 import { RingError, type RingErrorCode } from "@heliuslabs/zolana/ring";
 import { TransactionError, type TransactionErrorCode } from "@heliuslabs/zolana/transaction";
 import { WalletError, type WalletErrorCode } from "@heliuslabs/zolana/wallet";
@@ -11,7 +16,7 @@ import {
   HeliusRingsError,
   type HeliusRingsErrorCode,
   type RingsErrorCause,
-} from "@sdp/helius-rings";
+} from "@sdp/helius-rings/errors";
 import {
   isSolanaError,
   SOLANA_ERROR__ADDRESSES__INVALID_BASE58_ENCODED_ADDRESS,
@@ -19,6 +24,17 @@ import {
   SOLANA_ERROR__ADDRESSES__STRING_LENGTH_OUT_OF_RANGE,
   SOLANA_ERROR__CODECS__INVALID_STRING_FOR_BASE,
 } from "@solana/kit";
+
+/**
+ * Decodes a shielded-pool custom program error code into Zolana's named error, so API callers
+ * can name codes (for example 7009 → InvalidSettlementAccounts) without depending on
+ * `@heliuslabs/zolana`, which only this package declares.
+ * @param code the raw custom program error code carried by the failed transaction
+ * @returns the decoded shielded-pool error
+ */
+export function decodeShieldedPoolError(code: number): DecodedShieldedPoolError {
+  return decodeZolanaShieldedPoolError(code);
+}
 
 type BridgedErrorCode = Extract<
   HeliusRingsErrorCode,

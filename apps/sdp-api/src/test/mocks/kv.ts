@@ -5,20 +5,20 @@
  * valid once a Redis-backed implementation lands (HOO-510).
  */
 
+import type { Action } from "@sdp/types/actions";
 import type {
-  Action,
   ApiKeyEnvironment,
   ApiKeyStatus,
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
   RateLimitTier,
-} from "@sdp/types";
+} from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_SLUG } from "@/test/helpers/projects";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * The state of an API key a suite seeds: the `api_keys` columns authentication

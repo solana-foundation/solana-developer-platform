@@ -1,9 +1,9 @@
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { currentDatabaseIdentity } from "@/db/identity";
-import app from "@/index";
+import { app } from "@/index";
 import { AppError, rateLimited } from "@/lib/errors";
 import * as organizationAccess from "@/lib/organization-access";
 import { apiKeyFloodGuardFallback, authMiddleware, optionalAuth } from "@/middleware/auth";
@@ -26,7 +26,7 @@ import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 
 /**
  * From TEST-NET-3 (203.0.113.0/24, RFC 5737) — reserved for documentation and

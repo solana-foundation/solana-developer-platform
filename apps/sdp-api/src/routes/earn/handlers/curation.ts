@@ -1,4 +1,5 @@
-import type { EarnProviderId, SolanaCluster } from "@sdp/types";
+import type { EarnProviderId } from "@sdp/types/provider-access";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
 /**
  * Per-vault catalogue curation config — the data behind the strategy routes'

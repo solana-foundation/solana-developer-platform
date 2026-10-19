@@ -1,5 +1,8 @@
+// NOTE: Server-only by construction: this module imports next/headers, which Next.js refuses to
+// bundle into a Client Component module, so any client import of it fails the build. Server
+// loaders that call it need no `import "server-only"`.
 import { auth } from "@clerk/nextjs/server";
-import type { ListProjectsResponse, Project } from "@sdp/types";
+import type { ListProjectsResponse, Project } from "@sdp/types/projects";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
@@ -16,6 +19,7 @@ import {
   type TraceContext,
 } from "./request-tracing";
 import { findSdpApiBaseUrl } from "./sdp-api-base-url";
+import { getSdpAuth } from "./sdp-auth";
 
 function getApiBaseUrl(): string {
   const base = findSdpApiBaseUrl({
@@ -47,14 +51,8 @@ export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string
   return token;
 }
 
-const getRequestAuth = cache(async () => auth());
-
-export function getSdpAuth() {
-  return getRequestAuth();
-}
-
 const getRequestClerkToken = cache(async (): Promise<string> => {
-  const { getToken, orgId } = await getRequestAuth();
+  const { getToken, orgId } = await getSdpAuth();
   if (!orgId) {
     throw new Error("Active Clerk organization required");
   }

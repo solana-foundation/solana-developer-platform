@@ -1,4 +1,4 @@
-import { PAYMENT_RECURRING_PAYMENT_ACTIONS } from "@sdp/types";
+import { PAYMENT_RECURRING_PAYMENT_ACTIONS } from "@sdp/types/payments";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { proxyToSdpApi } from "@/lib/sdp-api";

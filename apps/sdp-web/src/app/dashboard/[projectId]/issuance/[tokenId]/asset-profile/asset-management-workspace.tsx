@@ -1,18 +1,19 @@
 "use client";
 
-import type { AssetProfile, Token } from "@sdp/types";
+import type { AssetProfile } from "@sdp/types/asset-profiles";
+import type { Token } from "@sdp/types/tokens";
 import { Loader2 } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { TokenActionConfirmationDialog } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-action-confirmation-dialog";
+import { TokenAuthorityModal } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-authority-modal";
+import { TokenDeployWalletDialog } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-deploy-wallet-dialog";
+import { TokenLockSupplyModal } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-lock-supply-modal";
+import { TokenManagementModalShell } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-modal-shell";
+import { TokenSignerSelect } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-signer-select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
-import { TokenAuthorityModal } from "../token-authority-modal";
-import { TokenDeployWalletDialog } from "../token-deploy-wallet-dialog";
-import { TokenLockSupplyModal } from "../token-lock-supply-modal";
-import { TokenManagementModalShell } from "../token-management-modal-shell";
-import { TokenSignerSelect } from "../token-signer-select";
 import { AnimatedSection } from "./animated-section";
 import { AssetProfileHeader } from "./asset-profile-header";
 import { AssetProfileSaveBar } from "./asset-profile-save-bar";

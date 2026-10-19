@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,9 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { useTokenActionRunner } from "./use-token-action-runner";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }),
+}));
 vi.mock("sonner", () => ({ toast: { loading: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
 const wallets: PaymentsDashboardWallet[] = [

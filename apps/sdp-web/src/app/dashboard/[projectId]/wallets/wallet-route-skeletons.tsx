@@ -1,10 +1,10 @@
+import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { WalletActivitySkeleton } from "@/app/dashboard/[projectId]/custody/wallet-activity-skeleton";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import { cn } from "@/lib/utils";
 
 const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;

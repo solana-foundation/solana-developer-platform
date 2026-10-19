@@ -1,4 +1,7 @@
-import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
+import {
+  earnProviderDepositSettlement,
+  earnProviderWithdrawalSettlement,
+} from "@sdp/types/provider-access";
 import type { EarnMovementRow } from "@/db/repositories/earn-movements.repository";
 
 /**

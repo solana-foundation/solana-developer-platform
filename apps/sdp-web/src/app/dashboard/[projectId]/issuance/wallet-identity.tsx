@@ -1,17 +1,18 @@
 "use client";
 
-import type { CustodyProvider, PaymentsDashboardWallet } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import { ArrowUpRight, Copy, KeyRound, type LucideIcon, TriangleAlert, Wallet } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { formatCustodyProviderName } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Button } from "@/components/ui/button";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // "Who is behind this address / walletId" — one model, two renderings, shared by

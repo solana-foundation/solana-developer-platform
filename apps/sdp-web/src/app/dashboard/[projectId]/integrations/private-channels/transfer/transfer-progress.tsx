@@ -1,11 +1,11 @@
 "use client";
 
-import type { PrivateChannelTransfer } from "@sdp/types";
+import type { PrivateChannelTransfer } from "@sdp/types/private-channels";
+import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
 import { CheckCircle2Icon } from "lucide-react";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 export function TransferProgress({
   transfer,

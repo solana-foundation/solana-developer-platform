@@ -1,6 +1,6 @@
 "use client";
 
-import type { Counterparty, ListCounterpartiesResponse } from "@sdp/types";
+import type { Counterparty, ListCounterpartiesResponse } from "@sdp/types/counterparties";
 import { useEffect, useRef, useState } from "react";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { COUNTERPARTY_PAGE_SIZE } from "./counterparty-page.data";

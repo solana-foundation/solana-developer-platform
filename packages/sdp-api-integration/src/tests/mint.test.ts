@@ -3,7 +3,7 @@ import type {
   MintApiResponse,
   MintPrepareApiResponse,
   TokenApiResponse,
-} from "../helpers/api-types";
+} from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -11,7 +11,7 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations", () => {
   let apiKeyHash: string;

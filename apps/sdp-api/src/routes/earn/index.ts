@@ -15,7 +15,7 @@ import { requestGate } from "@/middleware/request-gate";
 import { requireAction, requireActionWhenAuthenticated } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { isEarnExitOrRead } from "./exits";
 import {
   createEarnExternalWalletDeposit,
@@ -102,7 +102,7 @@ import {
   earnVaultWithdrawalSchema,
 } from "./schemas";
 
-const earnRoutes = new Hono<{ Bindings: Env }>();
+export const earnRoutes = new Hono<{ Bindings: Env }>();
 const optionalAuthEarn = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
 
@@ -644,5 +644,3 @@ earn.get(
 
 earnRoutes.route("/", optionalAuthEarn);
 earnRoutes.route("/", earn);
-
-export default earnRoutes;

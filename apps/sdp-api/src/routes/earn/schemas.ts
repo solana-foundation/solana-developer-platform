@@ -1,4 +1,3 @@
-import { isAddress } from "@sdp/solana/address";
 import {
   EARN_APY_TYPES,
   EARN_LIQUIDITY_TERMS,
@@ -7,9 +6,10 @@ import {
   EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS,
   EARN_STRATEGY_SOURCE_KINDS,
   EARN_SWAP_MAX_SLIPPAGE_BPS,
-  SOLANA_CLUSTERS,
-} from "@sdp/types";
+} from "@sdp/types/earn";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
+import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
+import { isAddress } from "@solana/addresses";
 import { z } from "zod";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";
-import { createEncryptionService } from "../encryption.service";
 import { assertCustodyEncryptionScheme, CustodyCipherRouter } from "./cipher-router";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
 

@@ -5,7 +5,7 @@ import type { KVStoreSet } from "@/runtime/kv";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { kvStoreMiddleware } from "./kv-store";
 import { anonymousMeteredQuota, meteredQuota } from "./metered-quota";
 

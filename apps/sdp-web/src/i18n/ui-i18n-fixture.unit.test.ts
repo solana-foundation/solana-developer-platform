@@ -1,7 +1,8 @@
 import type { UiMessageKey } from "@sdp/ui/i18n";
 import { ENGLISH_UI_MESSAGES, translateEnglishUi } from "@sdp/ui/testing/english-ui-i18n";
 import { describe, expect, it } from "vitest";
-import { englishSourceMessages, translate } from "./messages";
+import { englishSourceMessages } from "./locales/en";
+import { translate } from "./translate";
 
 // Every placeholder a primitive's label uses, so templated labels compare filled in.
 const SAMPLE_VALUES = { count: 3, field: "Start date", page: 2, pageCount: 5 };

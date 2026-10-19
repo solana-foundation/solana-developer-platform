@@ -1,4 +1,4 @@
-import type { PaymentRecurringPaymentStatus } from "@sdp/types";
+import type { PaymentRecurringPaymentStatus } from "@sdp/types/payments";
 import { describe, expect, it, vi } from "vitest";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import {

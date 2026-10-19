@@ -1,4 +1,4 @@
-import type { EgressReadiness } from "@sdp/types";
+import type { EgressReadiness } from "@sdp/types/health";
 import { getLogger } from "@/runtime/logger";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 

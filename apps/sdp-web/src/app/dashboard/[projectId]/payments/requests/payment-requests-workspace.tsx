@@ -1,15 +1,30 @@
 "use client";
 
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
+import type {
+  CreatedPaymentRequest,
+  PaymentRequest,
+  PaymentRequestLink,
+  PaymentRequestStatus,
+  PaymentsDashboardWallet,
+} from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type Counterparty,
-  type CounterpartyAccount,
-  type CreatedPaymentRequest,
-  type PaymentRequest,
-  type PaymentRequestLink,
-  type PaymentRequestStatus,
-  type PaymentsDashboardWallet,
-} from "@sdp/types";
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   BanknoteIcon,
   ChevronRightIcon,
@@ -35,33 +50,21 @@ import {
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
+import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
+import { CounterpartyPlaygroundLoading } from "@/app/dashboard/[projectId]/payments/counterparty-menu-loading";
+import {
+  formatDisplayAmount,
+  formatTimestamp,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { syncPlaygroundApiKeysForActiveTab } from "@/app/dashboard/[projectId]/payments/payments-playground-api-key-state";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
-import { Select, SelectItem } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   type DashboardPlaygroundApiKeyOption,
   useDashboardWorkspace,
@@ -73,12 +76,6 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm } from "@/lib/use-zod-form";
-import { cn } from "@/lib/utils";
-import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
-import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
-import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
-import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import {
   deriveTokenOptions,

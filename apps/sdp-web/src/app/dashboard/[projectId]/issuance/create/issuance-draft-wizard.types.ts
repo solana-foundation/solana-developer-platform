@@ -1,4 +1,4 @@
-import type { AssetCategory } from "@sdp/types";
+import type { AssetCategory } from "@sdp/types/asset-profiles";
 
 // The four top-level wizard steps (V2 issuance direction). Classification owns
 // both the category and the sub-asset-type selection; "asset-details" is the

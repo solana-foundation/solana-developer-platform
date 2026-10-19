@@ -1,21 +1,24 @@
+import type {
+  Counterparty,
+  CounterpartyAccount,
+  ListCounterpartiesResponse,
+  ListCounterpartyProviderAccountsResponse,
+} from "@sdp/types/counterparties";
+import type {
+  CounterpartyAccountSummary,
+  PaymentRecurringPayment,
+  PaymentRequest,
+  PaymentSubscriptionCollectionAttempt,
+  PaymentsDashboardWallet,
+  PaymentTransferSummary,
+} from "@sdp/types/payments";
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
-  type Counterparty,
-  type CounterpartyAccount,
-  type CounterpartyAccountSummary,
-  type ListCounterpartiesResponse,
-  type ListCounterpartyProviderAccountsResponse,
-  type PaymentRecurringPayment,
-  type PaymentRequest,
-  type PaymentSubscriptionCollectionAttempt,
-  type PaymentsDashboardWallet,
-  type PaymentTransferSummary,
-  RAMP_PROVIDERS,
-  type RampProviderId,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransaction,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as counterpartyAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/accounts/route";
 import { GET as providerAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/provider-accounts/route";
@@ -87,7 +90,7 @@ import { paymentsDemoBody } from "./demo-fixtures";
 // and the request.
 // Every ramp provider on, as the flags leave them with all of them promoted.
 vi.mock("@/flags/ramps", async () => {
-  const { RAMP_PROVIDERS } = await import("@sdp/types");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
   return {
     getEnabledRampProviders: async () => RAMP_PROVIDERS,
     getOfferedRampProviders: async () => RAMP_PROVIDERS,

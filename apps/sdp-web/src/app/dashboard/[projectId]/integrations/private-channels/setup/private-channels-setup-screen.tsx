@@ -1,4 +1,4 @@
-import type { PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { newDesign } from "@/flags";
 import { PrivateChannelsConnectForm as LegacyPrivateChannelsConnectForm } from "./private-channels-connect-form";
 import { PrivateChannelsConnectForm } from "./private-channels-connect-form.redesign";

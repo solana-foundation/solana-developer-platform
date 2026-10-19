@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 // Placeholders for the asset grid — the one home of the grid's loading geometry.
 // The route-level IssuancePageSkeleton renders these same components, so the

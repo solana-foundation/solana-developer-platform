@@ -2,7 +2,7 @@ import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   PRIVATE_CHANNEL_EVENT_TYPES,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { describe, expect, it, vi } from "vitest";
 import { getLogger } from "@/runtime/logger";
 import type { PrivateChannelEventRecord, PrivateChannelEventSink } from "./event.service";

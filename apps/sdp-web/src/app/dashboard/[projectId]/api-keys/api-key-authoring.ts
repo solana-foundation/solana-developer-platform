@@ -3,8 +3,6 @@ import {
   type ActionModule,
   type ActionVerb,
   API_KEY_GRANTABLE_ACTIONS,
-  type ApiKeyEnvironment,
-  type ApiKeyWalletScope,
   actionModuleOf,
   actionOwnerOf,
   actionVerbOf,
@@ -12,8 +10,9 @@ import {
   isAction,
   isInEverythingGrant,
   normalizeGrants,
-  type SdpModule,
-} from "@sdp/types";
+} from "@sdp/types/actions";
+import type { ApiKeyEnvironment, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { SdpModule } from "@sdp/types/release-channels";
 
 export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
 

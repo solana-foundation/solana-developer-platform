@@ -10,7 +10,7 @@
  * - Polling for transaction completion
  */
 
-import { scrubTelemetry } from "@sdp/redaction";
+import { scrubTelemetry } from "@sdp/redaction/scrub";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";

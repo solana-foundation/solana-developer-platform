@@ -5,9 +5,10 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
-import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types";
+import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/permissions";
 import type { Context, Next } from "hono";
-import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
@@ -31,7 +32,7 @@ import {
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
 import { ProjectService } from "@/services/project.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
 /**

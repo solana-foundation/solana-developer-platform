@@ -1,10 +1,10 @@
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import { hashString } from "@sdp/payments/hash";
-import type { PrivateChannelTransfer } from "@sdp/types";
-import { PrivySigner } from "@solana/keychain-privy";
+import type { PrivateChannelTransfer } from "@sdp/types/private-channels";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createPrivateChannelTransferRepository } from "@/db/repositories";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";
+import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
@@ -19,6 +19,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -28,8 +29,8 @@ const { createChannelTransferMock, resolveGatewayAuthMock } = vi.hoisted(() => (
   createChannelTransferMock: vi.fn(),
   resolveGatewayAuthMock: vi.fn(),
 }));
-const createProviderSigner = PrivySigner.create;
-const createOrgSignerMock = vi.spyOn(PrivySigner, "create");
+const getProviderSigner = KeychainPrivyAdapter.prototype.getTransactionSigner;
+const providerSignerMock = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
 const providerFetch = vi.fn<typeof fetch>();
 const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 
@@ -40,8 +41,8 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-vi.mock("@/services/private-channels", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/private-channels")>();
+vi.mock("@/services/private-channels/transfer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/private-channels/transfer")>();
   return { ...actual, createChannelTransfer: createChannelTransferMock };
 });
 
@@ -493,7 +494,7 @@ async function postTransfer(body: Record<string, unknown>, headers: Record<strin
 
 describe("Private Channels — transfer access and routes", () => {
   afterAll(() => {
-    createOrgSignerMock.mockRestore();
+    providerSignerMock.mockRestore();
     env.PRIVY_APP_ID = originalPrivy.appId;
     env.PRIVY_APP_SECRET = originalPrivy.appSecret;
   });
@@ -511,9 +512,9 @@ describe("Private Channels — transfer access and routes", () => {
     await verifyClerkJwt(CLERK_TOKEN, env);
     createChannelTransferMock.mockReset();
     resolveGatewayAuthMock.mockReset();
-    createOrgSignerMock.mockReset();
+    providerSignerMock.mockReset();
     createChannelTransferMock.mockResolvedValue(transferDto({}));
-    createOrgSignerMock.mockImplementation(createProviderSigner);
+    providerSignerMock.mockImplementation(getProviderSigner);
     providerFetch
       .mockReset()
       .mockImplementation(async () =>
@@ -552,7 +553,7 @@ describe("Private Channels — transfer access and routes", () => {
       expect(response.status).toBe(200);
       if (replay) {
         expect(await response.json()).toMatchObject({ data: { id: "pct_role_replay" } });
-        expect(createOrgSignerMock).not.toHaveBeenCalled();
+        expect(providerSignerMock).not.toHaveBeenCalled();
       }
     }
   );
@@ -603,7 +604,7 @@ describe("Private Channels — transfer access and routes", () => {
     expect(await history.json()).toMatchObject({
       data: { id: "pct_replay", status: "submitted" },
     });
-    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    expect(providerSignerMock).not.toHaveBeenCalled();
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
   });
 
@@ -618,10 +619,8 @@ describe("Private Channels — transfer access and routes", () => {
       humanHeaders({ "Idempotency-Key": "idem_route_transfer" })
     );
     expect(response.status).toBe(200);
-    expect(createOrgSignerMock).toHaveBeenCalledOnce();
-    expect(createOrgSignerMock).toHaveBeenCalledWith(
-      expect.objectContaining({ appId: "pc-transfer-connection-app" })
-    );
+    expect(providerSignerMock).toHaveBeenCalledOnce();
+    expect(lastPrivyAdapter(providerSignerMock).appId).toBe("pc-transfer-connection-app");
     expect(resolveGatewayAuthMock).toHaveBeenCalledOnce();
   });
 
@@ -645,7 +644,7 @@ describe("Private Channels — transfer access and routes", () => {
       },
       meta: { requestId: expect.any(String) },
     });
-    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    expect(providerSignerMock).not.toHaveBeenCalled();
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
   });
 
@@ -677,7 +676,7 @@ describe("Private Channels — transfer access and routes", () => {
       expect(await history.json()).toMatchObject({
         data: { id: "pct_abandoned", status: write ? "failed" : "pending" },
       });
-      expect(createOrgSignerMock).not.toHaveBeenCalled();
+      expect(providerSignerMock).not.toHaveBeenCalled();
       expect(resolveGatewayAuthMock).toHaveBeenCalledTimes(write ? 1 : 0);
     }
   );
@@ -715,7 +714,7 @@ describe("Private Channels — transfer access and routes", () => {
       );
       expect(response.status).toBe(409);
 
-      expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
+      expect(providerSignerMock).toHaveBeenCalledTimes(1);
     }
   );
 
@@ -884,7 +883,7 @@ describe("Private Channels — transfer access and routes", () => {
   });
 
   it("rejects an active custody wallet whose provider cannot produce a signer", async () => {
-    createOrgSignerMock.mockRejectedValueOnce(new Error("custody provider unavailable"));
+    providerSignerMock.mockRejectedValueOnce(new Error("custody provider unavailable"));
 
     const response = await postTransfer(
       {
@@ -896,9 +895,7 @@ describe("Private Channels — transfer access and routes", () => {
     );
 
     expect(response.status).toBe(503);
-    expect(createOrgSignerMock).toHaveBeenCalledWith(
-      expect.objectContaining({ walletId: ACTOR_WALLET_ID })
-    );
+    expect(providerSignerMock).toHaveBeenCalledWith(ACTOR_WALLET_ID, ACTOR_ADDRESS);
     expect(createChannelTransferMock).not.toHaveBeenCalled();
     const persisted = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS count FROM private_channel_transfers")

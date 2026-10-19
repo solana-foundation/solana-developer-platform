@@ -1,8 +1,8 @@
 import { badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { probeInstanceHealth } from "@/services/private-channels";
-import type { AppContext } from "../context";
-import { healthQuerySchema } from "../schemas";
+import type { AppContext } from "@/routes/private-channels/context";
+import { healthQuerySchema } from "@/routes/private-channels/schemas";
+import { probeInstanceHealth } from "@/services/private-channels/service";
 
 /**
  * GET /health — probe a candidate gateway's `/health` + `/ready` (a pre-connect

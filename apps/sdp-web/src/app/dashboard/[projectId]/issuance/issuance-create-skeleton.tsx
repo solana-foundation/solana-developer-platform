@@ -1,6 +1,6 @@
 "use client";
 
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 
 const ISSUANCE_CLASSIFICATION_CARD_IDS = [
   "issuance-classification-card-1",

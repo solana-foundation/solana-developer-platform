@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RAMP_PROVIDERS, RETIRED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
-import { SdpPaymentsError } from "../errors";
+import { SdpPaymentsError } from "#/errors";
 import { isRampProviderId, RAMP_PROVIDER_CLIENTS, resolveRampProviderClient } from "./index";
 
 function assertProviderNotConfigured(provider: string): void {

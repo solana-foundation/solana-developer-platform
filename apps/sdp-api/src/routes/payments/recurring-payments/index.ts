@@ -5,7 +5,7 @@ import { idempotent } from "@/middleware/idempotency";
 import { replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams } from "@/middleware/validate";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import {
   authorizeRecurringPayment,
   authorizeRecurringPaymentCreate,
@@ -37,7 +37,7 @@ import {
   updateRecurringPaymentSchema,
 } from "./schemas";
 
-const recurringPayments = new Hono<{ Bindings: Env }>();
+export const recurringPayments = new Hono<{ Bindings: Env }>();
 
 /** "1.0" and "1" collect the same amount, so they fingerprint as one request. */
 const canonicalAmount = (body: JsonValue) => canonicalizeDecimalFields(body, ["amount"]);
@@ -118,5 +118,3 @@ recurringPayments.post(
   resumeRecurringPayment
 );
 recurringPayments.get("/:id", requireAction("recurring.read"), getRecurringPayment);
-
-export default recurringPayments;

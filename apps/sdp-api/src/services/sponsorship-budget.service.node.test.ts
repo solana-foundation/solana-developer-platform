@@ -1,6 +1,6 @@
-import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment";
+import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment/port";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type Blockhash,
   compileTransaction,

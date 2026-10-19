@@ -2,11 +2,11 @@ import { SigningError } from "@sdp/custody/signing";
 import type {
   CreateApiKeyResponse,
   ListApiKeysResponse,
-  OrganizationRole,
   RotateApiKeyResponse,
-} from "@sdp/types";
+} from "@sdp/types/api-keys";
+import type { OrganizationRole } from "@sdp/types/permissions";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -30,7 +30,7 @@ import {
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { type AuditLogEntry, AuditService } from "@/services/audit.service";
-import type { Env } from "@/types/env";
+import type { Env } from "@/types/env.d";
 import { buildApiKeyAccessSummaries } from "./access-response";
 import type {
   apiKeyCreateSchema,

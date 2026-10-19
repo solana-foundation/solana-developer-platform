@@ -1,20 +1,23 @@
-import type {
-  PrivateChannelEventDto,
-  PrivateChannelEventFamily,
-  PrivateChannelEventStatus,
-} from "@sdp/types";
-import { PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/types";
-import type { PrivateChannelEventRow } from "@/db/repositories";
+import {
+  PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS,
+  type PrivateChannelEventDto,
+  type PrivateChannelEventFamily,
+  type PrivateChannelEventStatus,
+} from "@sdp/types/private-channels";
+import type { PrivateChannelEventRow } from "@/db/repositories/private-channel-event.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { callerMayPerform } from "@/middleware/require-action";
-import type { AppContext } from "../context";
-import { getPrivateChannelEventRepository, getPrivateChannelRepository } from "../context";
-import { resolveEventViewer } from "../event-access";
-import { requireActiveInstance } from "../helpers";
-import { privateChannelEventsQuerySchema } from "../schemas";
+import {
+  type AppContext,
+  getPrivateChannelEventRepository,
+  getPrivateChannelRepository,
+} from "@/routes/private-channels/context";
+import { resolveEventViewer } from "@/routes/private-channels/event-access";
+import { requireActiveInstance } from "@/routes/private-channels/helpers";
+import { privateChannelEventsQuerySchema } from "@/routes/private-channels/schemas";
 
 function displayEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const displayPayload: Record<string, unknown> = {};

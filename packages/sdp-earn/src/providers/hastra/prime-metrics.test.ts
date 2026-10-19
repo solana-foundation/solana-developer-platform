@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { SdpEarnError } from "../../errors";
+import { SdpEarnError } from "#/errors";
 import {
   HASTRA_POR_API_URL,
   hastraPercentToDecimalString,

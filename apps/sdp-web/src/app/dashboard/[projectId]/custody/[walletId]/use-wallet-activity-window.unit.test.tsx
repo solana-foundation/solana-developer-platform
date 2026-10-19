@@ -4,7 +4,10 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WalletActivityPayload, WalletActivityRow } from "../wallet-activity.data";
+import type {
+  WalletActivityPayload,
+  WalletActivityRow,
+} from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
 
 const fetchWalletActivity = vi.hoisted(() =>
   vi.fn<(walletId: string, options?: { limit?: number }) => Promise<WalletActivityPayload>>()
