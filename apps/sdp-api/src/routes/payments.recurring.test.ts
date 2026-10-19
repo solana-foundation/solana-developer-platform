@@ -511,7 +511,8 @@ async function bindApiKeyToWallet(custodyWalletId: string): Promise<void> {
  */
 async function revokeKeyWhileClaiming(
   path: string,
-  init: { method: string; body: unknown } = { method: "POST", body: {} }
+  init: { method: string; body: unknown } = { method: "POST", body: {} },
+  narrowing = "UPDATE api_keys SET status = 'deactivated' WHERE id = ?"
 ): Promise<Response> {
   let revoke: () => void = () => {};
   const revoked = new Promise<void>((resolve) => {
@@ -525,7 +526,7 @@ async function revokeKeyWhileClaiming(
     await tx.execute("SELECT id FROM api_keys WHERE id = ? FOR UPDATE", [TEST_API_KEY.id]);
     locked();
     await revoked;
-    await tx.execute("UPDATE api_keys SET status = 'deactivated' WHERE id = ?", [TEST_API_KEY.id]);
+    await tx.execute(narrowing, [TEST_API_KEY.id]);
   });
   await holding;
   const request = app.request(
@@ -4705,6 +4706,37 @@ describe("Payments routes — recurring", () => {
     });
     expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
   });
+
+  // A key edit writes the key row under the same lock revocation takes, so the
+  // claim decides the narrowed key exactly as the signing waist would.
+  it.each([
+    {
+      change: "loses recurring.execute",
+      narrowing: "UPDATE api_keys SET grants = '{recurring.read}' WHERE id = ?",
+      reason: "action_not_held",
+    },
+    {
+      change: "loses the source wallet",
+      narrowing: "UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?",
+      reason: "wallet_out_of_scope",
+    },
+  ])(
+    "refuses an activation whose key $change between admission and claim",
+    async ({ narrowing, reason }) => {
+      const payment = await seedPendingRecurringPayment();
+      const before = await recurringExecutionSnapshot(payment.id);
+
+      const response = await revokeKeyWhileClaiming(
+        `/v1/payments/recurring-payments/${payment.id}/activate`,
+        { method: "POST", body: {} },
+        narrowing
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: { details: { reason } } });
+      expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    }
+  );
 
   it("refuses a resume whose key is revoked between admission and claim", async () => {
     recurringExecution

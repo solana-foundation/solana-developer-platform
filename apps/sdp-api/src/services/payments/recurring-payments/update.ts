@@ -1951,6 +1951,10 @@ async function claimActiveRecurringPaymentUpdate(input: {
       projectId: input.projectId,
       movement: "recurring.update",
       recurringPaymentId: input.recurringPayment.id,
+      // Moving the mandate signs with the wallet it leaves and the one it joins.
+      custodyWalletIds: input.newSourceCustodyWalletId
+        ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
+        : [input.sourceWallet.id],
     });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     // Kept on the attempt, so an attempt abandoned before its terms take

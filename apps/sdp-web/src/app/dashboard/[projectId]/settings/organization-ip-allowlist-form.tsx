@@ -15,17 +15,20 @@ export function OrganizationIpAllowlistForm({
 }) {
   const t = useTranslations();
   const [value, setValue] = useState(() => initialAllowedIps.join("\n"));
+  // One key per edit: a retried save repeats it, a changed list gets a new one.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const [isPending, startTransition] = useTransition();
 
   const save = () => {
     startTransition(async () => {
-      const result = await saveOrganizationIpAllowlistAction(value);
+      const result = await saveOrganizationIpAllowlistAction(value, idempotencyKey);
       if (!result.ok) {
         toast.error(t("Shared.organizationAccess.saveFailed", { error: result.error }));
         return;
       }
       // Show the list as the API stored it: each entry in canonical form.
       setValue(result.allowedIps.join("\n"));
+      setIdempotencyKey(crypto.randomUUID());
       toast.success(t("Shared.organizationAccess.saved"));
     });
   };
@@ -41,7 +44,10 @@ export function OrganizationIpAllowlistForm({
           className="mt-2"
           rows={4}
           value={value}
-          onChange={(event) => setValue(event.currentTarget.value)}
+          onChange={(event) => {
+            setValue(event.currentTarget.value);
+            setIdempotencyKey(crypto.randomUUID());
+          }}
           placeholder={"203.0.113.10\n198.51.100.0/24"}
           aria-describedby="organization-allowed-ips-helper"
           spellCheck={false}

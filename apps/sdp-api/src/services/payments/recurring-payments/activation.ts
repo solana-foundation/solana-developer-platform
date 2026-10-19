@@ -663,6 +663,7 @@ export async function activateRecurringPayment(input: {
       projectId: input.projectId,
       movement: "recurring.activate",
       recurringPaymentId: input.recurringPayment.id,
+      custodyWalletIds: [input.sourceWallet.id],
     });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentActivation({

@@ -507,6 +507,7 @@ async function runRecurringPaymentLifecycle(
       projectId: input.projectId,
       movement: "recurring.resume",
       recurringPaymentId: collectionState.recurringPayment.id,
+      custodyWalletIds: [input.sourceWallet.id],
     });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentLifecycle({
