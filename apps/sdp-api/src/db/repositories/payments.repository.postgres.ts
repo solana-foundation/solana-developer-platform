@@ -860,6 +860,24 @@ export function createPostgresPaymentsRepository(
         : null;
     },
 
+    async lockMoonpayTransactionOwner(transactionId) {
+      if (tenantScope) throw new Error("MoonPay transaction locking requires system scope");
+      await db
+        .prepare(
+          "SELECT pg_advisory_xact_lock(hashtext('sdp:moonpay-transaction'), hashtext(?::text))"
+        )
+        .bind(transactionId)
+        .first();
+      // Read after the lock so a concurrent claimant's commit is visible.
+      const row = await db
+        .prepare(
+          "SELECT id FROM payment_transfers WHERE provider = 'moonpay' AND provider_reference = ?"
+        )
+        .bind(transactionId)
+        .first<{ id: string }>();
+      return row?.id ?? null;
+    },
+
     async getFailedMoonpayTransaction(transactionId) {
       if (tenantScope) throw new Error("MoonPay failed-attempt reads require system scope");
       const row = await db

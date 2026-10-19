@@ -326,6 +326,11 @@ export interface PaymentsRepository {
     transferId: string;
     provider: RampProviderId;
   }): Promise<{ transfer: PaymentTransferRow; environment: SdpEnvironment } | null>;
+  /**
+   * Serializes MoonPay claims and failures for one transaction id, then reads
+   * its bound owner. Transaction only.
+   */
+  lockMoonpayTransactionOwner(transactionId: string): Promise<string | null>;
   getFailedMoonpayTransaction(transactionId: string): Promise<{
     transferId: string;
     providerObservedAt: string;
@@ -339,6 +344,7 @@ export interface PaymentsRepository {
   }): Promise<void>;
   /**
    * Claims a provider reference after the caller locks and checks its transfer.
+   * MoonPay callers also lock the transaction id before checking its owner.
    * Failed MoonPay transaction ids cannot claim even after the reference clears.
    */
   claimProviderReference(input: {

@@ -153,7 +153,8 @@ transaction. Its first claim also checks the environment inside the UPDATE
 bound transaction id; equal or older observations are ignored. A failed buy
 releases its reference only when neither the row nor the incoming event reports
 payment activity. It records the id in `moonpay_failed_transactions`; archived
-tombstones still block later claims.
+tombstones still block later claims. Claims and failed-ID writes serialize on
+the transaction id; a reference already bound to another transfer is refused.
 Competing ids, conflicting terminal state, unsafe failures, cross-environment
 events, and settlement after cancellation are `refused`. Production parks them
 for review; sandbox discards them.

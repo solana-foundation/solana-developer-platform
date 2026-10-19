@@ -110,7 +110,8 @@ async function moonpayObservationPreflight(
   repo: PaymentsRepository,
   locked: { transfer: PaymentTransferRow; environment: SdpEnvironment } | null,
   environment: SdpEnvironment,
-  event: Exclude<MoonpaySettlementEvent, { kind: "ignore" }>
+  event: Exclude<MoonpaySettlementEvent, { kind: "ignore" }>,
+  ownerTransferId: string | null
 ): Promise<RampWebhookProcessResult | null> {
   if (!locked) return { outcome: "unmatched" };
   const { transfer } = locked;
@@ -131,6 +132,9 @@ async function moonpayObservationPreflight(
   }
   if (transfer.type !== event.rampType) {
     return { outcome: "refused", reason: "transfer_type_mismatch" };
+  }
+  if (ownerTransferId !== null && ownerTransferId !== transfer.id) {
+    return { outcome: "refused", reason: "provider_reference_conflict" };
   }
   const retired = await repo.getFailedMoonpayTransaction(event.reference);
   if (retired) {
@@ -223,7 +227,18 @@ async function processMoonpayObservation(
         transferId: event.transferId,
         provider: "moonpay",
       });
-      const preflight = await moonpayObservationPreflight(repo, locked, environment, event);
+      // The same transaction id can target two transfers at once. Hold one
+      // database lock through both the live reference claim and failed-id write.
+      const ownerTransferId = locked
+        ? await repo.lockMoonpayTransactionOwner(event.reference)
+        : null;
+      const preflight = await moonpayObservationPreflight(
+        repo,
+        locked,
+        environment,
+        event,
+        ownerTransferId
+      );
       if (preflight) return preflight;
       if (!locked) throw new Error("MoonPay preflight accepted a missing transfer");
       const { transfer } = locked;
