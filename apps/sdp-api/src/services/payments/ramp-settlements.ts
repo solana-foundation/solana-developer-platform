@@ -85,6 +85,12 @@ function settlementObservationFields(
     }
     return { providerData, providerSettlementUnclaimed: true };
   }
+  // Stripe has no per-session observation time. An untimed event cannot
+  // supersede an accepted settled claim while chain proof is pending.
+  if (event.providerObservedAt === undefined) {
+    providerData.providerSettlement = null;
+    return { providerData, providerSettlementUnclaimed: true };
+  }
   providerData.providerSettlement = null;
   return { providerData };
 }

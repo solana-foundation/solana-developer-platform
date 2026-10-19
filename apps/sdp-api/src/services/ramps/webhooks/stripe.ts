@@ -41,6 +41,11 @@ function stripeDeliveredAssetRail(currency: string, network: string): DeliveredA
 
 /** The one field every Stripe event carries that says which mode it ran in. */
 const stripeEventModeSchema = z.object({ livemode: z.boolean() });
+const stripeDeliveryProofSchema = z.object({
+  destination_amount: z.string().trim().min(1).nullish(),
+  transaction_id: z.string().trim().min(1).nullish(),
+  wallet_address: z.string().trim().min(1).nullish(),
+});
 
 interface StripeSignatureHeader {
   timestamp: string;
@@ -139,24 +144,28 @@ function stripeSettledEvent(
       { provider: "stripe" }
     );
   }
-  const receivedAmount = details ? readString(details.destination_amount) : undefined;
-  const transactionId = details ? readString(details.transaction_id) : undefined;
-  const walletAddress = details ? readString(details.wallet_address) : undefined;
-  return {
+  const proof = stripeDeliveryProofSchema.safeParse(details);
+  if (!proof.success) {
+    throw badRequest(
+      'Stripe "crypto.onramp_session.updated" webhook has malformed delivery proof',
+      {
+        provider: "stripe",
+        errors: proof.error.issues,
+      }
+    );
+  }
+  const event: Extract<RampSettlementEvent, { kind: "settled" }> = {
     provider: "stripe",
     kind: "settled",
     reference,
     deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
-    ...(receivedAmount ? { receivedAmount } : {}),
-    ...(transactionId
-      ? {
-          onchain: {
-            signature: transactionId,
-            ...(walletAddress ? { destinationAddress: walletAddress } : {}),
-          },
-        }
-      : {}),
   };
+  if (proof.data.destination_amount) event.receivedAmount = proof.data.destination_amount;
+  if (proof.data.transaction_id) {
+    event.onchain = { signature: proof.data.transaction_id };
+    if (proof.data.wallet_address) event.onchain.destinationAddress = proof.data.wallet_address;
+  }
+  return event;
 }
 
 export const stripeWebhook = {

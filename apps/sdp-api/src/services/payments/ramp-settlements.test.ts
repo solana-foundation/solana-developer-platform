@@ -360,8 +360,20 @@ describe("applyRampSettlementEvent", () => {
   it("serializes concurrent terminal events", async () => {
     await seedTransfer({ id: "xfr_race", reference: "order_race", status: "settling" });
     const events: RampSettlementEvent[] = [
-      { provider: "moonpay", kind: "settled", reference: "order_race", receivedAmount: "9" },
-      { provider: "moonpay", kind: "failed", reference: "order_race", error: "declined" },
+      {
+        provider: "moonpay",
+        kind: "settled",
+        reference: "order_race",
+        providerObservedAt: "2026-10-19T00:01:00.000Z",
+        receivedAmount: "9",
+      },
+      {
+        provider: "moonpay",
+        kind: "failed",
+        reference: "order_race",
+        providerObservedAt: "2026-10-19T00:02:00.000Z",
+        error: "declined",
+      },
     ];
 
     const results = await Promise.all(

@@ -5,6 +5,7 @@ import {
   RAMP_TRANSFER_TRANSITIONS,
   RAMP_TRANSFER_TYPES,
   type RampTransferType,
+  SIGNED_TRANSFER_SUBMISSION_STATUSES,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
@@ -43,6 +44,13 @@ const NO_STATUS_CHANGE_SQL: StatusChangeSql = {
   assignments: [],
   assignmentValues: [],
 };
+
+const SIGNED_SUBMISSION_STATUS_CLAUSE =
+  "((type = 'offramp' AND status = ANY(?::text[])) OR (type <> 'offramp' AND status = ANY(?::text[])))";
+const SIGNED_SUBMISSION_STATUS_VALUES = [
+  [...SIGNED_TRANSFER_SUBMISSION_STATUSES.offramp],
+  [...SIGNED_TRANSFER_SUBMISSION_STATUSES.standard],
+];
 
 function appendRampTransitionGuards(
   input: RampTransferTransitionInput,
@@ -605,13 +613,13 @@ export function createPostgresPaymentsRepository(
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: [
           "id = ?",
-          "(status = 'processing' OR (type = 'offramp' AND status = 'settling'))",
+          SIGNED_SUBMISSION_STATUS_CLAUSE,
           "signature IS NULL",
           "signed_transaction IS NULL",
           "last_valid_block_height IS NULL",
           "submission_started_at IS NULL",
         ],
-        extraValues: [input.transferId],
+        extraValues: [input.transferId, ...SIGNED_SUBMISSION_STATUS_VALUES],
       });
       const row = await db
         .prepare(
@@ -700,13 +708,13 @@ export function createPostgresPaymentsRepository(
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
         extraClauses: [
           "id = ?",
-          "(status = 'processing' OR (type = 'offramp' AND status = 'settling'))",
+          SIGNED_SUBMISSION_STATUS_CLAUSE,
           "signature IS NOT NULL",
           "signed_transaction IS NOT NULL",
           "last_valid_block_height IS NOT NULL",
           "submission_started_at IS NULL",
         ],
-        extraValues: [input.transferId],
+        extraValues: [input.transferId, ...SIGNED_SUBMISSION_STATUS_VALUES],
       });
       const row = await db
         .prepare(

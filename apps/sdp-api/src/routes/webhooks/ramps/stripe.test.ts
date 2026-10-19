@@ -117,6 +117,29 @@ describe("stripeWebhook", () => {
     );
   });
 
+  it.each([
+    ["transaction_id", 42],
+    ["wallet_address", { address: "quoted-wallet" }],
+    ["destination_amount", false],
+  ])("rejects malformed %s in completed delivery proof", (field, value) => {
+    expect(() =>
+      parseStripeEvent({
+        type: "crypto.onramp_session.updated",
+        data: {
+          object: {
+            id: "cos_bad_proof",
+            status: "fulfillment_complete",
+            transaction_details: {
+              destination_currency: "usdc",
+              destination_network: "solana",
+              [field]: value,
+            },
+          },
+        },
+      })
+    ).toThrow("malformed delivery proof");
+  });
+
   it("throws on a known event type with a malformed envelope", () => {
     expect(() => parseStripeEvent({ type: "crypto.onramp_session.updated", data: {} })).toThrow(
       "missing the session object"

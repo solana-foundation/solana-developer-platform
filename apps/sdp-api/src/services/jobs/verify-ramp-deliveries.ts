@@ -3,6 +3,8 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   getSignatureStatuses,
   getTransaction,
+  type ParsedTransaction,
+  type SignatureStatusInfo,
   type SolanaRpc,
   tokenBalanceDelta,
 } from "@sdp/rpc/solana";
@@ -18,6 +20,19 @@ import type { Env } from "@/types/env";
 // One status request covers every off-ramp on this page. On-ramps need one
 // transaction read each to prove the quoted mint reached the quoted wallet.
 const MAX_PER_SWEEP = 64;
+
+export interface RampChainReader {
+  getTransaction(signature: Signature): Promise<ParsedTransaction | null>;
+  getSignatureStatuses(signatures: Signature[]): Promise<Array<SignatureStatusInfo | null>>;
+}
+
+function createRampChainReader(rpc: SolanaRpc = createClusterRpc()): RampChainReader {
+  return {
+    getTransaction: (signature) => getTransaction(rpc, signature, "finalized"),
+    getSignatureStatuses: (signatures) =>
+      getSignatureStatuses(rpc, signatures, { searchTransactionHistory: true }),
+  };
+}
 
 const providerSettlementSchema = z
   .object({
@@ -91,7 +106,7 @@ function reportedFieldsMatch(transfer: PaymentTransferRow, settled: ProviderSett
 function onrampReceivedAmount(
   transfer: PaymentTransferRow,
   settled: ProviderSettlement,
-  transaction: NonNullable<Awaited<ReturnType<typeof getTransaction>>>
+  transaction: ParsedTransaction
 ): string | null {
   const destination = transfer.destination_address;
   const token = WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token);
@@ -129,7 +144,7 @@ function onrampReceivedAmount(
     }
     for (const reported of [settled.receivedAmount, settled.onchain?.amount]) {
       if (reported === undefined) continue;
-      if (typeof reported !== "string" || parseDecimalAmount(reported, decimals) !== baseUnits) {
+      if (parseDecimalAmount(reported, decimals) !== baseUnits) {
         return null;
       }
     }
@@ -141,7 +156,7 @@ function onrampReceivedAmount(
 
 async function verifyOnramp(
   repo: PaymentsRepository,
-  rpc: SolanaRpc,
+  chain: RampChainReader,
   transfer: PaymentTransferRow,
   settled: ProviderSettlement
 ): Promise<boolean> {
@@ -153,37 +168,36 @@ async function verifyOnramp(
   ) {
     return false;
   }
-  const transaction = await getTransaction(rpc, transactionSignature, "finalized");
+  const transaction = await chain.getTransaction(transactionSignature);
   if (!transaction) return false;
   const amount = onrampReceivedAmount(transfer, settled, transaction);
   if (amount === null || transaction.slot > BigInt(Number.MAX_SAFE_INTEGER)) return false;
   const slot = Number(transaction.slot);
-  return (
-    (await repo.transitionRampTransfer({
-      transferId: transfer.id,
-      organizationId: transfer.organization_id,
-      projectId: transfer.project_id,
-      transition: "delivery_verified",
-      deliveryEvidence: { providerSettlement: settled, signature: transactionSignature },
-      ...(transfer.amount === null ? { amount } : {}),
-      providerData: {
-        verifiedDelivery: {
-          signature: transactionSignature,
-          slot,
-          token: transfer.token,
-          destinationAddress: transfer.destination_address,
-          amount,
-        },
+  const update: Parameters<PaymentsRepository["transitionRampTransfer"]>[0] = {
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    transition: "delivery_verified",
+    deliveryEvidence: { providerSettlement: settled, signature: transactionSignature },
+    providerData: {
+      verifiedDelivery: {
+        signature: transactionSignature,
+        slot,
+        token: transfer.token,
+        destinationAddress: transfer.destination_address,
+        amount,
       },
-      slot,
-      updatedAt: new Date().toISOString(),
-    })) !== null
-  );
+    },
+    slot,
+    updatedAt: new Date().toISOString(),
+  };
+  if (transfer.amount === null) update.amount = amount;
+  return (await repo.transitionRampTransfer(update)) !== null;
 }
 
 async function verifyOfframps(
   repo: PaymentsRepository,
-  rpc: SolanaRpc,
+  chain: RampChainReader,
   transfers: PaymentTransferRow[]
 ): Promise<string[]> {
   const eligible = transfers.flatMap((transfer) => {
@@ -198,10 +212,8 @@ async function verifyOfframps(
       : [];
   });
   if (eligible.length === 0) return [];
-  const statuses = await getSignatureStatuses(
-    rpc,
-    eligible.map(({ submittedSignature }) => submittedSignature),
-    { searchTransactionHistory: true }
+  const statuses = await chain.getSignatureStatuses(
+    eligible.map(({ submittedSignature }) => submittedSignature)
   );
   if (statuses.length !== eligible.length) {
     throw new Error("Ramp deposit status batch length mismatch");
@@ -244,7 +256,7 @@ async function verifyOfframps(
 /** Reconcile provider completion against one cluster without trusting its delivery claim. */
 export async function verifyRampDeliveries(
   env: Env,
-  rpc: SolanaRpc = createClusterRpc(),
+  chain: RampChainReader = createRampChainReader(),
   repo: PaymentsRepository = createSystemPaymentsRepository(env)
 ): Promise<void> {
   const transfers = await repo.listRampTransfersToVerify({
@@ -257,7 +269,7 @@ export async function verifyRampDeliveries(
   const completed = new Set<string>();
   try {
     try {
-      for (const id of await verifyOfframps(repo, rpc, offramps)) completed.add(id);
+      for (const id of await verifyOfframps(repo, chain, offramps)) completed.add(id);
     } catch (error) {
       getLogger().error(
         { environment: currentClusterScope().environment, error },
@@ -268,7 +280,7 @@ export async function verifyRampDeliveries(
       const settled = providerSettlement(transfer);
       if (!settled) continue;
       try {
-        if (await verifyOnramp(repo, rpc, transfer, settled)) completed.add(transfer.id);
+        if (await verifyOnramp(repo, chain, transfer, settled)) completed.add(transfer.id);
       } catch (error) {
         getLogger().error(
           { transfer_id: transfer.id, error },

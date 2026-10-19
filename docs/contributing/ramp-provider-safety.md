@@ -32,7 +32,9 @@ contract; this document defines the money movement acceptance gate.
   transaction signature, and addresses as observations. Do not copy them over
   quoted terms or mark the transfer `completed`. Queue even a settled event
   without a signature for review; accept later signed evidence through a
-  guarded update. A newer non-settled observation clears the settlement claim.
+  guarded update. A newer, ordered non-settled observation clears the settlement
+  claim. An event without a per-transaction ordering field cannot clear an
+  accepted claim; hold contradictory states for reconciliation.
 - A cluster-scoped verifier alone writes `completed`: an on-ramp needs a
   finalized successful transaction with the quoted mint and destination's
   received amount; an off-ramp needs the row's own SDP-signed deposit signature

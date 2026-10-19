@@ -294,17 +294,19 @@ export function moonpaySellTransactionSettlementEvent(
           : {}),
       };
     }
-    case "settled":
-      return {
+    case "settled": {
+      const event: MoonpaySettlementEvent = {
         provider: "moonpay",
         kind,
         ...identity,
         ...providerCustomer,
-        ...(data.refundWalletAddress ? { refundAddress: data.refundWalletAddress } : {}),
-        ...(data.quoteCurrencyAmount !== undefined
-          ? { receivedAmount: decimalStringFromNumber(data.quoteCurrencyAmount) }
-          : {}),
       };
+      if (data.refundWalletAddress) event.refundAddress = data.refundWalletAddress;
+      if (data.quoteCurrencyAmount !== undefined) {
+        event.receivedAmount = decimalStringFromNumber(data.quoteCurrencyAmount);
+      }
+      return event;
+    }
     case "failed":
       return {
         provider: "moonpay",

@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { SolanaRpc } from "@sdp/rpc/solana";
+import type { ParsedTransaction } from "@sdp/rpc/solana";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -7,17 +7,14 @@ import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { verifyRampDeliveries } from "./verify-ramp-deliveries";
+import { type RampChainReader, verifyRampDeliveries } from "./verify-ramp-deliveries";
 
-const { getTransactionMock, getSignatureStatusesMock } = vi.hoisted(() => ({
-  getTransactionMock: vi.fn(),
-  getSignatureStatusesMock: vi.fn(),
-}));
-vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
+const getTransactionMock = vi.fn<RampChainReader["getTransaction"]>();
+const getSignatureStatusesMock = vi.fn<RampChainReader["getSignatureStatuses"]>();
+const chain: RampChainReader = {
   getTransaction: getTransactionMock,
   getSignatureStatuses: getSignatureStatusesMock,
-}));
+};
 
 const ORG = "org_ramp_delivery_test";
 const USER = "usr_ramp_delivery_test";
@@ -29,14 +26,15 @@ const SIG_1 =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const SIG_2 =
   "5hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
-const RPC = {} as SolanaRpc;
-const MINT = wellKnownMint("USDC", "devnet");
-if (!MINT) throw new Error("USDC devnet mint missing");
+const usdcMint = wellKnownMint("USDC", "devnet");
+if (!usdcMint) throw new Error("USDC devnet mint missing");
+const MINT: string = usdcMint;
 
 async function seedTransfer(input: {
   id: string;
   reference: string;
   type?: "onramp" | "offramp";
+  provider?: "moonpay" | "stripe";
   projectId?: string;
   signature?: string;
   signed?: boolean;
@@ -52,7 +50,7 @@ async function seedTransfer(input: {
         fiat_currency, fiat_amount, provider_data, signature, signed_transaction,
         last_valid_block_height,
         submission_started_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'settling', 'moonpay', ?, 'USD', '10', '{}'::jsonb,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'settling', ?, ?, 'USD', '10', '{}'::jsonb,
                ?, ?, ?::numeric, ?, ?, ?)`
     )
     .bind(
@@ -66,6 +64,7 @@ async function seedTransfer(input: {
       input.amount === undefined ? (type === "offramp" ? "1" : null) : input.amount,
       type,
       type === "offramp" ? "outbound" : "inbound",
+      input.provider ?? "moonpay",
       input.reference,
       input.signature ?? null,
       input.signed ? "signed-by-sdp" : null,
@@ -94,10 +93,12 @@ async function row(id: string) {
 }
 
 function sweep(environment: "sandbox" | "production" = "sandbox") {
-  return runInClusterScope({ projectId: null, environment }, () => verifyRampDeliveries(env, RPC));
+  return runInClusterScope({ projectId: null, environment }, () =>
+    verifyRampDeliveries(env, chain)
+  );
 }
 
-function landedToken(amount: string, owner = "quoted-destination", mint = MINT) {
+function landedToken(amount: string, owner = "quoted-destination", mint = MINT): ParsedTransaction {
   return {
     slot: 42n,
     executionResultKnown: true,
@@ -143,7 +144,7 @@ describe("verifyRampDeliveries", () => {
 
     await sweep();
 
-    expect(getTransactionMock).toHaveBeenCalledExactlyOnceWith(RPC, SIG_1, "finalized");
+    expect(getTransactionMock).toHaveBeenCalledExactlyOnceWith(SIG_1);
     expect(getSignatureStatusesMock).not.toHaveBeenCalled();
     expect(await row("xfr_delivered")).toMatchObject({
       status: "completed",
@@ -209,18 +210,49 @@ describe("verifyRampDeliveries", () => {
     expect((await row("xfr_late_signature"))?.status).toBe("completed");
   });
 
+  it("ignores delayed untimed Stripe events after accepting settlement", async () => {
+    await seedTransfer({
+      id: "xfr_stripe_late_processing",
+      reference: "cos_late_processing",
+      provider: "stripe",
+    });
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "stripe",
+      kind: "settled",
+      reference: "cos_late_processing",
+      onchain: { signature: SIG_1, destinationAddress: "quoted-destination" },
+    });
+    const settled = await row("xfr_stripe_late_processing");
+    for (const kind of ["settling", "awaiting_payment", "failed"] as const) {
+      const delayed = await applyRampSettlementEvent(env, "sandbox", {
+        provider: "stripe",
+        kind,
+        reference: "cos_late_processing",
+      });
+      expect(delayed).toMatchObject({ applied: false, outcome: "ignored" });
+      expect((await row("xfr_stripe_late_processing"))?.provider_data).toEqual(
+        settled?.provider_data
+      );
+    }
+    getTransactionMock.mockResolvedValue(landedToken("500000"));
+    await sweep();
+    expect((await row("xfr_stripe_late_processing"))?.status).toBe("completed");
+  });
+
   it("drops a settled claim when a newer provider observation is not settled", async () => {
     await seedTransfer({ id: "xfr_provider_regressed", reference: "moonpay_provider_regressed" });
     await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "moonpay_provider_regressed",
+      providerObservedAt: "2026-10-19T00:01:00.000Z",
       onchain: { signature: SIG_1, destinationAddress: "quoted-destination" },
     });
     await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settling",
       reference: "moonpay_provider_regressed",
+      providerObservedAt: "2026-10-19T00:02:00.000Z",
     });
     getTransactionMock.mockResolvedValue(landedToken("500000"));
 
@@ -354,16 +386,14 @@ describe("verifyRampDeliveries", () => {
       });
     }
     getSignatureStatusesMock.mockResolvedValue([
-      { slot: 50n, confirmationStatus: "finalized", err: null },
-      { slot: 51n, confirmationStatus: "confirmed", err: null },
+      { slot: 50n, confirmations: null, confirmationStatus: "finalized", err: null },
+      { slot: 51n, confirmations: 1n, confirmationStatus: "confirmed", err: null },
     ]);
 
     await sweep();
 
     expect(getSignatureStatusesMock).toHaveBeenCalledTimes(1);
-    expect(getSignatureStatusesMock).toHaveBeenCalledWith(RPC, [SIG_1, SIG_2], {
-      searchTransactionHistory: true,
-    });
+    expect(getSignatureStatusesMock).toHaveBeenCalledWith([SIG_1, SIG_2]);
     expect(getTransactionMock).not.toHaveBeenCalled();
     expect((await row("xfr_off_final"))?.status).toBe("completed");
     expect(await row("xfr_off_final")).toMatchObject({
