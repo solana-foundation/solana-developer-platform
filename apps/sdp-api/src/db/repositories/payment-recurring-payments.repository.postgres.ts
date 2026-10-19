@@ -1394,7 +1394,20 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              FROM payment_recurring_payments rp
             WHERE rp.organization_id = ?
               AND rp.project_id = ?
-              AND rp.activated_by_api_key_id IN (SELECT id FROM lineage)
+              AND (
+                rp.activated_by_api_key_id IN (SELECT id FROM lineage)
+                -- An update in flight already names its caller, and puts the
+                -- key it replaced back if it fails: that key still answers
+                -- for the payment until the update lands.
+                OR (rp.status = 'updating' AND EXISTS (
+                  SELECT 1 FROM payment_recurring_payment_update_attempts a
+                   WHERE a.recurring_payment_id = rp.id
+                     AND a.organization_id = rp.organization_id
+                     AND a.project_id = rp.project_id
+                     AND a.status = 'processing'
+                     AND a.previous_activator->>'apiKeyId' IN (SELECT id FROM lineage)
+                ))
+              )
               AND rp.status = ANY(?::text[])
             ORDER BY rp.created_at ASC`
         )
