@@ -49,34 +49,48 @@ files import bare `@sdp/types` through its 38-line `src/index.ts`.
 
 ## Module boundaries
 
-Four layers decide what one module may import. Each answers one question, and a boundary goes in
-the lowest layer that can express it; restating it in a higher layer adds config and no
-protection.
+Four layers decide what a module may import. A boundary goes in the lowest layer that can express
+it. A higher layer only narrows what a lower one allows (which files inside the owning package
+may use it); restating a lower layer's boundary adds config and no protection.
 
 | Layer | Question | Mechanism |
 |---|---|---|
-| Dependencies | Which workspaces may use a package at all | The importing workspace's `package.json` declares it. pnpm does not hoist, so an undeclared package fails in `tsc` and at runtime. |
-| Package surface | What a workspace package offers | Its `package.json` `exports` list. An unlisted file does not resolve from outside the package. |
-| Callers | Which files inside a consumer may use an export | Biome `style/noRestrictedImports`, e.g. only the cluster-scope entry points may import `runInClusterScope` (`0007-cluster-scope-ambient.md`). |
+| Dependencies | Which workspaces may use a package at all | The importing workspace's `package.json` declares it. pnpm links only declared dependencies, so an undeclared package fails in `tsc` and at runtime. The repo root's dependencies resolve from every workspace, so the root declares only tooling. |
+| Package surface | What a workspace package offers | Its `package.json` `exports` list. An unlisted file does not resolve through the package name. A tsconfig `paths` entry into another workspace's source bypasses the list; `sdp-api-integration`, which tests the API from outside, is the one workspace with such entries. |
+| Callers | Which files may import an exported subpath | `style/noRestrictedImports` today; one Biome GritQL plugin per boundary as each module is narrowed (below). |
 | Capabilities | Which files may turn key material into signing authority | `pnpm check:value-movement` allowlists (`0007-money-admission.md`). Adding a file is a security-reviewed change. |
 
-Only `@sdp/custody` declares the `@solana/keychain-*` vendor SDKs, so the dependency layer already
-keeps them in custody, and `check:value-movement` pins their constructors to custody's adapter
-files. A Biome ban on them would need a custody exemption and add nothing.
+A third-party SDK that one package wraps is declared only by that package, never by the root, and
+the declaration is the boundary: no lint rule restates it.
 
-Biome override options replace each other rather than merge: an override that relaxes one entry
-of `noRestrictedImports` restates every other entry, and a file excluded from an override loses
-all of its entries. Grant a one-file exception with a `biome-ignore` comment that gives the reason.
+Narrowing a module, applied to every module in turn:
+
+1. **One capability per exported subpath.** A capability with fewer legitimate callers than the
+   rest of its module moves to its own file and `exports` entry, so its boundary is a whole
+   subpath, never a list of import names. Helius DAS already has its own subpath; opening a
+   cluster scope and the history RPC pool still share one with their widely used siblings.
+2. **One plugin per boundary.** A `.grit` file listed in `biome.json` `plugins` matches imports of
+   that subpath and fails unless `$filename` is on its allowlist. The allowlist names the files,
+   tests included, and the plugin's message names the reason and the ADR. Each plugin stands
+   alone: adding or widening one never touches another.
+3. **Exceptions live in the plugin's allowlist**, reviewed in one place; no `biome-ignore` for a
+   boundary.
+
+Why not `style/noRestrictedImports`: Biome override options replace each other rather than merge,
+so every override that relaxes one entry restates all the others, and a file excluded from an
+override loses every entry. The rule stays for blanket bans that apply to every file in their
+scope; its per-caller entries (the `@sdp/rpc` subpaths, the release-channel lists) move to plugins
+as each module is narrowed.
 
 ## Consequences
 
 - One-time sweep: 43 Hono `export default app` files in `apps/sdp-api` become named exports; 2
   non-framework default exports in `apps/sdp-web`; 1055 bare `@sdp/types` imports and ~130 other
-  bare `@sdp/*` imports move to subpaths; 60 `index.ts` barrels in `apps/sdp-api` are deleted
-  with callers rewritten to the defining file. Mechanical: codemod resolves each imported symbol
-  to its defining file.
+  bare `@sdp/*` imports move to subpaths; every `index.ts` that only re-exports is deleted (#2404
+  in `apps/sdp-api`, #2406 in packages) with callers rewritten to the defining file, and the ones
+  left define code. Mechanical: codemod resolves each imported symbol to its defining file.
 - Route modules keep an `index.ts` only if it defines the Hono app itself (a mount file, not a
   barrel).
-- `docs/contributing/code-standards.md` gains the two rules under TypeScript; Greptile inherits
-  them through the existing "flag code-standards violations" rule.
+- `docs/contributing/code-standards.md` gains one TypeScript rule, "Imports name the defining
+  file"; Greptile inherits it through `.greptile/rules.md`, which flags code-standards violations.
 - Zero users, so no transition period.
