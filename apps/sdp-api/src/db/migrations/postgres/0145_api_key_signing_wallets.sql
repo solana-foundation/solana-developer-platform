@@ -86,4 +86,4 @@ CREATE POLICY sdp_tenant_isolation ON api_key_signing_wallets
 ALTER TABLE payment_recurring_payments
   ADD COLUMN IF NOT EXISTS activated_by_api_key_id TEXT,
   ADD COLUMN IF NOT EXISTS activated_by_user_id TEXT;
--- Their index builds concurrently in 0145.
+-- Their index builds concurrently in 0146.
