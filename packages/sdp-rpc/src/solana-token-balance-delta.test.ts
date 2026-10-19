@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   address,
+  createSolanaRpcFromTransport,
+  type RpcTransport,
   type Signature,
+  signature,
   stringifiedBigInt,
   stringifiedNumber,
   unixTimestamp,
@@ -138,18 +141,21 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
 });
 
 test("getTransaction surfaces the block time, null when the RPC has none", async () => {
-  const read = (blockTime?: JsonParsedTransactionResponse["blockTime"]) =>
-    getTransaction(
-      // SAFETY: the test double implements only the one method getTransaction calls.
-      {
-        getTransaction: () => ({
-          send: async () =>
-            jsonParsedTransactionResponse({ meta: null, instructions: [], blockTime }),
-        }),
-      } as unknown as SolanaRpc,
-      // SAFETY: the double never validates the signature it is asked for.
-      "sig" as Signature
+  const read = (blockTime?: JsonParsedTransactionResponse["blockTime"]) => {
+    const transport: RpcTransport = async <TResponse>() =>
+      // SAFETY: getTransaction sends this transport its one request, so this envelope is its response.
+      ({
+        jsonrpc: "2.0",
+        id: 1,
+        result: jsonParsedTransactionResponse({ meta: null, instructions: [], blockTime }),
+      }) as TResponse;
+    return getTransaction(
+      createSolanaRpcFromTransport(transport),
+      signature(
+        "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+      )
     );
+  };
 
   assert.equal((await read(unixTimestamp(1_792_000_000n)))?.blockTime, 1_792_000_000n);
   assert.equal((await read())?.blockTime, null);
