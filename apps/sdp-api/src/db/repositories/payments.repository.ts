@@ -5,6 +5,7 @@ import type {
   PaymentTransferType,
   RampTransferSettlement,
   RampTransferTransitionId,
+  RampTransferType,
 } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
@@ -58,6 +59,9 @@ export interface PaymentTransferRow {
   created_at: string;
   updated_at: string;
 }
+
+/** A transfer row the repository has proven is a ramp transfer. */
+export type RampPaymentTransferRow = PaymentTransferRow & { type: RampTransferType };
 
 export function generatePaymentTransferId(): string {
   return `${PAYMENT_TRANSFER_ID_PREFIX}${crypto.randomUUID()}`;
@@ -302,7 +306,7 @@ export interface PaymentsRepository {
     /** Rows quiet since before this are past their revival window. */
     updatedAfter?: string;
     polledAt: string;
-  }): Promise<{ transfer: PaymentTransferRow; environment: SdpEnvironment } | null>;
+  }): Promise<{ transfer: RampPaymentTransferRow; environment: SdpEnvironment } | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled

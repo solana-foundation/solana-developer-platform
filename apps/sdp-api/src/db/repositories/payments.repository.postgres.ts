@@ -840,12 +840,12 @@ export function createPostgresPaymentsRepository(
           params.polledAt
         )
         .first<PaymentTransferProjectionRow & { project_environment: unknown }>();
-      return row
-        ? {
-            transfer: mapTransferRow(row),
-            environment: z.enum(SDP_ENVIRONMENTS).parse(row.project_environment),
-          }
-        : null;
+      if (!row) return null;
+      const transfer = mapTransferRow(row);
+      return {
+        transfer: { ...transfer, type: z.enum(RAMP_TRANSFER_TYPES).parse(transfer.type) },
+        environment: z.enum(SDP_ENVIRONMENTS).parse(row.project_environment),
+      };
     },
 
     async getTransferById(params) {

@@ -6,7 +6,6 @@ import type {
 } from "@sdp/payments/ramps/types";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
-  isRampTransferType,
   OPEN_PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
   type PaymentTransferStatus,
   RAMP_TRANSFER_TRANSITIONS,
@@ -14,7 +13,10 @@ import {
   type RampWebhookProcessResult,
 } from "@sdp/types/payments";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
+import type {
+  PaymentsRepository,
+  RampPaymentTransferRow,
+} from "@/db/repositories/payments.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import { isProviderConfigured } from "@/services/provider-availability.service";
@@ -139,8 +141,7 @@ function providerEnv(env: Env): Record<string, string> {
  */
 function isAbandoned(
   provider: RampProviderId,
-  rampType: RampTransferType,
-  transfer: PaymentTransferRow,
+  transfer: RampPaymentTransferRow,
   outcomes: readonly RampStatusPullOutcome[],
   now: number
 ): boolean {
@@ -150,7 +151,9 @@ function isAbandoned(
   if (outcomes.some(({ outcome }) => outcome !== "ignored" && outcome !== "skipped")) {
     return false;
   }
-  return Date.parse(transfer.updated_at) <= now - RAMP_ABANDONMENT_HORIZON_MS[provider][rampType];
+  return (
+    Date.parse(transfer.updated_at) <= now - RAMP_ABANDONMENT_HORIZON_MS[provider][transfer.type]
+  );
 }
 
 /**
@@ -160,8 +163,7 @@ function isAbandoned(
  */
 async function expireAbandonedCheckout(
   repo: PaymentsRepository,
-  rampType: RampTransferType,
-  transfer: PaymentTransferRow
+  transfer: RampPaymentTransferRow
 ): Promise<boolean> {
   const update: Parameters<PaymentsRepository["transitionRampTransfer"]>[0] = {
     transferId: transfer.id,
@@ -171,7 +173,7 @@ async function expireAbandonedCheckout(
     expectedUpdatedAt: transfer.updated_at,
     updatedAt: new Date().toISOString(),
   };
-  if (rampType === "offramp") {
+  if (transfer.type === "offramp") {
     update.providerData = { cryptoDeposit: null };
   }
   return (await repo.transitionRampTransfer(update)) !== null;
@@ -182,21 +184,21 @@ async function pullTransfer(
   credentials: Record<string, string>,
   repo: PaymentsRepository,
   provider: RampProviderId,
-  claimed: { transfer: PaymentTransferRow; environment: SdpEnvironment },
+  claimed: { transfer: RampPaymentTransferRow; environment: SdpEnvironment },
   result: RampStatusSweepResult
 ): Promise<void> {
   const { transfer, environment } = claimed;
-  if (!isRampTransferType(transfer.type)) {
-    return;
-  }
-  const rampType = transfer.type;
   let outcomes: RampStatusPullOutcome[];
   try {
     outcomes = await RAMP_STATUS_PULLS[provider](
       { env: credentials, mode: environment },
       env,
       environment,
-      { transferId: transfer.id, rampType, providerReference: transfer.provider_reference }
+      {
+        transferId: transfer.id,
+        rampType: transfer.type,
+        providerReference: transfer.provider_reference,
+      }
     );
   } catch (error) {
     result.failed += 1;
@@ -240,8 +242,8 @@ async function pullTransfer(
     }
   }
   if (
-    isAbandoned(provider, rampType, transfer, outcomes, Date.now()) &&
-    (await expireAbandonedCheckout(repo, rampType, transfer))
+    isAbandoned(provider, transfer, outcomes, Date.now()) &&
+    (await expireAbandonedCheckout(repo, transfer))
   ) {
     result.expired += 1;
     logEvent("info", {
