@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Browser, Page, Response } from "@playwright/test";
 import type { CounterpartyAccountResponse, CounterpartyResponse } from "@sdp/types/counterparties";
+import type { WalletFaucetResponse } from "@sdp/types/custody";
 import type { OrganizationSettings, OrganizationTier } from "@sdp/types/organizations";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { ListProjectsResponse } from "@sdp/types/projects";
@@ -69,15 +70,6 @@ interface InitializeWalletResponse {
 
 interface ListWalletsResponse {
   wallets: PaymentsDashboardWallet[];
-}
-
-interface RpcRelayResponse {
-  response?: {
-    error?: {
-      message?: string;
-    };
-    result?: unknown;
-  };
 }
 
 type SolanaRpcResponse<T> =
@@ -422,28 +414,37 @@ export async function provisionLinkedOrgProjects(browser: Browser): Promise<Play
   });
 }
 
+/**
+ * One JSON-RPC call straight to the cluster RPC the local API is configured with.
+ *
+ * @param method - The Solana JSON-RPC method.
+ * @param params - The method's params.
+ * @returns The call's result.
+ */
+async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
+  const response = await fetch(getPlaywrightApiRuntimeEnv().solanaRpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
+  });
+  const payload = (await response.json()) as SolanaRpcResponse<T>;
+  if ("error" in payload) {
+    throw new Error(payload.error.message);
+  }
+  return payload.result;
+}
+
+/**
+ * Airdrops `lamports` from the cluster RPC, falling back to the API's devnet
+ * faucet, which airdrops its own fixed amount.
+ */
 async function requestWalletAirdropLamports(
   api: LocalApiClient,
-  walletAddress: string,
+  wallet: PlaywrightWalletFixture,
   lamports: number
 ): Promise<void> {
-  const runtimeEnv = getPlaywrightApiRuntimeEnv();
-
   try {
-    const response = await fetch(runtimeEnv.solanaRpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: `wallet-faucet-${walletAddress}`,
-        method: "requestAirdrop",
-        params: [walletAddress, lamports],
-      }),
-    });
-    const payload = (await response.json()) as SolanaRpcResponse<string>;
-    if ("error" in payload) {
-      throw new Error(payload.error.message);
-    }
+    await callSolanaRpc<string>("requestAirdrop", [wallet.publicKey, lamports]);
     return;
   } catch (error) {
     if (!(error instanceof Error)) {
@@ -451,15 +452,11 @@ async function requestWalletAirdropLamports(
     }
   }
 
-  const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
-    jsonrpc: "2.0",
-    id: `wallet-faucet-${walletAddress}`,
-    method: "requestAirdrop",
-    params: [walletAddress, lamports],
-  });
-
-  if (response.response?.error?.message) {
-    throw new Error(response.response.error.message);
+  const airdrop = await api.post<WalletFaucetResponse>(
+    `/internal/dashboard/wallets/${encodeURIComponent(wallet.walletId)}/faucet`
+  );
+  if (airdrop.status === "failed") {
+    throw new Error(`Devnet faucet airdrop ${airdrop.signature} failed`);
   }
 }
 
@@ -467,26 +464,13 @@ function encodeBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
 }
 
-async function getLatestBlockhash(api: LocalApiClient): Promise<{
+async function getLatestBlockhash(): Promise<{
   blockhash: Blockhash;
   lastValidBlockHeight: bigint;
 }> {
-  const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
-    jsonrpc: "2.0",
-    id: "wallet-latest-blockhash",
-    method: "getLatestBlockhash",
-    params: [{ commitment: "confirmed" }],
-  });
-
-  if (response.response?.error?.message) {
-    throw new Error(response.response.error.message);
-  }
-
-  const value = (
-    response.response?.result as {
-      value?: { blockhash?: string; lastValidBlockHeight?: number };
-    }
-  )?.value;
+  const { value } = await callSolanaRpc<{
+    value?: { blockhash?: string; lastValidBlockHeight?: number };
+  }>("getLatestBlockhash", [{ commitment: "confirmed" }]);
 
   if (!value?.blockhash || typeof value.lastValidBlockHeight !== "number") {
     throw new Error("RPC provider did not return a confirmed blockhash");
@@ -498,20 +482,9 @@ async function getLatestBlockhash(api: LocalApiClient): Promise<{
   };
 }
 
-async function getMinimumBalanceForRentExemption(api: LocalApiClient): Promise<bigint> {
-  const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
-    jsonrpc: "2.0",
-    id: "wallet-rent-exemption",
-    // biome-ignore lint/security/noSecrets: Solana RPC method name, not a credential.
-    method: "getMinimumBalanceForRentExemption",
-    params: [0],
-  });
-
-  if (response.response?.error?.message) {
-    throw new Error(response.response.error.message);
-  }
-
-  const rentExemption = response.response?.result;
+async function getMinimumBalanceForRentExemption(): Promise<bigint> {
+  // biome-ignore lint/security/noSecrets: Solana RPC method name, not a credential.
+  const rentExemption = await callSolanaRpc<unknown>("getMinimumBalanceForRentExemption", [0]);
   if (typeof rentExemption !== "number" || !Number.isFinite(rentExemption)) {
     throw new Error("RPC provider did not return a valid rent exemption amount");
   }
@@ -519,11 +492,7 @@ async function getMinimumBalanceForRentExemption(api: LocalApiClient): Promise<b
   return BigInt(Math.max(0, Math.trunc(rentExemption)));
 }
 
-async function fundAddressViaKoraFeePayer(
-  api: LocalApiClient,
-  address: string,
-  lamports: bigint
-): Promise<boolean> {
+async function fundAddressViaKoraFeePayer(address: string, lamports: bigint): Promise<boolean> {
   const runtimeEnv = getPlaywrightApiRuntimeEnv();
   const client = new KoraClient({
     rpcUrl: runtimeEnv.koraRpcUrl ?? DEFAULT_KORA_DEVNET_URL,
@@ -545,8 +514,8 @@ async function fundAddressViaKoraFeePayer(
       remainingLamports > KORA_MAX_TRANSFER_LAMPORTS
         ? KORA_MAX_TRANSFER_LAMPORTS
         : remainingLamports;
-    const { blockhash, lastValidBlockHeight } = await getLatestBlockhash(api);
-    const minimumLamports = await getMinimumBalanceForRentExemption(api);
+    const { blockhash, lastValidBlockHeight } = await getLatestBlockhash();
+    const minimumLamports = await getMinimumBalanceForRentExemption();
     const amount =
       requestedAmount > minimumLamports ? requestedAmount : minimumLamports + ONE_LAMPORT;
     const instruction = getTransferSolInstruction({
@@ -572,29 +541,15 @@ async function fundAddressViaKoraFeePayer(
   return true;
 }
 
-async function getWalletLamports(api: LocalApiClient, walletAddress: string): Promise<number> {
-  const response = await api.post<RpcRelayResponse>("/v1/rpc/proxy", {
-    jsonrpc: "2.0",
-    id: `wallet-balance-${walletAddress}`,
-    method: "getBalance",
-    params: [walletAddress, { commitment: "confirmed" }],
-  });
-
-  const result = response.response?.result;
-  if (
-    !result ||
-    typeof result !== "object" ||
-    !("value" in result) ||
-    typeof (result as { value?: unknown }).value !== "number"
-  ) {
-    return 0;
-  }
-
-  return (result as { value: number }).value;
+async function getWalletLamports(walletAddress: string): Promise<number> {
+  const { value } = await callSolanaRpc<{ value: number }>("getBalance", [
+    walletAddress,
+    { commitment: "confirmed" },
+  ]);
+  return value;
 }
 
 async function waitForWalletLamports(
-  api: LocalApiClient,
   walletAddress: string,
   minimumLamports: number,
   timeoutMs = 60_000
@@ -602,7 +557,7 @@ async function waitForWalletLamports(
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const lamports = await getWalletLamports(api, walletAddress);
+    const lamports = await getWalletLamports(walletAddress);
     if (lamports >= minimumLamports) {
       return;
     }
@@ -617,10 +572,11 @@ async function waitForWalletLamports(
 
 async function fundWalletToLamports(
   api: LocalApiClient,
-  walletAddress: string,
+  wallet: PlaywrightWalletFixture,
   minimumLamports: number
 ): Promise<void> {
-  const existingLamports = await getWalletLamports(api, walletAddress);
+  const walletAddress = wallet.publicKey;
+  const existingLamports = await getWalletLamports(walletAddress);
   if (existingLamports >= minimumLamports) {
     return;
   }
@@ -628,8 +584,8 @@ async function fundWalletToLamports(
   const lamportsNeeded = minimumLamports - existingLamports;
   if (isKoraSurfpoolShim()) {
     try {
-      await requestWalletAirdropLamports(api, walletAddress, lamportsNeeded);
-      await waitForWalletLamports(api, walletAddress, minimumLamports);
+      await requestWalletAirdropLamports(api, wallet, lamportsNeeded);
+      await waitForWalletLamports(walletAddress, minimumLamports);
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -640,18 +596,16 @@ async function fundWalletToLamports(
   }
 
   let koraFundingError: unknown = null;
-  const koraFunded = await fundAddressViaKoraFeePayer(
-    api,
-    walletAddress,
-    BigInt(lamportsNeeded)
-  ).catch((error) => {
-    koraFundingError = error;
-    return false;
-  });
+  const koraFunded = await fundAddressViaKoraFeePayer(walletAddress, BigInt(lamportsNeeded)).catch(
+    (error) => {
+      koraFundingError = error;
+      return false;
+    }
+  );
 
   if (koraFunded) {
     try {
-      await waitForWalletLamports(api, walletAddress, minimumLamports, 15_000);
+      await waitForWalletLamports(walletAddress, minimumLamports, 15_000);
       return;
     } catch (error) {
       koraFundingError = error;
@@ -659,8 +613,8 @@ async function fundWalletToLamports(
   }
 
   try {
-    await requestWalletAirdropLamports(api, walletAddress, lamportsNeeded);
-    await waitForWalletLamports(api, walletAddress, minimumLamports);
+    await requestWalletAirdropLamports(api, wallet, lamportsNeeded);
+    await waitForWalletLamports(walletAddress, minimumLamports);
   } catch (airdropError) {
     const koraMessage =
       koraFundingError instanceof Error ? koraFundingError.message : String(koraFundingError);
@@ -831,7 +785,7 @@ export async function bootstrapLocalWalletFixtures(input: {
     }
 
     const minimumLamports = parseSolAmountToLamports(fundSourceAmountSol);
-    await fundWalletToLamports(api, sourceWallet.publicKey, minimumLamports);
+    await fundWalletToLamports(api, sourceWallet, minimumLamports);
   }
 
   return {

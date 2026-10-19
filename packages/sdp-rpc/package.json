@@ -34,11 +34,6 @@
       "import": "./src/read-context.ts",
       "default": "./src/read-context.ts"
     },
-    "./relay": {
-      "types": "./src/relay.ts",
-      "import": "./src/relay.ts",
-      "default": "./src/relay.ts"
-    },
     "./scope": {
       "types": "./src/scope.ts",
       "import": "./src/scope.ts",

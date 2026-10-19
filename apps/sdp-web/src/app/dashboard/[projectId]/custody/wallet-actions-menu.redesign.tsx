@@ -55,7 +55,6 @@ export function WalletActionsMenu({
   const { dashboardAccess } = useDashboardWorkspace();
   const { isBusy, canRunSignerCheck, runSignerCheck, requestDevnetSol } = useWalletActions({
     walletId,
-    walletAddress,
     supportsSignerCheck,
   });
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);

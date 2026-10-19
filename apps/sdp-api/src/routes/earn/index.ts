@@ -242,7 +242,7 @@ optionalAuthEarn.get(
 // On the two money-IN routes the body is validated BEFORE either meter runs:
 // the keyed counter is shared by the whole organization, so a malformed
 // request must not be able to spend the pool that later valid builds and
-// provider reads draw from. Same order as the RPC relay's quota.
+// provider reads draw from.
 optionalAuthEarn.post(
   "/vault-deposit-previews",
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,

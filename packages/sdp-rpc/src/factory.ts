@@ -216,6 +216,7 @@ function servedJsonRpcError(response: unknown) {
  * | Threw anything else                        | no       | no       |
  * | Answered "node unhealthy"                  | yes      | reads    |
  * | `sendTransaction` answered anything else   | no       | no       |
+ * | `requestAirdrop` answered another error    | no       | yes      |
  * | Read answered another failover code        | no       | yes      |
  * | Read answered anything else                | no       | no       |
  *
@@ -223,7 +224,8 @@ function servedJsonRpcError(response: unknown) {
  * resubmitting is the send primitive's decision. Only "node unhealthy" cools a node down; the other
  * `FAILOVER_JSON_RPC_ERROR_CODES` (behind the caller's `minContextSlot`, missing history or block
  * status) are about this request, not the node, and a cooldown applies to every request on the
- * cluster.
+ * cluster. An airdrop the node answered with an error did not happen, so the next provider's
+ * faucet may try; the refusal is about that faucet (dry, rate-limited), not the node's health.
  *
  * @param outcome - The attempt's outcome.
  * @param rpcRequest - The request the attempt sent.
@@ -233,8 +235,8 @@ function judgeAttempt<TResponse>(
   outcome: AttemptOutcome<TResponse>,
   rpcRequest: Parameters<RpcTransport>[0]
 ): AttemptVerdict {
-  const isSend =
-    isJsonRpcPayload(rpcRequest.payload) && rpcRequest.payload.method === "sendTransaction";
+  const method = isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : null;
+  const isSend = method === "sendTransaction";
   if (!outcome.ok) {
     if (rpcRequest.signal?.aborted) return { cooldown: false, tryNext: false };
     if (outcome.cause instanceof UnsentRequestError) return { cooldown: true, tryNext: true };
@@ -246,6 +248,8 @@ function judgeAttempt<TResponse>(
     return { cooldown: true, tryNext: !isSend };
   }
   if (isSend) return { cooldown: false, tryNext: false };
+  if (method === "requestAirdrop" && servedError !== null)
+    return { cooldown: false, tryNext: true };
   const cannotServe = FAILOVER_JSON_RPC_ERROR_CODES.some((code) =>
     isSolanaError(servedError, code)
   );

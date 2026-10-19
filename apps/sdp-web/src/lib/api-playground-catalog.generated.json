@@ -7834,7 +7834,7 @@
       "owner": "payments"
     },
     {
-      "pattern": "^\\/(v1\\/wallets|internal\\/dashboard\\/custody)(\\/|$)",
+      "pattern": "^\\/(v1\\/wallets|internal\\/dashboard\\/(custody|wallets))(\\/|$)",
       "owner": "custody"
     },
     {
@@ -7846,7 +7846,7 @@
       "owner": "core"
     },
     {
-      "pattern": "^\\/v1\\/(members|organizations|projects|onboarding|places|rpc|api-keys)(\\/|$)",
+      "pattern": "^\\/v1\\/(members|organizations|projects|onboarding|places|api-keys)(\\/|$)",
       "owner": "core"
     },
     {

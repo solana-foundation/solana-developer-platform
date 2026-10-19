@@ -113,7 +113,7 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
+        const result = await requestDevnetSolanaFaucetAction(walletId, crypto.randomUUID()).catch(
           (error) => ({
             status: "error" as const,
             message:

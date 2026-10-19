@@ -34,11 +34,9 @@ export interface WalletOwnershipProof {
  */
 export function useWalletActions({
   walletId,
-  walletAddress,
   supportsSignerCheck = true,
 }: {
   walletId: string;
-  walletAddress: string;
   supportsSignerCheck?: boolean;
 }) {
   const t = useTranslations();
@@ -97,7 +95,7 @@ export function useWalletActions({
 
     startTransition(() => {
       void (async () => {
-        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
+        const result = await requestDevnetSolanaFaucetAction(walletId, crypto.randomUUID()).catch(
           (error) => ({
             status: "error" as const,
             message:

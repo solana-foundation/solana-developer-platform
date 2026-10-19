@@ -362,7 +362,6 @@ export async function enforceRateLimit(
   maxRequests: number,
   options: {
     failClosed?: boolean;
-    cost?: number;
     windowMs?: number;
     metricTier?: string;
     /** Counts in this instance's memory when the counter store is unavailable. */
@@ -404,7 +403,6 @@ export async function enforceRateLimit(
       maxRequests,
       previousWeight,
       expirationTtl: Math.ceil((windowMs * 2) / 1000),
-      ...(options.cost === undefined ? {} : { cost: options.cost }),
     })
     .catch((err) => {
       getLogger().error({ error: err, identifier }, "Failed to update rate limit");

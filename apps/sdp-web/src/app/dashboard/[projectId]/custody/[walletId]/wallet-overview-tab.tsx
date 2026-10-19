@@ -266,10 +266,7 @@ function TokensBlock({
 }) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const { isBusy, requestDevnetSol } = useWalletActions({
-    walletId: wallet.walletId,
-    walletAddress: wallet.publicKey,
-  });
+  const { isBusy, requestDevnetSol } = useWalletActions({ walletId: wallet.walletId });
   // The faucet funds devnet, so it is offered on a sandbox project to a wallet that can sign.
   const offersFaucet = sdpEnvironment === "sandbox" && wallet.isRuntimeExecutionAllowed;
   return (

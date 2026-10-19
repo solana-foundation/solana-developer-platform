@@ -38,6 +38,7 @@ import { assetProfiles } from "@/routes/asset-profiles";
 import { compliance } from "@/routes/compliance";
 import { counterparties } from "@/routes/counterparties";
 import { wallets } from "@/routes/custody";
+import { internalWallets } from "@/routes/custody/internal";
 import { docs } from "@/routes/docs";
 import { dvp } from "@/routes/dvp";
 import { earnRoutes as earn } from "@/routes/earn";
@@ -58,7 +59,6 @@ import { places } from "@/routes/places";
 import { playgroundInternal } from "@/routes/playground-internal";
 import { privateChannels } from "@/routes/private-channels";
 import { projects } from "@/routes/projects";
-import { rpc } from "@/routes/rpc";
 import { transactions } from "@/routes/transactions";
 import { webhooks } from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
@@ -106,8 +106,8 @@ const KV_FREE_PATHS = [
 ];
 
 // Backstop bound for any /v1 request body. Handler-side schemas are far
-// smaller; the webhooks and rpc routers already enforce this same ceiling on
-// their subsets, and no public /v1 route accepts file uploads.
+// smaller; the webhooks router already enforces this same ceiling on its
+// subset, and no public /v1 route accepts file uploads.
 const MAX_API_BODY_BYTES = 1024 * 1024;
 
 function mapSigningError(err: SigningError): {
@@ -263,7 +263,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Backstop body bound for the whole public API: request handlers buffer the
   // body whole before zod validation runs, so without a ceiling a single
   // authenticated request could make the instance buffer unbounded bytes.
-  // Route-level limits (webhooks, rpc) are equal or stricter.
+  // Route-level limits (webhooks) are equal or stricter.
   app.use(
     "/v1/*",
     bodyLimit({
@@ -329,7 +329,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/counterparties", counterparties);
   v1.route("/members", members);
   v1.route("/projects", projects);
-  v1.route("/rpc", rpc);
   // Asset profiles live under the issuance namespace, as a sibling of
   // /issuance/tokens. The router is self-contained (own auth + feature-flag + project
   // middleware).
@@ -365,6 +364,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/playground", playgroundInternal);
   app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
+  app.use("/internal/dashboard/wallets/*", requireModule("custody"));
+  app.route("/internal/dashboard/wallets", internalWallets);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
   app.route("/internal/dashboard/network", internalNetwork);
 

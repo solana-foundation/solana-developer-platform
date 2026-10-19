@@ -32,7 +32,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/payments` | Payment domain services and ramp providers. | `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/redaction` | Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies. | None |
-| `@sdp/rpc` | Solana RPC clients, errors, and relay helpers. | `@sdp/types` |
+| `@sdp/rpc` | Solana RPC clients, errors, and transport helpers. | `@sdp/types` |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None |
