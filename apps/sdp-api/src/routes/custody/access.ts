@@ -1,9 +1,10 @@
 import { getDb } from "@/db/client";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import { findProjectOperationalWallet } from "@/routes/custody/handlers/wallets";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { AppContext } from "./context";
 
 /**
@@ -87,22 +88,35 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
     throw badRequest("Invalid wallet ID");
   }
   // The handler resolves the path's id with its record-id alias and answers "Wallet not found".
-  await assertCustodyWalletInProject(
-    c,
-    walletId,
-    true,
-    () => new AppError("NOT_FOUND", "Wallet not found")
-  );
+  const notFound = () => new AppError("NOT_FOUND", "Wallet not found");
+  await assertCustodyWalletInProject(c, walletId, true, notFound);
+  // A selected key reaches only the wallets it lists (HOO-2099), as on the
+  // wallet detail read: the record the handler updates is checked here.
+  const wallet = await findProjectOperationalWallet(c, walletId, true);
+  if (wallet && !walletAccessAllows(getAuth(c).walletAccess, wallet.id)) {
+    throw notFound();
+  }
 }
 
 /** Wallet delete: the wallet the body names. */
 export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
-  await assertCustodyWalletInProject(
-    c,
-    body<{ walletId: string }>(input).walletId,
-    false,
-    walletNotFound
-  );
+  const walletId = body<{ walletId: string }>(input).walletId;
+  await assertCustodyWalletInProject(c, walletId, false, walletNotFound);
+  // A selected key reaches only the wallets it lists (HOO-2099): the record
+  // the handler would deactivate is checked here, before the key is claimed.
+  const auth = getAuth(c);
+  const owned = await new CustodyRuntimeTargets(
+    getDb(c.env),
+    c.env,
+    new Map()
+  ).findOwnedWalletForMutation({
+    organizationId: auth.organizationId,
+    projectId: requireProjectId(c),
+    walletId,
+  });
+  if (owned && !walletAccessAllows(auth.walletAccess, owned.id)) {
+    throw walletNotFound();
+  }
 }
 
 /**

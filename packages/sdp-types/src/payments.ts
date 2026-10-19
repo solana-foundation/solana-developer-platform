@@ -679,13 +679,15 @@ export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 /**
  * A recurring payment that collects, or will once its activation, update or
- * resume in flight finishes: revoke-and-cancel must see both, or one mid-way
- * would become active after the revoke that was meant to stop it.
+ * resume in flight finishes, or once a cancel in flight fails back to active:
+ * revoke-and-cancel must see all of them, or one mid-way would become active
+ * after the revoke that was meant to stop it.
  */
 export const LIVE_RECURRING_PAYMENT_STATUSES = [
   ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
   "activating",
   "updating",
+  "canceling",
   "resuming",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isCollectableRecurringPaymentStatus(

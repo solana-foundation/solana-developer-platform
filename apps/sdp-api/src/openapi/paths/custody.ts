@@ -209,12 +209,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet public key",
     operationId: "getWalletPublicKey",
     description:
-      "Returns the persisted public key for an exact active walletId. walletId may be omitted only by an API key whose own signing-wallet binding names the wallet; otherwise the request is rejected with 400. Resolution is DB-backed only.",
+      "Returns the persisted public key for an exact active walletId. walletId is required (400 without it); an API key with selected wallets gets 404 for a wallet it does not list. Resolution is DB-backed only.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       query: z.object({
-        walletId: walletIdParamSchema.optional(),
+        walletId: walletIdParamSchema,
       }),
     },
     responses: {

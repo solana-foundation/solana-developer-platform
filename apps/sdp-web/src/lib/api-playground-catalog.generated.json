@@ -342,7 +342,7 @@
             "label": "walletId",
             "description": "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
             "defaultValue": "privy_wallet_123",
-            "required": false
+            "required": true
           }
         ],
         "bodyFields": [],

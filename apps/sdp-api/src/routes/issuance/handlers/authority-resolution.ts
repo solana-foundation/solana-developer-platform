@@ -10,6 +10,7 @@ import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db/client";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -350,6 +351,9 @@ export async function resolveIssuanceWallet(params: {
   if (!wallet) {
     throw walletNotFound();
   }
+  // The custody signer refuses a wallet outside the key's scope (HOO-2099);
+  // refusing here as well stops the action before its token transaction row.
+  assertCallerWalletInScope(params.auth.walletAccess, wallet.custodyWalletId);
   return wallet;
 }
 
@@ -380,8 +384,10 @@ export async function resolveAuthorityWallet(params: {
   if (matches.length > 1) {
     throw conflict("Current authority wallet is ambiguous");
   }
-
-  return matches[0];
+  const [wallet] = matches;
+  // As above: refused before the token transaction row is written.
+  assertCallerWalletInScope(auth.walletAccess, wallet.custodyWalletId);
+  return wallet;
 }
 
 /** The issuance movements: compliance controls are exits, everything else a start. */

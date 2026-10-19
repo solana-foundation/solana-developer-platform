@@ -36,10 +36,12 @@ CREATE TABLE api_key_signing_wallets (
 -- backfill:start
 -- A key that was wallet-bound stays bound: without this every bound key would
 -- read as 'all' and sign with any wallet in its project. Fails closed. A
--- binding carries over only if it could sign before ('*', a :write or :admin
--- permission, or the NULL historical unrestricted marker) and its provider
--- wallet id names exactly one custody wallet in the key's project; a key left
--- with none listed signs nothing until a person picks its wallets again.
+-- binding carries over only if it could sign every module with that wallet
+-- before ('*', or the NULL historical unrestricted marker): a module-specific
+-- one such as "custody:write" or "tokens:write" signed some modules only, and
+-- the new list is not per module. Its provider wallet id must also name
+-- exactly one custody wallet in the key's project. A key left with none
+-- listed signs nothing until a person picks its wallets again.
 UPDATE api_keys ak
    SET wallet_scope = 'selected'
  WHERE ak.wallet_scope = 'all'
@@ -56,9 +58,7 @@ SELECT b.api_key_id, min(w.id)
  WHERE ((cfg.organization_id = ak.organization_id AND cfg.project_id = ak.project_id)
      OR (conn.organization_id = ak.organization_id AND conn.project_id = ak.project_id))
    AND (b.permissions IS NULL
-        OR b.permissions LIKE '%"*"%'
-        OR b.permissions LIKE '%:write"%'
-        OR b.permissions LIKE '%:admin"%')
+        OR b.permissions LIKE '%"*"%')
  GROUP BY b.api_key_id, b.wallet_id
 HAVING count(DISTINCT w.id) = 1
 ON CONFLICT DO NOTHING;
