@@ -10,6 +10,7 @@ import {
   type ApiKeyAuthoringDraft,
   type ApiKeyAuthoringMode,
   buildEndpointWalletPayload,
+  parseAllowedIps,
 } from "./api-key-authoring";
 import {
   API_KEY_FLASH_COOKIE,
@@ -200,6 +201,7 @@ export async function saveApiKeyAuthoringAction(
   }
 
   const walletPayload = buildEndpointWalletPayload(input.draft);
+  const allowedIps = parseAllowedIps(input.draft.allowedIps);
 
   try {
     const client = await createSdpApiClient();
@@ -213,8 +215,9 @@ export async function saveApiKeyAuthoringAction(
           name: input.draft.name.trim(),
           grants: input.draft.grants,
           ...walletPayload,
-          // JSON drops an undefined field: no expiry is sent as none.
+          // JSON drops an undefined field: no expiry or allowlist is sent as none.
           expiresAt: expiresAt ?? undefined,
+          allowedIps: allowedIps.length > 0 ? allowedIps : undefined,
         }),
       });
 
@@ -242,6 +245,8 @@ export async function saveApiKeyAuthoringAction(
       body: JSON.stringify({
         name: input.draft.name.trim(),
         expiresAt,
+        // An empty allowlist clears it: the key may be used from any address.
+        allowedIps: allowedIps.length > 0 ? allowedIps : null,
         // `walletScope: "all"` alone resets the key to every wallet. The API refuses it
         // next to any wallet field, null included.
         ...walletPayload,
