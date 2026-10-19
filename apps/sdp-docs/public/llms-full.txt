@@ -524,6 +524,7 @@ A recurring payment is collected on schedule as its own mandate, not as the key 
    - **Permissions** — a checkbox per verb for each module (Read, Manage, Execute); ticking Manage or Execute includes Read. **Everything** ticks every offered action
    - **Wallet access** — All wallets or Selected wallets
    - **Expiration (optional)** — date/time picker
+   - **Allowed IP addresses (optional)** — one IPv4 or IPv6 address or CIDR range per line; empty allows any address. Edit the key to change or clear it
 
    ![Create API key modal](/images/getting-started/api-key-create.png)
 

@@ -7,7 +7,7 @@ import { cn } from "@sdp/ui/cn";
 import { DateTimePicker } from "@sdp/ui/date-picker";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { CircleCheck, FileText, KeyRound, Layers, Search, Wallet } from "lucide-react";
+import { CircleCheck, FileText, Globe, KeyRound, Layers, Search, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -25,6 +25,7 @@ import {
   createApiKeyAuthoringDraft,
   defaultWalletScopeForGrants,
   isAuthoringStepComplete,
+  parseAllowedIps,
 } from "./api-key-authoring";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
 import { ApiKeyGrantPicker } from "./api-key-grant-picker";
@@ -57,6 +58,7 @@ function draftFromInitialKey(initialKey?: ApiKeyAuthoringExistingKey): ApiKeyAut
     walletScope: initialKey.walletScope,
     selectedWalletIds: initialKey.walletIds,
     grants: initialKey.grants,
+    allowedIps: (initialKey.allowedIps ?? []).join("\n"),
   };
 }
 
@@ -198,9 +200,34 @@ function DetailsStep({
             </div>
           </div>
         </WorkSection>
+        <WorkSection
+          title={t("DashboardCustody.apiKeyNetworkAccess")}
+          description={t("DashboardCustody.apiKeyNetworkAccessDescription")}
+        >
+          <Label htmlFor="api-key-allowed-ips">{t("DashboardCustody.apiKeyAllowedIpsLabel")}</Label>
+          <textarea
+            id="api-key-allowed-ips"
+            className="mt-2 w-full rounded-[14px] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary outline-none transition-[box-shadow,border-color] placeholder:text-muted focus:border-border-strong focus:ring-2 focus:ring-border-default"
+            rows={3}
+            value={draft.allowedIps}
+            onChange={(event) => update({ allowedIps: event.currentTarget.value })}
+            placeholder={"203.0.113.10\n198.51.100.0/24"}
+            aria-describedby="api-key-allowed-ips-helper"
+            spellCheck={false}
+          />
+          <p id="api-key-allowed-ips-helper" className="mt-2 text-xs text-secondary">
+            {t("DashboardCustody.apiKeyAllowedIpsHelper")}
+          </p>
+        </WorkSection>
       </div>
     </div>
   );
+}
+
+/** The draft's allowlist for a summary: its entries, or "any address". */
+function allowedIpsLabel(draft: ApiKeyAuthoringDraft, t: ReturnType<typeof useTranslations>) {
+  const entries = parseAllowedIps(draft.allowedIps);
+  return entries.length > 0 ? entries.join(", ") : t("DashboardCustody.apiKeyAllowedIpsAny");
 }
 
 function PermissionsStep({
@@ -429,6 +456,10 @@ function ReviewStep({
             label={t("DashboardCustody.expirationOptional")}
             value={draft.expiresAt || t("DashboardCustody.none")}
           />
+          <ReviewLine
+            label={t("DashboardCustody.apiKeyAllowedIps")}
+            value={allowedIpsLabel(draft, t)}
+          />
         </WorkSection>
         <WorkSection title={t("DashboardCustody.apiKeyReviewPermissions")}>
           <GrantSummaryList grants={draft.grants} />
@@ -494,6 +525,11 @@ function KeySummary({
             icon={<Layers className="size-4" />}
             label={t("DashboardCustody.environment")}
             value={environment}
+          />
+          <SummaryRow
+            icon={<Globe className="size-4" />}
+            label={t("DashboardCustody.apiKeyAllowedIps")}
+            value={allowedIpsLabel(draft, t)}
           />
           <SummaryRow
             icon={<KeyRound className="size-4" />}

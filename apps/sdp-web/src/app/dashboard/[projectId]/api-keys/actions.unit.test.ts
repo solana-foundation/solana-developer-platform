@@ -67,6 +67,15 @@ describe("saveApiKeyAuthoringAction: create", () => {
     });
   });
 
+  it("creates a key with its IP allowlist, one entry per address", async () => {
+    await saveApiKeyAuthoringAction({
+      mode: "create",
+      draft: draft({ allowedIps: "203.0.113.10\n198.51.100.0/24, 203.0.113.10\n" }),
+    });
+
+    expect(lastBody()).toMatchObject({ allowedIps: ["203.0.113.10", "198.51.100.0/24"] });
+  });
+
   it("refuses a key with no grants before calling the API", async () => {
     const result = await saveApiKeyAuthoringAction({
       mode: "create",
@@ -111,6 +120,16 @@ describe("saveApiKeyAuthoringAction: edit", () => {
     expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
     expect(client.fetch.mock.calls[0]?.[1]?.method).toBe("PATCH");
     expect(lastBody()).toMatchObject({ grants: ["transfers.read", "wallets.read"] });
+  });
+
+  it("clears the IP allowlist when the field is emptied", async () => {
+    await saveApiKeyAuthoringAction({
+      mode: "edit",
+      keyId: "key_1",
+      draft: draft({ allowedIps: "  " }),
+    });
+
+    expect(lastBody()).toMatchObject({ allowedIps: null });
   });
 
   it("sends no grants when the permissions step was not touched", async () => {
