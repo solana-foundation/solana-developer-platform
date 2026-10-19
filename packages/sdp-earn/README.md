@@ -318,7 +318,9 @@ refresh is update-only.
   reference both sources list stays on the own (fundable) shelf: the mirror
   under-reports it, warned hourly (ADR 0002, PRO-1742 addendum: this caps a
   fully-faithful mirror to cluster-distinct, address-keyed references).
-- **When it runs:** hourly (`0 * * * *`) and once when the Worker starts, as
+- **When it runs:** once per hourly Redis slot (scheduled `*/5 * * * *`, so a
+  slot that a Worker boot claimed mid-hour is retaken five minutes after it
+  expires) and once when the Worker starts, as
   the `sync-earn-catalogue` Cron Definition behind `isEarnEnabled`
   (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`, ADR 0011). Every run claims
   an hourly Redis slot first (`runEarnCatalogueSyncIfDue`), so a boot run and

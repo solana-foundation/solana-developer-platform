@@ -12,6 +12,7 @@ import {
   type MockInstance,
   vi,
 } from "vitest";
+import { z } from "zod";
 import { currentDatabaseIdentity, type DatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import * as moneyPathEvents from "@/runtime/money-path-events";
@@ -21,7 +22,7 @@ import { required } from "@/test/helpers/required";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { pendingTransfersCron } from "./pending-transfers";
 import { ringsIndexingCron } from "./rings-indexing";
-import { CRON_RUN_EVENT } from "./run-event";
+import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
 import { assertCronConfig, CRON_DEFINITIONS, type CronHandle, startCron } from "./runner";
 
 interface ScheduledFake {
@@ -36,9 +37,7 @@ interface RunObservation {
   identity: DatabaseIdentity | undefined;
 }
 
-interface DiscoveredRegistration {
-  cron: unknown;
-  environment: unknown;
+interface DiscoveredRegistration extends CronRegistration {
   schedule: string;
   ran: RunObservation[];
 }
@@ -97,7 +96,17 @@ function recordingBackgroundRunner(): RecordingBackgroundRunner {
   return { bg, runs };
 }
 
-function registrationKey(cron: unknown, environment: unknown): string {
+const loggedRegistrationSchema = z.object({
+  cron: z.string(),
+  environment: z.enum(SDP_ENVIRONMENTS).nullable(),
+});
+
+function lastLoggedRegistration(): CronRegistration {
+  const [, payload] = required(logEventSpy.mock.lastCall);
+  return loggedRegistrationSchema.parse(payload);
+}
+
+function registrationKey(cron: string, environment: SdpEnvironment | null): string {
   return JSON.stringify([cron, environment]);
 }
 
@@ -111,11 +120,11 @@ async function startWorker(): Promise<Worker> {
     const observed = observations.length;
     task.fire();
     await bg.awaitAll();
-    const [, payload] = required(logEventSpy.mock.lastCall);
-    registrations.set(registrationKey(payload.cron, payload.environment), task);
+    const { cron, environment } = lastLoggedRegistration();
+    registrations.set(registrationKey(cron, environment), task);
     discovered.push({
-      cron: payload.cron,
-      environment: payload.environment,
+      cron,
+      environment,
       schedule: task.expression,
       ran: observations.slice(observed),
     });

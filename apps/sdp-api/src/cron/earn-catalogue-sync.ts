@@ -679,12 +679,15 @@ async function syncEarnCatalogueIfDue(env: Env): Promise<void> {
 }
 
 /**
- * Hourly: catalogue drift is slow (a provider onboarding or delisting a vault). Runs on Worker
- * start too, so a fresh database never serves an empty shelf until the next hour.
+ * Hourly in effect: catalogue drift is slow (a provider onboarding or delisting a vault). The
+ * schedule is every five minutes and the Redis slot keeps it to one sync per window, because the
+ * window starts at whichever run first claims it: a Worker booting at 12:05 holds the slot until
+ * 13:04, so a top-of-hour schedule would skip 13:00 and leave the shelf unsynced until 14:00.
+ * Runs on Worker start too, so a fresh database never serves an empty shelf until the next slot.
  */
 export const earnCatalogueSyncCron = defineCron({
   name: "sync-earn-catalogue",
-  schedule: "0 * * * *",
+  schedule: "*/5 * * * *",
   scope: "global",
   effect: "observes",
   enabled: isEarnEnabled,

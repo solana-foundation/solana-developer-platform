@@ -1,4 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { CronRunStatus } from "@sdp/types/cron-runs";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 
 export const CRON_RUN_EVENT = "sdp_cron_run";
@@ -11,10 +12,18 @@ export interface CronRegistration {
 
 /** A slot's outcome; the statuses and their meanings are `CRON_RUN_STATUSES`. */
 export type CronRunRecord =
-  | { status: "ok"; durationMs: number }
-  | { status: "error"; durationMs: number; cause: unknown }
-  | { status: "skipped_overlap" }
-  | { status: "disabled" };
+  | { status: Extract<CronRunStatus, "ok">; durationMs: number }
+  | { status: Extract<CronRunStatus, "error">; durationMs: number; cause: unknown }
+  | { status: Extract<CronRunStatus, "skipped_overlap"> }
+  | { status: Extract<CronRunStatus, "disabled"> };
+
+/** Every status in `CRON_RUN_STATUSES` must have a level here, so the set and the logger cannot drift. */
+const CRON_RUN_LOG_LEVELS = {
+  ok: "info",
+  error: "error",
+  skipped_overlap: "warn",
+  disabled: "info",
+} as const satisfies Record<CronRunStatus, "info" | "warn" | "error">;
 
 /**
  * Log one slot of a Cron Definition to Loki. Every slot logs exactly one event, whatever its
@@ -32,20 +41,20 @@ export function logCronRun(registration: CronRegistration, record: CronRunRecord
   };
   switch (record.status) {
     case "ok":
-      logEvent("info", { ...base, duration_ms: record.durationMs });
+      logEvent(CRON_RUN_LOG_LEVELS.ok, { ...base, duration_ms: record.durationMs });
       return;
     case "error":
-      logEvent("error", {
+      logEvent(CRON_RUN_LOG_LEVELS.error, {
         ...base,
         duration_ms: record.durationMs,
         ...describeError(record.cause),
       });
       return;
     case "skipped_overlap":
-      logEvent("warn", base);
+      logEvent(CRON_RUN_LOG_LEVELS.skipped_overlap, base);
       return;
     case "disabled":
-      logEvent("info", base);
+      logEvent(CRON_RUN_LOG_LEVELS.disabled, base);
       return;
     default: {
       const unreachable: never = record;
