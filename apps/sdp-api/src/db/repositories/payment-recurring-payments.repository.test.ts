@@ -3,6 +3,7 @@ import {
   isInFlightRecurringPaymentAttemptStatus,
   PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   type PaymentRecurringPaymentAttemptStatus,
+  type PaymentRecurringPaymentStatus,
   type PaymentSubscriptionCollectionAttemptStatus,
 } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
@@ -25,6 +26,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type {
+  PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
   RecurringPaymentStepSignatureSlot,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
@@ -288,12 +290,13 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     last_valid_block_height: null,
   };
 
-  async function createUnsignedActivationAttempt(attemptId: string) {
+  /** A `pending_activation` schedule created at 2026-06-29T12:00:00.000Z. */
+  async function createPendingRecurringPayment(recurringPaymentId: string) {
     const { account, counterparty } = await seedCounterpartyAccount();
     const createdAt = "2026-06-29T12:00:00.000Z";
-    const created = required(
+    return required(
       await repo.createRecurringPayment({
-        id: `recpay_${attemptId}`,
+        id: recurringPaymentId,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -314,6 +317,10 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         idempotencyFingerprint: null,
       })
     );
+  }
+
+  async function createUnsignedActivationAttempt(attemptId: string) {
+    const created = await createPendingRecurringPayment(`recpay_${attemptId}`);
     return required(
       await repo.createActivationAttempt({
         id: attemptId,
@@ -326,8 +333,8 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         authorizationSignature: null,
         error: null,
         metadata: {},
-        createdAt,
-        updatedAt: createdAt,
+        createdAt: created.created_at,
+        updatedAt: created.created_at,
       })
     );
   }
@@ -1108,6 +1115,94 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       updated_at: expect.any(String),
     });
     expect(await latest()).toEqual(applied);
+  });
+
+  describe("update claim and activation reset", () => {
+    const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const LEFT_AT = "2026-06-29T12:00:00.000Z";
+    const STALE_BEFORE = "2026-06-29T12:05:00.000Z";
+    const CLAIMED_AT = "2026-06-29T12:20:00.000Z";
+
+    async function scheduleIn(
+      recurringPaymentId: string,
+      status: PaymentRecurringPaymentStatus
+    ): Promise<PaymentRecurringPaymentRow> {
+      await createPendingRecurringPayment(recurringPaymentId);
+      const moved = await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(status, LEFT_AT, recurringPaymentId)
+        .run();
+      expect(moved).toBe(1);
+      return required(await repo.getRecurringPaymentById({ ...tenant, recurringPaymentId }));
+    }
+
+    it("refuses to claim an update on a pending_activation schedule, leaving it untouched", async () => {
+      const before = await scheduleIn("recpay_repo_update_claim_pending", "pending_activation");
+
+      const claimed = await repo.claimRecurringPaymentUpdate({
+        ...tenant,
+        recurringPaymentId: before.id,
+        updatedAt: CLAIMED_AT,
+        staleBefore: STALE_BEFORE,
+        activatedBy: null,
+      });
+
+      expect(claimed).toBeNull();
+      expect(
+        await repo.getRecurringPaymentById({ ...tenant, recurringPaymentId: before.id })
+      ).toEqual(before);
+    });
+
+    it("claims an update on an active schedule into updating", async () => {
+      const before = await scheduleIn("recpay_repo_update_claim_active", "active");
+
+      const claimed = await repo.claimRecurringPaymentUpdate({
+        ...tenant,
+        recurringPaymentId: before.id,
+        updatedAt: CLAIMED_AT,
+        activatedBy: null,
+      });
+
+      const expected = { ...before, status: "updating", updated_at: CLAIMED_AT };
+      expect(claimed).toEqual(expected);
+      expect(
+        await repo.getRecurringPaymentById({ ...tenant, recurringPaymentId: before.id })
+      ).toEqual(expected);
+    });
+
+    it("reclaims a stale updating schedule", async () => {
+      const before = await scheduleIn("recpay_repo_update_claim_stale", "updating");
+
+      const claimed = await repo.claimRecurringPaymentUpdate({
+        ...tenant,
+        recurringPaymentId: before.id,
+        updatedAt: CLAIMED_AT,
+        staleBefore: STALE_BEFORE,
+        activatedBy: null,
+      });
+
+      const expected = { ...before, updated_at: CLAIMED_AT };
+      expect(claimed).toEqual(expected);
+      expect(
+        await repo.getRecurringPaymentById({ ...tenant, recurringPaymentId: before.id })
+      ).toEqual(expected);
+    });
+
+    it("refuses to reset an activating schedule another run has re-claimed since, leaving it untouched", async () => {
+      const before = await scheduleIn("recpay_repo_activation_reset_stamp", "activating");
+
+      const reset = await repo.resetRecurringPaymentActivationIfNotActive({
+        ...tenant,
+        recurringPaymentId: before.id,
+        expectedUpdatedAt: STALE_BEFORE,
+        updatedAt: CLAIMED_AT,
+      });
+
+      expect(reset).toBeNull();
+      expect(
+        await repo.getRecurringPaymentById({ ...tenant, recurringPaymentId: before.id })
+      ).toEqual(before);
+    });
   });
 });
 
