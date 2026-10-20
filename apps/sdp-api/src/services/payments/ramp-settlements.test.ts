@@ -1,7 +1,8 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
+import { RedisKVStore } from "@/runtime/kv-redis";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -211,6 +212,42 @@ describe("applyRampSettlementEvent", () => {
     });
   });
 
+  it("leaves the transfer as it was when its settlement cannot be recorded", async () => {
+    await seedTransfer({
+      id: "xfr_unaudited_settle",
+      reference: "order_unaudited_settle",
+      status: "awaiting_payment",
+    });
+    // The ledger's pending witness is refused, so the record never seals.
+    const witness = vi.spyOn(RedisKVStore.prototype, "compareAndSet").mockResolvedValueOnce(false);
+    onTestFinished(() => witness.mockRestore());
+
+    await expect(
+      applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: "order_unaudited_settle",
+        receivedAmount: "12",
+        onchain: {
+          signature: "unaudited-signature",
+          destinationAddress: "destination",
+          amount: "12",
+        },
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    expect(await readTransfer("xfr_unaudited_settle")).toMatchObject({
+      status: "awaiting_payment",
+      signature: null,
+      provider_data: {},
+    });
+    const audits = await getDb(env)
+      .prepare("SELECT count(*)::integer AS count FROM audit_logs WHERE resource_id = ?")
+      .bind("xfr_unaudited_settle")
+      .first<{ count: number }>();
+    expect(audits).toMatchObject({ count: 0 });
+  });
+
   it("refuses settlement when cancellation wins after the first read", async () => {
     await seedCounterparty();
     await seedTransfer({
@@ -220,11 +257,14 @@ describe("applyRampSettlementEvent", () => {
       counterpartyId: COUNTERPARTY_ID,
     });
 
+    // A settled event's writes run in the audit ledger's transaction, which
+    // opens after the checks read: the cancel lands in between.
     const db = getDb(env);
-    const runTransaction = db.transaction.bind(db);
+    const runLedgerTransaction = db.lockedTransactionWithPostCommit?.bind(db);
+    if (!runLedgerTransaction) throw new Error("The test database serializes audit writes");
     const settlementTransaction = vi
-      .spyOn(db, "transaction")
-      .mockImplementationOnce(async (callback) => {
+      .spyOn(db, "lockedTransactionWithPostCommit")
+      .mockImplementationOnce(async (lockKey, callback, afterCommit, afterRollback, options) => {
         const canceled = await createSystemPaymentsRepository(env).transitionRampTransfer({
           transferId: "xfr_cancel_race",
           organizationId: ORG_ID,
@@ -233,7 +273,7 @@ describe("applyRampSettlementEvent", () => {
           updatedAt: new Date().toISOString(),
         });
         expect(canceled?.status).toBe("canceled");
-        return runTransaction(callback);
+        return runLedgerTransaction(lockKey, callback, afterCommit, afterRollback, options);
       });
 
     const result = await applyRampSettlementEvent(env, "sandbox", {

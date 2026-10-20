@@ -16,7 +16,6 @@ import {
   type RampWebhookProcessResult,
 } from "@sdp/types/payments";
 import { z } from "zod";
-import { asTransactionalClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createSystemTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
@@ -24,7 +23,10 @@ import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
+import {
+  applyRampSettlementEventIn,
+  withRampSettlementTransaction,
+} from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
 
@@ -216,8 +218,8 @@ async function processMoonpayObservation(
   event: Exclude<MoonpaySettlementEvent, { kind: "ignore" }>
 ): Promise<RampWebhookProcessResult> {
   try {
-    return await getDb(env).transaction(async (tx) => {
-      const client = asTransactionalClient(tx);
+    // A settled, failed or expired observation commits with its audit row.
+    return await withRampSettlementTransaction(env, event.kind, async (client, recordAudit) => {
       const repo = createSystemTransactionalPaymentsRepository(client);
       const locked = await repo.lockTransferForProvider({
         transferId: event.transferId,
@@ -268,7 +270,7 @@ async function processMoonpayObservation(
         updatedAt: new Date().toISOString(),
       });
       if (!claimed) throw new Error("MoonPay reference claim changed while transfer was locked");
-      const result = await applyRampSettlementEvent(env, environment, event, client);
+      const result = await applyRampSettlementEventIn(environment, event, client, recordAudit);
       if (!result.applied) throw new RollBackMoonpayClaim(result);
       // Keep the failed sale for operator review after withdrawing its deposit.
       return event.kind === "failed"

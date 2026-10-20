@@ -157,6 +157,13 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   settlement it judged, and the row leaves `listRampTransfersToVerify`. The
   next provider event clears it (`deliveryMismatch: null`). A finalized
   transaction never changes, so re-reading it each minute only spends RPC.
+- **Audited steps commit with their audit row.** A quote, a cancel, a settled,
+  failed or expired event and a verified delivery write through
+  `auditedRampWrite` (`AuditService.logWithin`) or, without a request,
+  `withRampSettlementTransaction` and `auditedRampWriteSystem`
+  (`logSystemWithin`); a ledger failure rolls the transition back. The ledger
+  cannot join an open transaction (a transactional client refuses its session
+  lock), so it owns the transaction: MoonPay's observation runs inside it.
 
 ## Ramps: status pull queue
 

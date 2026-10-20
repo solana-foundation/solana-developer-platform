@@ -16,7 +16,7 @@ import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/p
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { auditRampTransferSystem } from "@/services/payments/ramp-audit";
+import { auditedRampWriteSystem } from "@/services/payments/ramp-audit";
 import {
   currentProviderSettlement,
   type ProviderSettlement,
@@ -281,16 +281,20 @@ async function verifyOnramp(
     updatedAt: new Date().toISOString(),
   };
   if (transfer.amount === null) update.amount = amount;
-  const completed = await repo.transitionRampTransfer(update);
-  if (completed === null) return false;
-  await auditRampTransferSystem(env, "settle", completed, {
-    source: "chain",
-    fromStatus: transfer.status,
-    signature: transactionSignature,
-    slot,
-    deliveredAmount: amount,
-  });
-  return true;
+  // The completion and its audit row commit together, or the next tick retries both.
+  const completed = await auditedRampWriteSystem(
+    env,
+    "settle",
+    (audited) => audited.transitionRampTransfer(update),
+    {
+      source: "chain",
+      fromStatus: transfer.status,
+      signature: transactionSignature,
+      slot,
+      deliveredAmount: amount,
+    }
+  );
+  return completed !== null;
 }
 
 async function verifyOfframps(
@@ -338,33 +342,36 @@ async function verifyOfframps(
     }
     if (BigInt(status.slot) > BigInt(Number.MAX_SAFE_INTEGER)) continue;
     try {
-      const updated = await repo.transitionRampTransfer({
-        transferId: entry.transfer.id,
-        organizationId: entry.transfer.organization_id,
-        projectId: entry.transfer.project_id,
-        transition: "delivery_verified",
-        deliveryEvidence: {
-          providerSettlement: entry.settled,
-          signature: entry.submittedSignature,
-        },
-        providerData: {
-          verifiedDelivery: {
-            signature: entry.submittedSignature,
+      const updated = await auditedRampWriteSystem(
+        env,
+        "settle",
+        (audited) =>
+          audited.transitionRampTransfer({
+            transferId: entry.transfer.id,
+            organizationId: entry.transfer.organization_id,
+            projectId: entry.transfer.project_id,
+            transition: "delivery_verified",
+            deliveryEvidence: {
+              providerSettlement: entry.settled,
+              signature: entry.submittedSignature,
+            },
+            providerData: {
+              verifiedDelivery: {
+                signature: entry.submittedSignature,
+                slot: Number(status.slot),
+              },
+            },
             slot: Number(status.slot),
-          },
-        },
-        slot: Number(status.slot),
-        updatedAt: new Date().toISOString(),
-      });
-      if (updated !== null) {
-        completed.push(entry.transfer.id);
-        await auditRampTransferSystem(env, "settle", updated, {
+            updatedAt: new Date().toISOString(),
+          }),
+        {
           source: "chain",
           fromStatus: entry.transfer.status,
           signature: entry.submittedSignature,
           slot: Number(status.slot),
-        });
-      }
+        }
+      );
+      if (updated !== null) completed.push(entry.transfer.id);
     } catch (error) {
       getLogger().error(
         { transfer_id: entry.transfer.id, error },

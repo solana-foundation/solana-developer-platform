@@ -573,7 +573,7 @@ function logSubmittedUnconfirmed(transfer: TransferRow, signature: string | null
 async function releaseUnsentRampDeposit(
   c: AppContext,
   transfer: TransferRow,
-  error: unknown
+  cause: unknown
 ): Promise<boolean> {
   if (transfer.type !== "offramp") return false;
   const released = await getPaymentsRepository(c).releaseOfframpDepositClaim({
@@ -590,7 +590,7 @@ async function releaseUnsentRampDeposit(
     organization_id: transfer.organization_id,
     project_id: transfer.project_id,
     transfer_id: transfer.id,
-    ...describeError(error),
+    ...describeError(cause),
   });
   return true;
 }

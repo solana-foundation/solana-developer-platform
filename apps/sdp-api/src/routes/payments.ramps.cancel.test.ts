@@ -1,7 +1,8 @@
 import { SdpPaymentsError } from "@sdp/payments/errors";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { RedisKVStore } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import {
   cancelMoonpaySaleMock,
@@ -75,7 +76,10 @@ async function readCancelAudits(transferId: string) {
     )
     .bind(transferId)
     .all<{ action: string; resource_type: string; metadata: string }>();
-  return results.map((row) => ({ ...row, metadata: JSON.parse(row.metadata) as unknown }));
+  return results.map((row) => {
+    const metadata: unknown = JSON.parse(row.metadata);
+    return { ...row, metadata };
+  });
 }
 
 describe("Payments routes: canceling a ramp transfer", () => {
@@ -115,10 +119,25 @@ describe("Payments routes: canceling a ramp transfer", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    const body = (await second.json()) as { data: { transfer: { id: string; status: string } } };
-    expect(body.data.transfer).toMatchObject({ id: "xfr_cancel_twice", status: "canceled" });
+    expect(await second.json()).toMatchObject({
+      data: { transfer: { id: "xfr_cancel_twice", status: "canceled" } },
+    });
     expect(cancelMoonpaySaleMock).toHaveBeenCalledTimes(2);
     expect(await readCancelAudits("xfr_cancel_twice")).toHaveLength(1);
+  });
+
+  it("keeps the sale open when its cancel cannot be recorded", async () => {
+    await seedRamp({ id: "xfr_cancel_unaudited", type: "offramp", status: "awaiting_payment" });
+    // The ledger's pending witness is refused, so the record never seals.
+    const witness = vi.spyOn(RedisKVStore.prototype, "compareAndSet").mockResolvedValueOnce(false);
+    onTestFinished(() => witness.mockRestore());
+
+    const response = await cancel("xfr_cancel_unaudited");
+
+    expect(response.status).toBe(500);
+    expect(await readStatus("xfr_cancel_unaudited")).toBe("awaiting_payment");
+    expect(await readCancelAudits("xfr_cancel_unaudited")).toEqual([]);
+    expect(cancelMoonpaySaleMock).not.toHaveBeenCalled();
   });
 
   it("keeps SDP's cancel when MoonPay cannot be reached", async () => {

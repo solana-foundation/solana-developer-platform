@@ -167,6 +167,26 @@ describe("Payments routes: off-ramp quote checks before the sale", () => {
     expect(await readCounterpartySales(counterpartyId)).toEqual([]);
   });
 
+  it("refuses an amount finer than USDC's precision, writing no sale", async () => {
+    const counterpartyId = await seedCounterparty();
+    estimateAnswers({ fiatAmount: "20.69" });
+    walletHoldsUsdc("25000000");
+
+    const response = await requestOfframpQuote({
+      counterpartyId,
+      assetRail: "usdc.solana",
+      cryptoAmount: "25.0000001",
+    });
+
+    expect(response.status).toBe(400);
+    expect((await readErrorResponse(response)).error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Amount has too many decimal places: USDC allows 6",
+    });
+    expect(await readCounterpartySales(counterpartyId)).toEqual([]);
+    expect(chainReads()).toEqual([]);
+  });
+
   it("names the minimum first when the sale is both under it and unfunded", async () => {
     const counterpartyId = await seedCounterparty();
     estimateAnswers({ refusal: UNDER_MINIMUM() });

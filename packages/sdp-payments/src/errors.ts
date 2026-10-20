@@ -101,10 +101,10 @@ export function providerUnavailable(
   return new SdpPaymentsError("PROVIDER_UNAVAILABLE", message, details, diagnostics);
 }
 
-const AMOUNT_LIMIT_MESSAGES: Record<RampAmountLimitReason, string> = {
+const AMOUNT_LIMIT_MESSAGES = {
   amount_below_minimum: "Amount is below this provider's minimum of",
   amount_above_maximum: "Amount is above this provider's maximum of",
-};
+} as const satisfies Record<RampAmountLimitReason, string>;
 
 /**
  * A provider refuses the amount for this pair. The bound rides in `details`

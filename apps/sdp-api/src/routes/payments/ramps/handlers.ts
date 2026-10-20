@@ -12,7 +12,7 @@ import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/pa
 import { mapTransferRow } from "@/routes/payments/mappers";
 import { resolveScope } from "@/routes/payments/wallets";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { auditRampTransfer } from "@/services/payments/ramp-audit";
+import { auditedRampWrite } from "@/services/payments/ramp-audit";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import { admitRamp } from "./admission";
 import type { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
@@ -81,13 +81,20 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
 
-  const updated = await repository.transitionRampTransfer({
-    transferId: transfer.id,
-    organizationId: scope.auth.organizationId,
-    projectId,
-    transition: "canceled",
-    updatedAt: new Date().toISOString(),
-  });
+  // The cancel and its record commit together; the provider hears of it after.
+  const updated = await auditedRampWrite(
+    c,
+    "cancel",
+    (audited) =>
+      audited.transitionRampTransfer({
+        transferId: transfer.id,
+        organizationId: scope.auth.organizationId,
+        projectId,
+        transition: "canceled",
+        updatedAt: new Date().toISOString(),
+      }),
+    { fromStatus: transfer.status }
+  );
   if (!updated) {
     const current = await repository.getTransferById({
       transferId: transfer.id,
@@ -101,7 +108,6 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   }
 
   await cancelProviderSale(c, updated);
-  await auditRampTransfer(c, "cancel", updated, { fromStatus: transfer.status });
   return success(c, { transfer: mapTransferRow(updated) });
 }
 

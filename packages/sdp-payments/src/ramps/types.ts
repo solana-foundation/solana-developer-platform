@@ -193,6 +193,21 @@ export type RampSettlementEvent =
       unmappedStatus?: string;
     };
 
+/** Provider outcomes the audit ledger records: the sale or buy settled, failed or expired. */
+export const RAMP_AUDITED_SETTLEMENT_KINDS = [
+  "settled",
+  "failed",
+  "expired",
+] as const satisfies readonly RampSettlementEvent["kind"][];
+
+export type RampAuditedSettlementKind = (typeof RAMP_AUDITED_SETTLEMENT_KINDS)[number];
+
+export function isAuditedRampSettlementKind(
+  kind: RampSettlementEvent["kind"]
+): kind is RampAuditedSettlementKind {
+  return RAMP_AUDITED_SETTLEMENT_KINDS.some((audited) => audited === kind);
+}
+
 /**
  * Runtime context for quote/execute calls. Providers read their own credentials
  * from `env` keyed by `mode`; the route handler resolves `mode` (it depends on

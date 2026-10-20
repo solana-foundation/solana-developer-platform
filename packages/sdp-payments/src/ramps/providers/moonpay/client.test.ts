@@ -185,7 +185,7 @@ describe("MoonpayRampClient on-ramp total", () => {
   it("prices what the customer pays in all, fees on top of the amount", async () => {
     answerBuyQuote(QUOTE_RESPONSE);
 
-    const estimate = await new MoonpayRampClient().estimateOnramp(runtimeContext, {
+    const estimate = await RAMP_PROVIDER_CLIENTS.moonpay.estimateOnramp(runtimeContext, {
       assetRail: "sol.solana",
       fiatCurrency: "USD",
       fiatAmount: "50",
@@ -198,7 +198,7 @@ describe("MoonpayRampClient on-ramp total", () => {
   it("takes MoonPay's own total when it sends one", async () => {
     answerBuyQuote({ ...QUOTE_RESPONSE, totalAmount: 51.61 });
 
-    const estimate = await new MoonpayRampClient().estimateOnramp(runtimeContext, {
+    const estimate = await RAMP_PROVIDER_CLIENTS.moonpay.estimateOnramp(runtimeContext, {
       assetRail: "sol.solana",
       fiatCurrency: "USD",
       fiatAmount: "50",
@@ -239,7 +239,7 @@ describe("MoonpayRampClient off-ramp limits", () => {
   }
 
   function estimateUsdc(cryptoAmount: string) {
-    return new MoonpayRampClient().estimateOfframp(runtimeContext, {
+    return RAMP_PROVIDER_CLIENTS.moonpay.estimateOfframp(runtimeContext, {
       assetRail: "usdc.solana",
       fiatCurrency: "USD",
       cryptoAmount,
@@ -311,7 +311,10 @@ describe("MoonpayRampClient sale cancel", () => {
   it("deletes the sale by SDP's id with the secret key", async () => {
     const requests = answerCancel(204);
 
-    const outcome = await new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID);
+    const outcome = await RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(
+      runtimeContext,
+      TRANSFER_ID
+    );
 
     assert.equal(outcome, "canceled");
     assert.equal(requests.length, 1);
@@ -325,12 +328,12 @@ describe("MoonpayRampClient sale cancel", () => {
   it("reads no sale and a finished sale as answers, not failures", async () => {
     answerCancel(404);
     assert.equal(
-      await new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID),
+      await RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(runtimeContext, TRANSFER_ID),
       "not_found"
     );
     answerCancel(409);
     assert.equal(
-      await new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID),
+      await RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(runtimeContext, TRANSFER_ID),
       "not_cancelable"
     );
   });
@@ -339,7 +342,7 @@ describe("MoonpayRampClient sale cancel", () => {
     answerCancel(401);
 
     await assert.rejects(
-      new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID),
+      RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(runtimeContext, TRANSFER_ID),
       (error: unknown) => {
         assert.ok(error instanceof SdpPaymentsError);
         assert.equal(error.code, "PROVIDER_NOT_CONFIGURED");

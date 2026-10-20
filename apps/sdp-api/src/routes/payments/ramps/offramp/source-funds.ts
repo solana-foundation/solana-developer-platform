@@ -1,5 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { AppError, accountFrozen, badRequest } from "@/lib/errors";
@@ -54,7 +54,16 @@ export async function assertOfframpSourceFunded(
     throw badRequest("Off-ramp asset is not a well-known token");
   }
   const symbol = token?.symbol ?? "SOL";
-  const needed = parseDecimalAmount(cryptoAmount, decimals);
+  let needed: bigint;
+  try {
+    needed = parseDecimalAmount(cryptoAmount, decimals);
+  } catch (cause) {
+    // The schema checks the shape; only the asset knows its precision.
+    if (cause instanceof AmountError) {
+      throw badRequest(`${cause.message}: ${symbol} allows ${decimals}`);
+    }
+    throw cause;
+  }
   const holding = await readSourceHolding(owner, mint);
   if (holding.frozen) {
     throw accountFrozen(`Source wallet's ${symbol} account is frozen`);

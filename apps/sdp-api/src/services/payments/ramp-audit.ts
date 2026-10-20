@@ -1,84 +1,83 @@
 import type { Context } from "hono";
+import type { DatabaseClient } from "@/db/client";
 import { getDb } from "@/db/client";
-import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
+import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
+import {
+  createSystemTransactionalPaymentsRepository,
+  createTransactionalPaymentsRepository,
+} from "@/db/repositories/repository-factory";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
-import { getLogger } from "@/runtime/logger";
-import { type AuditAction, AuditService } from "@/services/audit.service";
+import { type AuditAction, AuditService, type SystemAuditLogEntry } from "@/services/audit.service";
 import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "@/services/audit-ledger-timeout";
 import type { Env } from "@/types/env";
 
 /** The ramp steps the audit ledger records: a quote, a cancel, a settlement, a provider failure. */
-type RampAuditAction = Extract<AuditAction, "create" | "cancel" | "settle" | "update">;
+export type RampAuditAction = Extract<AuditAction, "create" | "cancel" | "settle" | "update">;
 
-function rampAuditMetadata(
+/** The audit record of one ramp step. */
+export function rampAuditEntry(
+  action: RampAuditAction,
   transfer: PaymentTransferRow,
-  extra: Record<string, unknown>
-): Record<string, unknown> {
+  extra: Record<string, unknown> = {}
+): SystemAuditLogEntry {
   return {
-    type: transfer.type,
-    provider: transfer.provider,
-    status: transfer.status,
-    // Named tokenMint: the audit redaction policy scrubs a bare "token" key.
-    tokenMint: transfer.token,
-    amount: transfer.amount,
-    fiatCurrency: transfer.fiat_currency,
-    fiatAmount: transfer.fiat_amount,
-    counterpartyId: transfer.counterparty_id,
-    custodyWalletId: transfer.custody_wallet_id,
-    providerReference: transfer.provider_reference,
-    ...extra,
+    organizationId: transfer.organization_id,
+    action,
+    resourceType: "payment_transfer",
+    resourceId: transfer.id,
+    metadata: {
+      type: transfer.type,
+      provider: transfer.provider,
+      status: transfer.status,
+      // Named tokenMint: the audit redaction policy scrubs a bare "token" key.
+      tokenMint: transfer.token,
+      amount: transfer.amount,
+      fiatCurrency: transfer.fiat_currency,
+      fiatAmount: transfer.fiat_amount,
+      counterpartyId: transfer.counterparty_id,
+      custodyWalletId: transfer.custody_wallet_id,
+      providerReference: transfer.provider_reference,
+      ...extra,
+    },
   };
 }
 
-function logAuditFailure(transfer: PaymentTransferRow, action: RampAuditAction, error: unknown) {
-  getLogger().error(
-    { event: "sdp_api_ramp_audit_write_failed", transfer_id: transfer.id, action, error },
-    "ramp audit write failed; the transfer row stays the record"
+/** The audit ledger for provider events and jobs, which have no request. */
+export function systemRampAuditService(env: Env): AuditService {
+  return new AuditService(
+    getDb(env),
+    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
   );
 }
 
 /**
- * Records a ramp step a request took. Best-effort and after the write: no
- * money moves at these steps, and the transfer row stays the record.
+ * A ramp step a request takes: its transfer write and audit row commit
+ * together, or neither does. A write that changed nothing records nothing.
  */
-export async function auditRampTransfer(
+export function auditedRampWrite(
   c: Context<{ Bindings: Env }>,
   action: RampAuditAction,
-  transfer: PaymentTransferRow,
+  write: (repository: PaymentsRepository) => Promise<PaymentTransferRow | null>,
   extra: Record<string, unknown> = {}
-): Promise<void> {
-  try {
-    await new AuditService(getDb(c.env)).log(c, {
-      organizationId: transfer.organization_id,
-      action,
-      resourceType: "payment_transfer",
-      resourceId: transfer.id,
-      metadata: rampAuditMetadata(transfer, extra),
-    });
-  } catch (error) {
-    logAuditFailure(transfer, action, error);
-  }
+): Promise<PaymentTransferRow | null> {
+  return new AuditService(getDb(c.env)).logWithin(c, async (tx: DatabaseClient) => {
+    const written = await write(
+      createTransactionalPaymentsRepository(tx, getRequestTenantScope(c))
+    );
+    return { entry: written ? rampAuditEntry(action, written, extra) : null, result: written };
+  });
 }
 
-/** Records a ramp step a provider event or the delivery verifier took, best-effort. */
-export async function auditRampTransferSystem(
+/** `auditedRampWrite` for a provider event or the delivery verifier. */
+export function auditedRampWriteSystem(
   env: Env,
   action: RampAuditAction,
-  transfer: PaymentTransferRow,
+  write: (repository: PaymentsRepository) => Promise<PaymentTransferRow | null>,
   extra: Record<string, unknown> = {}
-): Promise<void> {
-  try {
-    await new AuditService(
-      getDb(env),
-      createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
-    ).logSystem({
-      organizationId: transfer.organization_id,
-      action,
-      resourceType: "payment_transfer",
-      resourceId: transfer.id,
-      metadata: rampAuditMetadata(transfer, extra),
-    });
-  } catch (error) {
-    logAuditFailure(transfer, action, error);
-  }
+): Promise<PaymentTransferRow | null> {
+  return systemRampAuditService(env).logSystemWithin(async (tx) => {
+    const written = await write(createSystemTransactionalPaymentsRepository(tx));
+    return { entry: written ? rampAuditEntry(action, written, extra) : null, result: written };
+  });
 }

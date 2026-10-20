@@ -1414,9 +1414,7 @@ export const RAMP_AMOUNT_LIMIT_REASONS = ["amount_below_minimum", "amount_above_
 export type RampAmountLimitReason = (typeof RAMP_AMOUNT_LIMIT_REASONS)[number];
 
 export function isRampAmountLimitReason(value: unknown): value is RampAmountLimitReason {
-  return (
-    typeof value === "string" && (RAMP_AMOUNT_LIMIT_REASONS as readonly string[]).includes(value)
-  );
+  return RAMP_AMOUNT_LIMIT_REASONS.some((reason) => reason === value);
 }
 
 /** The bound an amount crossed, in the currency the amount was given in. */
