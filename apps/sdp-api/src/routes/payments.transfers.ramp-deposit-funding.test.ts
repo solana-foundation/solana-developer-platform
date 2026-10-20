@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
+import { forbidden } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -190,10 +191,12 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     const quoted = await readTransferRow(transferId);
     answerSourceUsdc("25000000", "initialized");
     createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(
-      new Error("custody signer unavailable")
+      forbidden("Custody signing is paused for this wallet")
     );
+    // The dashboard sends one key per deposit, so its retry reuses it.
+    const idempotencyKey = crypto.randomUUID();
 
-    const failed = await postTransfer(usdcDepositRequest(transferId), {});
+    const failed = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
 
     expect(failed.status).toBeGreaterThanOrEqual(400);
     expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -201,8 +204,8 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     expect({ ...released, updated_at: quoted.updated_at }).toEqual(quoted);
     expect(released.status).toBe("awaiting_payment");
 
-    // The released sale takes a new deposit request, which funds it.
-    const funded = await postTransfer(usdcDepositRequest(transferId), {});
+    // The release stored nothing under the key, so the same key funds the sale.
+    const funded = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
     const fundedText = await funded.text();
     expect(funded.status, fundedText).toBe(200);
     expect((await readTransferResponse(new Response(fundedText))).data.transfer).toMatchObject({

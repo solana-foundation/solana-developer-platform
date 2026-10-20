@@ -70,6 +70,7 @@ import {
   getIdempotencyRecordKey,
   markIdempotencyCommitted,
   markIdempotencyRecordMismatch,
+  markIdempotencyReleased,
 } from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
@@ -582,6 +583,7 @@ async function releaseUnsentRampDeposit(
     updatedAt: new Date().toISOString(),
   });
   if (released === null) return false;
+  markIdempotencyReleased(c);
   logEvent("warn", {
     event: "sdp_api_ramp_deposit_released",
     provider: transfer.provider,
