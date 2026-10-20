@@ -20,7 +20,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { createClusterHistoryRpc, createClusterRpc } from "./factory";
+import { createClusterHistoryRpc, createClusterRpc, createKoraUpstreamRpc } from "./factory";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import type { ManagedRpcEnv } from "./types";
@@ -83,20 +83,27 @@ const PRODUCTION: ScopeFacts = {
   environment: "production",
 };
 
-const MANAGED_POOL_ENV_KEY = /^SOLANA_RPC_[A-Z]+_(?:DEVNET|MAINNET)_API_KEY_URL$/;
+const RPC_ENV_KEY =
+  /^(?:SOLANA_RPC_[A-Z]+_(?:DEVNET|MAINNET)_API_KEY_URL|KORA_(?:DEVNET|MAINNET)_RPC_URL)$/;
 
 const originalFetch = globalThis.fetch;
 
-let ambientPool: NodeJS.ProcessEnv = {};
+let ambientRpcEnv: NodeJS.ProcessEnv = {};
 
-function clearManagedPool(): void {
+function clearRpcEnv(): void {
   for (const envKey of Object.keys(process.env)) {
-    if (MANAGED_POOL_ENV_KEY.test(envKey)) delete process.env[envKey];
+    if (RPC_ENV_KEY.test(envKey)) delete process.env[envKey];
   }
 }
 
 function configurePool(pool: ManagedRpcEnv): void {
   Object.assign(process.env, pool);
+}
+
+function configureKoraUpstreams(
+  upstreams: Partial<Record<"KORA_DEVNET_RPC_URL" | "KORA_MAINNET_RPC_URL", string>>
+): void {
+  Object.assign(process.env, upstreams);
 }
 
 function devnetJsonRpcError(code: number): Endpoint {
@@ -225,24 +232,24 @@ function airdropRequest(url: string): RpcCall {
   return { url, method: "requestAirdrop" };
 }
 
-function isolateManagedPool(): void {
-  ambientPool = Object.fromEntries(
-    Object.entries(process.env).filter(([envKey]) => MANAGED_POOL_ENV_KEY.test(envKey))
+function isolateRpcEnv(): void {
+  ambientRpcEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([envKey]) => RPC_ENV_KEY.test(envKey))
   );
-  clearManagedPool();
+  clearRpcEnv();
 }
 
-function restoreManagedPool(): void {
+function restoreRpcEnv(): void {
   mock.timers.reset();
   globalThis.fetch = originalFetch;
-  clearManagedPool();
-  Object.assign(process.env, ambientPool);
+  clearRpcEnv();
+  Object.assign(process.env, ambientRpcEnv);
 }
 
 describe("createClusterRpc", () => {
-  beforeEach(isolateManagedPool);
+  beforeEach(isolateRpcEnv);
 
-  afterEach(restoreManagedPool);
+  afterEach(restoreRpcEnv);
 
   it("refuses to build a client outside a cluster scope", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-unscoped.example.test" });
@@ -774,9 +781,9 @@ describe("createClusterRpc", () => {
 });
 
 describe("createClusterHistoryRpc", () => {
-  beforeEach(isolateManagedPool);
+  beforeEach(isolateRpcEnv);
 
-  afterEach(restoreManagedPool);
+  afterEach(restoreRpcEnv);
 
   it("tries the scope's own cluster Helius endpoint first, on a client apart from the plain pool", async () => {
     const devnetTriton = "https://devnet-history-triton.example.test";
@@ -865,5 +872,79 @@ describe("createClusterHistoryRpc", () => {
       genesisProbe(alchemy),
       slotRead(alchemy),
     ]);
+  });
+});
+
+describe("createKoraUpstreamRpc", () => {
+  beforeEach(isolateRpcEnv);
+
+  afterEach(restoreRpcEnv);
+
+  it("sends a sandbox scope only to the devnet Kora upstream and a production scope only to mainnet's", async () => {
+    const devnet = "https://kora-devnet-upstream.example.test";
+    const mainnet = "https://kora-mainnet-upstream.example.test";
+    configureKoraUpstreams({ KORA_DEVNET_RPC_URL: devnet, KORA_MAINNET_RPC_URL: mainnet });
+    const calls = stubEndpoints({ [devnet]: SERVES_DEVNET, [mainnet]: SERVES_MAINNET });
+
+    assert.equal(
+      await runInClusterScope(SANDBOX, createKoraUpstreamRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
+    assert.equal(
+      await runInClusterScope(PRODUCTION, createKoraUpstreamRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
+    assert.deepEqual(calls, [
+      genesisProbe(devnet),
+      slotRead(devnet),
+      genesisProbe(mainnet),
+      slotRead(mainnet),
+    ]);
+  });
+
+  it("refuses a scope whose cluster's Kora upstream URL is blank or unset", () => {
+    configureKoraUpstreams({ KORA_DEVNET_RPC_URL: "  " });
+
+    assert.throws(() => runInClusterScope(SANDBOX, createKoraUpstreamRpc), {
+      name: "SdpRpcError",
+      message: "No Kora upstream RPC is configured for devnet: set KORA_DEVNET_RPC_URL",
+      code: "RPC_NOT_CONFIGURED",
+      statusCode: 503,
+      details: { cluster: "devnet" },
+    });
+    assert.throws(() => runInClusterScope(PRODUCTION, createKoraUpstreamRpc), {
+      name: "SdpRpcError",
+      message: "No Kora upstream RPC is configured for mainnet-beta: set KORA_MAINNET_RPC_URL",
+      code: "RPC_NOT_CONFIGURED",
+      statusCode: 503,
+      details: { cluster: "mainnet-beta" },
+    });
+  });
+
+  it("refuses to build a client outside a cluster scope", () => {
+    configureKoraUpstreams({ KORA_DEVNET_RPC_URL: "https://kora-unscoped.example.test" });
+
+    assert.throws(() => createKoraUpstreamRpc(), {
+      name: "SdpRpcError",
+      message: "No cluster scope is open for this work",
+      code: "CLUSTER_SCOPE_MISSING",
+      statusCode: 500,
+    });
+  });
+
+  it("shares one client per cluster and URL, apart from a pool client on the same URL", () => {
+    const url = "https://kora-shared-with-pool.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url });
+    configureKoraUpstreams({ KORA_DEVNET_RPC_URL: url });
+    const koraRpc = runInClusterScope(SANDBOX, createKoraUpstreamRpc);
+
+    assert.equal(
+      runInClusterScope(
+        { projectId: "proj_factory_other", environment: "sandbox" },
+        createKoraUpstreamRpc
+      ),
+      koraRpc
+    );
+    assert.notEqual(runInClusterScope(SANDBOX, createClusterRpc), koraRpc);
   });
 });

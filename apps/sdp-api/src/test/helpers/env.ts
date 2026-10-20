@@ -84,10 +84,8 @@ const providedEnv: Env = {
   RUN_INTEGRATION_TESTS: "false",
   SOLANA_NETWORK: "devnet",
   SOLANA_RPC_URL: "https://solana-rpc.mock.invalid",
-  FEE_PAYMENT_PROVIDER: "kora",
   KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
   KORA_DEVNET_RPC_URL: "https://kora-devnet-rpc.mock.invalid",
-  KORA_MAINNET_RPC_URL: "https://kora-mainnet-rpc.mock.invalid",
   // The minted metadata origin comes only from this trusted config value —
   // deploys that need the SDP-hosted metadata fallback fail closed without it.
   PUBLIC_API_ORIGIN: "http://localhost",

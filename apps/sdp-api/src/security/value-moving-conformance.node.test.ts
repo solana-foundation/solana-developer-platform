@@ -538,7 +538,7 @@ const contracts: ValueMovingContract[] = [
 const signingSinkInventory: Record<string, string[]> = {
   // The custody signer check is deliberately absent: it partially signs and
   // SIMULATES its memo transaction — verified locally, never broadcast — so it
-  // has no signAndSend sink and cannot spend sponsorship.
+  // has no signing sink and cannot spend sponsorship.
   "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
     // Sponsored signing adds the fee-payer signature without broadcasting, so
     // the final signature can still be recorded before bytes reach the network.
@@ -551,15 +551,11 @@ const signingSinkInventory: Record<string, string[]> = {
   // settle only partially sign as authorities and are not sinks of their own.
   "apps/sdp-api/src/services/payments/payment-request-sponsorship.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
-  "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/transfer.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/withdraw.ts": ["signTransactionMessageWithSigners"],
-  "packages/sdp-issuance/src/mosaic/service.ts": [
-    "signAndSend",
-    "signTransactionMessageWithSigners",
-  ],
-  "packages/sdp-solana/src/token-2022.ts": ["signAndSend", "signTransactionMessageWithSigners"],
+  "packages/sdp-issuance/src/mosaic/service.ts": ["signTransactionMessageWithSigners"],
+  "packages/sdp-solana/src/token-2022.ts": ["signTransactionMessageWithSigners"],
 };
 
 const valueMovingSourceRoots = [
@@ -607,7 +603,7 @@ function sourceFiles(directory: string): string[] {
 
 function discoverSigningSinks(): Record<string, string[]> {
   const sinkPattern =
-    /\.(signAndSend|signAsFeePayer|prepareOwnedSubmission)\(|\b(signTransactionMessageWithSigners)\(/g;
+    /\.(signAsFeePayer|prepareOwnedSubmission)\(|\b(signTransactionMessageWithSigners)\(/g;
   const inventory: Record<string, string[]> = {};
 
   for (const root of valueMovingSourceRoots) {

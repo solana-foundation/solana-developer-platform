@@ -2,14 +2,28 @@ import { apiTestSupport } from "@sdp/api/test-support";
 import { resolveDefaultCluster } from "@sdp/rpc/config";
 import { env } from "#env-impl";
 
-const { resolveKoraEndpoint } = apiTestSupport;
+const { KORA_ENV_KEYS } = apiTestSupport;
 
-/** The Kora this run targets: the `SOLANA_NETWORK` cluster's `KORA_<CLUSTER>_*` trio, or null. */
-export const koraEndpoint = resolveKoraEndpoint(env, resolveDefaultCluster(env));
+/** The run's cluster's Kora env keys: the harness sponsors on `SOLANA_NETWORK`'s cluster. */
+const koraEnvKeys = KORA_ENV_KEYS[resolveDefaultCluster(env)];
 
 /** The env var that names {@link koraEndpoint}'s URL, for "missing" messages. */
-export const KORA_URL_ENV_KEY =
-  resolveDefaultCluster(env) === "mainnet-beta" ? "KORA_MAINNET_URL" : "KORA_DEVNET_URL";
+export const KORA_URL_ENV_KEY = koraEnvKeys.serviceUrl;
+
+const koraUrl = env[koraEnvKeys.serviceUrl]?.trim();
+
+/**
+ * The Kora this run targets: the `SOLANA_NETWORK` cluster's `KORA_<CLUSTER>_*` trio, or null.
+ * Read from env rather than `resolveKoraEndpoint`, which needs a cluster scope that helpers
+ * never open.
+ */
+export const koraEndpoint = koraUrl
+  ? {
+      rpcUrl: koraUrl,
+      apiKey: env[koraEnvKeys.apiKey],
+      identityTokenAudience: env[koraEnvKeys.identityTokenAudience],
+    }
+  : null;
 
 /**
  * The Kora this run targets, for suites that cannot run without one.

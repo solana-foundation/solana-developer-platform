@@ -1,4 +1,7 @@
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import { resolveDefaultCluster } from "@sdp/rpc/config";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SDP_ENVIRONMENT_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   asOrganizationAdmin,
@@ -41,30 +44,36 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
       custodyWallet.id,
       "issuance.authority"
     );
-    const mosaic = createMosaicService(env as ApiTestEnv, signer, {
-      mode: "sponsored",
-      scope: {
-        environment: TEST_PROJECT.environment,
-        organizationId: TEST_ORG.id,
+    const result = await runInClusterScope(
+      {
         projectId: TEST_PROJECT.id,
-        actor: { type: "project", id: TEST_PROJECT.id },
+        environment: SDP_ENVIRONMENT_BY_CLUSTER[resolveDefaultCluster(env)],
       },
-      movement: "issuance.authority",
-    });
-
-    const result = await asOrganizationAdmin(() =>
-      mosaic.createToken({
-        template: "custom",
-        feePayer: signer,
-        metadata: {
-          name: "Mosaic Custom Mint",
-          symbol: "MCM",
-          uri: "https://example.com/mosaic-custom-mint.json",
-        },
-        decimals: 6,
-        mintAuthority: signer,
-        freezeAuthority: signer.address,
-      })
+      () => {
+        const mosaic = createMosaicService(env as ApiTestEnv, signer, {
+          mode: "sponsored",
+          scope: {
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            actor: { type: "project", id: TEST_PROJECT.id },
+          },
+          movement: "issuance.authority",
+        });
+        return asOrganizationAdmin(() =>
+          mosaic.createToken({
+            template: "custom",
+            feePayer: signer,
+            metadata: {
+              name: "Mosaic Custom Mint",
+              symbol: "MCM",
+              uri: "https://example.com/mosaic-custom-mint.json",
+            },
+            decimals: 6,
+            mintAuthority: signer,
+            freezeAuthority: signer.address,
+          })
+        );
+      }
     );
 
     expect(result.mint).toBeTruthy();

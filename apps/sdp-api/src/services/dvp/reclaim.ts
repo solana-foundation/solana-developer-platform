@@ -231,6 +231,8 @@ export async function reclaimDvpTradeLeg(
         },
         markStarted: async () => {},
         hasStarted: async () => claims.hasClaim(trade.id, side, heldSignature),
+        // A refused send releases its claim in the caller.
+        clearSigned: async () => {},
       },
     });
   } catch (error) {
