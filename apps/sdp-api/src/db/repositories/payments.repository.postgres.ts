@@ -227,7 +227,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
     signature: (row.signature as string | null | undefined) ?? null,
     serialized_tx: (row.serialized_tx as string | null | undefined) ?? null,
     signed_transaction: (row.signed_transaction as string | null | undefined) ?? null,
-    last_valid_block_height: (row.last_valid_block_height as string | null | undefined) ?? null,
+    last_valid_block_height: z.string().nullable().parse(row.last_valid_block_height),
     submission_started_at: (row.submission_started_at as string | null | undefined) ?? null,
     slot: (row.slot as number | null | undefined) ?? null,
     block_time: (row.block_time as string | null | undefined) ?? null,

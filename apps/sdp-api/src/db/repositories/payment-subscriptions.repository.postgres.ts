@@ -81,6 +81,8 @@ const attemptRowSchema = z.object({
   signature: z.string().nullable(),
   error: z.string().nullable(),
   metadata: paymentSubscriptionCollectionAttemptMetadataSchema,
+  delegation_period_start_ts_before: z.number().int().nullable(),
+  delegation_amount_pulled_before: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -607,6 +609,7 @@ export function createPostgresPaymentSubscriptionsRepository(
     },
 
     async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {
+      const preImage = input.delegationPreImage;
       const row = await db
         .prepare(
           `UPDATE payment_subscription_collection_attempts
@@ -616,10 +619,16 @@ export function createPostgresPaymentSubscriptionsRepository(
                   signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
                   metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
+                  delegation_period_start_ts_before = CASE WHEN ?::boolean THEN ?::bigint ELSE delegation_period_start_ts_before END,
+                  delegation_amount_pulled_before = CASE WHEN ?::boolean THEN ?::numeric ELSE delegation_amount_pulled_before END,
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
+              AND (
+                NOT ?::boolean
+                OR (delegation_period_start_ts_before IS NULL AND delegation_amount_pulled_before IS NULL)
+              )
               AND (
                 ?::text IS NULL
                 OR ?::text = status
@@ -641,10 +650,15 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.error ?? null,
           input.metadata !== undefined,
           JSON.stringify(input.metadata ?? {}),
+          preImage !== undefined,
+          preImage === undefined ? null : preImage.periodStartTs.toString(),
+          preImage !== undefined,
+          preImage === undefined ? null : preImage.amountPulled.toString(),
           input.updatedAt,
           input.attemptId,
           input.organizationId,
           input.projectId,
+          preImage !== undefined,
           input.status ?? null,
           input.status ?? null,
           input.status ?? null,

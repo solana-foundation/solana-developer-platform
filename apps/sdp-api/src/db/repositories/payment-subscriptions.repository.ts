@@ -62,8 +62,21 @@ export interface PaymentSubscriptionCollectionAttemptRow {
   signature: string | null;
   error: string | null;
   metadata: PaymentSubscriptionCollectionAttemptMetadata;
+  /** The delegation's `current_period_start_ts` read just before the pull was signed; null until then, and on attempts signed before the pre-image was saved. */
+  delegation_period_start_ts_before: number | null;
+  /** The delegation's `amount_pulled_in_period` (u64 decimal string) read with it. */
+  delegation_amount_pulled_before: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * The delegation's period start and amount pulled, read at `confirmed` just before a collection
+ * pull is signed. Recovery proves the pull landed only against this pre-image.
+ */
+export interface CollectionAttemptDelegationPreImage {
+  periodStartTs: bigint;
+  amountPulled: bigint;
 }
 
 export interface CreatePaymentSubscriptionPlanInput {
@@ -187,6 +200,8 @@ export interface UpdatePaymentSubscriptionCollectionAttemptInput {
   signature?: string | null;
   error?: string | null;
   metadata?: PaymentSubscriptionCollectionAttemptMetadata;
+  /** Written only while the attempt has none; an attempt that already holds one is not updated. */
+  delegationPreImage?: CollectionAttemptDelegationPreImage;
   updatedAt: string;
 }
 

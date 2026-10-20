@@ -39,7 +39,7 @@ import {
   isSubscriptionsError,
   type SubscriptionsError,
 } from "@solana/subscriptions";
-import { decodeToken } from "@solana-program/token-2022";
+import { decodeMint, decodeToken } from "@solana-program/token-2022";
 import type { DatabaseExecutor } from "@/db/client";
 import {
   type PaymentRecurringPaymentRow,
@@ -49,6 +49,7 @@ import {
   type RecurringPaymentStepSignatureSlots,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import type {
+  CollectionAttemptDelegationPreImage,
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
@@ -385,7 +386,8 @@ export interface RecurringPaymentStepLogContext {
     | "update_plan"
     | "cancel_old_subscription"
     | "cancel"
-    | "resume";
+    | "resume"
+    | "collect";
 }
 
 /**
@@ -501,16 +503,32 @@ export async function readRecurringPaymentStep(input: {
  *
  * @param effect - The step's effect.
  * @returns The `confirmed` block height, the effect accounts and whether they show the effect.
- * @throws When a read fails, the accounts come from a bank below the epoch read's slot, the
- *   answer lists a different number of accounts, or an account does not decode.
+ * @throws When the read fails or an account does not decode.
  */
 async function observeRecurringPaymentStep(
   effect: RecurringPaymentStepEffect
 ): Promise<{ blockHeight: bigint; accounts: MaybeEncodedAccount[]; landed: boolean }> {
+  const { blockHeight, accounts } = await readConfirmedAccounts(effect.addresses);
+  return { blockHeight, accounts, landed: effect.landed(accounts) };
+}
+
+/**
+ * Reads accounts in two RPC calls on the cluster pool: the `confirmed` epoch info (slot S and
+ * block height c), then every account in one `getMultipleAccounts` at `confirmed` from a bank at
+ * slot S or later, so the accounts include every block up to c.
+ *
+ * @param addresses - The accounts to read.
+ * @returns The `confirmed` block height and the accounts, in the order of `addresses`.
+ * @throws When a read fails, the accounts come from a bank below the epoch read's slot, or the
+ *   answer lists a different number of accounts.
+ */
+export async function readConfirmedAccounts(
+  addresses: readonly Address[]
+): Promise<{ blockHeight: bigint; accounts: MaybeEncodedAccount[] }> {
   const rpc = createClusterRpc();
   const epochInfo = await rpc.getEpochInfo({ commitment: "confirmed" }).send();
   const response = await rpc
-    .getMultipleAccounts(effect.addresses, {
+    .getMultipleAccounts(addresses, {
       commitment: "confirmed",
       minContextSlot: epochInfo.absoluteSlot,
       encoding: "base64",
@@ -522,15 +540,15 @@ async function observeRecurringPaymentStep(
       `getMultipleAccounts answered from slot ${response.context.slot}, below ${epochInfo.absoluteSlot}`
     );
   }
-  if (response.value.length !== effect.addresses.length) {
+  if (response.value.length !== addresses.length) {
     throw new Error(
-      `getMultipleAccounts returned ${response.value.length} accounts for ${effect.addresses.length} addresses`
+      `getMultipleAccounts returned ${response.value.length} accounts for ${addresses.length} addresses`
     );
   }
-  const accounts = effect.addresses.map((address, index) =>
+  const accounts = addresses.map((address, index) =>
     parseBase64RpcAccount(address, response.value[index])
   );
-  return { blockHeight: epochInfo.blockHeight, accounts, landed: effect.landed(accounts) };
+  return { blockHeight: epochInfo.blockHeight, accounts };
 }
 
 /**
@@ -1226,6 +1244,60 @@ export function delegationCreatedEffect(subscriptionPda: Address): RecurringPaym
   return {
     addresses: [subscriptionPda],
     landed: ([delegation]) => decodeSubscriptionDelegation(delegation).exists,
+  };
+}
+
+/**
+ * A collection pull's effect, decided against the delegation's pre-image. The program resets the
+ * period's pulled amount only inside a pull that opens a new period, so after the first pull the
+ * pulled amount alone cannot tell a landed pull from none: the pull landed when the period moved
+ * on and at least the amount was pulled in it, or the period is unchanged and the pulled amount
+ * grew by at least the amount. The mint rides the same read for its decimals. A delegation that
+ * is absent while the pull is in flight is logged as an error and throws, which the reader takes
+ * as pending: SDP never closes a delegation it collects from, so its absence never reads as
+ * dropped. An absent or undecodable mint throws too.
+ *
+ * @param input - The pull's accounts, amount and pre-image.
+ * @param input.subscriptionPda - The delegation's address.
+ * @param input.mint - The collected token's mint.
+ * @param input.amount - The collected amount as a decimal string, as the attempt stores it.
+ * @param input.preImage - The delegation's period start and amount pulled read before signing.
+ * @param input.logContext - What the absent-delegation log names.
+ * @returns The effect.
+ */
+export function collectionPulledEffect(input: {
+  subscriptionPda: Address;
+  mint: Address;
+  amount: string;
+  preImage: CollectionAttemptDelegationPreImage;
+  logContext: RecurringPaymentStepLogContext;
+}): RecurringPaymentStepEffect {
+  return {
+    addresses: [input.subscriptionPda, input.mint],
+    landed: ([delegationAccount, mintAccount]) => {
+      if (!mintAccount.exists) {
+        throw new Error(`Recurring payment token mint ${input.mint} is not on chain`);
+      }
+      if (!delegationAccount.exists) {
+        logEvent("error", {
+          event: "sdp_api_recurring_payment_collection_delegation_absent",
+          ...input.logContext,
+          subscription_pda: input.subscriptionPda,
+        });
+        throw new Error(
+          `Subscription delegation ${input.subscriptionPda} is absent while a collection is in flight`
+        );
+      }
+      const amount = parseDecimalAmount(input.amount, decodeMint(mintAccount).data.decimals);
+      const delegation = decodeSubscriptionDelegation(delegationAccount).data;
+      if (delegation.currentPeriodStartTs > input.preImage.periodStartTs) {
+        return delegation.amountPulledInPeriod >= amount;
+      }
+      return (
+        delegation.currentPeriodStartTs === input.preImage.periodStartTs &&
+        delegation.amountPulledInPeriod >= input.preImage.amountPulled + amount
+      );
+    },
   };
 }
 
