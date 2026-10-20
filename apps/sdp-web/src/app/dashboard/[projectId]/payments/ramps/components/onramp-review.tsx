@@ -1,5 +1,6 @@
 "use client";
 
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import { CUSTODY_PROVIDER_CATALOG_BY_ID } from "@sdp/types/custody";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { PaymentRampEstimate } from "@sdp/types/payments";
@@ -168,6 +169,12 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
   const now = useSecondsTick(ok?.expiresAt !== undefined);
   const fiat = selectedRampPair.fiatCurrency.toUpperCase();
   const asset = getCryptoRailAssetLabel(selectedRampPair.assetRail);
+  const total = ok?.totalFiatAmount;
+  const totalIncludesFees =
+    total !== undefined &&
+    isDecimalString(total) &&
+    isDecimalString(fields.amount) &&
+    compareDecimalAmounts(total, fields.amount) !== 0;
 
   return (
     <div className="space-y-8">
@@ -183,9 +190,9 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
           />
           <ReviewRow
             label={t("DashboardPayments.ramps.youPay")}
-            value={`${formatDecimalAmount(ok?.totalFiatAmount ?? fields.amount, locale)} ${fiat}`}
+            value={`${formatDecimalAmount(total ?? fields.amount, locale)} ${fiat}`}
             aside={
-              ok?.totalFiatAmount && Number(ok.totalFiatAmount) !== Number(fields.amount)
+              totalIncludesFees
                 ? t("DashboardPayments.ramps.youPayIncludesFees", {
                     amount: `${formatDecimalAmount(fields.amount, locale)} ${fiat}`,
                   })

@@ -353,7 +353,7 @@ function estimate({ segments, body, now }: WriteContext): DemoWriteResult {
         cryptoAmount: cryptoText(amounts),
         // Fiat per one unit of the crypto, as the providers quote it.
         exchangeRate: scaled(1 / amounts.rate, 6),
-        ...(direction === "onramp" ? { totalFiatAmount: scaled(amounts.fiat, 2) } : {}),
+        totalFiatAmount: direction === "onramp" ? scaled(amounts.fiat, 2) : undefined,
         fees: {
           currency: fiatCurrency as PaymentRampEstimate["fiatCurrency"],
           total: scaled(amounts.fee, 2),

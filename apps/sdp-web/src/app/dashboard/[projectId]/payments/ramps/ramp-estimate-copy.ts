@@ -1,3 +1,4 @@
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { PaymentRampEstimate, RampProviderEstimateResult } from "@sdp/types/payments";
 import type { MessageKey } from "@/i18n/messages";
@@ -38,11 +39,11 @@ export function estimateRateCopy(
   estimate: PaymentRampEstimate,
   locale: string
 ): string | null {
-  const rate = Number(estimate.exchangeRate);
-  if (!Number.isFinite(rate) || rate <= 0) return null;
+  const rate = estimate.exchangeRate;
+  if (!isDecimalString(rate) || compareDecimalAmounts(rate, "0") <= 0) return null;
   return t("DashboardPayments.ramps.rateLine", {
     asset: getCryptoRailAssetLabel(estimate.assetRail),
-    rate: formatEstimateFigure(estimate.exchangeRate, locale),
+    rate: formatEstimateFigure(rate, locale),
     fiat: estimate.fiatCurrency,
   });
 }
