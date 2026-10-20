@@ -1692,10 +1692,12 @@ async function adoptRecoveredCollectionAttempt(input: {
  * program's per-period cap refuses a second pull in the same period. A signature still not
  * indexed, or one whose instruction the matcher does not recognize (a transfer-hook account
  * resolved differently since), may still be a pull that moved money, and failing it would retry
- * it into the next period, so it is logged by kind and stays pending. Those two may never settle,
- * so they bump the attempt's `updated_at` (only while it is processing) and leave the cron's
- * oldest-first recovery batch for one stale window instead of starving the attempts behind them;
- * every other pending answer writes nothing.
+ * it into the next period, so it is logged by kind and stays pending. A failed-on-chain signature
+ * whose transfer the tracker already marked successful cannot be failed either (the transfer guard
+ * refuses it), so it stays pending too. Those three may never settle, so they bump the attempt's
+ * `updated_at` (only while it is processing) and leave the cron's oldest-first recovery batch for
+ * one stale window instead of starving the attempts behind them; every other pending answer
+ * writes nothing.
  *
  * @param input - The recovered attempt and the schedule it collects for.
  * @param input.env - The API environment.
@@ -1814,6 +1816,9 @@ async function finishLandedRecurringPaymentCollection(input: {
       break;
     default:
       return assertNever(verification);
+  }
+  if (isSuccessfulPaymentTransferStatus(input.transfer.status)) {
+    await rotateStuckCollectionAttempt(input);
   }
   await markRecurringPaymentCollectionFailedAtomically({
     env: input.env,
