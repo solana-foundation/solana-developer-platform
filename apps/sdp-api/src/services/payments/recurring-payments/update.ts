@@ -85,7 +85,6 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
-  type ActionableRecurringPaymentStep,
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   authorizationSetupEffect,
@@ -100,7 +99,6 @@ import {
   type RecurringPaymentPlanMetadataPreImage,
   type RecurringPaymentStepEffect,
   type RecurringPaymentStepLogContext,
-  type RecurringPaymentStepRead,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   recurringPaymentErrorMessage,
@@ -921,8 +919,6 @@ function planMetadataPreImage(
 type UpdateAttemptStepSlot = Extract<RecurringPaymentStepSignatureSlot, { row: "update_attempt" }>;
 type UpdateAttemptStepColumn = UpdateAttemptStepSlot["column"];
 
-const UNSETTLED_STEP_MESSAGE = "Recurring payment step is not settled on chain yet; retry";
-
 /**
  * An update step that cannot land, raised inside the steps that unwind (a metadata update through
  * its plan update; a replacement through its authorization): refused at preflight, dropped past
@@ -990,9 +986,9 @@ async function insideUpdatePhase<T>(phase: UpdatePhase, run: () => Promise<T>): 
 
 /**
  * Reads an unwinding step an earlier run saved a signature for, and acts on it: landed goes on
- * (and settles the phase when it was the unread step), unsent is sent again (no read follows a
- * save with unsent; it is sent like a fresh step), pending keeps the attempt in flight, and
- * dropped fails the update and clears the saved signature with it.
+ * (and settles the phase when it was the unread step), pending keeps the attempt in flight, and
+ * dropped fails the update and clears the saved signature with it. A saved step never reads as
+ * unsent; the reader's unsent arm is kept in flight with pending.
  *
  * @param input - The saved step.
  * @param input.phase - The run's unwinding steps.
@@ -1002,7 +998,7 @@ async function insideUpdatePhase<T>(phase: UpdatePhase, run: () => Promise<T>): 
  * @param input.effect - The step's effect.
  * @param input.failureMessage - The TRANSACTION_FAILED message a dropped step answers with.
  * @param input.logContext - What the step's logs name.
- * @returns The landed or unsent step, with its effect accounts.
+ * @returns The landed step's effect accounts.
  * @throws ResumedStepUnsettledError when the step is pending.
  * @throws RecurringPaymentUpdateStepFailedError when the step is dropped.
  */
@@ -1014,8 +1010,8 @@ async function readSavedUnwindStep(input: {
   effect: RecurringPaymentStepEffect;
   failureMessage: string;
   logContext: RecurringPaymentStepLogContext;
-}): Promise<ActionableRecurringPaymentStep> {
-  const step: RecurringPaymentStepRead = await readRecurringPaymentStep({
+}): Promise<readonly MaybeEncodedAccount[]> {
+  const step = await readRecurringPaymentStep({
     effect: input.effect,
     savedSignature: input.signature,
     lastValidBlockHeight: input.lastValidBlockHeight,
@@ -1026,11 +1022,10 @@ async function readSavedUnwindStep(input: {
       if (input.phase.unreadSavedStep === input.slot.column) {
         input.phase.unreadSavedStep = null;
       }
-      return step;
+      return step.accounts;
     case "unsent":
-      return step;
     case "pending":
-      throw new ResumedStepUnsettledError(UNSETTLED_STEP_MESSAGE);
+      throw new ResumedStepUnsettledError();
     case "dropped":
       throw new RecurringPaymentUpdateStepFailedError({
         failure: transactionFailed(input.failureMessage),
@@ -1043,7 +1038,12 @@ async function readSavedUnwindStep(input: {
 
 /** A step send as settled: sent and confirmed now, or found landed after its send failed. */
 type SettledUpdateStep =
-  | { state: "sent"; signature: Signature }
+  | {
+      state: "sent";
+      signature: Signature;
+      /** The slot the send confirmed in; reads after it ask for a bank at least this new. */
+      confirmedSlot: bigint;
+    }
   | {
       state: "landed";
       /** Null when the send was refused as already done, which cleared its slot. */
@@ -1055,7 +1055,9 @@ type SettledUpdateStep =
  * What a step that cannot land does to its update: `unwind` fails it back to `active`; the old
  * subscription's cancel, past the unwinding steps, leaves it in flight to send again.
  */
-type UpdateStepFailureOutcome = "unwind" | "stay_in_flight";
+type UpdateStepFailureOutcome =
+  | { outcome: "unwind" }
+  | { outcome: "stay_in_flight"; oldSubscriptionPda: Address };
 
 interface UpdateStepSend {
   env: Env;
@@ -1112,8 +1114,8 @@ async function sendUpdateStep(input: UpdateStepSend): Promise<SettledUpdateStep>
         attemptId: input.attemptId,
       }),
     });
-    await confirmSubscriptionSignature(signature, input.failureMessage);
-    return { state: "sent", signature };
+    const confirmedSlot = await confirmSubscriptionSignature(signature, input.failureMessage);
+    return { state: "sent", signature, confirmedSlot };
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     if (error instanceof SponsoredSendRefusedError) {
@@ -1162,14 +1164,15 @@ async function reloadSavedUpdateStep(
       statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
     });
   } catch (readError) {
-    getLogger().warn(
-      { ...input.logContext, err: readError },
-      "Recurring payment update step could not be reloaded after a failed send"
-    );
-    throw new ResumedStepUnsettledError(UNSETTLED_STEP_MESSAGE);
+    logEvent("warn", {
+      event: "sdp_api_recurring_payment_step_reload_failed",
+      ...input.logContext,
+      ...describeError(readError),
+    });
+    throw new ResumedStepUnsettledError();
   }
   if (latest === null || latest.id !== input.attemptId) {
-    throw new ResumedStepUnsettledError(UNSETTLED_STEP_MESSAGE);
+    throw new ResumedStepUnsettledError();
   }
   return {
     signature: parseNullableStoredSignature(latest[input.slot.column]),
@@ -1205,18 +1208,77 @@ async function settleFailedUpdateStep(
     case "landed":
       return { state: "landed", signature: saved.signature, accounts: step.accounts };
     case "pending":
-      throw new ResumedStepUnsettledError(UNSETTLED_STEP_MESSAGE);
+      throw new ResumedStepUnsettledError();
     case "unsent":
       return failUpdateStep(input, failure, null);
-    case "dropped":
-      return failUpdateStep(
-        input,
-        transactionFailed(input.failureMessage),
-        saved.signature === null ? null : { slot: input.slot, signature: saved.signature }
-      );
+    case "dropped": {
+      const clear =
+        saved.signature === null ? null : { slot: input.slot, signature: saved.signature };
+      if (clear !== null && input.onFailure.outcome === "stay_in_flight") {
+        await clearDroppedOldCancel({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: input.recurringPaymentId,
+          attemptId: input.attemptId,
+          signature: clear.signature,
+          oldSubscriptionPda: input.onFailure.oldSubscriptionPda,
+          logContext: input.logContext,
+        });
+      }
+      return failUpdateStep(input, transactionFailed(input.failureMessage), clear);
+    }
     default:
       return assertNever(step);
   }
+}
+
+/**
+ * Clears a dropped old-subscription cancel's saved signature, only while its slot still holds
+ * it, and logs it, so the next send of the cancel starts from an empty slot.
+ *
+ * @param input - The dropped cancel.
+ * @param input.env - The environment.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.recurringPaymentId - The schedule.
+ * @param input.attemptId - The update attempt.
+ * @param input.signature - The dropped cancel's saved signature.
+ * @param input.oldSubscriptionPda - The old delegation's address.
+ * @param input.logContext - What the step's logs name.
+ * @throws AppError CONFLICT when the slot no longer holds the signature.
+ */
+async function clearDroppedOldCancel(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  attemptId: string;
+  signature: Signature;
+  oldSubscriptionPda: Address;
+  logContext: RecurringPaymentStepLogContext;
+}): Promise<void> {
+  const cleared = await createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  ).clearStepSignature({
+    slot: { row: "update_attempt", column: "old_cancel_signature" },
+    id: input.attemptId,
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    signature: input.signature,
+    updatedAt: new Date().toISOString(),
+  });
+  if (!cleared) {
+    throw conflict("Recurring payment step signature changed concurrently");
+  }
+  logEvent("error", {
+    event: "sdp_api_recurring_payment_old_cancel_dropped",
+    ...input.logContext,
+    signature: input.signature,
+    old_subscription_pda: input.oldSubscriptionPda,
+  });
 }
 
 /**
@@ -1225,7 +1287,6 @@ async function settleFailedUpdateStep(
  * @param input - The step's send.
  * @param failure - The error the request answers with.
  * @param clear - A dropped step's slot and saved signature, or null.
- * @returns Never.
  * @throws RecurringPaymentUpdateStepFailedError for an unwinding step.
  * @throws `failure` for the old subscription's cancel.
  */
@@ -1234,7 +1295,7 @@ function failUpdateStep(
   failure: Error,
   clear: { slot: UpdateAttemptStepSlot; signature: Signature } | null
 ): never {
-  switch (input.onFailure) {
+  switch (input.onFailure.outcome) {
     case "unwind":
       throw new RecurringPaymentUpdateStepFailedError({ failure, clear });
     case "stay_in_flight":
@@ -1316,48 +1377,36 @@ async function runMetadataScheduleUpdate(input: {
     };
     // A signature saved in the step's slot means an earlier run reached the send (HOO-2044): the
     // plan's metadata, against the pre-image the schedule recorded, settles whether it landed.
-    const saved =
-      planUpdateSignature === null
-        ? null
-        : { signature: planUpdateSignature, preImage: planMetadataPreImage(input.claimed) };
-    const preImage = saved === null ? null : saved.preImage;
-    const step =
-      saved === null
-        ? null
-        : await readSavedUnwindStep({
-            phase,
-            slot,
-            signature: saved.signature,
-            lastValidBlockHeight: attempt.last_valid_block_height,
-            effect: planMetadataUpdatedEffect({
-              planPda,
-              preImage: saved.preImage,
-              targetMetadataUri,
-              logContext,
-            }),
-            failureMessage,
-            logContext,
-          });
-    if (step !== null && step.state === "landed") {
+    if (planUpdateSignature !== null) {
+      await readSavedUnwindStep({
+        phase,
+        slot,
+        signature: planUpdateSignature,
+        lastValidBlockHeight: attempt.last_valid_block_height,
+        effect: planMetadataUpdatedEffect({
+          planPda,
+          preImage: planMetadataPreImage(input.claimed),
+          targetMetadataUri,
+          logContext,
+        }),
+        failureMessage,
+        logContext,
+      });
       return resolvedNextDueAt;
     }
 
-    const onChainPlan =
-      step === null
-        ? await subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment: "confirmed" })
-        : subscriptionsProgram.decodePlan(step.accounts[0]);
+    const onChainPlan = await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
+      commitment: "confirmed",
+    });
     if (!onChainPlan.exists) {
       throw transactionFailed("Subscription plan was not found on-chain");
     }
-    // The send expects this pre-image, so the program refuses a plan changed outside this attempt
-    // instead of overwriting it; a resend expects the schedule's record, a fresh send the plan as read.
-    const expectedPreImage: RecurringPaymentPlanMetadataPreImage =
-      preImage === null
-        ? {
-            createdAt: onChainPlan.data.data.terms.createdAt.toString(),
-            metadataUri: removeNullCharacters(onChainPlan.data.data.metadataUri),
-          }
-        : preImage;
+    // The send expects the plan as read, so the program refuses a plan changed since instead of
+    // overwriting it; a failed send's re-read compares against the same pre-image.
+    const expectedPreImage: RecurringPaymentPlanMetadataPreImage = {
+      createdAt: onChainPlan.data.data.terms.createdAt.toString(),
+      metadataUri: removeNullCharacters(onChainPlan.data.data.metadataUri),
+    };
 
     attempt = requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
@@ -1370,11 +1419,9 @@ async function runMetadataScheduleUpdate(input: {
     );
     const instruction = await subscriptionsProgram.getUpdatePlanOverlayInstruction({
       endTs: onChainPlan.data.data.endTs,
-      expectedCreatedAt:
-        preImage === null ? onChainPlan.data.data.terms.createdAt : BigInt(preImage.createdAt),
+      expectedCreatedAt: onChainPlan.data.data.terms.createdAt,
       expectedEndTs: onChainPlan.data.data.endTs,
-      expectedMetadataUri:
-        preImage === null ? onChainPlan.data.data.metadataUri : preImage.metadataUri,
+      expectedMetadataUri: onChainPlan.data.data.metadataUri,
       expectedPullers: onChainPlan.data.data.pullers,
       metadataUri: targetMetadataUri,
       owner: sourceSigner,
@@ -1400,7 +1447,7 @@ async function runMetadataScheduleUpdate(input: {
         logContext,
       }),
       alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__STALE_PLAN_APPROVAL,
-      onFailure: "unwind",
+      onFailure: { outcome: "unwind" },
       failureMessage,
       logContext,
     });
@@ -1470,20 +1517,17 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   const savedSetupSignature = parseNullableStoredSignature(
     input.attempt.authorization_setup_signature
   );
-  const resumed =
-    savedSetupSignature === null
-      ? null
-      : await readSavedUnwindStep({
-          phase: input.phase,
-          slot,
-          signature: savedSetupSignature,
-          lastValidBlockHeight: input.attempt.last_valid_block_height,
-          effect,
-          failureMessage,
-          logContext,
-        });
-  if (resumed !== null && resumed.state === "landed") {
-    return subscriptionsProgram.decodeSubscriptionAuthority(resumed.accounts[0]);
+  if (savedSetupSignature !== null) {
+    const accounts = await readSavedUnwindStep({
+      phase: input.phase,
+      slot,
+      signature: savedSetupSignature,
+      lastValidBlockHeight: input.attempt.last_valid_block_height,
+      effect,
+      failureMessage,
+      logContext,
+    });
+    return subscriptionsProgram.decodeSubscriptionAuthority(accounts[0]);
   }
   if (input.subscriptionAuthority.exists && input.sourceTokenAccount.exists) {
     return input.subscriptionAuthority;
@@ -1525,7 +1569,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     slot,
     effect,
     alreadyDone: null,
-    onFailure: "unwind",
+    onFailure: { outcome: "unwind" },
     failureMessage,
     logContext,
   });
@@ -1539,7 +1583,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   const subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
     input.rpc,
     input.subscriptionAuthorityAddress,
-    { commitment: "confirmed" }
+    { commitment: "confirmed", minContextSlot: settled.confirmedSlot }
   );
   if (!subscriptionAuthority.exists) {
     throw transactionFailed("Subscription authority was not found on-chain");
@@ -1832,10 +1876,11 @@ function latestSavedReplacementStep(
 /**
  * Reads the old subscription's cancel an earlier run saved a signature for. A dropped cancel is
  * cleared, only while its slot still holds the signature, and logged, for the caller to send it
- * again: the new mandate is live, so the cancel never unwinds.
+ * again: the new mandate is live, so the cancel never unwinds. A saved cancel never reads as
+ * unsent; the reader's unsent arm is kept in flight with pending.
  *
  * @param input - The saved cancel.
- * @param input.recurringRepo - The tenant's recurring payments repository.
+ * @param input.env - The environment.
  * @param input.attempt - The run's attempt.
  * @param input.signature - The saved cancel signature.
  * @param input.oldSubscriptionPda - The old delegation's address.
@@ -1845,7 +1890,7 @@ function latestSavedReplacementStep(
  * @throws AppError CONFLICT when the slot no longer holds the dropped signature.
  */
 async function readSavedOldCancel(input: {
-  recurringRepo: PaymentRecurringPaymentsRepository;
+  env: Env;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   signature: Signature;
   oldSubscriptionPda: Address;
@@ -1861,30 +1906,20 @@ async function readSavedOldCancel(input: {
     case "landed":
       return true;
     case "unsent":
-      return false;
     case "pending":
-      throw new ResumedStepUnsettledError(UNSETTLED_STEP_MESSAGE);
-    case "dropped": {
-      const cleared = await input.recurringRepo.clearStepSignature({
-        slot: { row: "update_attempt", column: "old_cancel_signature" },
-        id: input.attempt.id,
-        recurringPaymentId: input.attempt.recurring_payment_id,
+      throw new ResumedStepUnsettledError();
+    case "dropped":
+      await clearDroppedOldCancel({
+        env: input.env,
         organizationId: input.attempt.organization_id,
         projectId: input.attempt.project_id,
+        recurringPaymentId: input.attempt.recurring_payment_id,
+        attemptId: input.attempt.id,
         signature: input.signature,
-        updatedAt: new Date().toISOString(),
-      });
-      if (!cleared) {
-        throw conflict("Recurring payment step signature changed concurrently");
-      }
-      logEvent("error", {
-        event: "sdp_api_recurring_payment_old_cancel_dropped",
-        ...input.logContext,
-        signature: input.signature,
-        old_subscription_pda: input.oldSubscriptionPda,
+        oldSubscriptionPda: input.oldSubscriptionPda,
+        logContext: input.logContext,
       });
       return false;
-    }
     default:
       return assertNever(step);
   }
@@ -1955,7 +1990,7 @@ async function sendReplacementPlanCreation(input: {
     slot: input.slot,
     effect: planCreatedEffect(input.planPda),
     alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__PLAN_ALREADY_EXISTS,
-    onFailure: "unwind",
+    onFailure: { outcome: "unwind" },
     failureMessage: input.failureMessage,
     logContext: input.logContext,
   });
@@ -1964,6 +1999,7 @@ async function sendReplacementPlanCreation(input: {
       ? subscriptionsProgram.decodePlan(settled.accounts[0])
       : await subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
           commitment: "confirmed",
+          minContextSlot: settled.confirmedSlot,
         });
   return { attempt, signature: settled.signature, onChainPlan };
 }
@@ -2074,7 +2110,7 @@ async function sendReplacementAuthorization(input: {
     slot: input.slot,
     effect: delegationCreatedEffect(input.subscriptionPda),
     alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__ALREADY_SUBSCRIBED,
-    onFailure: "unwind",
+    onFailure: { outcome: "unwind" },
     failureMessage: input.failureMessage,
     logContext: input.logContext,
   });
@@ -2206,7 +2242,7 @@ async function runReplacementUpdate(input: {
     // A signature saved in a step's slot means an earlier run reached its send (HOO-2044): the
     // chain settles whether it landed before anything is sent again. A step with no saved
     // signature never left, and reads nothing extra.
-    const planStep =
+    const landedPlanAccounts =
       savedPlanCreationSignature === null
         ? null
         : await readSavedUnwindStep({
@@ -2220,9 +2256,7 @@ async function runReplacementUpdate(input: {
           });
     let planCreationSignature = savedPlanCreationSignature;
     let onChainPlan =
-      planStep !== null && planStep.state === "landed"
-        ? subscriptionsProgram.decodePlan(planStep.accounts[0])
-        : null;
+      landedPlanAccounts === null ? null : subscriptionsProgram.decodePlan(landedPlanAccounts[0]);
     if (!onChainPlan) {
       const created = await sendReplacementPlanCreation({
         env: input.env,
@@ -2302,20 +2336,19 @@ async function runReplacementUpdate(input: {
       attempt_id: attempt.id,
       step: "authorize_subscription",
     };
-    const authorizeStep =
-      savedAuthorizationSignature === null
-        ? null
-        : await readSavedUnwindStep({
-            phase,
-            slot: authorizeSlot,
-            signature: savedAuthorizationSignature,
-            lastValidBlockHeight: attempt.last_valid_block_height,
-            effect: delegationCreatedEffect(subscriptionPda),
-            failureMessage: authorizeFailureMessage,
-            logContext: authorizeLogContext,
-          });
+    if (savedAuthorizationSignature !== null) {
+      await readSavedUnwindStep({
+        phase,
+        slot: authorizeSlot,
+        signature: savedAuthorizationSignature,
+        lastValidBlockHeight: attempt.last_valid_block_height,
+        effect: delegationCreatedEffect(subscriptionPda),
+        failureMessage: authorizeFailureMessage,
+        logContext: authorizeLogContext,
+      });
+    }
     let authorizationSignature = savedAuthorizationSignature;
-    if (authorizeStep === null || authorizeStep.state === "unsent") {
+    if (savedAuthorizationSignature === null) {
       const authorized = await sendReplacementAuthorization({
         env: input.env,
         organizationId: input.organizationId,
@@ -2368,7 +2401,7 @@ async function runReplacementUpdate(input: {
   const oldCanceledOnChain =
     savedOldCancelSignature !== null &&
     (await readSavedOldCancel({
-      recurringRepo,
+      env: input.env,
       attempt,
       signature: savedOldCancelSignature,
       oldSubscriptionPda: replacement.oldSubscriptionPda,
@@ -2415,7 +2448,10 @@ async function runReplacementUpdate(input: {
         slot: { row: "update_attempt", column: "old_cancel_signature" },
         effect: delegationCanceledEffect(replacement.oldSubscriptionPda),
         alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__SUBSCRIPTION_ALREADY_CANCELLED,
-        onFailure: "stay_in_flight",
+        onFailure: {
+          outcome: "stay_in_flight",
+          oldSubscriptionPda: replacement.oldSubscriptionPda,
+        },
         failureMessage: "Recurring payment old subscription cancellation failed on-chain",
         logContext: cancelOldLogContext,
       });
@@ -2471,6 +2507,8 @@ async function runReplacementUpdate(input: {
  * Fails an update whose unwinding step cannot land, in one transaction: clears a dropped step's
  * saved signature while its slot still holds it, fails the attempt (its stage stays where the
  * run left it), and moves the schedule from `updating` back to `active` with the activator it had.
+ * Both writes are fenced to this run: the attempt must still be `processing`, and the schedule
+ * must still carry this run's claim stamp, so a stalled run never undoes a later run's re-claim.
  *
  * @param input - The run's schedule, attempt and step failure.
  * @param input.env - The environment.
@@ -2479,9 +2517,9 @@ async function runReplacementUpdate(input: {
  * @param input.claimed - The claimed schedule.
  * @param input.attempt - The run's attempt.
  * @param input.stepFailure - The step failure.
- * @returns Nothing.
- * @throws AppError CONFLICT when the slot no longer holds the dropped signature or the schedule
- *   left `updating`; the transaction rolls back and the attempt stays in flight.
+ * @throws AppError CONFLICT when the slot no longer holds the dropped signature, the attempt is no
+ *   longer `processing`, or the schedule left this run's claim; the transaction rolls back and the
+ *   attempt stays in flight.
  */
 async function failRecurringPaymentUpdate(input: {
   env: Env;
@@ -2516,6 +2554,7 @@ async function failRecurringPaymentUpdate(input: {
         projectId: input.projectId,
         status: "failed",
         error: recurringPaymentErrorMessage(input.stepFailure.failure),
+        expectedStatus: "processing",
         updatedAt: failedAt,
       })
     );
@@ -2525,6 +2564,7 @@ async function failRecurringPaymentUpdate(input: {
       projectId: input.projectId,
       status: "active",
       expectedStatus: "updating",
+      expectedUpdatedAt: input.claimed.updated_at,
       updatedAt: failedAt,
     });
     if (updatedRecurringPayment === null) {

@@ -129,15 +129,17 @@ Recurring payments carve this out: their cron resumes and completes a half-finis
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Collection saves its signed transaction before
 broadcast. Activation, lifecycle and update save a step's signature and its last valid block
-height on the attempt row before the send, and clear both only when the send is provably refused.
+height on the attempt row before the send, and clear both only when the send is provably refused
+or proven dropped.
 A run that resumes a step an earlier run reached reads it through the step reader
 (`readRecurringPaymentStep`) in two RPC calls: the `confirmed` epoch info, then the step's effect
 accounts at `confirmed` from a bank at that slot or later. The step is in one of four states
 (`GLOSSARY.md`): landed when its effect shows, so it is not sent again; unsent when no signature is
 saved, so it is sent; dropped when a signature is saved, the effect is absent and the chain is past
-the saved expiry, so the send can never land: its signature is cleared and the step takes its
-failure action (an update's plan, setup, authorization or plan update fails the update back to
-`active` on what it had; its old subscription's cancel is sent again); pending otherwise. No signature
+the saved expiry, so the send can never land; pending otherwise. In an update, a dropped step's
+signature is cleared and the step takes its failure action: its plan, setup, authorization or plan
+update fails the update back to `active` on what it had, and its old subscription's cancel is sent
+again. Activation and lifecycle keep failing a dropped step without clearing it until HOO-2192. No signature
 status is read: the effect and the expiry decide, which also covers a send that failed on chain.
 A pending step (its send may still land, or the read failed) answers 409 and leaves the attempt in
 flight, never failed or reset, so recovery finishes it.

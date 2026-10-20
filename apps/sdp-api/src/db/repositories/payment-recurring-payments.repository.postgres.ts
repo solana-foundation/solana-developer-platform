@@ -1325,6 +1325,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
+              AND (?::boolean = false OR status = ?)
           RETURNING *`
         )
         .bind(
@@ -1357,7 +1358,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.attemptId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.expectedStatus !== undefined,
+          input.expectedStatus === undefined ? null : input.expectedStatus
         )
         .first<Record<string, unknown>>();
 

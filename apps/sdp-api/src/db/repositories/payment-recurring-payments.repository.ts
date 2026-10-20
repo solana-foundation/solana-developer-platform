@@ -353,6 +353,8 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   adoptIdempotencyKey?: string | null;
   /** The adopting request's fingerprint, recorded only with its key. */
   adoptIdempotencyFingerprint?: string | null;
+  /** When set, the write applies only while the attempt still has this status. */
+  expectedStatus?: PaymentRecurringPaymentAttemptStatus;
   updatedAt: string;
 }
 

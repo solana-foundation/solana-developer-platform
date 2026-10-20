@@ -402,8 +402,8 @@ export type RecurringPaymentStepRead =
  * failing or resetting; the request answers 409.
  */
 export class ResumedStepUnsettledError extends AppError {
-  constructor(message: string) {
-    super("CONFLICT", message);
+  constructor() {
+    super("CONFLICT", "Recurring payment step is not settled on chain yet; retry");
     this.name = "ResumedStepUnsettledError";
   }
 }
@@ -536,9 +536,7 @@ export function requireActionableStep(
     case "dropped":
       throw transactionFailed(failureMessage);
     case "pending":
-      throw new ResumedStepUnsettledError(
-        "Recurring payment step is not settled on chain yet; retry"
-      );
+      throw new ResumedStepUnsettledError();
     default:
       return assertNever(step);
   }
@@ -696,10 +694,18 @@ export function authorizationSetupEffect(input: {
   };
 }
 
+/**
+ * Waits for a sent subscription transaction to reach `confirmed`.
+ *
+ * @param signature - The sent transaction's signature.
+ * @param message - The TRANSACTION_FAILED message when the transaction failed on chain.
+ * @returns The slot the transaction was confirmed in, for reads that must not see an older bank.
+ * @throws AppError TRANSACTION_FAILED with `message` when the confirmed status carries an error.
+ */
 export async function confirmSubscriptionSignature(
   signature: Signature,
   message: string
-): Promise<void> {
+): Promise<bigint> {
   const rpc = createClusterRpc();
   const confirmation = await confirmTransaction(rpc, signature, {
     commitment: "confirmed",
@@ -708,6 +714,7 @@ export async function confirmSubscriptionSignature(
   if (confirmation.err) {
     throw transactionFailed(message);
   }
+  return confirmation.slot;
 }
 
 export function recurringPaymentErrorMessage(error: Error): string {
