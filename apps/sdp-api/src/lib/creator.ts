@@ -1,13 +1,9 @@
 import type { Context } from "hono";
+import { getDb } from "@/db";
 import type { Env } from "@/types/env";
 import { getAuth } from "./auth";
 import { internalError } from "./errors";
 
-/**
- * The user a write is attributed to: the Clerk user, or for an API key the user
- * who created it, which authentication read from the key's live row. Adds no
- * statement of its own.
- */
 export async function resolveCreatorUserId(c: Context<{ Bindings: Env }>): Promise<string> {
   const auth = getAuth(c);
 
@@ -15,10 +11,18 @@ export async function resolveCreatorUserId(c: Context<{ Bindings: Env }>): Promi
     return auth.userId;
   }
 
-  const createdBy = c.get("keyCreator");
-  if (!createdBy) {
+  if (!auth.apiKeyId) {
     throw internalError("Could not resolve creator user");
   }
 
-  return createdBy;
+  const creator = await getDb(c.env)
+    .prepare(`SELECT created_by FROM api_keys WHERE id = ? AND organization_id = ?`)
+    .bind(auth.apiKeyId, auth.organizationId)
+    .first<{ created_by: string }>();
+
+  if (!creator?.created_by) {
+    throw internalError("Could not resolve creator user");
+  }
+
+  return creator.created_by;
 }

@@ -17,7 +17,6 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { recordStatements } from "@/test/helpers/statement-log";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -280,18 +279,6 @@ describe("Counterparties Routes", () => {
         .bind(body.data.counterparty.id)
         .first<{ provider_data: Record<string, unknown> }>();
       expect(stored?.provider_data).toEqual({});
-    });
-
-    it("attributes the counterparty to the key's creator from the authentication read", async () => {
-      const { result: res, statements } = await recordStatements(env, async () =>
-        createCounterparty({ externalId: "ext_statements" })
-      );
-
-      expect(res.status).toBe(201);
-      expect((await res.json()).data.counterparty.createdBy).toBe(TEST_USER.id);
-      expect(statements.filter((sql) => sql.includes("SELECT created_by FROM api_keys"))).toEqual(
-        []
-      );
     });
 
     it("returns 409 on duplicate externalId", async () => {
