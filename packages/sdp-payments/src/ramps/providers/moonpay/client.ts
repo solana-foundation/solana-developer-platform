@@ -72,6 +72,7 @@ const moonpayBuyQuoteSchema = z.object({
   feeAmount: z.number(),
   networkFeeAmount: z.number(),
   extraFeeAmount: z.number(),
+  totalAmount: z.number().optional(),
 });
 
 /** The fields `estimateOfframp` reads from a MoonPay sell quote. */
@@ -571,6 +572,16 @@ export class MoonpayRampClient implements RampProvider {
       fiatAmount: String(quote.baseCurrencyAmount),
       cryptoAmount: String(quote.quoteCurrencyAmount),
       exchangeRate: String(quote.quoteCurrencyPrice),
+      // MoonPay charges its fees on top of the amount bought.
+      totalFiatAmount:
+        quote.totalAmount === undefined
+          ? sumDecimalAmounts([
+              String(quote.baseCurrencyAmount),
+              String(quote.feeAmount),
+              String(quote.networkFeeAmount),
+              String(quote.extraFeeAmount),
+            ])
+          : decimalStringFromNumber(quote.totalAmount),
       fees: {
         currency: input.fiatCurrency,
         total: sumDecimalAmounts([

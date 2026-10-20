@@ -141,3 +141,49 @@ describe("StripeRampClient credentials", () => {
     assert.equal(result.requests, 1);
   });
 });
+
+describe("StripeRampClient estimate total", () => {
+  const quote = {
+    id: "q_total",
+    destination_network: "solana",
+    destination_currency: "usdc",
+    destination_amount: "19.990000",
+    fees: { network_fee_monetary: "0.01", transaction_fee_monetary: "0.80" },
+  };
+
+  /** Estimates 20 USD of USDC against a Stripe quote set holding `answer`. */
+  async function estimateAgainst(answer: Record<string, unknown>) {
+    assert.ok(STRIPE_TEST_KIT.env, "the Stripe kit carries sandbox credentials");
+    replayExchanges([
+      {
+        method: "GET",
+        url: /^https:\/\/api\.stripe\.com\/v1\/crypto\/onramp\/quotes\?/,
+        query: { source_amount: "20" },
+        status: 200,
+        body: {
+          id: "quote_set_total",
+          object: "crypto.onramp.quotes",
+          source_amount: "20.00",
+          source_currency: "usd",
+          rate_fetched_at: 1719947634,
+          destination_network_quotes: { solana: [answer] },
+        },
+      },
+    ]);
+    return RAMP_PROVIDER_CLIENTS.stripe.estimateOnramp(
+      { env: STRIPE_TEST_KIT.env, mode: "sandbox" },
+      { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: "20" }
+    );
+  }
+
+  it("reports what the buyer pays in all, Stripe's fees on top of the amount", async () => {
+    const estimate = await estimateAgainst({ ...quote, source_total_amount: "20.81" });
+    assert.equal(estimate.fiatAmount, "20");
+    assert.equal(estimate.totalFiatAmount, "20.81");
+  });
+
+  it("adds the fees itself when Stripe leaves the total out", async () => {
+    const estimate = await estimateAgainst(quote);
+    assert.equal(estimate.totalFiatAmount, "20.81");
+  });
+});

@@ -1368,7 +1368,10 @@ export interface PaymentRampEstimate {
   assetRail: CryptoRailId;
   fiatAmount: string;
   cryptoAmount: string;
+  /** What one unit of the crypto costs in the fiat, in both directions. */
   exchangeRate: string;
+  /** On-ramp only: what the customer pays in all, the provider's fees on top of `fiatAmount`. */
+  totalFiatAmount?: string;
   fees: PaymentRampEstimateFees;
   minFiatAmount?: string;
   maxFiatAmount?: string;

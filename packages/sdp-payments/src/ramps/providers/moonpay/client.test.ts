@@ -177,6 +177,37 @@ describe("MoonpayRampClient currency codes", () => {
   });
 });
 
+describe("MoonpayRampClient on-ramp total", () => {
+  function answerBuyQuote(body: unknown): void {
+    globalThis.fetch = async () => Response.json(body);
+  }
+
+  it("prices what the customer pays in all, fees on top of the amount", async () => {
+    answerBuyQuote(QUOTE_RESPONSE);
+
+    const estimate = await new MoonpayRampClient().estimateOnramp(runtimeContext, {
+      assetRail: "sol.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "50",
+    });
+
+    assert.equal(estimate.fiatAmount, "50");
+    assert.equal(estimate.totalFiatAmount, "51.6");
+  });
+
+  it("takes MoonPay's own total when it sends one", async () => {
+    answerBuyQuote({ ...QUOTE_RESPONSE, totalAmount: 51.61 });
+
+    const estimate = await new MoonpayRampClient().estimateOnramp(runtimeContext, {
+      assetRail: "sol.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "50",
+    });
+
+    assert.equal(estimate.totalFiatAmount, "51.61");
+  });
+});
+
 describe("MoonpayRampClient off-ramp limits", () => {
   // MoonPay's sandbox answers, 2026-10-20: a sale under the minimum is a 400
   // naming it, while one over the maximum still quotes.

@@ -5,7 +5,7 @@ import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments"
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { addDecimalAmounts, divideDecimalAmounts } from "#/decimal";
+import { addDecimalAmounts, divideDecimalAmounts, sumDecimalAmounts } from "#/decimal";
 import {
   badRequest,
   estimateNotAvailable,
@@ -152,6 +152,7 @@ const stripeOnrampQuotesSchema = z.object({
         destination_currency: z.string(),
         destination_amount: z.string(),
         fees: z.object({ network_fee_monetary: z.string(), transaction_fee_monetary: z.string() }),
+        source_total_amount: z.string().optional(),
       })
     )
   ),
@@ -446,6 +447,8 @@ export class StripeRampClient implements RampProvider {
       fiatAmount: input.fiatAmount,
       cryptoAmount: match.destination_amount,
       exchangeRate: divideDecimalAmounts(input.fiatAmount, match.destination_amount),
+      // Stripe charges its fees on top of the amount bought.
+      totalFiatAmount: match.source_total_amount ?? sumDecimalAmounts([input.fiatAmount, totalFee]),
       fees: {
         currency: input.fiatCurrency,
         total: totalFee,
