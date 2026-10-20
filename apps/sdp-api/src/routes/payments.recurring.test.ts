@@ -7279,6 +7279,67 @@ describe("Payments routes — recurring", () => {
         });
       });
 
+      it("continues an update whose plan creation is refused as already existing once the chain shows the plan", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        sendTransactionMock.mockRejectedValueOnce(
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__PLAN_ALREADY_EXISTS
+          )
+        );
+        const sent = sends();
+
+        const update = await app.request(
+          actionPath(activated.id),
+          {
+            method: "PATCH",
+            headers: keyed(crypto.randomUUID()),
+            body: JSON.stringify({ amount: "35.00" }),
+          },
+          env
+        );
+
+        expect(update.status).toBe(200);
+        expect((await parseRecurringResponse(update)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          planCreationSignature: null,
+        });
+        // The refused plan, then subscribe and the old subscription's cancel.
+        expect(sent).toHaveBeenCalledTimes(3);
+        expect(poolSentSignatures()).toHaveLength(5);
+      });
+
+      it("fails an update whose plan creation is refused as already existing when the chain shows no plan", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        sendTransactionMock.mockRejectedValueOnce(
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__PLAN_ALREADY_EXISTS
+          )
+        );
+        recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, plan: () => null });
+        const sent = sends();
+
+        const update = await app.request(
+          actionPath(activated.id),
+          {
+            method: "PATCH",
+            headers: keyed(crypto.randomUUID()),
+            body: JSON.stringify({ amount: "35.00" }),
+          },
+          env
+        );
+
+        expect(update.status).toBe(400);
+        expect(await errorCode(update)).toBe("TRANSACTION_FAILED");
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "failed",
+          stage: "create_plan",
+          plan_creation_signature: null,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+      });
+
       it("keeps a stalled update's saved authorization in flight while it can still land", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const oldSubscriptionPda = required(activated.subscriptionPda);
