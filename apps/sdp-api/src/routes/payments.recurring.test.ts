@@ -26,7 +26,12 @@ import {
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
+  AssociatedTokenInstruction,
+  findAssociatedTokenPda,
+  identifyAssociatedTokenInstruction,
+} from "@solana-program/token-2022";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -7389,7 +7394,7 @@ describe("Payments routes — recurring", () => {
         expect(poolSentSignatures()).toHaveLength(5);
       });
 
-      it("fails an update whose plan creation is refused as already existing when the chain shows no plan", async () => {
+      it("keeps an update in flight when its plan creation is refused as already existing but the chain shows no plan, and sends the plan again on the next run", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         sendTransactionMock.mockRejectedValueOnce(
           sendTransactionPreflightError(
@@ -7397,6 +7402,61 @@ describe("Payments routes — recurring", () => {
           )
         );
         recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, plan: () => null });
+        const sent = sends();
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+
+        const refused = await update();
+
+        expect(refused.status).toBe(409);
+        expect(await errorCode(refused)).toBe("CONFLICT");
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "create_plan",
+          plan_creation_signature: null,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+
+        await leaveUpdateCrashedAt(activated.id, key);
+
+        const retry = await update();
+
+        expect(retry.status).toBe(200);
+        const planCreationSignature = required(poolSentSignatures()[3]);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          planCreationSignature,
+        });
+        // The plan again, then subscribe and the old subscription's cancel.
+        expect(sent).toHaveBeenCalledTimes(4);
+        expect(poolSentSignatures()).toHaveLength(6);
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          plan_creation_signature: planCreationSignature,
+        });
+      });
+
+      it("sends a replacement's authority init beside the token account create when only the token account is missing", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const sourceSigner = recurringExecution.sourceSigner();
+        const [sourceAta] = await findAssociatedTokenPda({
+          owner: sourceSigner.address,
+          tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+          mint: address(DEVNET_USDC_MINT),
+        });
+        // The subscription authority still exists; the token account was closed after activation.
+        const accountInfo = required(getAccountInfoMock.getMockImplementation());
+        getAccountInfoMock.mockImplementation(async (...args) =>
+          args[1] === sourceAta ? null : accountInfo(...args)
+        );
         const sent = sends();
 
         const update = await app.request(
@@ -7409,15 +7469,37 @@ describe("Payments routes — recurring", () => {
           env
         );
 
-        expect(update.status).toBe(400);
-        expect(await errorCode(update)).toBe("TRANSACTION_FAILED");
-        expect(sent).toHaveBeenCalledTimes(1);
-        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
-          status: "failed",
-          stage: "create_plan",
-          plan_creation_signature: null,
+        expect(update.status).toBe(200);
+        expect((await parseRecurringResponse(update)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
         });
-        expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+        const sentInstructions = sent.mock.calls.map(([input]) => input.instructions);
+        expect(
+          sentInstructions.map((instructions) =>
+            instructions.map(({ programAddress }) => programAddress)
+          )
+        ).toEqual([
+          [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+          [ASSOCIATED_TOKEN_PROGRAM_ADDRESS, subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+          [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+          [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+        ]);
+        const [createSourceAta, initAuthority] = required(sentInstructions[1]);
+        expect(identifyAssociatedTokenInstruction(required(required(createSourceAta).data))).toBe(
+          AssociatedTokenInstruction.CreateAssociatedTokenIdempotent
+        );
+        const init = required(initAuthority);
+        expect(
+          subscriptionsProgram.parseSubscriptionsInstruction({ ...init, data: required(init.data) })
+        ).toMatchObject({
+          instructionType: subscriptionsProgram.SubscriptionsInstruction.InitSubscriptionAuthority,
+          accounts: {
+            owner: { address: sourceSigner.address },
+            tokenMint: { address: DEVNET_USDC_MINT },
+            userAta: { address: sourceAta },
+          },
+        });
       });
 
       it("fails a replacement whose saved setup never broadcast, back on its old mandate", async () => {
@@ -7863,24 +7945,57 @@ describe("Payments routes — recurring", () => {
         expect(sent).toHaveBeenCalledTimes(1);
       });
 
-      it("drops a pending schedule's landed plan when its terms change, and keeps it for a first-collection edit", async () => {
+      it("drops a pending schedule's landed plan and subscription when its terms change, and keeps them for a first-collection edit", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const planId = `psp_${crypto.randomUUID()}`;
-        await seedPlanRow(planId, "active", new Date().toISOString());
-        // An earlier activation created the plan on chain, then reset to pending.
+        const subscriptionId = `psub_${crypto.randomUUID()}`;
+        const now = new Date().toISOString();
+        await seedPlanRow(planId, "active", now);
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_subscriptions (
+               id, organization_id, project_id, plan_id, counterparty_id, subscriber_address,
+               status, created_by, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, 'pending_authorization', ?, ?, ?)`
+          )
+          .bind(
+            subscriptionId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            planId,
+            created.counterpartyId,
+            recurringExecution.sourceSigner().address,
+            TEST_USER.id,
+            now,
+            now
+          )
+          .run();
+        // An earlier activation created the plan and subscribed on chain, then reset to pending.
         await getDb(env)
           .prepare(
             `UPDATE payment_recurring_payments
                 SET plan_id = ?, plan_pda = ?, plan_created_at = '1770000000',
-                    plan_creation_signature = ?
+                    plan_creation_signature = ?, subscription_id = ?, subscription_pda = ?,
+                    subscription_authority_address = ?, authorization_signature = ?
               WHERE id = ?`
           )
-          .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, testSignature(3), created.id)
+          .bind(
+            planId,
+            TEST_SOLANA_ADDRESSES.wallet3,
+            testSignature(3),
+            subscriptionId,
+            TEST_SOLANA_ADDRESSES.wallet2,
+            TEST_SOLANA_ADDRESSES.wallet1,
+            testSignature(4),
+            created.id
+          )
           .run();
         const planReference = () =>
           getDb(env)
             .prepare(
-              `SELECT status, plan_id, plan_pda, plan_created_at, plan_creation_signature
+              `SELECT status, plan_id, plan_pda, plan_created_at, plan_creation_signature,
+                      subscription_id, subscription_pda, subscription_authority_address,
+                      authorization_signature
                  FROM payment_recurring_payments WHERE id = ?`
             )
             .bind(created.id)
@@ -7890,6 +8005,10 @@ describe("Payments routes — recurring", () => {
               plan_pda: string | null;
               plan_created_at: string | null;
               plan_creation_signature: string | null;
+              subscription_id: string | null;
+              subscription_pda: string | null;
+              subscription_authority_address: string | null;
+              authorization_signature: string | null;
             }>();
         const patch = (body: Record<string, string>) =>
           app.request(
@@ -7905,6 +8024,10 @@ describe("Payments routes — recurring", () => {
           plan_pda: TEST_SOLANA_ADDRESSES.wallet3,
           plan_created_at: "1770000000",
           plan_creation_signature: testSignature(3),
+          subscription_id: subscriptionId,
+          subscription_pda: TEST_SOLANA_ADDRESSES.wallet2,
+          subscription_authority_address: TEST_SOLANA_ADDRESSES.wallet1,
+          authorization_signature: testSignature(4),
         });
 
         expect((await patch({ amount: "35.00" })).status).toBe(200);
@@ -7914,6 +8037,10 @@ describe("Payments routes — recurring", () => {
           plan_pda: null,
           plan_created_at: null,
           plan_creation_signature: null,
+          subscription_id: null,
+          subscription_pda: null,
+          subscription_authority_address: null,
+          authorization_signature: null,
         });
       });
     });
