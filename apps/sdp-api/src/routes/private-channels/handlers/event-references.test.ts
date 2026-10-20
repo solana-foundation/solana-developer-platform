@@ -1,4 +1,3 @@
-import type { ApiKeyWalletBinding } from "@sdp/types/api-keys";
 import type { PrivateChannelEventReferencesEnvelope } from "@sdp/types/private-channels";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -7,6 +6,7 @@ import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -93,7 +93,7 @@ async function buildApp(userId: string, role: "admin" | "member") {
   };
 }
 
-function buildApiKeyApp(projectId: string, walletBindings: ApiKeyWalletBinding[]) {
+function buildApiKeyApp(projectId: string) {
   const app = new Hono<{
     Bindings: Env;
   }>();
@@ -102,11 +102,9 @@ function buildApiKeyApp(projectId: string, walletBindings: ApiKeyWalletBinding[]
       id: "key_event_refs_test",
       organizationId: ORGANIZATION_ID,
       projectId,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
-      signingWalletId: null,
-      walletBindings,
+      walletAccess: { scope: "all" },
     });
     c.set("projectId", PROJECT_ID);
     await next();
@@ -236,12 +234,12 @@ describe("Private Channels event references handler", () => {
     expect(body.data.references[INSTANCE_ID]).toBe("http://gw");
   });
   it("rejects an API key scoped to another project", async () => {
-    const app = buildApiKeyApp(OTHER_PROJECT_ID, []);
+    const app = buildApiKeyApp(OTHER_PROJECT_ID);
     const response = await app.request("/events/references", {}, env);
     expect(response.status).toBe(403);
   });
   it("returns the full dictionary for a correctly scoped API key", async () => {
-    const app = buildApiKeyApp(PROJECT_ID, []);
+    const app = buildApiKeyApp(PROJECT_ID);
     const response = await app.request("/events/references", {}, env);
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -250,10 +248,8 @@ describe("Private Channels event references handler", () => {
     expect(body.data.references[CHANNEL_ID]).toBe("Treasury");
     expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
   });
-  it("limits wallet labels to the API key wallet bindings", async () => {
-    const app = buildApiKeyApp(PROJECT_ID, [
-      { walletId: WALLET_ID, permissions: ["wallets:read"] },
-    ]);
+  it("labels every project wallet for an API key, whatever its wallet scope (HOO-2099)", async () => {
+    const app = buildApiKeyApp(PROJECT_ID);
     const response = await app.request("/events/references", {}, env);
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -261,7 +257,6 @@ describe("Private Channels event references handler", () => {
     };
     expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
     expect(body.data.references[WALLET_ID]).toBe("Treasury Wallet");
-    expect(body.data.references[OTHER_PUBLIC_KEY]).toBeUndefined();
-    expect(body.data.references[OTHER_WALLET_ID]).toBeUndefined();
+    expect(body.data.references[OTHER_PUBLIC_KEY]).toBeDefined();
   });
 });

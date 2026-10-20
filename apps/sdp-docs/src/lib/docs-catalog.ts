@@ -1,6 +1,6 @@
 /**
- * Docs-owned descriptions of SDP's modules, ramp providers and API-key operation
- * families. Pages never list these by hand: the generated blocks in
+ * Docs-owned descriptions of SDP's modules, ramp providers and the action
+ * modules an API key can be granted. Pages never list these by hand: the generated blocks in
  * docs-blocks.ts render them for whatever the build's release channel publishes
  * (src/generated/public-surface.json), so a module or provider appears in an
  * overview exactly when its own pages do.
@@ -9,7 +9,7 @@
  * source.config.ts loads it.
  */
 
-import type { OperationFamily } from "@sdp/types/allowed-operations";
+import type { ActionModule } from "@sdp/types/actions";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule } from "@sdp/types/release-channels";
 
@@ -39,7 +39,7 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
   {
     module: "core",
     name: "API keys and projects",
-    summary: "Project-scoped API keys, roles and allowed operations",
+    summary: "Project-scoped API keys with explicit grants by module",
     capability: "API key management and projects",
   },
   {
@@ -116,12 +116,27 @@ export function publishedRampProviderIds(published: readonly RampProviderId[]): 
   return DOCS_RAMP_PROVIDERS.map((entry) => entry.provider).filter((id) => publishedIds.has(id));
 }
 
-/** What each API-key operation family covers; its types come from the manifest. */
-export const DOCS_OPERATION_FAMILIES: Readonly<Record<OperationFamily, string>> = {
-  payment: "Transfers, transfer batches, and recurring payment creation, updates and collections",
-  ramp: "On-ramp and off-ramp quotes",
-  issuance:
-    "Token deploy, mint, burn, seize, force-burn, authority, pause, freeze, metadata and allowlist actions",
-  program: "Program operations, by type",
-  privacy: "Private operations, by type",
-};
+/** What each action module covers; which verbs it has comes from the manifest. */
+export const DOCS_ACTION_MODULES = {
+  transfers: "Single transfers from a custody wallet",
+  transfer_batches: "Batches of transfers, and their estimates",
+  payment_requests: "Payment requests and their payment links",
+  counterparties: "Counterparties, their accounts, and provider requirements",
+  transactions: "The unified transaction list; each row also needs the read of its own module",
+  recurring: "Recurring payments, subscription plans and subscriptions",
+  wallets: "Custody wallets and their balances",
+  compliance: "Address screening",
+  api_keys: "API keys",
+  projects: "Projects and provider availability",
+  members: "Organization and project members",
+  organizations: "Organization settings and provider access",
+  rpc: "The managed Solana RPC relay",
+  onramp: "On-ramp currencies, estimates and quotes",
+  offramp: "Off-ramp currencies, estimates and quotes",
+  ramp_transfers: "Ramp transfer cancellation and sandbox simulation",
+  issuance: "Tokens, templates, asset profiles, and their on-chain actions",
+  dvp: "Delivery-versus-payment trades",
+  earn: "Earn strategies, deposits, withdrawals and programs",
+  private_channels: "Private channel instances, channels and movements",
+  helius_rings: "Helius Rings wallets, rings and operations",
+} as const satisfies Record<ActionModule, string>;

@@ -401,7 +401,7 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 
 - **Cloud Run** — Hosted Node.js API service and one-shot jobs
 - **Postgres 16** — Application database, hosted with managed connectivity in deployed environments
-- **Redis** — API-key, rate-limit, cache, and session storage
+- **Redis** — rate-limit, cache, and session storage
 - **Cloud Run** — the API service, the always-on Worker service (Cron Definitions), and the database migration job
 - **Kora** — Optional local fee-payer service
 

@@ -72,9 +72,9 @@ Provision signing wallets through integrated custody providers, so your team nev
 
    The unified Solana signing interface. Every custody backend is a keychain adapter behind the same signing API, which is what makes providers interchangeable.
 
-- **[Allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations)**
+- **[Grants by module](/docs/developing-with-sdp/manage-api-keys#grants-by-module)**
 
-   Limit what an API key may do. List the operation families and types a key may perform, and every other operation is refused before it executes.
+   Limit what an API key may do. A key holds an explicit list of actions, such as reading one module or executing in another, and every other route is refused before it runs.
 
 - **Scoped custody configuration**
 

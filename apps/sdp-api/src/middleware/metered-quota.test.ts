@@ -1,8 +1,8 @@
-import type { Permission } from "@sdp/types/permissions";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
 import type { KVStoreSet } from "@/runtime/kv";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -29,12 +29,9 @@ function apiKeyContext(keyId: string) {
     id: keyId,
     organizationId: ORG_ID,
     projectId: "prj_metered_quota_test",
-    role: "api_admin",
-    permissions: ["*"] as Permission[],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox" as const,
-    signingWalletId: null,
-    signingWalletIds: [],
-    walletBindings: [],
+    walletAccess: { scope: "all" } as const,
   };
 }
 
@@ -42,8 +39,7 @@ function clerkContext(userId: string) {
   return {
     userId,
     organizationId: ORG_ID,
-    role: "admin",
-    permissions: [] as Permission[],
+    role: "admin" as const,
     clerkUserId: `clerk_${userId}`,
     clerkOrgId: "clerk_org_metered",
     email: null,

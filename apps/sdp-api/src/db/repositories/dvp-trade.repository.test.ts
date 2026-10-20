@@ -1038,74 +1038,6 @@ describe("DvpTradeRepository (postgres)", () => {
   // iff a bound wallet's public key is a PARTY (user_a or user_b), which is the
   // correct reading of wallet scoping post-reshape. The dangerous case is the
   // empty list, which must deny rather than fall through to "no filter".
-  describe("wallet scope", () => {
-    // A third address that neither bound wallet's public key matches.
-    const UNRELATED_PUBKEY = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
-    const UNRELATED_PUBKEY_2 = "DxR4Km2vQp8nRtYwZbCdFgHiJkLmNoPqRsTuVwXyZ12u";
-
-    const bothTrades = async () => {
-      // dvp_mine names WALLET_A's public key as user_a — visible to a key
-      // bound to CUSTODY_WALLET_ID.
-      await repo.create(
-        tradeInsert({
-          id: "dvp_mine",
-          swapDvp: address("SwapA11111111111111111111111111111111111111"),
-          userA: address(WALLET_A_PUBKEY),
-          userB: address(UNRELATED_PUBKEY),
-        })
-      );
-      // dvp_theirs names neither bound wallet's public key — invisible to a
-      // key bound to either wallet.
-      await repo.create(
-        tradeInsert({
-          id: "dvp_theirs",
-          swapDvp: address("SwapB11111111111111111111111111111111111111"),
-          userA: address(UNRELATED_PUBKEY),
-          userB: address(UNRELATED_PUBKEY_2),
-        })
-      );
-    };
-
-    it("returns every trade when the scope is unrestricted", async () => {
-      await bothTrades();
-
-      const listed = await repo.listByProject({ ...scope, sdpWalletIds: null }, UNFILTERED, 10);
-
-      expect(listed.map((t) => t.id).sort()).toEqual(["dvp_mine", "dvp_theirs"]);
-    });
-
-    it("admits only trades where a bound wallet's public key is a party", async () => {
-      await bothTrades();
-
-      const listed = await repo.listByProject(
-        { ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] },
-        UNFILTERED,
-        10
-      );
-
-      expect(listed.map((t) => t.id)).toEqual(["dvp_mine"]);
-    });
-
-    it("denies everything for a key with no usable bindings", async () => {
-      await bothTrades();
-
-      await expect(
-        repo.listByProject({ ...scope, sdpWalletIds: [] }, UNFILTERED, 10)
-      ).resolves.toEqual([]);
-    });
-
-    it("hides an out-of-scope trade from getById and getBySwapDvp", async () => {
-      await bothTrades();
-      const bound = { ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] };
-
-      await expect(repo.getById(bound, "dvp_theirs")).resolves.toBeNull();
-      await expect(
-        repo.getBySwapDvp(bound, address("SwapB11111111111111111111111111111111111111"))
-      ).resolves.toBeNull();
-      await expect(repo.getById(bound, "dvp_mine")).resolves.toMatchObject({ id: "dvp_mine" });
-    });
-  });
-
   // The filters narrow SERVER-SIDE, before the LIMIT, because the list is
   // capped with no cursor: a client-side filter over the newest page makes a
   // matching trade older than the page unfindable.
@@ -1248,15 +1180,6 @@ describe("DvpTradeRepository (postgres)", () => {
         50
       );
       expect(ready.map((row) => row.id).sort()).toEqual(["dvp_av_edge", "dvp_av_ready"]);
-    });
-
-    it("composes with the wallet-scope clause: a bound wallet still sees only its party trades, filtered", async () => {
-      const listed = await repo.listByProject(
-        { ...scope, sdpWalletIds: [CUSTODY_WALLET_ID] },
-        { statuses: ["settled"], settlementAvailability: null, q: null },
-        10
-      );
-      expect(listed.map((t) => t.id)).toEqual(["dvp_fl_settled"]);
     });
   });
 

@@ -43,7 +43,6 @@ import {
   earnVaultWithdrawalRequestsQuerySchema,
 } from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   CustodyRuntimeTargets,
@@ -72,7 +71,6 @@ import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import { resolveExternalWalletExit } from "./external-wallet";
 import { parseParams, parseQuery } from "./shared";
 import {
-  assertBoundWalletIdentifierIsUnique,
   listReadableEarnVaultWallets,
   resolveEarnVaultCustodyWallet,
   toVaultHolding,
@@ -306,8 +304,6 @@ async function resolveCustodyQueueTarget(
       projectId,
     });
     wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
-    assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
-    assertApiKeyWalletAccess(auth, wallet.walletId, ["earn:write"]);
   }
 
   return {

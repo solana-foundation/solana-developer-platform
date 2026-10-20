@@ -9,26 +9,30 @@ import {
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { Action } from "@sdp/types/actions";
 import {
   isRampTransferType,
   isSuccessfulPaymentTransferStatus,
   OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS,
+  PAYMENT_TRANSFER_TYPES,
   RAMP_TRANSFER_TYPES,
   TRANSFER_CHAIN_VERDICT_STATUSES,
   type PaymentTransferStatus as TransferStatus,
   type PaymentTransferType as TransferType,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
-import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
+  type Address,
   address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createTransactionMessage,
   getTransactionEncoder,
+  type Instruction,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  type TransactionSigner,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getTransferSolInstruction } from "@solana-program/system";
@@ -50,13 +54,13 @@ import {
   badRequestQuery,
   conflict,
   type ErrorCode,
-  forbidden,
   internalError,
   isErrorCode,
   notFound,
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { appErrorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
@@ -68,6 +72,7 @@ import {
 } from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
+import { callerMayPerform } from "@/middleware/require-action";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
@@ -76,15 +81,12 @@ import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import {
   admitPaymentWalletRuntimeExecution,
-  assertPaymentWalletReadAccess,
-  authorizeCustodyPaymentWallet,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
@@ -315,9 +317,6 @@ export async function authorizeTransfer(
 ): Promise<TransferResolved> {
   // SAFETY: mounted after validateBody(createTransferSchema).
   const body = input.body as CreateTransferBody;
-  // Read fresh, never from the cached snapshot, which drops a binding once its
-  // wallet is inactive and would refuse the replay of a transfer that ran.
-  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   assertPaymentProjectScope(body.projectId, requireProjectId(c));
   const operation = resolveOutboundPaymentOperation({
@@ -327,6 +326,11 @@ export async function authorizeTransfer(
     token: body.token,
     amount: body.amount,
   });
+  // The custody signer refuses a wallet outside the key's scope (HOO-2099).
+  // Refusing here as well, before the key is claimed, keeps a refused start
+  // from writing a failed transfer row and an Idempotency-Key that would
+  // replay that failure after the scope is fixed.
+  assertCallerWalletInScope(scope.auth.walletAccess, operation.sourceWallet.id);
   // A ramp deposit the request funds is named by id: it must be in the
   // project before the key is claimed, so a wrong id is never stored as a 404.
   let rampTransfer: TransferRow | null = null;
@@ -964,22 +968,42 @@ function observedTransferTarget(wallet: CustodyWallet): ObservedTransferTarget {
   };
 }
 
-function assertTransferReadAccess(c: AppContext, row: TransferRow): void {
-  assertPaymentWalletReadAccess(c, {
-    custodyWalletId: row.custody_wallet_id,
-    providerWalletId: row.wallet_id,
-  });
+/**
+ * The read that shows each type of transfer row, as the unified feed asks
+ * for each kind: a ramp or batch row is that module's record, so
+ * `transfers.read` alone does not show it (HOO-2099).
+ */
+const TRANSFER_TYPE_READ_ACTIONS = {
+  transfer: "transfers.read",
+  transfer_batch: "transfer_batches.read",
+  onramp: "onramp.read",
+  offramp: "offramp.read",
+} as const satisfies Record<TransferType, Action>;
+
+/**
+ * The transfer types this caller may list: an explicitly requested type it
+ * cannot read is refused, naming the read; a category or the default set is
+ * narrowed to what it can read.
+ */
+function readableTransferTypes(
+  c: AppContext,
+  requested: readonly TransferType[] | undefined,
+  candidates: readonly TransferType[]
+): TransferType[] {
+  const unreadable = (requested ?? []).find(
+    (type) => !callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type])
+  );
+  if (unreadable) {
+    const action = TRANSFER_TYPE_READ_ACTIONS[unreadable];
+    throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+  }
+  return candidates.filter((type) => callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type]));
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Wallet-scoped transfer listing merges DB rows with observed on-chain history.
 export async function listTransfers(c: AppContext) {
   const auth = getAuth(c);
   const query = listTransfersQuerySchema.safeParse(c.req.query());
   if (!query.success) throw badRequestQuery();
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:read",
-  ]);
-
   const {
     page,
     pageSize,
@@ -1007,7 +1031,6 @@ export async function listTransfers(c: AppContext) {
       : category === "ramp"
         ? RAMP_TRANSFER_TYPES
         : undefined;
-  const transferTypes = requestedTypes ?? categoryTypes;
   if (
     requestedTypes &&
     categoryTypes &&
@@ -1015,7 +1038,17 @@ export async function listTransfers(c: AppContext) {
   ) {
     throw badRequest("type must match the requested transfer category");
   }
-  const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
+  const transferTypes = readableTransferTypes(
+    c,
+    requestedTypes,
+    requestedTypes ?? categoryTypes ?? PAYMENT_TRANSFER_TYPES
+  );
+  // Nothing readable is an empty page, never an absent filter: the
+  // repository reads an empty type list as no condition at all.
+  if (transferTypes.length === 0) {
+    return paginated(c, [], { total: 0, page, pageSize });
+  }
+  const transferTypeSet = new Set<TransferType>(transferTypes);
   // Rows store mints, so a symbol or native-SOL filter must be normalized to
   // the same canonical mint before either the in-memory or SQL comparison.
   const tokenFilter = token ? normalizePaymentToken(token) : undefined;
@@ -1025,9 +1058,6 @@ export async function listTransfers(c: AppContext) {
 
   let exactWallet: CustodyWallet | null = null;
   if (custodyWalletId) {
-    if (walletAuthorization && !walletAuthorization.custodyWalletIds.includes(custodyWalletId)) {
-      throw forbidden("API key is not authorized for the requested wallet");
-    }
     if (includeObserved) {
       const scope = await resolveScope(c);
       exactWallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
@@ -1040,17 +1070,6 @@ export async function listTransfers(c: AppContext) {
 
   if (hasProviderReference && !hasProvider) {
     throw badRequest("provider is required for provider reference lookup");
-  }
-
-  if (hasExactProviderReference) {
-    const row = await repo.getTransferByProviderReference({
-      provider,
-      providerReference,
-      organizationId: auth.organizationId,
-      projectId: requireProjectId(c),
-    });
-
-    if (row) assertTransferReadAccess(c, row);
   }
 
   let transferRows: TransferRow[];
@@ -1214,22 +1233,11 @@ export async function listTransfers(c: AppContext) {
     transferRows = merged.slice(offset, offset + pageSize);
   } else {
     // DB-only path: exact rows are filtered by the canonical SDP Wallet ID.
-    if (
-      !custodyWalletId &&
-      walletAuthorization !== null &&
-      walletAuthorization.custodyWalletIds.length === 0 &&
-      walletAuthorization.providerWalletIds.length === 0
-    ) {
-      return paginated(c, [], { total: 0, page, pageSize });
-    }
-
     const queryStartedAt = performance.now();
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
       projectId: requireProjectId(c),
       custodyWalletId,
-      walletAuthorization:
-        custodyWalletId || walletAuthorization === null ? undefined : walletAuthorization,
       counterpartyId,
       search,
       token: tokenFilter,
@@ -1250,7 +1258,6 @@ export async function listTransfers(c: AppContext) {
     });
     total = result.total;
     transferRows = result.rows;
-    for (const row of transferRows) assertTransferReadAccess(c, row);
   }
 
   const transfers = transferRows.map(mapTransferRow);
@@ -1270,8 +1277,10 @@ export async function getTransfer(c: AppContext) {
     projectId: requireProjectId(c),
   });
 
-  if (!row) throw notFound("Transfer");
-  assertTransferReadAccess(c, row);
+  // A row of a module the caller cannot read is not disclosed.
+  if (!row || !callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[row.type])) {
+    throw notFound("Transfer");
+  }
 
   return success(c, { transfer: mapTransferRow(row) });
 }

@@ -254,6 +254,10 @@ export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
   "expired",
 ] as const satisfies readonly PaymentTransferStatus[];
 
+/** The open ones among them, which a provider status pull checks; `expired` has its own queue. */
+export const OPEN_PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES =
+  PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES.filter((status) => status !== "expired");
+
 /** A MoonPay attempt with no SDP deposit claim can safely stop taking payment. */
 const MOONPAY_UNCLAIMED_TRANSFER_STATUSES = [
   "pending",
@@ -314,6 +318,14 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   // Not from `settling`: a stale redelivered expiry must not undo a transfer
   // another event already revived.
   provider_expired: {
+    from: ["pending", "awaiting_payment"],
+    to: "expired",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // SDP's own verdict from provider silence (HOO-2040): no provider activity
+  // past the abandonment horizon. Never from `processing` or `settling`, where
+  // funds may be moving; a later provider observation revives it.
+  checkout_abandoned: {
     from: ["pending", "awaiting_payment"],
     to: "expired",
     types: RAMP_TRANSFER_TYPES,
@@ -763,6 +775,19 @@ export function isEditableRecurringPaymentStatus(status: PaymentRecurringPayment
 export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
   "active",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
+/**
+ * A recurring payment that collects, or will once its activation, update or
+ * resume in flight finishes, or once a cancel in flight fails back to active:
+ * revoke-and-cancel must see all of them, or one mid-way would become active
+ * after the revoke that was meant to stop it.
+ */
+export const LIVE_RECURRING_PAYMENT_STATUSES = [
+  ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
+  "activating",
+  "updating",
+  "canceling",
+  "resuming",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isCollectableRecurringPaymentStatus(
   status: PaymentRecurringPaymentStatus
 ): boolean {
@@ -1041,16 +1066,26 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
-export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+export const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
   at: string;
 }
 
+/**
+ * A payment request as reads return it. It carries no link token: that is a
+ * bearer secret, returned only by {@link CreatedPaymentRequest} and
+ * {@link PaymentRequestLink} (APE-849).
+ */
 export interface PaymentRequest {
   id: string;
-  publicToken: string;
   organizationId: string;
   projectId: string | null;
   counterpartyId: string | null;
@@ -1067,6 +1102,20 @@ export interface PaymentRequest {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** The create response: the record plus the token behind its hosted `/pay/{publicToken}` link. */
+export interface CreatedPaymentRequest extends PaymentRequest {
+  publicToken: string;
+}
+
+/**
+ * `GET /v1/payments/requests/{id}/link` (`payment_requests.manage`): the
+ * request's link token.
+ */
+export interface PaymentRequestLink {
+  id: string;
+  publicToken: string;
 }
 
 export interface ListPaymentRequestsResponse {

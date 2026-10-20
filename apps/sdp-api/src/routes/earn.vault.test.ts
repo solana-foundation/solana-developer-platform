@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import type { CustodyProvider } from "@sdp/types/custody";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
@@ -38,8 +38,8 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const depositIntoVault = vi.hoisted(() => vi.fn());
 
@@ -85,21 +85,19 @@ const PROD_API_KEY = {
   raw: "sk_live_earn_vault",
   prefix: "sk_live_ear",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
-const PROD_CACHED_API_KEY: CachedApiKey = {
-  ...TEST_CACHED_API_KEY,
+const PROD_CACHED_API_KEY: SeededApiKey = {
+  ...TEST_SEEDED_API_KEY,
   id: PROD_API_KEY.id,
   projectId: TEST_PRODUCTION_PROJECT.id,
   environment: "production",
@@ -246,9 +244,9 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, prodKeyHash, PROD_CACHED_API_KEY);
+  await seedApiKeyRow(env, prodKeyHash, PROD_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -281,8 +279,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -292,15 +290,14 @@ async function seedAuth(): Promise<void> {
         "Earn Vault Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         PROD_API_KEY.id,
@@ -310,8 +307,7 @@ async function seedAuth(): Promise<void> {
         "Earn Vault Production Key",
         PROD_API_KEY.prefix,
         prodKeyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -459,6 +455,31 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({
       error: { details: { reason: "runtime_execution_unavailable" } },
+    });
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a wallet outside the key's scope before opening an audit intent or deposit", async () => {
+    await seedAuth();
+    await seedConnectionWallet();
+    const strategy = await seedStrategy({});
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+    const audit = vi.spyOn(AuditService.prototype, "beginCritical");
+
+    const response = await postVaultDeposit(
+      { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
+      "out-of-scope-deposit",
+      TEST_API_KEY.raw
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "wallet_out_of_scope" } },
     });
     expect(depositIntoVault).not.toHaveBeenCalled();
     expect(audit).not.toHaveBeenCalled();
@@ -1004,52 +1025,6 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     );
 
     expect(res.status).toBe(404);
-    expect(depositIntoVault).not.toHaveBeenCalled();
-  });
-
-  it("does not let a selected-wallet key cross an ambiguous provider wallet id", async () => {
-    await seedAuth();
-    const strategy = await seedStrategy({});
-    await seedWallet({
-      publicKey: WALLET_ADDRESS,
-      projectId: TEST_PROJECT.id,
-      configId: "cfg_earn_vault_bound_project",
-      provider: "privy",
-      custodyWalletId: "cwlt_earn_vault_bound_project",
-      providerWalletId: "privy_earn_vault_bound_duplicate",
-    });
-    await seedWallet({
-      publicKey: WALLET_ADDRESS,
-      configId: "cfg_earn_vault_bound_second",
-      provider: "para",
-      custodyWalletId: "cwlt_earn_vault_bound_second",
-      providerWalletId: "privy_earn_vault_bound_duplicate",
-      projectId: TEST_PROJECT.id,
-    });
-    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
-      signingWalletId: "privy_earn_vault_bound_duplicate",
-      walletBindings: [
-        {
-          walletId: "privy_earn_vault_bound_duplicate",
-          permissions: ["earn:write"],
-        },
-      ],
-    });
-
-    const res = await postVaultDeposit(
-      {
-        strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_bound_second",
-        amount: "10",
-        requestId: crypto.randomUUID(),
-      },
-      crypto.randomUUID(),
-      TEST_API_KEY.raw
-    );
-
-    expect(res.status).toBe(403);
     expect(depositIntoVault).not.toHaveBeenCalled();
   });
 });

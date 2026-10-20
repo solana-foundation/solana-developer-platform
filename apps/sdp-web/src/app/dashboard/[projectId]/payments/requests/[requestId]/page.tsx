@@ -3,7 +3,10 @@ import { redirect } from "next/navigation";
 import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { PaymentRequestDetailWorkspace } from "@/app/dashboard/[projectId]/payments/requests/payment-request-detail-workspace";
-import { fetchPaymentRequestDetail } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
+import {
+  fetchPaymentRequestDetail,
+  fetchPaymentRequestLinkToken,
+} from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
@@ -26,9 +29,12 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
   return withDashboardPageTrace(
     "dashboard.payment-requests.detail.page",
     async ({ trace, apiClient }) => {
-      const [detail, walletsResult] = await Promise.all([
+      const [detail, link, walletsResult] = await Promise.all([
         trace.step("fetch_payment_request", () =>
           fetchPaymentRequestDetail(apiClient.request, requestId)
+        ),
+        trace.step("fetch_payment_request_link", () =>
+          fetchPaymentRequestLinkToken(apiClient.request, requestId)
         ),
         trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request)),
       ]);
@@ -36,8 +42,6 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
       trace.log({ status: detail.status });
 
       if (detail.status === "not_found") {
-        // TODO(api): with a read by id, a missing request can get its own not-found page. For now
-        // it goes back to the list, as the list is the only way the API reads requests.
         redirect(await requestProjectHref(PAYMENT_REQUESTS_HREF));
       }
 
@@ -58,6 +62,7 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
         <div className="flex h-full min-h-0 w-full flex-col">
           <PaymentRequestDetailWorkspace
             request={request}
+            publicToken={link.ok ? link.publicToken : null}
             contactName={contact?.displayName ?? null}
             walletName={wallet?.label ?? null}
             error={detail.status === "error" ? detail.error : undefined}

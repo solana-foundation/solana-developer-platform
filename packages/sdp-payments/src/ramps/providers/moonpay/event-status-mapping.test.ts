@@ -201,6 +201,7 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       provider: "moonpay",
       kind: "ignore",
       reason: "unsupported_status:somethingNew",
+      unmappedStatus: "somethingNew",
     });
   });
 

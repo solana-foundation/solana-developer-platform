@@ -10,12 +10,10 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
-import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
-import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import {
   ensureClerkOrganizationMapping,
@@ -99,60 +97,6 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       )
       .bind(mapping.organization_id),
   ]);
-
-  // Everything below is post-commit, and each effect is isolated so that one
-  // throwing cannot skip the others — every one of them is what stops a live
-  // credential. Failures are collected and rethrown at the end so the
-  // webhook 500s and Clerk redelivers (the whole handler is idempotent).
-  const failures: unknown[] = [];
-
-  // The hashes are queried AFTER the revocation batch commits: a key created
-  // concurrently with this webhook still gets revoked by it, and a pre-batch
-  // snapshot would miss that key, leaving its cached credentials active for
-  // the full TTL. Webhooks are a KV-free path (no c.var.kv), so the store
-  // set is built directly — it shares the process-wide Redis client.
-  try {
-    const orgKeyHashes = await db
-      .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")
-      .bind(mapping.organization_id)
-      .all<{ key_hash: string }>();
-
-    const apiKeysKV = createKVStoreSet(c.env).apiKeys;
-    const cacheRefreshes = await Promise.allSettled(
-      (orgKeyHashes.results ?? []).map((row) => refreshApiKeyCache(db, apiKeysKV, row.key_hash))
-    );
-
-    // A rejected refresh and one that resolved false (CAS contention left a
-    // possibly-stale entry cached) are equally unresolved.
-    const failedRefreshes: unknown[] = [];
-    for (const result of cacheRefreshes) {
-      if (result.status === "rejected") {
-        failedRefreshes.push(result.reason);
-      } else if (!result.value) {
-        failedRefreshes.push(new Error("api key cache refresh remained contended"));
-      }
-    }
-    if (failedRefreshes.length > 0) {
-      getLogger().error(
-        { errors: failedRefreshes },
-        "Failed to invalidate cached API keys after webhook organization deletion"
-      );
-      failures.push(...failedRefreshes);
-    }
-  } catch (error) {
-    getLogger().error(
-      { error },
-      "Failed to enumerate API keys after webhook organization deletion"
-    );
-    failures.push(error);
-  }
-
-  if (failures.length > 0) {
-    throw new AppError(
-      "INTERNAL_ERROR",
-      "Organization was deleted but some credentials could not be invalidated yet; Clerk redelivery and the reconciliation job repair them"
-    );
-  }
 }
 
 async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {

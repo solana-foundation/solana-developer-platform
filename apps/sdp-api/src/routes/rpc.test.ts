@@ -15,6 +15,7 @@ import { app } from "@/index";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env, resetManagedRpcEnv } from "@/test/helpers/env";
@@ -118,7 +119,6 @@ describe("RPC Relay Routes", () => {
 
     await clearKvStore(kv.rateLimits);
     await clearKvStore(kv.cache);
-    await clearKvStore(kv.apiKeys);
 
     await db
       .prepare("DELETE FROM api_keys")
@@ -167,8 +167,8 @@ describe("RPC Relay Routes", () => {
     await db
       .prepare(
         `INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'RPC Relay Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'RPC Relay Key', ?, ?, ?, 'active')`
       )
       .bind(
         TEST_API_KEY_ID,
@@ -176,26 +176,11 @@ describe("RPC Relay Routes", () => {
         TEST_PROJECT_ID,
         TEST_USER.id,
         TEST_API_KEY_PREFIX,
-        apiKeyHash
+        apiKeyHash,
+        ALL_API_KEY_GRANTS
       )
       .run();
 
-    await kv.apiKeys.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify({
-        id: TEST_API_KEY_ID,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        role: "api_admin",
-        permissions: ["*"],
-        environment: "sandbox",
-        rateLimitTier: "standard",
-        allowedIps: null,
-        signingWalletId: null,
-        status: "active",
-        expiresAt: null,
-      })
-    );
     resetManagedRpcEnv();
   });
 
@@ -431,7 +416,7 @@ describe("RPC Relay Routes", () => {
 
       expect(response.status).toBe(403);
       const body = await response.json();
-      expect(body.error.message).toContain("not a wallet of this organization");
+      expect(body.error.message).toContain("not a wallet of this project");
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 

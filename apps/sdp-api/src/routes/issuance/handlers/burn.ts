@@ -155,7 +155,6 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     env: c.env,
     auth,
     custodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const authority = await createResolvedAuthoritySigner({
     movement: "issuance.control",
@@ -163,7 +162,6 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     auth,
     custodyWalletId: wallet.custodyWalletId,
     currentAuthority: wallet.publicKey,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const signer = authority.signer;
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
@@ -276,7 +274,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     type: "burn",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -300,7 +297,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     env: c.env,
     auth,
     custodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.burn.source, "source");
@@ -368,7 +364,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       auth,
       custodyWalletId: wallet.custodyWalletId,
       currentAuthority: wallet.publicKey,
-      requiredWalletPermissions: ["tokens:write"],
     });
     const signer = authority.signer;
     const normalizedSource = await resolveValidatedBurnSource(

@@ -29,6 +29,10 @@
  * allows wrapping a pinned constructor in a new function: those files are
  * trusted, so a change inside one is reviewed like the waists themselves.
  *
+ * It also pins who may set the money principal (HOO-2099): the ambient
+ * identity the waists check a signature against. Only the entry points that
+ * authenticated it set it, so no handler can name a more privileged one.
+ *
  * Adding a file to any list below is a security-reviewed change.
  */
 
@@ -149,6 +153,22 @@ export const CAPABILITIES = [
     ],
     owners: [FEE_PAYMENT_PACKAGE],
     allow: [],
+  },
+  {
+    id: "money-principal",
+    why: "Sets who a request or job moves money for, which the signing waists admit; only the authenticating entry points may (HOO-2099).",
+    symbols: [{ file: `${API}/lib/money-principal.ts`, name: "runAsMoneyPrincipal" }],
+    owners: [`${API}/lib/money-principal.ts`],
+    allow: [
+      // An API key, as authenticated from its live row.
+      `${API}/middleware/auth.ts`,
+      // A signed-in member, as authenticated from their session.
+      `${API}/middleware/clerk-auth.ts`,
+      // The recurring-payment job, as the mandate it collects (APE-343).
+      `${API}/services/jobs/collect-recurring-payments.ts`,
+      // A `/pay` link, as the payment request its token names.
+      `${API}/routes/pay/context.ts`,
+    ],
   },
   {
     id: "keypair-signer",

@@ -139,7 +139,12 @@ describe("MoonpayRampClient.fetchTransferStatus", () => {
     const events = await lookUpEvents("onramp", [{ ...MOONPAY_COMPLETED_BUY, status: "refunded" }]);
 
     assert.deepEqual(events, [
-      { provider: "moonpay", kind: "ignore", reason: "unsupported_status:refunded" },
+      {
+        provider: "moonpay",
+        kind: "ignore",
+        reason: "unsupported_status:refunded",
+        unmappedStatus: "refunded",
+      },
     ]);
   });
 

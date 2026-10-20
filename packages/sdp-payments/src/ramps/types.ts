@@ -180,7 +180,16 @@ export type RampSettlementEvent =
       error?: string;
       settlement?: RampTransferSettlement;
     })
-  | { provider: RampProviderId; kind: "ignore"; reason: string };
+  | {
+      provider: RampProviderId;
+      kind: "ignore";
+      reason: string;
+      /**
+       * A provider status SDP has no mapping for. Money may be moving, so a
+       * status pull holds the transfer for review instead of expiring it.
+       */
+      unmappedStatus?: string;
+    };
 
 /**
  * Runtime context for quote/execute calls. Providers read their own credentials

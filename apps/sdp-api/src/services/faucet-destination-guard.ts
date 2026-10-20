@@ -4,7 +4,7 @@
  * The RPC relay forwards its payload verbatim, so before this guard the
  * airdrop destination was whatever address the caller typed — any tenant
  * could drip provider-funded SOL to wallets nobody in the platform owns.
- * A faucet destination must be a wallet of the AUTHENTICATED organization,
+ * A faucet destination must be a wallet of the AUTHENTICATED project,
  * proven against the custody inventory, never against request input.
  */
 
@@ -39,22 +39,21 @@ export function extractAirdropDestinations(payload: unknown): unknown[] {
 
 /**
  * Refuse any `requestAirdrop` in the payload whose destination is not a
- * custody wallet of the authenticated organization.
+ * custody wallet of the caller's own project.
  *
  * Ownership spans both custody models — config-owned and connection-owned
  * wallets — because either kind is a real tenant wallet a faucet may fund.
- * Scoped by organization alone: the org boundary is the security boundary,
- * and the relay's project semantics (an optional query hint) are too loose to
- * bind funding tighter without refusing legitimate org-level wallets.
+ * Scoped by the caller's project (APE-603): custody is project-only (0125), so
+ * a sibling project's wallet is never this caller's to fund.
  *
  * @param db - Database client.
- * @param organizationId - The authenticated organization (from auth, never input).
+ * @param scope - The authenticated organization and project (from auth, never input).
  * @param payload - The validated relay payload.
  * @throws AppError BAD_REQUEST for a malformed destination; FORBIDDEN for an unowned one.
  */
 export async function assertFaucetDestinationsOwned(
   db: DatabaseClient,
-  organizationId: string,
+  scope: { organizationId: string; projectId: string },
   payload: unknown
 ): Promise<void> {
   const rawDestinations = extractAirdropDestinations(payload);
@@ -80,6 +79,7 @@ export async function assertFaucetDestinationsOwned(
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
       WHERE c.organization_id = ?
+        AND c.project_id = ?
         AND c.status = 'active'
         AND w.status = 'active'
         AND w.public_key IN (${placeholders})
@@ -88,16 +88,24 @@ export async function assertFaucetDestinationsOwned(
        FROM custody_wallets w
        JOIN custody_connections cc ON cc.id = w.custody_connection_id
       WHERE cc.organization_id = ?
+        AND cc.project_id = ?
         AND cc.status = 'active'
         AND w.status = 'active'
         AND w.public_key IN (${placeholders})`,
-    [organizationId, ...addresses, organizationId, ...addresses]
+    [
+      scope.organizationId,
+      scope.projectId,
+      ...addresses,
+      scope.organizationId,
+      scope.projectId,
+      ...addresses,
+    ]
   );
 
   const ownedAddresses = new Set(owned.map((row) => row.public_key));
   for (const destination of destinations) {
     if (!ownedAddresses.has(destination)) {
-      throw forbidden("requestAirdrop destination is not a wallet of this organization");
+      throw forbidden("requestAirdrop destination is not a wallet of this project");
     }
   }
 }

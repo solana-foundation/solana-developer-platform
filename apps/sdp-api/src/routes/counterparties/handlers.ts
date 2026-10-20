@@ -26,11 +26,7 @@ import {
 import { created, noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { admitRamp } from "@/routes/payments/ramps/admission";
-import {
-  assertPaymentWalletExactAccess,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "@/routes/payments/wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
@@ -38,13 +34,13 @@ import {
   getCounterpartiesRepository,
   getCounterpartyAccountsRepository,
 } from "./context";
-import type { submitCounterpartyRequirementsSchema } from "./schemas";
 import {
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   type createCounterpartySchema,
   listCounterpartiesQuerySchema,
   listCounterpartyAccountsQuerySchema,
+  type submitCounterpartyRequirementsSchema,
   type updateCounterpartySchema,
 } from "./schemas";
 
@@ -217,7 +213,6 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       scope.wallets,
       query.data.destinationCustodyWalletId
     );
-    assertPaymentWalletExactAccess(c, destinationWallet.id, []);
     destinationWalletAddress = destinationWallet.publicKey;
   }
 

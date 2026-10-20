@@ -2,8 +2,7 @@
  * Wallet API Schemas
  */
 
-import type { CustodyWalletOwnerTarget } from "@sdp/types/custody";
-import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import { CUSTODY_PROVIDERS, type CustodyWalletOwnerTarget } from "@sdp/types/custody";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
@@ -159,7 +158,7 @@ export type DeleteWalletRequest = z.infer<typeof deleteWalletSchema>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const signerCheckSchema = z.object({
-  walletId: z.string().min(1).optional(),
+  walletId: z.string().trim().min(1),
 });
 
 export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;

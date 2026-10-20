@@ -200,7 +200,7 @@ function registerEarnDepositPreviewPath(
       "derive `minSharesOut` from `sharesOut` minus the chosen tolerance. Read-only, no " +
       "idempotency key, and 501 when the provider cannot quote deposits. An anonymous request " +
       "acts in the named strategy's environment and touches no tenant state. An authenticated request retains " +
-      "its project environment, `earn:read` scope, and provider entitlement.",
+      "its project environment, `earn.read` grant, and provider entitlement.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -401,8 +401,8 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     description:
       "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. An " +
       "anonymous build uses the owner as fee payer, writes no tenant row, and must be signed, " +
-      "broadcast, and tracked by the caller. An authenticated build retains its `earn:write` " +
-      "scope and provider entitlement, persists a submit-capable build, and may name a " +
+      "broadcast, and tracked by the caller. An authenticated build retains its `earn.execute` " +
+      "grant and provider entitlement, persists a submit-capable build, and may name a " +
       "caller-controlled `feePayer` that signs alongside the owner. The transaction expires " +
       "with its blockhash, and nothing moves during the build.",
     security: security.optional,
@@ -497,7 +497,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     operationId: "createEarnExternalWalletWithdrawalTransaction",
     description:
       "Builds one unsigned external-wallet exit. An authenticated request identifies its " +
-      "tenant position, retains its `earn:write` scope, and persists a submit-capable build. " +
+      "tenant position, retains its `earn.execute` grant, and persists a submit-capable build. " +
       "An anonymous request identifies the strategy and signing owner, uses the owner as fee " +
       "payer, and writes no tenant row. Both tiers retain ADR 0002 exit safety, so the exit " +
       "works while the provider is disabled for new deposits. A strategy with a withdrawal " +

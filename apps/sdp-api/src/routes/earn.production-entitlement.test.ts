@@ -5,6 +5,7 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import {
   seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
@@ -191,7 +192,7 @@ beforeEach(async () => {
   apiKeyRaw = (
     await seedEarnApiKey(env, tenant, {
       id: "key_earn_prod_entitlement",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "production",
     })
   ).raw;

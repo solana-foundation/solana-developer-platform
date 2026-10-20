@@ -13,57 +13,70 @@
     "helius_rings"
   ],
   "rampProviders": ["moonpay", "stripe"],
-  "allowedOperations": [
+  "grantableActions": [
     {
-      "family": "privacy",
-      "types": [
-        "rings_shield",
-        "rings_transfer_registered",
-        "rings_transfer_anonymous",
-        "rings_withdraw",
-        "rings_merge",
-        "rings_timelock_create",
-        "rings_timelock_settle",
-        "rings_zone_create",
-        "rings_ring_exit",
-        "rings_ring_entry"
-      ]
+      "module": "transfers",
+      "verbs": ["read", "execute"]
     },
     {
-      "family": "payment",
-      "types": [
-        "payment_transfer_execute",
-        "payment_transfer_batch_execute",
-        "recurring_payment_create",
-        "recurring_payment_update",
-        "recurring_payment_collection"
-      ]
+      "module": "transfer_batches",
+      "verbs": ["read", "execute"]
     },
     {
-      "family": "ramp",
-      "types": ["ramp_onramp_quote", "ramp_offramp_quote"]
+      "module": "payment_requests",
+      "verbs": ["read", "manage"]
     },
     {
-      "family": "issuance",
-      "types": [
-        "issuance_allowlist_add_execute",
-        "issuance_allowlist_remove_execute",
-        "issuance_burn_execute",
-        "issuance_deploy_execute",
-        "issuance_force_burn_execute",
-        "issuance_freeze_execute",
-        "issuance_metadata_update_execute",
-        "issuance_mint_execute",
-        "issuance_pause_execute",
-        "issuance_seize_execute",
-        "issuance_unfreeze_execute",
-        "issuance_unpause_execute",
-        "issuance_update_authority_execute"
-      ]
+      "module": "counterparties",
+      "verbs": ["read", "manage", "execute"]
     },
     {
-      "family": "program",
-      "types": ["dvp_fund", "dvp_settle"]
+      "module": "transactions",
+      "verbs": ["read"]
+    },
+    {
+      "module": "recurring",
+      "verbs": ["read", "manage", "execute"]
+    },
+    {
+      "module": "wallets",
+      "verbs": ["read", "manage", "execute"]
+    },
+    {
+      "module": "compliance",
+      "verbs": ["execute"]
+    },
+    {
+      "module": "projects",
+      "verbs": ["read"]
+    },
+    {
+      "module": "onramp",
+      "verbs": ["read", "execute"]
+    },
+    {
+      "module": "offramp",
+      "verbs": ["read", "execute"]
+    },
+    {
+      "module": "ramp_transfers",
+      "verbs": ["manage"]
+    },
+    {
+      "module": "issuance",
+      "verbs": ["read", "manage", "execute", "enforce", "authority"]
+    },
+    {
+      "module": "dvp",
+      "verbs": ["read", "manage", "execute"]
+    },
+    {
+      "module": "private_channels",
+      "verbs": ["read", "manage", "execute"]
+    },
+    {
+      "module": "helius_rings",
+      "verbs": ["read", "manage", "execute"]
     }
   ],
   "allModules": [

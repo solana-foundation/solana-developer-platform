@@ -216,7 +216,7 @@ HttpRequest request = HttpRequest.newBuilder()
 | --- | --- | --- |
 | `provider` | yes | A provider from the [capability matrix](/docs/payments/ramps-providers#capability-matrix). |
 | `counterpartyId` | yes | An existing Counterparty. Provider-side customer and payout-account state is resolved server-side from it, not passed on the request. Counterparties do not store identity or email fields. |
-| `destinationCustodyWalletId` (onramp) / `sourceCustodyWalletId` (offramp) | yes | A custody wallet you control — its `id` (the `id` returned by `GET /v1/wallets`), resolved against your API key's wallet scope. Same shape for every provider. |
+| `destinationCustodyWalletId` (onramp) / `sourceCustodyWalletId` (offramp) | yes | A custody wallet you control — its `id` (the `id` returned by `GET /v1/wallets`), which must be within your API key's wallet scope. Same shape for every provider. |
 | `assetRail` | yes | Canonical SDP crypto asset rail (`usdc.solana`, `usdt.solana`, `sol.solana`, …). |
 | `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp, and for offramp where the provider's page says so. |
 | `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |

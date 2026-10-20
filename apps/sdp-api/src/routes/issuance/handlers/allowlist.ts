@@ -22,10 +22,11 @@ import { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { controlListMovement } from "./access-control";
-import type { IssuanceAuthority, IssuanceMovement } from "./authority-resolution";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
+  type IssuanceAuthority,
+  type IssuanceMovement,
   resolveAllowlistAuthority,
   resolveAuthorityWallet,
 } from "./authority-resolution";
@@ -175,7 +176,6 @@ async function resolveAllowlistAuthoritySigner(
     auth,
     currentAuthority: authorityAddress,
     requestedCustodyWalletId: signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   await admitIssuanceRuntimeExecution({
     env: c.env,
@@ -188,7 +188,6 @@ async function resolveAllowlistAuthoritySigner(
     auth,
     custodyWalletId: authorityWallet.custodyWalletId,
     currentAuthority: authorityAddress,
-    requiredWalletPermissions: ["tokens:write"],
     movement,
   });
   return { ...authorityWallet, authority };

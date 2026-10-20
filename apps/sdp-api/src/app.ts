@@ -30,6 +30,7 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import { publicRoute } from "@/middleware/require-action";
 import { requireModule } from "@/middleware/require-module";
 import { allowlist } from "@/routes/allowlist";
 import { apiKeys } from "@/routes/api-keys";
@@ -371,7 +372,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/admin/allowlist", allowlist);
 
   // Root redirect to health
-  app.get("/", (c) => c.redirect("/health"));
+  app.get("/", publicRoute("root: redirects to the health check"), (c) => c.redirect("/health"));
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Error Handling

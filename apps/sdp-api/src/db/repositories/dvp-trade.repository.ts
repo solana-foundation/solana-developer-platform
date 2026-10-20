@@ -148,16 +148,6 @@ export type DvpTradeInsert = Omit<
 export interface DvpTradeScope {
   organizationId: string;
   projectId: string;
-  /**
-   * Custody wallets a wallet-scoped API key may see trades for.
-   *
-   * `null` or absent means unrestricted — a Clerk session, or a key that is not
-   * wallet-scoped. An EMPTY ARRAY means deny everything, never "no filter". That
-   * reading is the repo-wide convention for wallet allowlists (see
-   * `payments.repository.postgres.ts:74-80`) and getting it backwards would turn
-   * a key with no usable bindings into a key that reads the whole project.
-   */
-  sdpWalletIds?: string[] | null;
 }
 
 /**

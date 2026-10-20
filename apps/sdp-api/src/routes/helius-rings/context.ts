@@ -1,5 +1,4 @@
 import { HeliusRingsError } from "@sdp/helius-rings/errors";
-import type { Permission } from "@sdp/types/permissions";
 import type { Context } from "hono";
 import type { HeliusRingsOperationRow } from "@/db/repositories/helius-rings-operation.repository";
 import type { HeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";
@@ -10,10 +9,8 @@ import {
 } from "@/db/repositories/repository-factory";
 import { getAuth } from "@/lib/auth";
 import { AppError, type ErrorCode, notFound } from "@/lib/errors";
-import {
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletIdsForPermissions,
-} from "@/services/api-key-scope.service";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
+import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings/service";
 import type { Env } from "@/types/env";
 
@@ -36,71 +33,60 @@ export function getHeliusRingsOperationRepository(c: AppContext) {
 }
 
 /**
- * Wallet-level authorization, on top of the route's project-level permission.
- *
- * An API key can be scoped to particular custody wallets. Without these checks
- * a key holding `payments:write` for one wallet could list this project's Rings
- * wallet ids and then spend from any of them — the route permission says what a
- * caller may do, not which wallet it may do it to. Payments enforces the same
- * guard on its equivalent operations.
- *
- * The guard is keyed on `sdp_wallet_id`, the custody provider's wallet id, which
- * is what API-key bindings name. Keys with no wallet scope are unaffected.
+ * How a route uses the Rings wallet it names. A `read` is project-scoped. A
+ * `write` also needs the wallet inside the key's wallet scope (HOO-2099): the
+ * custody signer refuses one outside it, and refusing up front keeps the
+ * operation from being prepared or sent to the gateway first.
  */
-async function assertRingsWalletAccess(
-  c: AppContext,
-  tenant: HeliusRingsTenant,
-  walletId: string,
-  permissions: Permission[]
-): Promise<HeliusRingsWalletRow> {
-  const wallet = await getHeliusRingsWalletRepository(c).getWalletById({ ...tenant, id: walletId });
-  // 404 before the scope check: a key that cannot see this wallet learns the
-  // same thing either way, and this keeps a missing id from reading as a
-  // permission problem.
-  if (!wallet) throw notFound("rings wallet");
+export type RingsWalletUse = "read" | "write";
 
-  assertApiKeyWalletAccess(getAuth(c), wallet.sdp_wallet_id, permissions);
-  return wallet;
-}
-
+/** The project's Rings wallet a route names, or 404; for a `write`, in the key's scope. */
 export async function requireRingsWallet(
   c: AppContext,
   tenant: HeliusRingsTenant,
   walletId: string,
-  permissions: Permission[]
+  use: RingsWalletUse
 ): Promise<HeliusRingsWalletRow> {
-  return assertRingsWalletAccess(c, tenant, walletId, permissions);
+  const wallet = await getHeliusRingsWalletRepository(c).getWalletById({ ...tenant, id: walletId });
+  if (!wallet) throw notFound("rings wallet");
+  if (use === "write") await assertRingsWalletInScope(c, wallet);
+  return wallet;
 }
 
-/** The same check reached through an operation, which names its wallet. */
+/** The project's Rings operation a route names, or 404; for a `write`, its wallet in the key's scope. */
 export async function requireRingsOperation(
   c: AppContext,
   tenant: HeliusRingsTenant,
   operationId: string,
-  permissions: Permission[]
+  use: RingsWalletUse
 ): Promise<HeliusRingsOperationRow> {
   const operation = await getHeliusRingsOperationRepository(c).getOperationById({
     ...tenant,
     id: operationId,
   });
   if (!operation) throw notFound("rings operation");
-
-  await assertRingsWalletAccess(c, tenant, operation.wallet_id, permissions);
+  if (use === "write") {
+    await requireRingsWallet(c, tenant, operation.wallet_id, "write");
+  }
   return operation;
 }
 
 /**
- * The `sdp_wallet_id` values this key may see, or null when it is unrestricted.
- *
- * List routes filter rather than throw: a scoped key asking for "my wallets"
- * wants its own, not a 403.
+ * The key's scope lists exact custody wallet ids. A Rings wallet records the
+ * custody wallet that signs for it; one created before live provisioning
+ * names only the provider id, resolved to its one custody wallet (ambiguity
+ * refuses, APE-390). An all-wallets key reads nothing more.
  */
-export function allowedRingsWalletIds(
+async function assertRingsWalletInScope(
   c: AppContext,
-  permissions: Permission[]
-): ReadonlySet<string> | null {
-  const allowed = getAllowedApiKeyWalletIdsForPermissions(getAuth(c), permissions);
-  return allowed === null ? null : new Set(allowed);
+  wallet: HeliusRingsWalletRow
+): Promise<void> {
+  const { walletAccess } = getAuth(c);
+  if (walletAccess.scope === "all") return;
+  const custodyWalletId =
+    wallet.custody_wallet_id ??
+    resolveWallet((await resolveScope(c)).wallets, wallet.sdp_wallet_id).id;
+  assertCallerWalletInScope(walletAccess, custodyWalletId);
 }
 
 export function getHeliusRingsZoneRepository(c: AppContext) {

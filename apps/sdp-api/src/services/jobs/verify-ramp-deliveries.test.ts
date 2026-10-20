@@ -98,9 +98,14 @@ function sweep(environment: "sandbox" | "production" = "sandbox") {
   );
 }
 
+const unixSeconds = (iso: string) => BigInt(Date.parse(iso) / 1000);
+// seedTransfer creates every row at 2026-10-19T00:00:00Z.
+const LANDED_AFTER_TRANSFER = unixSeconds("2026-10-19T00:05:00.000Z");
+
 function landedToken(amount: string, owner = "quoted-destination", mint = MINT): ParsedTransaction {
   return {
     slot: 42n,
+    blockTime: LANDED_AFTER_TRANSFER,
     executionResultKnown: true,
     err: null,
     preTokenBalances: [],
@@ -280,6 +285,7 @@ describe("verifyRampDeliveries", () => {
     });
     getTransactionMock.mockResolvedValue({
       slot: 42n,
+      blockTime: LANDED_AFTER_TRANSFER,
       executionResultKnown: true,
       err: null,
       accountKeys: ["fee-payer", "quoted-destination"],
@@ -325,6 +331,15 @@ describe("verifyRampDeliveries", () => {
     ["short delivery", landedToken("499999")],
     ["failed transaction", { ...landedToken("500000"), err: { InstructionError: [0, "Custom"] } }],
     ["unknown execution", { ...landedToken("500000"), executionResultKnown: false }],
+    [
+      "a delivery from before the transfer",
+      { ...landedToken("500000"), blockTime: unixSeconds("2026-10-09T00:00:00.000Z") },
+    ],
+    [
+      "a delivery just past the clock-skew allowance",
+      { ...landedToken("500000"), blockTime: unixSeconds("2026-10-18T23:57:59.000Z") },
+    ],
+    ["a delivery with no block time", { ...landedToken("500000"), blockTime: null }],
   ])("holds %s for operator reconciliation", async (_reason, transaction) => {
     await seedTransfer({ id: "xfr_bad_delivery", reference: "moonpay_bad_delivery" });
     await applyRampSettlementEvent(env, "sandbox", {
@@ -340,6 +355,25 @@ describe("verifyRampDeliveries", () => {
 
     expect((await row("xfr_bad_delivery"))?.status).toBe("settling");
     expect((await row("xfr_bad_delivery"))?.amount).toBeNull();
+  });
+
+  it("accepts a delivery inside the clock-skew allowance", async () => {
+    await seedTransfer({ id: "xfr_skewed_clock", reference: "moonpay_skewed_clock" });
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "moonpay_skewed_clock",
+      onchain: { signature: SIG_1, destinationAddress: "quoted-destination" },
+      receivedAmount: "0.5",
+    });
+    getTransactionMock.mockResolvedValue({
+      ...landedToken("500000"),
+      blockTime: unixSeconds("2026-10-18T23:58:00.000Z"),
+    });
+
+    await sweep();
+
+    expect((await row("xfr_skewed_clock"))?.status).toBe("completed");
   });
 
   it("does not read the chain when the provider names a different destination", async () => {

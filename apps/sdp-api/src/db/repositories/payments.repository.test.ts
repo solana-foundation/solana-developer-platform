@@ -881,35 +881,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     offset: 0,
   };
 
-  it("matches nothing for an empty allowlist instead of dropping the filter", async () => {
-    const repo = await seedTwoWallets();
-
-    // walletIds carries an API key's authorized-wallet allowlist. An empty
-    // allowlist means "authorized for no wallet"; silently dropping the
-    // filter would hand that key every transfer in scope.
-    const denied = await repo.listTransfers({ ...listArgs, walletIds: [] });
-
-    expect(denied.rows).toHaveLength(0);
-    expect(denied.total).toBe(0);
-  });
-
-  it("scopes a non-empty allowlist to exactly its wallets", async () => {
-    const repo = await seedTwoWallets();
-
-    const scoped = await repo.listTransfers({ ...listArgs, walletIds: [WALLET_A] });
-
-    expect(scoped.rows).toHaveLength(2);
-    expect(scoped.rows.every((row) => row.wallet_id === WALLET_A)).toBe(true);
-  });
-
-  it("keeps an absent allowlist unfiltered", async () => {
-    const repo = await seedTwoWallets();
-
-    const all = await repo.listTransfers({ ...listArgs, walletIds: undefined });
-
-    expect(all.rows).toHaveLength(3);
-  });
-
   it("filters by one exact wallet", async () => {
     const repo = await seedTwoWallets();
 
@@ -920,37 +891,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
 
     expect(selected.rows.map((row) => row.id)).toHaveLength(1);
     expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
-  });
-
-  it("authorizes exact rows by custody ID and legacy null rows by Provider ID", async () => {
-    const repo = await seedTwoWallets();
-
-    const authorized = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: {
-        custodyWalletIds: [CUSTODY_WALLET_B],
-        providerWalletIds: [WALLET_A],
-      },
-    });
-    const denied = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
-    });
-
-    expect(authorized.rows).toHaveLength(2);
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({
-        custody_wallet_id: CUSTODY_WALLET_B,
-        wallet_id: WALLET_B,
-      })
-    );
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({ custody_wallet_id: null, wallet_id: WALLET_A })
-    );
-    expect(authorized.rows).not.toContainEqual(
-      expect.objectContaining({ custody_wallet_id: CUSTODY_WALLET_A })
-    );
-    expect(denied).toEqual({ rows: [], total: 0 });
   });
 });
 

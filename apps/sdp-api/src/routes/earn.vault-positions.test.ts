@@ -1,7 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import { withRpcReadContext } from "@sdp/rpc/read-context";
 import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import type { Address, RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -11,12 +10,12 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
 import { getLogger } from "@/runtime/logger";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const signatureStatuses = vi.hoisted(() => vi.fn());
 vi.mock("@sdp/rpc/solana", async (original) => ({
@@ -63,17 +62,15 @@ const PRODUCTION_API_KEY = {
   prefix: "sk_live_vau",
 };
 
-function cachedKey(): CachedApiKey {
+function cachedKey(): SeededApiKey {
   return {
     id: API_KEY.id,
     organizationId: ORG,
     projectId: PROJECT_A,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -81,7 +78,7 @@ function cachedKey(): CachedApiKey {
 
 async function seedScope(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey());
+  await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -101,10 +98,9 @@ async function seedScope(): Promise<void> {
     organizationId: ORG,
     projectId: `${PROJECT_A}_production`,
     createdBy: USER,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
-  await seedCachedApiKey(env, productionKeyHash, {
+  await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
     id: PRODUCTION_API_KEY.id,
     projectId: `${PROJECT_A}_production`,
@@ -114,10 +110,19 @@ async function seedScope(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', '["*"]'::jsonb, 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`
       )
-      .bind(API_KEY.id, ORG, PROJECT_A, USER, "Vault key", "sk_test_vau", keyHash),
+      .bind(
+        API_KEY.id,
+        ORG,
+        PROJECT_A,
+        USER,
+        "Vault key",
+        "sk_test_vau",
+        keyHash,
+        ALL_API_KEY_GRANTS
+      ),
     ...[[CONFIG_A, PROJECT_A, WALLET_A, PROVIDER_WALLET_A, PUBLIC_KEY_A]].flatMap(
       ([configId, projectId, walletId, providerWalletId, publicKey]) => [
         getDb(env)
@@ -358,53 +363,6 @@ describe("GET /v1/earn/vault-positions", () => {
     } finally {
       env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = original;
     }
-  });
-
-  it("exposes no rows for an ambiguous selected-wallet provider id", async () => {
-    const secondConfigId = "cfg_vault_positions_second";
-    const secondWalletId = "cwlt_vault_positions_second";
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: secondConfigId,
-          organizationId: ORG,
-          projectId: PROJECT_A,
-          provider: "para",
-          configEncrypted: "encrypted",
-          status: "active",
-        },
-      ],
-      wallets: [
-        {
-          id: secondWalletId,
-          owner: { kind: "config", custodyConfigId: secondConfigId },
-          walletId: PROVIDER_WALLET_A,
-          publicKey: PUBLIC_KEY_B,
-          label: null,
-          purpose: null,
-          status: "active",
-        },
-      ],
-    });
-    await createPosition({ providerReference: "vault_project_binding" });
-    await createPosition({
-      walletId: secondWalletId,
-      providerReference: "vault_second_binding",
-      signature: "sig_second_binding",
-    });
-    const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
-      ...cachedKey(),
-      signingWalletId: PROVIDER_WALLET_A,
-      walletBindings: [{ walletId: PROVIDER_WALLET_A, permissions: ["earn:read"] }],
-    });
-
-    const response = await getPositions();
-    const body = (await response.json()) as { data: { positions: unknown[] } };
-
-    expect(response.status).toBe(200);
-    expect(body.data.positions).toEqual([]);
-    expect(readVaultPositions).not.toHaveBeenCalled();
   });
 
   it("returns stable bounded keyset pages without overlap", async () => {

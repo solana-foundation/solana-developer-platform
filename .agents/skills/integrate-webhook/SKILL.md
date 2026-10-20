@@ -13,7 +13,7 @@ only reaches `settling`; `verify-ramp-deliveries` checks the chain before
 the interface in `processor.ts`:
 
 - `verify(context)` — verify the raw request signature, return the raw body.
-- `parse(rawBody, environment)` — pure wire-format → `RampSettlementEvent` mapping.
+- `parse(rawBody, environment)` — pure: validate the envelope, then hand the provider's transaction object to the package status mapping.
 - `process(env, environment, event)` — DB orchestration through `applyRampSettlementEvent`.
 
 Canonical examples: the registered processors in
@@ -51,7 +51,13 @@ Signature variety across the registered webhook providers:
 
 `(rawBody: string, environment?: SdpEnvironment) → Event`, typically
 `RampSettlementEvent` from `@sdp/payments/ramps/types`. Validate the provider
-envelope and event types; unknown event types map to `ignore`. Set `reference`
+envelope and event types; unknown event types map to `ignore`. Map the
+provider's transaction object in the package, in
+`packages/sdp-payments/src/ramps/providers/<id>/*-status-mapping.ts`
+(`event-status-mapping.ts` for MoonPay, `session-status-mapping.ts` for
+Stripe), because `fetchTransferStatus` calls the same mapping. A mapping
+refusal is `PROVIDER_RESPONSE_INVALID`; `parse` turns it into a 400 so the
+provider redelivers. Set `reference`
 to the provider transaction or session id bound to the SDP quote. Parse amounts
 in their real currency: a MoonPay buy's `quoteCurrencyAmount` is crypto, while
 a sell's `quoteCurrencyAmount` is fiat. Keep refund wallets distinct from
@@ -86,6 +92,36 @@ provider observations separately from quoted fields. A settled event stays
 ## Beyond settlement: provisioning auto-advance
 
 A provider whose counterparty provisioning is async (KYC verification, wallet creation) also moves requirement state from webhooks: `parse` returns a wider provider event union — one event kind per upstream type (customer status changes, wallet creation/status changes, payment status changes) — and `process` switches exhaustively on `event.kind`, routing settlement kinds to `applyRampSettlementEvent`-based helpers and provisioning kinds to helpers that update `counterparty_provider_accounts` rows (never `counterparties.provider_data` — it's deprecated). The requirements GET then reflects the advanced state (`counterparty-requirements`). The standard contract a new provider implements is the settlement path above; add provisioning kinds only when the upstream provisions asynchronously.
+
+## Status pull and abandonment
+
+A webhook can be lost. The `sweep-ramp-transfer-statuses` cron
+(`apps/sdp-api/src/services/jobs/sweep-ramp-transfer-statuses.ts`, every five
+minutes) asks the provider instead:
+
+- Implement `fetchTransferStatus` on the client: one request that finds the
+  provider's transactions for the transfer (by SDP's transfer id or the stored
+  provider reference), mapped through the shared status mapping, oldest update
+  first. Return `[]` only for the provider's "holds nothing" answer (MoonPay's
+  404); every other failure throws.
+- Register the client and its processor in `RAMP_STATUS_PULLS`, and a
+  per-direction horizon in `RAMP_ABANDONMENT_HORIZON_MS`. Typecheck fails
+  until both exist.
+- The sweep applies each pulled event through `process`, exactly as a
+  delivered webhook. It expires a `pending` or `awaiting_payment` checkout
+  (`checkout_abandoned`) only after a quiet horizon, a pull that neither failed
+  nor was refused, and an unchanged row. An untimed "not paid yet" (no
+  `providerObservedAt`) never counts as activity: it neither resets the horizon
+  nor revives an expired checkout.
+- Set `unmappedStatus` on the `ignore` event for a provider status your mapping
+  does not know, so the sweep holds that checkout instead of expiring it. A
+  known status SDP deliberately ignores (Stripe's `initialized`) leaves it
+  unset.
+- Rows SDP holds no credentials for (production, until projects bring their
+  own) are skipped, never expired. A release channel that hides the provider
+  does not stop the sweep.
+- Add `transferStatus` kit cases (a known transaction per direction and the
+  empty answer), and look up real sandbox transactions once before review.
 
 ## Rules + verify
 

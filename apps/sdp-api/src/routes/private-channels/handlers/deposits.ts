@@ -6,8 +6,8 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import type { AppContext } from "@/routes/private-channels/context";
 import {
+  type AppContext,
   getPrivateChannelDepositRepository,
   loadPrivateChannelProjectRpcClient,
 } from "@/routes/private-channels/context";
@@ -34,13 +34,13 @@ import { createPrivateChannelSigner } from "@/services/private-channels/wallet-a
 /**
  * POST /deposits — create + broadcast a deposit from a custody wallet into the
  * instance escrow, crediting `recipient` (defaults to the depositor) in the
- * channel. Feature-gated + `payments:write`. Returns the deposit DTO with its
+ * channel. Feature-gated + `private_channels.execute`. Returns the deposit DTO with its
  * current status (submitted/confirmed, or failed with a reason).
  *
  * Authorization lives entirely in `resolveDepositCreateContext`: the caller must
  * be an SPC member of the project's active instance, the source custody wallet
  * must be one THEY verified there, and the credited recipient must be an address
- * verified on the instance. `payments:write` alone is not enough — it says
+ * verified on the instance. `private_channels.execute` alone is not enough — it says
  * nothing about which member owns which wallet.
  *
  * `Idempotency-Key` is required. The reservation it takes is what makes a retry

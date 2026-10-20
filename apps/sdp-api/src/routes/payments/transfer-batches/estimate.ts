@@ -3,13 +3,15 @@ import {
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
 } from "@sdp/rpc/solana";
-import type { TransactionMessageBytesBase64 } from "@solana/kit";
-import { compileTransaction, createNoopSigner } from "@solana/kit";
+import {
+  compileTransaction,
+  createNoopSigner,
+  type TransactionMessageBytesBase64,
+} from "@solana/kit";
 import { getTokenSize } from "@solana-program/token-2022";
 import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
@@ -92,8 +94,7 @@ export async function estimateTransferBatch(
   c: ValidatedBodyContext<typeof estimateTransferBatchSchema>
 ) {
   const body = c.req.valid("json");
-  const resolved = await resolveBatchRequest(c, body, ["payments:read"]);
-  assertApiKeyCustodyWalletAccess(resolved.scope.auth, resolved.sourceWallet.id, ["payments:read"]);
+  const resolved = await resolveBatchRequest(c, body);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
   const [feePayer, lifetime] = await Promise.all([
     resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),

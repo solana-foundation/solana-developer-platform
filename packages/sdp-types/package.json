@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./actions": {
+      "types": "./src/actions.ts",
+      "import": "./src/actions.ts",
+      "default": "./src/actions.ts"
+    },
     "./advanced-settings": {
       "types": "./src/advanced-settings.ts",
       "import": "./src/advanced-settings.ts",
@@ -154,11 +159,6 @@
       "import": "./src/payments.ts",
       "default": "./src/payments.ts"
     },
-    "./permissions": {
-      "types": "./src/permissions.ts",
-      "import": "./src/permissions.ts",
-      "default": "./src/permissions.ts"
-    },
     "./places": {
       "types": "./src/places.ts",
       "import": "./src/places.ts",
@@ -193,6 +193,11 @@
       "types": "./src/release-channels.ts",
       "import": "./src/release-channels.ts",
       "default": "./src/release-channels.ts"
+    },
+    "./roles": {
+      "types": "./src/roles.ts",
+      "import": "./src/roles.ts",
+      "default": "./src/roles.ts"
     },
     "./site": {
       "types": "./src/site.ts",
