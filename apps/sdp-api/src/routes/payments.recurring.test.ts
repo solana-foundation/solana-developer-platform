@@ -4937,6 +4937,40 @@ describe("Payments routes — recurring", () => {
     }
   );
 
+  // Greptile (#2435): the early refusal must leave the key unstored, so the same
+  // request runs once the key's scope is fixed, and cancels exactly once.
+  it("runs a refused cancel's same-key retry once the key may sign with the source wallet", async () => {
+    await seedUnboundWallet();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+    const headers = { ...RECURRING_HEADERS, "Idempotency-Key": "cancel-after-scope-fix" };
+    const cancel = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers, body: "{}" },
+        env
+      );
+
+    await expectWalletOutOfScope(await cancel());
+
+    await seedCachedKey({ walletScope: "all", walletIds: [] });
+    recurringExecution.signAndSendMock().mockResolvedValue(testSignature(9));
+    const retried = await cancel();
+
+    expect(retried.status).toBe(200);
+    const cancelAttempts = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count FROM payment_recurring_payment_lifecycle_attempts
+          WHERE recurring_payment_id = ? AND operation = 'cancel'`
+      )
+      .bind(activated.id)
+      .first<{ count: number }>();
+    expect(cancelAttempts).toEqual({ count: 1 });
+  });
+
   // The compromised-key path (APE-343): revoke-and-cancel finds what the key
   // activated under its own id or one it was rotated from.
   describe("cancel what a revoked key activated", () => {
