@@ -711,10 +711,6 @@
         "label": "Organization",
         "description": "Organization settings and provider access."
       },
-      "rpc": {
-        "label": "RPC",
-        "description": "The managed Solana RPC relay."
-      },
       "onramp": {
         "label": "On-ramp",
         "description": "On-ramp currencies, estimates and quotes."

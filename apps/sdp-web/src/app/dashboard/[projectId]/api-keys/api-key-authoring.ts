@@ -8,7 +8,6 @@ import {
   grantsCoverAction,
   isAction,
   isActionInReleaseChannel,
-  isInEverythingGrant,
   normalizeGrants,
 } from "@sdp/types/actions";
 import type { ApiKeyEnvironment, ApiKeyWalletScope } from "@sdp/types/api-keys";
@@ -166,8 +165,7 @@ export function clearOfferedGrants(
 }
 
 /**
- * "Everything": every offered action, written out, except the metered RPC
- * relay, which a key gets only when it is ticked on its own. Reads a module's
+ * "Everything": every offered action, written out. Reads a module's
  * `manage` or `execute` includes are not stored, and grants the picker cannot
  * show are kept. What is stored is this explicit list, so an action added to
  * SDP later reaches no existing key.
@@ -176,10 +174,7 @@ export function everythingGrants(
   offered: readonly Action[],
   current: readonly Action[] = []
 ): Action[] {
-  return withoutIncludedReads([
-    ...offered.filter(isInEverythingGrant),
-    ...heldGrantsNotOffered(current, offered),
-  ]);
+  return withoutIncludedReads([...offered, ...heldGrantsNotOffered(current, offered)]);
 }
 
 /** The verbs held on each module, an included read listed too, for summaries. */

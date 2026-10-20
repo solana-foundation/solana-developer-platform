@@ -635,7 +635,7 @@ describe("Rate limiting", () => {
 });
 
 describe("nextAdmissionAt", () => {
-  const window = { windowStart: 60_000, windowMs: 60_000, cost: 1, maxRequests: 100 };
+  const window = { windowStart: 60_000, windowMs: 60_000, maxRequests: 100 };
 
   it("waits for the window to end when the current window alone is full", () => {
     expect(nextAdmissionAt({ ...window, admission: { current: 100, previous: 0 } })).toBe(120_000);
@@ -655,8 +655,8 @@ describe("nextAdmissionAt", () => {
   });
 
   it("never answers past the window's end", () => {
-    expect(nextAdmissionAt({ ...window, cost: 50, admission: { current: 60, previous: 10 } })).toBe(
-      120_000
-    );
+    expect(
+      nextAdmissionAt({ ...window, admission: { current: 99, previous: 1_000_000_000 } })
+    ).toBe(120_000);
   });
 });

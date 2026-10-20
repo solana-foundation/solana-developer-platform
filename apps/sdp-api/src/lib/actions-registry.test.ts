@@ -51,7 +51,6 @@ const PUBLISHED_ACTIONS = [
   "members.manage",
   "organizations.read",
   "organizations.manage",
-  "rpc.execute",
   "onramp.read",
   "onramp.execute",
   "offramp.read",

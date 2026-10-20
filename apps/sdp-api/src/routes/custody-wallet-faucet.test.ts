@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { HUMAN_SESSION_REQUIRED_MESSAGE } from "@/middleware/human-session";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -51,8 +52,7 @@ async function seedSandboxWalletAndApiKey(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     projectId: SANDBOX_PROJECT_ID,
     createdBy: USER_ID,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ["wallets.execute"],
   });
   await seedTestCustodyRows(env, {
     configs: [
@@ -88,7 +88,7 @@ describe("POST /internal/dashboard/wallets/:walletId/faucet", () => {
     await seedSandboxWalletAndApiKey();
   });
 
-  it("refuses an API key with every permission on its own sandbox wallet, before any RPC call", async () => {
+  it("refuses an API key holding wallets.execute on its own sandbox wallet, before any RPC call", async () => {
     const response = await app.request(
       `/internal/dashboard/wallets/${CUSTODY_WALLET_ID}/faucet`,
       {
@@ -102,10 +102,10 @@ describe("POST /internal/dashboard/wallets/:walletId/faucet", () => {
       env
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(403);
     expect(errorSchema.parse(await response.json()).error).toEqual({
-      code: "UNAUTHORIZED",
-      message: "Clerk JWT required",
+      code: "FORBIDDEN",
+      message: HUMAN_SESSION_REQUIRED_MESSAGE,
     });
     expect(rpc.calls).toEqual([]);
   });

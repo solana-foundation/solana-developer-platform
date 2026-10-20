@@ -339,16 +339,15 @@ export const keyedIpBackstopFallback = new InProcessRateLimiter(
  */
 export function nextAdmissionAt(input: {
   maxRequests: number;
-  cost: number;
   windowStart: number;
   windowMs: number;
   admission: { current: number; previous: number };
 }): number {
-  const { maxRequests, cost, windowStart, windowMs, admission } = input;
+  const { maxRequests, windowStart, windowMs, admission } = input;
   const windowEnd = windowStart + windowMs;
-  // The store admits while current + previous * weight + cost - 1 < max, so
-  // the previous window's weighted share must fall below this room.
-  const room = maxRequests - admission.current - Math.max(1, Math.floor(cost)) + 1;
+  // The store admits while current + previous * weight < max, so the
+  // previous window's weighted share must fall below this room.
+  const room = maxRequests - admission.current;
   if (room <= 0 || admission.previous <= 0) {
     return windowEnd;
   }
@@ -432,9 +431,7 @@ export async function enforceRateLimit(
   c.header("X-RateLimit-Reset", Math.ceil(windowEndMs / 1000).toString());
 
   if (!admission.admitted) {
-    options.onRefused?.(
-      nextAdmissionAt({ maxRequests, cost: options.cost ?? 1, windowStart, windowMs, admission })
-    );
+    options.onRefused?.(nextAdmissionAt({ maxRequests, windowStart, windowMs, admission }));
     const retryAfter = Math.max(1, Math.ceil((windowEndMs - now) / 1000));
     c.header("Retry-After", retryAfter.toString());
     getLogger().warn(

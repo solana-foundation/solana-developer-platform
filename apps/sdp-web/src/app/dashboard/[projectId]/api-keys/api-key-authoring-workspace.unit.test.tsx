@@ -116,7 +116,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     expect(continueButton.hasAttribute("disabled")).toBe(false);
   });
 
-  it("saves Everything as the explicit list of offered actions, less the RPC relay and included reads", async () => {
+  it("saves Everything as the explicit list of offered actions, less included reads", async () => {
     vi.mocked(saveApiKeyAuthoringAction).mockResolvedValue({ ok: true, message: "saved" });
     const user = await openPermissionsStep();
     await user.click(screen.getByRole("button", { name: "Everything" }));
@@ -128,7 +128,6 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     expect(vi.mocked(saveApiKeyAuthoringAction).mock.calls[0]?.[0].draft.grants).toEqual(
       everythingGrants(STABLE_ACTIONS)
     );
-    expect(everythingGrants(STABLE_ACTIONS)).not.toContain("rpc.execute");
   });
 
   it("opens an existing key on its own grants", async () => {
