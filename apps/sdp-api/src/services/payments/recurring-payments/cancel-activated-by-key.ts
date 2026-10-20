@@ -64,7 +64,8 @@ export async function cancelRecurringPaymentsActivatedByKey(
         projectId: scope.projectId,
         sourceWallet,
         recurringPayment,
-        // Revocation cancels under no request key and as the system, as the cron does.
+        // Revocation cancels under no request key, as the cron does. It signs as
+        // the person revoking (requireHumanActor), whom wallet scope never narrows.
         idempotencyKey: null,
         admitCaller: null,
       });

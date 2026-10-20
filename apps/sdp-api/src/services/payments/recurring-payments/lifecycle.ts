@@ -414,9 +414,10 @@ type RecurringPaymentLifecycleRun =
       operation: Extract<RecurringPaymentLifecycleOperation, "cancel">;
       /**
        * The caller's own refusal of a cancel it may not sign (wallet scope),
-       * run before the claim; null for the job and revocation, which cancel
-       * as the system. A cancel is an exit: this is the waist's refusal made
-       * early, so a refused request claims and journals nothing (HOO-2099).
+       * run before the claim. Null for the job, which cancels as the mandate,
+       * and for revocation, which signs as the person revoking, whom wallet
+       * scope never narrows. A cancel is an exit: this is the waist's refusal
+       * made early, so a refused request claims and journals nothing (HOO-2099).
        */
       admitCaller: (() => void) | null;
     }
