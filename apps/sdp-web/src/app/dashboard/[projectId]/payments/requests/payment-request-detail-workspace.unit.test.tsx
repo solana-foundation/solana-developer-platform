@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { PaymentRequest } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,21 +15,27 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: "sandbox" }),
 }));
 
-const paymentRequest = {
+const paymentRequest: PaymentRequest = {
   id: "preq_1",
-  publicToken: "tok_1",
+  organizationId: "org_1",
+  projectId: "prj_1",
   counterpartyId: null,
   walletId: "wallet_1",
   destinationAddress: "11111111111111111111111111111111",
-  token: "So11111111111111111111111111111111111111112",
+  token: SOL_MINT,
   amount: "5",
   reference: "ref_1",
   status: "awaiting_payment",
   expiresAt: null,
+  fulfilledByTransferId: null,
+  canceledBy: null,
+  lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
+  createdBy: null,
   createdAt: "2026-09-14T00:00:00.000Z",
-} as PaymentRequest;
+  updatedAt: "2026-09-14T00:00:00.000Z",
+};
 
-function renderDetail(demo: boolean) {
+function renderDetail(demo: boolean, publicToken: string | null = "tok_1") {
   function wrapper({ children }: { children: ReactNode }) {
     return (
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -37,7 +44,12 @@ function renderDetail(demo: boolean) {
     );
   }
   return render(
-    <PaymentRequestDetailWorkspace request={paymentRequest} contactName={null} walletName={null} />,
+    <PaymentRequestDetailWorkspace
+      request={paymentRequest}
+      publicToken={publicToken}
+      contactName={null}
+      walletName={null}
+    />,
     { wrapper }
   );
 }
@@ -47,6 +59,15 @@ afterEach(() => {
 });
 
 describe("PaymentRequestDetailWorkspace payment link", () => {
+  // The token is a bearer credential (APE-849): a member who may not manage
+  // payment requests gets none, and no link is drawn.
+  it("shows no link or QR code without the link token", async () => {
+    renderDetail(false, null);
+
+    await waitFor(() => expect(screen.queryByText(/\/pay\//)).toBeNull());
+    expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
+  });
+
   it("shows the pay link and its QR code", async () => {
     renderDetail(false);
 

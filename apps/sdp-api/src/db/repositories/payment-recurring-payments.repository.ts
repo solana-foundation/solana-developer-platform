@@ -118,6 +118,17 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   idempotency_key: string | null;
   /** The fingerprint of that request's validated body: the same key with other terms is a 422. */
   idempotency_fingerprint: string | null;
+  /**
+   * The activator this attempt's claim replaced, restored if the attempt is
+   * abandoned; null when the claim changed no activator (HOO-2099).
+   */
+  previous_activator: StoredRecurringPaymentActivator | null;
+}
+
+/** An activator as stored: both null for a payment no principal activated. */
+export interface StoredRecurringPaymentActivator {
+  apiKeyId: string | null;
+  userId: string | null;
 }
 
 export interface PaymentRecurringPaymentUpdateEventRow {
@@ -223,6 +234,15 @@ export interface UpdatePaymentRecurringPaymentDestinationTokenAccountInput {
   updatedAt: string;
 }
 
+/**
+ * Who activated or resumed a recurring payment, recorded on the claim for
+ * audit and for "revoke this key and cancel what it activated" (APE-343).
+ * Null keeps the stored value: the job's recovery and a cancel record nobody.
+ */
+export type RecurringPaymentActivator =
+  | { apiKeyId: string; userId: null }
+  | { apiKeyId: null; userId: string };
+
 export interface ClaimPaymentRecurringPaymentLifecycleInput {
   recurringPaymentId: string;
   organizationId: string;
@@ -230,6 +250,7 @@ export interface ClaimPaymentRecurringPaymentLifecycleInput {
   operation: PaymentRecurringPaymentLifecycleOperation;
   updatedAt: string;
   staleBefore?: string;
+  activatedBy: RecurringPaymentActivator | null;
 }
 
 export interface ClaimPaymentRecurringPaymentUpdateInput {
@@ -238,6 +259,11 @@ export interface ClaimPaymentRecurringPaymentUpdateInput {
   projectId: string;
   updatedAt: string;
   staleBefore?: string;
+  /**
+   * Who the mandate answers to after an update that changes where or how much
+   * money moves; null keeps the stored activator (HOO-2099).
+   */
+  activatedBy: RecurringPaymentActivator | null;
 }
 
 export interface UpdatePaymentRecurringPaymentLifecycleInput {
@@ -276,6 +302,8 @@ export interface CreatePaymentRecurringPaymentUpdateAttemptInput {
   updatedAt: string;
   idempotencyKey?: string | null;
   idempotencyFingerprint?: string | null;
+  /** The activator the claim replaced; null when it changed none. */
+  previousActivator?: StoredRecurringPaymentActivator | null;
 }
 
 export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
@@ -417,15 +445,9 @@ export interface GetLatestPaymentRecurringPaymentActivationAttemptInput {
   statuses?: readonly PaymentRecurringPaymentAttemptStatus[];
 }
 
-export interface PaymentRecurringWalletAuthorization {
-  custodyWalletIds: string[];
-  providerWalletIds: string[];
-}
-
 export interface ListPaymentRecurringPaymentsInput {
   organizationId: string;
   projectId: string;
-  walletAuthorization: PaymentRecurringWalletAuthorization | null;
   status?: PaymentRecurringPaymentStatus;
   counterpartyId?: string;
   limit: number;
@@ -484,13 +506,38 @@ export interface PaymentRecurringPaymentsRepository {
   updateRecurringPayment(
     input: UpdatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  /** The stored activator, row-locked for the claim that may replace it. */
+  lockRecurringPaymentActivator(params: {
+    recurringPaymentId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<StoredRecurringPaymentActivator | null>;
+  /** Puts back the activator an abandoned update's claim replaced. */
+  restoreRecurringPaymentActivator(params: {
+    recurringPaymentId: string;
+    organizationId: string;
+    projectId: string;
+    activator: StoredRecurringPaymentActivator;
+  }): Promise<void>;
   claimRecurringPaymentActivation(params: {
     recurringPaymentId: string;
     organizationId: string;
     projectId: string;
     updatedAt: string;
     staleBefore?: string;
+    activatedBy: RecurringPaymentActivator | null;
   }): Promise<PaymentRecurringPaymentRow | null>;
+  /**
+   * Recurring payments a key activated or last resumed that collect, or will
+   * once an operation in flight finishes, for revoke-and-cancel: under this
+   * key's id or any id it was rotated from, since rotation mints a new row
+   * for the same credential.
+   */
+  listLiveRecurringPaymentsActivatedByApiKey(params: {
+    organizationId: string;
+    projectId: string;
+    apiKeyId: string;
+  }): Promise<PaymentRecurringPaymentRow[]>;
   resetRecurringPaymentActivationIfNotActive(params: {
     recurringPaymentId: string;
     organizationId: string;
@@ -560,7 +607,6 @@ export interface PaymentRecurringPaymentsRepository {
     recurringPaymentId: string;
     organizationId: string;
     projectId: string;
-    walletAuthorization: PaymentRecurringWalletAuthorization | null;
   }): Promise<PaymentRecurringPaymentRow | null>;
   listRecurringPayments(
     params: ListPaymentRecurringPaymentsInput

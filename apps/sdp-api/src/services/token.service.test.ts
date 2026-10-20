@@ -1,12 +1,9 @@
-/**
- * Token Service Unit Tests
- */
-
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb, type PreparedStatement } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { TokenService } from "@/services/token.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT, TEST_PROJECT_API_KEY } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -100,8 +97,8 @@ describe("TokenService", () => {
     await db
       .prepare(
         `INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, ?, 'active')`
       )
       .bind(
         TEST_PROJECT_API_KEY.id,
@@ -109,7 +106,8 @@ describe("TokenService", () => {
         TEST_PROJECT.id,
         TEST_USER.id,
         TEST_PROJECT_API_KEY.prefix,
-        "hash_unused_for_service_test"
+        "hash_unused_for_service_test",
+        ALL_API_KEY_GRANTS
       )
       .run();
 

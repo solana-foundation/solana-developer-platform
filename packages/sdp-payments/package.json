@@ -54,6 +54,11 @@
       "import": "./src/ramps/providers/stripe/client.ts",
       "default": "./src/ramps/providers/stripe/client.ts"
     },
+    "./ramps/providers/stripe/session-status-mapping": {
+      "types": "./src/ramps/providers/stripe/session-status-mapping.ts",
+      "import": "./src/ramps/providers/stripe/session-status-mapping.ts",
+      "default": "./src/ramps/providers/stripe/session-status-mapping.ts"
+    },
     "./ramps/shared": {
       "types": "./src/ramps/shared.ts",
       "import": "./src/ramps/shared.ts",

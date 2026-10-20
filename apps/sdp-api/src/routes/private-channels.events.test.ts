@@ -2,7 +2,6 @@ import { hashString } from "@sdp/payments/hash";
 import * as privateChannelsAuth from "@sdp/private-channels/auth";
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
 import * as privateChannelsProbe from "@sdp/private-channels/probe";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
@@ -15,10 +14,12 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import * as privateChannelService from "@/services/private-channels/service";
 import * as privateChannelWallets from "@/services/private-channels/wallets";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsProbe, "probeConnection");
 const spcRegisterMock = vi.spyOn(privateChannelsAuth, "spcRegister");
@@ -43,16 +44,14 @@ const TEST_PROJECT = { id: "prj_pce_test", slug: "pc-events-test-project" };
 const TEST_USER = { id: "usr_pce_test", email: "pc-events-test@example.com" };
 const TEST_API_KEY = { id: "key_pce_test", raw: "sk_test_pc_events", prefix: "sk_test_pce" };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -75,7 +74,7 @@ function successProbe() {
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -94,8 +93,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -105,12 +104,14 @@ async function seedAuth(): Promise<void> {
         "PC Events Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
 }
+
+/** A signed-in admin: instance and principal setup are `private_channels.configure`. */
+let adminHeaders: Record<string, string>;
 
 function authHeaders() {
   return { Authorization: `Bearer ${TEST_API_KEY.raw}`, "Content-Type": "application/json" };
@@ -122,7 +123,7 @@ async function connectInstance(): Promise<void> {
     "/v1/private-channels/instance",
     {
       method: "POST",
-      headers: authHeaders(),
+      headers: adminHeaders,
       body: JSON.stringify({
         gatewayUrl: SANDBOX_DEFAULTS.gatewayUrl,
         escrowProgramId: SANDBOX_DEFAULTS.escrowProgramId,
@@ -159,6 +160,14 @@ describe("Private Channels — event routes", () => {
     overviewMock.mockReset();
     await seedTestDatabase(env);
     await seedAuth();
+    adminHeaders = {
+      ...(await clerkAdminHeaders(env, getDb(env), {
+        userId: TEST_USER.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      })),
+      "Content-Type": "application/json",
+    };
   });
 
   afterEach(async () => {
@@ -519,7 +528,7 @@ describe("Private Channels — event routes", () => {
     await connectInstance();
     const del = await app.request(
       "/v1/private-channels/instance",
-      { method: "DELETE", headers: authHeaders() },
+      { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(del.status).toBe(200);

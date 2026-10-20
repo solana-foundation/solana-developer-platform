@@ -5,11 +5,7 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
-import {
-  getPermissionsForOrgRole,
-  normalizeOrganizationRole,
-  type OrganizationRole,
-} from "@sdp/types/permissions";
+import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -24,7 +20,8 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
-import { enforceOrganizationAccess, organizationNotActive } from "@/lib/organization-access";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
+import { organizationNotActive, readActiveOrganizationSettings } from "@/lib/organization-access";
 import {
   loadOrganizationEntitlements,
   recordOrganizationEntitlements,
@@ -433,11 +430,11 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
 
   // Everything below writes — user provisioning, membership, default projects,
   // email repair — so organization access gates entry here rather than the
-  // response after: a deleted organization or a blocked origin must not leave
-  // state behind. A Clerk organization outlives an SDP deletion, so without
+  // response after: a deleted organization must not leave state behind. The
+  // organization's IP allowlist is not checked: it governs API keys only. A Clerk organization outlives an SDP deletion, so without
   // this a member could sign back into a deleted organization and be given a
   // fresh active membership. Only an organization that already exists can be
-  // deleted or carry a restriction; one first provisioned by this request
+  // deleted; one first provisioned by this request
   // cannot, so the callers need no second check.
   const knownOrganization = await resolveClerkOrganization(
     getDb(c.env),
@@ -446,7 +443,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   if (knownOrganization) {
     recordOrganizationEntitlements(
       c,
-      await enforceOrganizationAccess(c, knownOrganization.organization_id)
+      await readActiveOrganizationSettings(c.env, knownOrganization.organization_id)
     );
   }
 
@@ -498,7 +495,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     return {
       userId: existingContext.user_id,
       organizationId: existingContext.organization_id,
-      permissions: getPermissionsForOrgRole(role),
       role,
       clerkUserId: payload.sub as string,
       clerkOrgId: organizationClaims.organizationId,
@@ -541,7 +537,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     userIdentity.userId
   );
 
-  const permissions = getPermissionsForOrgRole(role);
   if (!knownOrganization) {
     // First provisioned by this request: no allowlist read recorded them yet.
     await loadOrganizationEntitlements(c, resolvedOrgIdentity.organization_id);
@@ -550,7 +545,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   return {
     userId: userIdentity.userId,
     organizationId: resolvedOrgIdentity.organization_id,
-    permissions,
     role,
     clerkUserId: payload.sub as string,
     clerkOrgId: organizationClaims.organizationId,
@@ -567,6 +561,20 @@ function assertClerkTenantClaims(payload: ClerkJwtPayload): void {
   if (!resolveClerkOrganizationClaims(payload).organizationId) {
     throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
   }
+}
+
+/**
+ * The rest of a signed-in request: narrowed to the member's organization, and
+ * moving money as the member (HOO-2099). The signing waists re-read the
+ * membership whenever it signs for them.
+ */
+function runAsSignedInMember(
+  clerk: { userId: string; organizationId: string },
+  next: Next
+): Promise<void> {
+  return runWithTenantDatabaseIdentity({ organizationId: clerk.organizationId }, () =>
+    runAsMoneyPrincipal({ kind: "member", userId: clerk.userId }, next)
+  );
 }
 
 export function clerkAuthMiddleware() {
@@ -601,7 +609,7 @@ export function clerkAuthMiddleware() {
       return context;
     });
 
-    await runWithTenantDatabaseIdentity({ organizationId: clerkContext.organizationId }, next);
+    await runAsSignedInMember(clerkContext, next);
   };
 }
 
@@ -643,7 +651,7 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
 
     const clerk = c.get("clerk");
     if (clerk) {
-      await runWithTenantDatabaseIdentity({ organizationId: clerk.organizationId }, next);
+      await runAsSignedInMember(clerk, next);
       return;
     }
     await next();

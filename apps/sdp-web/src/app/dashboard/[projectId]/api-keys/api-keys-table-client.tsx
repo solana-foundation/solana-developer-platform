@@ -1,14 +1,8 @@
 "use client";
 
-import type { AllowedOperation } from "@sdp/types/allowed-operations";
-import type {
-  ApiKeyEnvironment,
-  ApiKeyStatus,
-  ApiKeyWalletBinding,
-  ApiKeyWalletScope,
-} from "@sdp/types/api-keys";
+import type { Action } from "@sdp/types/actions";
+import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
-import type { ApiKeyRole } from "@sdp/types/permissions";
 import { Button } from "@sdp/ui/button";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { TableCell } from "@sdp/ui/table";
@@ -20,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
-import { operationsSummaryLabel } from "./api-key-operations-labels";
+import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
 
 const PREFIX_COLUMN_CLASS = "hidden @4xl/api-keys-table:table-cell";
 const STATUS_COLUMN_CLASS = "hidden @5xl/api-keys-table:table-cell";
@@ -32,18 +26,61 @@ export interface ApiKeyRecord {
   id: string;
   name: string;
   keyPrefix: string;
-  role: ApiKeyRole;
+  grants: Action[];
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
   walletScope: ApiKeyWalletScope;
-  signingWalletId: string | null;
-  signingWalletIds: string[];
-  walletBindings: ApiKeyWalletBinding[];
-  /** Empty means the key may perform every operation. */
-  allowedOperations: AllowedOperation[];
+  /** Custody wallet ids a selected key lists. */
+  walletIds: string[];
   lastUsedAt: string | null;
   expiresAt: string | null;
+  /** When a rotated key stops working; null unless it is in its grace period. */
+  rotationDeadline: string | null;
   createdAt: string;
+}
+
+/** When the key stops working: its rotation deadline or expiry, whichever is first. */
+function effectiveExpiry(key: ApiKeyRecord): string | null {
+  if (key.rotationDeadline && key.expiresAt) {
+    return new Date(key.rotationDeadline) < new Date(key.expiresAt)
+      ? key.rotationDeadline
+      : key.expiresAt;
+  }
+  return key.rotationDeadline ?? key.expiresAt;
+}
+
+/**
+ * A rotated key that still works until its deadline. Revocation keeps the
+ * deadline, and a key past it stays `active` in the row while authentication
+ * refuses it, so the deadline itself decides.
+ */
+function isRotating(key: ApiKeyRecord, now = Date.now()): boolean {
+  return (
+    key.status === "active" &&
+    key.rotationDeadline !== null &&
+    new Date(key.rotationDeadline).getTime() > now
+  );
+}
+
+function statusLabel(key: ApiKeyRecord, t: ReturnType<typeof useTranslations>): string {
+  return isRotating(key) ? t("DashboardCustody.apiKeyRotatingStatus") : key.status;
+}
+
+/**
+ * The rotation deadline with its time, in UTC: the table renders on the
+ * server too, so a viewer-local time zone would not hydrate.
+ */
+function formatRotationDeadline(value: string, locale: string): string {
+  // Component fields, not dateStyle/timeStyle: those refuse timeZoneName.
+  return new Date(value).toLocaleString(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
 }
 
 function formatDate(
@@ -61,12 +98,6 @@ function formatDate(
   });
 }
 
-function formatRole(role: ApiKeyRole, t: ReturnType<typeof useTranslations>): string {
-  if (role === "api_admin") return t("DashboardCustody.admin");
-  if (role === "api_readonly") return t("DashboardCustody.readOnly");
-  return t("DashboardCustody.developer");
-}
-
 function formatWalletLabel(wallet: PaymentsDashboardWallet): string {
   return wallet.label?.trim() || wallet.walletId;
 }
@@ -80,10 +111,7 @@ function getWalletNames(
     return { label: t("DashboardCustody.allWallets"), title: t("DashboardCustody.allWallets") };
   }
 
-  const walletIds =
-    key.walletBindings.length > 0
-      ? key.walletBindings.map((binding) => binding.walletId)
-      : key.signingWalletIds;
+  const walletIds = key.walletIds;
   const walletNames = walletIds.map((walletId) => walletLabelById.get(walletId) ?? walletId);
 
   if (walletNames.length === 0) {
@@ -108,18 +136,18 @@ function AccessSummary({
 }) {
   const t = useTranslations();
   const walletSummary = getWalletNames(apiKey, walletLabelById, t);
-  const operationsSummary = operationsSummaryLabel(apiKey.allowedOperations, t);
+  const grantLines = grantSummaryLines(apiKey.grants, t);
 
   return (
     <div className="min-w-0">
-      <p className="truncate text-sm font-medium text-primary">
-        {t("DashboardCustody.roleAccess", { role: formatRole(apiKey.role, t) })}
-      </p>
       <p
-        className="mt-1 truncate text-xs text-secondary"
-        title={`${walletSummary.title} · ${operationsSummary}`}
+        className="truncate text-sm font-medium text-primary"
+        title={grantLines.join("\n") || undefined}
       >
-        {walletSummary.label} · {operationsSummary}
+        {grantLines.length === 1 ? grantLines[0] : grantsSummaryLabel(apiKey.grants, t)}
+      </p>
+      <p className="mt-1 truncate text-xs text-secondary" title={walletSummary.title}>
+        {walletSummary.label}
       </p>
     </div>
   );
@@ -151,7 +179,7 @@ export function ApiKeysTableClient({
   }, [apiKeys]);
 
   const walletLabelById = useMemo(() => {
-    return new Map(wallets.map((wallet) => [wallet.walletId, formatWalletLabel(wallet)]));
+    return new Map(wallets.map((wallet) => [wallet.id, formatWalletLabel(wallet)]));
   }, [wallets]);
 
   if (sortedApiKeys.length === 0) {
@@ -213,7 +241,7 @@ export function ApiKeysTableClient({
                 <span className="block truncate">{key.name}</span>
                 <span className="mt-1 block truncate text-[11px] font-normal text-tertiary">
                   {key.environment}
-                  <span className="@5xl/api-keys-table:hidden"> · {key.status}</span>
+                  <span className="@5xl/api-keys-table:hidden"> · {statusLabel(key, t)}</span>
                   <span className="@4xl/api-keys-table:hidden"> · {key.keyPrefix}</span>
                 </span>
               </TableCell>
@@ -224,13 +252,24 @@ export function ApiKeysTableClient({
                 <AccessSummary apiKey={key} walletLabelById={walletLabelById} />
               </TableCell>
               <TableCell className={`${STATUS_COLUMN_CLASS} text-xs`}>
-                <span className="block truncate">{key.status}</span>
+                <span
+                  className="block truncate"
+                  title={
+                    key.rotationDeadline && isRotating(key)
+                      ? t("DashboardCustody.apiKeyRotatingUntil", {
+                          date: formatRotationDeadline(key.rotationDeadline, locale),
+                        })
+                      : undefined
+                  }
+                >
+                  {statusLabel(key, t)}
+                </span>
               </TableCell>
               <TableCell className={`${LAST_USED_COLUMN_CLASS} text-xs text-secondary`}>
                 {formatDate(key.lastUsedAt, locale, t)}
               </TableCell>
               <TableCell className={`${EXPIRES_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(key.expiresAt, locale, t)}
+                {formatDate(effectiveExpiry(key), locale, t)}
               </TableCell>
               <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-secondary`}>
                 {formatDate(key.createdAt, locale, t)}

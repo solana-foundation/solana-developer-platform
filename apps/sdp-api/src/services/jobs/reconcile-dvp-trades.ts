@@ -11,7 +11,9 @@
  * an authority. `observed_at` is part of the answer.
  */
 
-import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { getSignatureStatuses, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
@@ -24,7 +26,6 @@ import {
 } from "@/db/repositories/dvp-leg-transfer.repository";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
-import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
 import { classifyDvpFundingReceipt } from "@/services/dvp/funding-receipt";
@@ -59,22 +60,21 @@ const CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES = 360;
 const MILLISECONDS_PER_MINUTE = 60_000;
 
 /**
- * Reconciles open DvP trades against the chain.
+ * Reconciles the open cluster scope's open DvP trades against that cluster. Runs once per
+ * Environment (a `cluster` Cron Definition), so a Production trade is only ever read on mainnet.
  *
  * @param env - API process environment.
+ * @returns Resolves once the page of trades has been reconciled.
  */
 export async function reconcileDvpTrades(env: Env): Promise<void> {
-  if (!isDvpEnabled(env)) {
-    return;
-  }
-
+  const { environment } = currentClusterScope();
   const repository = createDvpTradeRepository(env);
-  const trades = await repository.listOpenForReconciliation(BATCH_SIZE);
+  const trades = await repository.listOpenForReconciliation({ environment, limit: BATCH_SIZE });
   if (trades.length === 0) {
     return;
   }
 
-  const rpc = createRpc(env);
+  const rpc = createClusterRpc();
 
   // Read once for the whole batch. Every trade's create-expiry decision is made
   // against the same height, which also keeps the sweep internally consistent:
@@ -97,9 +97,10 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
     // and owned by the funding organization: the trade-level columns this sweep
     // used to release alongside are gone, and one table now carries every
     // funder — creator and party alike.
-    const released = await createPostgresDvpLegFundingClaimRepository(getDb(env)).releaseExpired(
-      blockHeight
-    );
+    const released = await createPostgresDvpLegFundingClaimRepository(getDb(env)).releaseExpired({
+      environment,
+      blockHeight,
+    });
     if (released > 0) {
       getLogger().info(
         { released, blockHeight: blockHeight.toString() },
@@ -109,7 +110,10 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
     // Same reasoning for a close lock: past its height the settle or cancel
     // either landed, and the sweep below records the close from the chain, or
     // never will, and the trade can be closed again.
-    const releasedCloses = await repository.releaseExpiredCloseClaims(blockHeight);
+    const releasedCloses = await repository.releaseExpiredCloseClaims({
+      environment,
+      blockHeight,
+    });
     if (releasedCloses > 0) {
       getLogger().info(
         { released: releasedCloses, blockHeight: blockHeight.toString() },
@@ -133,7 +137,7 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
   // decides a DB deletion — the chain's answer is final here.
   try {
     const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
-    const expiredBroadcast = await claims.listExpiredBroadcast(blockHeight);
+    const expiredBroadcast = await claims.listExpiredBroadcast({ environment, blockHeight });
     // One status call per chunk, not per receipt: a backlog of expired
     // receipts used to cost one RPC call each on every tick.
     for (let start = 0; start < expiredBroadcast.length; start += SIGNATURE_STATUS_CHUNK) {
@@ -236,7 +240,7 @@ async function syncTradeTransfers(
  */
 async function resolveExpiredReceipts(
   claims: ReturnType<typeof createPostgresDvpLegFundingClaimRepository>,
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   chunk: readonly DvpLegFundingClaim[]
 ): Promise<void> {
   let statuses: Awaited<ReturnType<typeof getSignatureStatuses>>;
@@ -311,7 +315,7 @@ async function resolveExpiredReceipts(
 async function reconcileTrade(
   repository: ReturnType<typeof createDvpTradeRepository>,
   ledger: TransferLedger,
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   trade: DvpTradeRow,
   blockHeight: bigint
 ): Promise<void> {

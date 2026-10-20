@@ -141,6 +141,16 @@ function quoteGucLiteral(value: string): string {
  * `SET TRANSACTION ISOLATION LEVEL ...`.
  */
 export function databaseIdentityConfigStatement(identity: DatabaseIdentity): { text: string } {
+  return { text: databaseIdentityConfigStatements(identity).join("; ") };
+}
+
+/**
+ * The same stamp as separate statements, for a transaction already open: an
+ * executor runs one statement per call, and re-stamping mid-transaction (the
+ * audit ledger running a request's work under the request's identity) needs
+ * exactly that.
+ */
+export function databaseIdentityConfigStatements(identity: DatabaseIdentity): string[] {
   let organizationId = "";
   let actor = "";
   switch (identity.kind) {
@@ -158,10 +168,9 @@ export function databaseIdentityConfigStatement(identity: DatabaseIdentity): { t
         "A 'none' identity must not be stamped onto a database session"
       );
   }
-  return {
-    text:
-      `SET LOCAL app.tenant_isolation_identity = ${quoteGucLiteral(identity.kind)}; ` +
-      `SET LOCAL app.tenant_isolation_organization_id = ${quoteGucLiteral(organizationId)}; ` +
-      `SET LOCAL app.tenant_isolation_actor = ${quoteGucLiteral(actor)}`,
-  };
+  return [
+    `SET LOCAL app.tenant_isolation_identity = ${quoteGucLiteral(identity.kind)}`,
+    `SET LOCAL app.tenant_isolation_organization_id = ${quoteGucLiteral(organizationId)}`,
+    `SET LOCAL app.tenant_isolation_actor = ${quoteGucLiteral(actor)}`,
+  ];
 }

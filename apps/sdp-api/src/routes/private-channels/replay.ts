@@ -1,28 +1,26 @@
-import { hasAllPermissions } from "@sdp/types/permissions";
 import type { PrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
 import type { PrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
 import type { PrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";
-import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
 import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelTransferFingerprint,
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
-import { refreshPrivateChannelAuth } from "@/services/private-channels/wallet-access";
+import { callerMayPerform } from "@/middleware/require-action";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
-/** Every movement POST, including replay, requires current write access. */
+/**
+ * Every movement POST, including replay, requires `private_channels.execute`.
+ * The custody signer re-reads the key (live, holding the action, wallet in
+ * scope) whenever a start signs (HOO-2099), so nothing is re-read here.
+ */
 export async function requireMovementWrite(c: AppContext): Promise<void> {
-  const auth = getAuth(c);
-  if (auth.authType === "api_key") {
-    const current = await refreshPrivateChannelAuth(c.env, auth, requireProjectId(c));
-    const key = c.get("apiKey");
-    if (key) c.set("apiKey", { ...key, permissions: current.permissions });
-  }
-  if (!hasAllPermissions(getAuth(c).permissions, ["payments:write"])) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: payments:write");
+  if (!callerMayPerform(c, "private_channels.execute")) {
+    throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
+      action: "private_channels.execute",
+    });
   }
 }
 

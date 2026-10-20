@@ -1,21 +1,25 @@
+import { type Action, API_KEY_GRANTABLE_ACTIONS, apiKeyMayPerform } from "@sdp/types/actions";
 import { describe, expect, it } from "vitest";
-import { permittedUnifiedTransactionModules } from "./module-permissions";
+import {
+  permittedPaymentTransactionKinds,
+  permittedUnifiedTransactionModules,
+} from "./module-permissions";
 
-describe("unified transaction module permissions", () => {
-  it("limits payments-only keys to payment-scoped modules", () => {
-    expect(permittedUnifiedTransactionModules(["payments:read"])).toEqual([
-      "payments",
-      "private_channels",
-      "rings",
-    ]);
+function forGrants(grants: readonly Action[]) {
+  return permittedUnifiedTransactionModules((action) => apiKeyMayPerform(grants, action));
+}
+
+describe("unified transaction module actions", () => {
+  it("limits a transactions-only key to payments rows", () => {
+    expect(forGrants(["transactions.read"])).toEqual(["payments"]);
   });
 
-  it("limits earn-only keys to Earn", () => {
-    expect(permittedUnifiedTransactionModules(["earn:read"])).toEqual(["earn"]);
+  it("adds a module's rows with that module's read, implied by its execute", () => {
+    expect(forGrants(["transactions.read", "earn.execute"])).toEqual(["payments", "earn"]);
   });
 
-  it("allows wildcard identities to see every module", () => {
-    expect(permittedUnifiedTransactionModules("*")).toEqual([
+  it("shows every module to a key holding everything", () => {
+    expect(forGrants(API_KEY_GRANTABLE_ACTIONS)).toEqual([
       "payments",
       "earn",
       "dvp",
@@ -23,5 +27,23 @@ describe("unified transaction module permissions", () => {
       "issuance",
       "rings",
     ]);
+  });
+});
+
+describe("Payments row kinds by the read of their module", () => {
+  function kindsFor(grants: readonly Action[]) {
+    return permittedPaymentTransactionKinds((action) => apiKeyMayPerform(grants, action));
+  }
+
+  it("shows a transactions-only key no Payments kind", () => {
+    expect(kindsFor(["transactions.read"])).toEqual([]);
+  });
+
+  it("maps each kind to its module's read", () => {
+    expect(kindsFor(["transfers.read"])).toEqual(["pay", "confidential_pay", "deposit"]);
+    expect(kindsFor(["transfer_batches.execute"])).toEqual(["batch_pay"]);
+    expect(kindsFor(["recurring.manage"])).toEqual(["recurring_pay"]);
+    expect(kindsFor(["payment_requests.read"])).toEqual(["request_deposit"]);
+    expect(kindsFor(["onramp.read", "offramp.execute"])).toEqual(["onramp", "offramp"]);
   });
 });

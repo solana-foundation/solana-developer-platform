@@ -10,6 +10,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Project scope
 
+New ramp provider UI follows `docs/contributing/ramp-provider-safety.md` with
+the API integration. Show provider settlement as pending until chain delivery
+is verified; never turn a provider webhook alone into completed UI state.
+
 Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes from the URL alone:
 
 - Server code (pages, server actions, route handlers) calls `createSdpApiClient()`, `requestProjectId()` and `requestProjectHref(path)` from `@/lib/sdp-api`; they read the request's `x-project-id`, which `proxy.ts` sets from the URL. Keep signatures Project-free: no `projectId` parameters, no reads of the selection cookie.

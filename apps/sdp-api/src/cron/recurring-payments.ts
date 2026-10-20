@@ -1,28 +1,23 @@
-import type { BackgroundRunner } from "@/runtime/background";
-import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
-import type { Observability } from "@/runtime/observability";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import type { Env } from "@/types/env";
+import { alwaysEnabled, defineCron } from "./define-cron";
 
-export const RECURRING_PAYMENTS_COLLECTION_MONITOR = "sdp-api-collect-recurring-payments";
-export const RECURRING_PAYMENTS_COLLECTION_CRON = "*/5 * * * *";
-
-export interface RecurringPaymentsCollectionDeps {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
+/**
+ * Collect the recurring payments due now in the open cluster scope.
+ *
+ * @param env - Process environment.
+ * @returns Resolves once the due collections have run.
+ */
+async function collectDueNow(env: Env): Promise<void> {
+  await collectDueRecurringPayments(env, new Date());
 }
 
-export function runRecurringPaymentsCollection(deps: RecurringPaymentsCollectionDeps): void {
-  const work = () =>
-    runInEachClusterScope(async () => {
-      await collectDueRecurringPayments(deps.env, new Date());
-    });
-  const promise = deps.observability
-    ? deps.observability.withMonitor(RECURRING_PAYMENTS_COLLECTION_MONITOR, work, {
-        schedule: { type: "crontab", value: RECURRING_PAYMENTS_COLLECTION_CRON },
-      })
-    : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
-}
+/** Recurring payment collection: signs new collections, each admitted through `assertMoneyStartAdmitted`. */
+export const recurringPaymentsCron = defineCron({
+  name: "collect-recurring-payments",
+  schedule: "*/5 * * * *",
+  scope: "cluster",
+  effect: "starts",
+  enabled: alwaysEnabled,
+  run: collectDueNow,
+});

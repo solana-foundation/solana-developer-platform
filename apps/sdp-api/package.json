@@ -41,7 +41,9 @@
     "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "route-actions:generate": "tsx scripts/generate-route-actions.ts",
+    "route-actions:check": "tsx scripts/generate-route-actions.ts --check"
   },
   "dependencies": {
     "@clerk/backend": "3.20.1",

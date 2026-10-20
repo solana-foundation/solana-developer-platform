@@ -15,7 +15,7 @@
  * 3. Upgrade "confirmed" transfers to "finalized" once the cluster reports
  *    finality — confirmed is transitional, not terminal.
  *
- * Runs inside one cluster scope per environment (`runInEachClusterScope`): each run selects only
+ * Runs inside one cluster scope per environment (a `cluster` Cron Definition): each run selects only
  * transfers whose project is in the scope's environment and reads them through that cluster.
  */
 

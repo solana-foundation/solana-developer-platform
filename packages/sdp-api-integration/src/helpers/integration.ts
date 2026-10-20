@@ -6,6 +6,7 @@ import {
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
 } from "@sdp/rpc/solana";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -29,9 +30,12 @@ const {
   createMosaicService,
   createSigningService,
   CustodyConfigStore,
+  ensureTestClerkIssuer,
   getDb,
   hashString,
+  runAsMoneyPrincipal,
   seedTestDatabase,
+  signTestClerkJwt,
   TEST_ORG,
   TEST_PROJECT,
   TEST_PROJECT_API_KEY,
@@ -125,7 +129,7 @@ export async function resetIntegrationState(
 async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
   cachedCustodyWallet = null;
   const db = getDb(env);
-  const { apiKeys: apiKeysKV, rateLimits: rateLimitKV } = createKVStoreSet(env);
+  const { rateLimits: rateLimitKV } = createKVStoreSet(env);
 
   const rateLimitKeys = await rateLimitKV.list();
   for (const key of rateLimitKeys.keys) {
@@ -207,8 +211,8 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
   await db
     .prepare(
       `INSERT OR REPLACE INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+       VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, ?, 'active')`
     )
     .bind(
       TEST_PROJECT_API_KEY.id,
@@ -216,11 +220,10 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
       TEST_PROJECT.id,
       TEST_USER.id,
       TEST_PROJECT_API_KEY.prefix,
-      apiKeyHash
+      apiKeyHash,
+      [...API_KEY_GRANTABLE_ACTIONS]
     )
     .run();
-
-  await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
 }
 
 export async function cleanupIntegrationSuite() {
@@ -288,6 +291,81 @@ export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
   return (url: string, init: IntegrationRequestInit = {}) => {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${apiKey}`);
+    return request(url, { ...init, headers });
+  };
+}
+
+async function seedOrganizationAdminMembership(): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+       VALUES (?, ?, ?, 'admin', 'active')
+       ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin', status = 'active'`
+    )
+    .bind(`mem_integration_${TEST_USER.id}`, TEST_ORG.id, TEST_USER.id)
+    .run();
+}
+
+/**
+ * Runs a direct service call (no HTTP request) as the test organization's
+ * admin, the money principal a signed-in request would carry: the signing
+ * waists refuse work with no principal (HOO-2099). Wrap only the service
+ * call; an API request inside it would set its own principal.
+ */
+export async function asOrganizationAdmin<T>(work: () => Promise<T>): Promise<T> {
+  await seedOrganizationAdminMembership();
+  return runAsMoneyPrincipal({ kind: "member", userId: TEST_USER.id }, work);
+}
+
+/**
+ * Requests as a signed-in organization admin of the test organization, scoped
+ * to the test project. Key management answers a signed-in person only, never
+ * an API key (HOO-2099), so suites create, rotate and revoke keys this way.
+ * The session verifies against an in-process test issuer; the admin's
+ * membership and Clerk identity are seeded idempotently.
+ */
+export async function requestAsOrganizationAdmin() {
+  const db = getDb(env);
+  const clerkUserId = `clerk_${TEST_USER.id}`;
+  const clerkOrgId = `clerk_${TEST_ORG.id}`;
+  await seedOrganizationAdminMembership();
+  await db
+    .prepare(
+      `INSERT INTO project_members (id, project_id, user_id, role)
+       VALUES (?, ?, ?, 'admin')
+       ON CONFLICT (project_id, user_id) DO NOTHING`
+    )
+    .bind(`pm_integration_${TEST_USER.id}`, TEST_PROJECT.id, TEST_USER.id)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+       VALUES (?, 'clerk', ?, ?, ?)
+       ON CONFLICT (provider, provider_user_id) DO NOTHING`
+    )
+    .bind(`aui_integration_${TEST_USER.id}`, clerkUserId, TEST_USER.id, TEST_USER.email)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+       VALUES (?, 'clerk', ?, ?, ?)
+       ON CONFLICT (provider, provider_org_id) DO NOTHING`
+    )
+    .bind(`aoi_integration_${TEST_ORG.id}`, clerkOrgId, TEST_ORG.id, TEST_ORG.slug)
+    .run();
+  await ensureTestClerkIssuer(env);
+  const token = await signTestClerkJwt({
+    clerkUserId,
+    clerkOrgId,
+    orgRole: "admin",
+    orgSlug: TEST_ORG.slug,
+    email: TEST_USER.email,
+    expiresInSeconds: 3600,
+  });
+  return (url: string, init: IntegrationRequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    headers.set("x-project-id", TEST_PROJECT.id);
     return request(url, { ...init, headers });
   };
 }

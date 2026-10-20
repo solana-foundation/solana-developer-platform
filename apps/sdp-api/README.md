@@ -38,7 +38,6 @@ authenticated.
 
 - `/admin/allowlist/*` — Admin allowlist management
 - `/webhooks/clerk/link-orgs` — Clerk org sync webhook
-- `/v1/rpc/*` — Solana RPC proxy (internal)
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
 - `/v1/onboarding/*` — Internal onboarding status
@@ -388,15 +387,12 @@ The hosted API is built as a container and deployed to Cloud Run through GitHub 
 
 Stage deploys and merge deploys to production update and execute the migration
 job before deploying the API. Production then verifies a no-traffic candidate
-revision before promoting the service and reconciliation cron job to the same
+revision before promoting the service and the Worker service to the same
 immutable image, and holds further deploys when the production canary fails,
 leaving the rollback to a person. Releases and manual production redeploys leave the migration
 job unchanged and refuse an image that adds migrations production has not
 applied. Runtime environment variables and secret references
 are managed on the GCP resources rather than written by the image deployment.
-The reconciliation rollout's required Sentry observation and legacy-monitor
-retirement are documented in
-[`docs/ops/managed-reconciliation-monitor-migration.md`](../../docs/ops/managed-reconciliation-monitor-migration.md).
 
 See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for details.
 
@@ -404,16 +400,18 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 
 - **Cloud Run** — Hosted Node.js API service and one-shot jobs
 - **Postgres 16** — Application database, hosted with managed connectivity in deployed environments
-- **Redis** — API-key, rate-limit, cache, and session storage
-- **Cloud Run jobs and scheduler** — Database migrations and transfer reconciliation
+- **Redis** — rate-limit, cache, and session storage
+- **Cloud Run** — the API service, the always-on Worker service (Cron Definitions), and the database migration job
 - **Kora** — Optional local fee-payer service
 
 ### Reconciliation cron
 
-- **Transfer reconciliation** and **approved wallet-operation recovery** are the two ungated jobs: they register on every in-process `startCron` and both also run in the dedicated Cloud Run Job (`src/job.ts`). Web service replicas skip in-process cron by default when `K_SERVICE` is set (`DISABLE_CRON=false` opts a service back in).
-- The **Earn strategy-catalogue sync** runs on both paths behind its gates (`MARKETS_ENABLED` plus `EARN_ENABLED`): hourly via in-process `startCron` (`src/cron/runner.ts`) on self-hosted and opted-in services, in the Cloud Run Job on managed deployments — no replica needs `DISABLE_CRON=false` — and once at every API process start in any mode (`startEarnCatalogueBootSync`, same slotted entry, so a fresh database lists strategies within seconds and replicas booting inside the same hour skip). The job follows the deployment-provided [**Managed Reconciliation Cadence**](../../docs/decisions/0003-managed-reconciliation-cadence.md), so each tick claims an hourly Redis slot first (`runEarnCatalogueSyncIfDue` in `src/cron/earn-catalogue-sync.ts`) and skips while the slot is held. The in-process monitor keeps its wall-clock `EARN_CATALOGUE_SYNC_CRON`; the managed monitor reports the rolling lease as a one-hour interval under a separate slug. The slot is a unique claim token embedding its expiry: claims and expired-slot takeovers are single compare-and-set transitions, and a failed sync releases via compare-and-delete on its own token — atomically a no-op if a newer tick took the slot over — so the next tick retries and a crashed run self-heals once the claim expires. A feature-disabled heartbeat uses a separate monitoring-only slot, so observability can never delay a later real sync. The sync itself is deadline-bounded (10 minutes, far under the claim expiry) so an execution can never still be running when its claim lapses. The sync reports to its own Sentry monitor, and the cadence, timeout, flags, and provider credentials reach the job container through sdp-infra (`sdp_api_reconciliation_env` / `app_secret_keys`).
-- **Orphaned split-swap detection** (`src/services/jobs/detect-orphaned-earn-split-swaps.ts`) runs unconditionally on both paths, every minute in-process and at the deployment-provided Managed Reconciliation Cadence in the Cloud Run Job (three minutes in production, so alert latency on managed deployments is bounded by that, not by the in-process schedule): it reads the advisories the external-wallet split-swap build records and alerts on owners whose swap landed without a follow-up deposit, never acting on funds and never writing a movement (PRO-1864).
-- **Recurring payment collection** runs unconditionally on both paths — recurring payments are an always-on product surface, so the collection tick is behind no flag (the old `PAYMENTS_RECURRING_COLLECTION_ENABLED` gate is removed). The **Private Channels deposit/withdrawal reconcilers** run on both paths behind `PRIVATE_CHANNELS_ENABLED`: in-process via `startCron` on self-hosted and opted-in services, and in the Cloud Run Job on managed deployments. None of them needs the Earn Redis slot — their crontabs run at or above the **Managed Reconciliation Cadence**, so each tick simply runs them, with faster reconcilers degrading to the managed cadence the same way pending-transfers does. The two reconcilers run concurrently under their own Sentry monitors so a failing leg never skips the other. The Cloud Run Job's ticks are isolated the same way: a failing tick is collected rather than aborting the ticks after it, and the execution fails at the end with every cause — one persistently broken reconciler can never starve the rest. `PRIVATE_CHANNELS_ENABLED` reaches the job container through sdp-infra (`sdp_api_job_env`).
+Background work is a set of **Cron Definitions** (`src/cron/*.ts`, each built with `defineCron`; ADR 0011) run by one process: the always-on Worker service, which sets `DISABLE_CRON=false`. API replicas skip cron by default when `K_SERVICE` is set; self-hosted runtimes run it by default.
+
+- Each definition declares its `schedule`, its `scope` (`cluster`: registered once per Environment, each run inside that Environment's cluster scope; `global`: registered once), its money `effect`, and an `enabled(env)` decision made once at registration. The full list is `CRON_DEFINITIONS` in `src/cron/runner.ts`.
+- Every slot logs one `sdp_cron_run` event (`cron`, `environment`, `status`, `duration_ms`) to Loki. The statuses (`ok`, `error`, `skipped_overlap`, `disabled`) are defined on `CRON_RUN_STATUSES` in `@sdp/types/cron-runs`. A disabled definition still logs `disabled` on its schedule, and a slot that fires while the same registration's previous run is in flight logs `skipped_overlap` instead of starting a second run.
+- Money Exits (`effect: "finishes"`: transfer settlement, sponsorship budgets, Earn vault movements, DvP, ramp replay) are always enabled; the private-channels withdrawal tracker is the one flagged exception, because it cannot run without the gateway configured.
+- The **Earn strategy-catalogue sync** is hourly in effect behind `isEarnEnabled`: it is scheduled every five minutes and also runs once when the Worker starts (`runOnStart`), so a fresh database lists strategies within seconds, and every run claims an hourly Redis slot first (`runEarnCatalogueSyncIfDue`), so a boot run, the scheduled run and two Workers overlapping during a deploy never sync twice in one window. The slot is a claim token embedding its expiry; a failed sync releases it via compare-and-delete on its own token, and the sync is deadline-bounded (10 minutes, far under the claim expiry). It logs `sdp_earn_catalogue_sync` with `outcome: "synced" | "skipped"`.
 
 ## Contributing
 

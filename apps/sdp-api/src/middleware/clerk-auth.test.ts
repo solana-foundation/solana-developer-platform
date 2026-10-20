@@ -6,10 +6,11 @@ import { getDb } from "@/db/client";
 import { getClerkAuth } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { optionalClerkAuth } from "@/middleware/clerk-auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, skipRateLimitPaths } from "@/middleware/rate-limit";
+import { requireAction } from "@/middleware/require-action";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   ensureTestClerkIssuer,
@@ -104,13 +105,13 @@ describe("Clerk auth request cache", () => {
       cachedAfterAuth = after.payload;
     });
     app.use("*", unifiedAuthMiddleware());
-    app.get("/protected", requirePermissions("org:read"), (c) => {
+    app.get("/protected", requireAction("organizations.read"), (c) => {
       return c.json({
         organizationId: getClerkAuth(c).organizationId,
         email: getClerkAuth(c).email,
       });
     });
-    app.get("/admin", requirePermissions("org:admin"), (c) => {
+    app.get("/admin", requireAction("organizations.manage"), (c) => {
       return c.json({ role: getClerkAuth(c).role });
     });
     app.onError((error, c) => {

@@ -32,12 +32,7 @@ export const adminAuth = async (c: Context<{ Bindings: Env }>, next: Next) => {
     const adminOrgId = c.env.ALLOWLIST_ADMIN_ORG_ID;
     const isOrgMatch = adminOrgId && clerk.organizationId === adminOrgId;
 
-    if (
-      isOrgMatch &&
-      (clerk.role === "admin" ||
-        clerk.permissions.includes("org:admin") ||
-        clerk.permissions.includes("*"))
-    ) {
+    if (isOrgMatch && clerk.role === "admin") {
       await next();
       return;
     }

@@ -1,6 +1,7 @@
 export const PUBLIC_TAG_SLUGS = new Set([
   "health",
-  "api-keys",
+  // API-key management answers a signed-in person only (HOO-2099), so the
+  // public document carries no "api-keys" family; keys are made in the dashboard.
   "wallets",
   "projects",
   "issuance",

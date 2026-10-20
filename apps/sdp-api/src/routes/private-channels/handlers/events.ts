@@ -1,17 +1,17 @@
-import { hasPermission } from "@sdp/types/permissions";
-import type {
-  PrivateChannelEventDto,
-  PrivateChannelEventFamily,
-  PrivateChannelEventStatus,
+import {
+  PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS,
+  type PrivateChannelEventDto,
+  type PrivateChannelEventFamily,
+  type PrivateChannelEventStatus,
 } from "@sdp/types/private-channels";
-import { PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/types/private-channels";
 import type { PrivateChannelEventRow } from "@/db/repositories/private-channel-event.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
-import type { AppContext } from "@/routes/private-channels/context";
+import { callerMayPerform } from "@/middleware/require-action";
 import {
+  type AppContext,
   getPrivateChannelEventRepository,
   getPrivateChannelRepository,
 } from "@/routes/private-channels/context";
@@ -84,7 +84,7 @@ function eventsEnvelope(c: AppContext, rows: PrivateChannelEventRow[], hasMore: 
   const nextCursor = hasMore && last ? encodeKeysetCursor(last.occurred_at, last.id) : null;
   const auth = getAuth(c);
   const includeRawPayload =
-    auth.authType !== "api_key" && hasPermission(auth.permissions, "org:admin");
+    auth.authType !== "api_key" && callerMayPerform(c, "organizations.manage");
   return success(c, {
     events: rows.map((row) => mapPrivateChannelEventRow(row, includeRawPayload)),
     hasMore,

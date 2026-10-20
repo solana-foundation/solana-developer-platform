@@ -284,8 +284,8 @@ describe("release channels", () => {
         "private_channels",
         "helius_rings",
       ],
-      beta: ["custody", "payments", "recurring_payments", "compliance", "markets", "earn"],
-      stable: ["custody", "payments", "recurring_payments", "compliance"],
+      beta: ["custody", "payments", "recurring_payments", "markets", "earn"],
+      stable: ["custody", "payments", "recurring_payments"],
     });
   });
 

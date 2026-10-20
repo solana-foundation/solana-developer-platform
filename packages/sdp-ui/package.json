@@ -154,6 +154,11 @@
       "import": "./src/testing/english-ui-i18n.tsx",
       "default": "./src/testing/english-ui-i18n.tsx"
     },
+    "./textarea": {
+      "types": "./src/textarea.tsx",
+      "import": "./src/textarea.tsx",
+      "default": "./src/textarea.tsx"
+    },
     "./theme-scope": {
       "types": "./src/theme-scope.ts",
       "import": "./src/theme-scope.ts",

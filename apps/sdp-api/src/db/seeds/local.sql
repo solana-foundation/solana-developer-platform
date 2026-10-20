@@ -35,7 +35,7 @@ INSERT INTO projects (id, organization_id, name, slug, environment, status, crea
 -- API_KEY_PEPPER is unset; in production, use a random key and set API_KEY_PEPPER.
 INSERT INTO api_keys (
     id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-    role, rate_limit_tier, status
+    grants, rate_limit_tier, status
 ) VALUES (
     'key_test123456789',
     'org_test123456789',
@@ -44,7 +44,13 @@ INSERT INTO api_keys (
     'Development Key',
     'sk_test_abc',
     encode(sha256('sk_test_abcdefghijklmnopqrstuvwxyz123456'::bytea), 'hex'),
-    'api_admin',
+    ARRAY(SELECT unnest(ARRAY[
+      'transfers.read', 'transfers.execute', 'transfer_batches.read', 'transfer_batches.execute',
+      'payment_requests.read', 'payment_requests.manage', 'counterparties.read',
+      'counterparties.manage', 'counterparties.execute', 'transactions.read', 'recurring.read',
+      'recurring.manage', 'recurring.execute', 'wallets.read', 'wallets.manage', 'wallets.execute',
+      'compliance.execute', 'projects.read', 'organizations.read'
+    ])),
     'standard',
     'active'
 );

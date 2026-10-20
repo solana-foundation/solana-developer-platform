@@ -149,7 +149,7 @@ const extractRenderedRows = (content) => {
 };
 
 // Families every release channel runs, so every build must render them.
-const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "api-keys", "wallets", "projects"];
+const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "wallets", "projects"];
 
 const validateGeneratedTagPages = async ({
   outputDir,

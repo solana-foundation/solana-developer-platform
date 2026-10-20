@@ -34,11 +34,9 @@ export interface WalletOwnershipProof {
  */
 export function useWalletActions({
   walletId,
-  walletAddress,
   supportsSignerCheck = true,
 }: {
   walletId: string;
-  walletAddress: string;
   supportsSignerCheck?: boolean;
 }) {
   const t = useTranslations();
@@ -97,13 +95,11 @@ export function useWalletActions({
 
     startTransition(() => {
       void (async () => {
-        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
-          (error) => ({
-            status: "error" as const,
-            message:
-              error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
-          })
-        );
+        const result = await requestDevnetSolanaFaucetAction(walletId).catch((error) => ({
+          status: "error" as const,
+          message:
+            error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
+        }));
 
         if (result.status === "success") {
           const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
@@ -139,5 +135,14 @@ export function useWalletActions({
     });
   };
 
-  return { isBusy, canRunSignerCheck, runSignerCheck, requestDevnetSol, lastProof };
+  const canRequestDevnetSol = dashboardAccess.capabilities.canUseWalletFaucet;
+
+  return {
+    isBusy,
+    canRunSignerCheck,
+    runSignerCheck,
+    canRequestDevnetSol,
+    requestDevnetSol,
+    lastProof,
+  };
 }

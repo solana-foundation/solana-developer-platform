@@ -102,6 +102,11 @@ export const RAMP_WEBHOOK_REFUSAL_REASONS = [
   "transfer_type_mismatch",
   "asset_mismatch",
   "settled_after_cancel",
+  "provider_reference_conflict",
+  "moonpay_attempt_revived",
+  "moonpay_failure_after_funding",
+  "moonpay_terminal_conflict",
+  "moonpay_sell_failed",
 ] as const;
 export type RampWebhookRefusalReason = (typeof RAMP_WEBHOOK_REFUSAL_REASONS)[number];
 
@@ -139,6 +144,12 @@ export const PAYMENT_TRANSFER_STATUSES = [
 ] as const;
 
 export type PaymentTransferStatus = (typeof PAYMENT_TRANSFER_STATUSES)[number];
+
+/** Statuses in which a signed transfer may persist or begin its submission. */
+export const SIGNED_TRANSFER_SUBMISSION_STATUSES = {
+  standard: ["processing"],
+  offramp: ["processing", "settling"],
+} as const satisfies Record<"standard" | "offramp", readonly PaymentTransferStatus[]>;
 
 export const SUCCESSFUL_PAYMENT_TRANSFER_STATUSES = [
   "completed",
@@ -230,9 +241,27 @@ export interface RampTransferTransition {
   readonly types: readonly RampTransferType[];
 }
 
-/** Any open status, plus `expired`, which a provider observation proves was premature. */
+/**
+ * Every status a ramp row is open in, plus `expired`, which a provider
+ * observation proves was premature. `confirmed` and `finalized` belong to wallet
+ * sends; no writer puts a ramp row there.
+ */
 export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
-  ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  "pending",
+  "processing",
+  "awaiting_payment",
+  "settling",
+  "expired",
+] as const satisfies readonly PaymentTransferStatus[];
+
+/** The open ones among them, which a provider status pull checks; `expired` has its own queue. */
+export const OPEN_PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES =
+  PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES.filter((status) => status !== "expired");
+
+/** A MoonPay attempt with no SDP deposit claim can safely stop taking payment. */
+const MOONPAY_UNCLAIMED_TRANSFER_STATUSES = [
+  "pending",
+  "awaiting_payment",
   "expired",
 ] as const satisfies readonly PaymentTransferStatus[];
 
@@ -240,8 +269,8 @@ export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
  * Legal ramp transfer status changes, by name. `transitionRampTransfer` reads
  * the source statuses from here, never from its caller, so an illegal
  * transition matches zero rows, the same answer a lost race gives. No terminal
- * status is a source except `expired`. Writers that still set the status
- * themselves are listed in the API's `ramp-transfer-transitions.test.ts`.
+ * status is a source except `expired`. Every writer is listed in the API's
+ * `ramp-transfer-transitions.test.ts`.
  */
 export const RAMP_TRANSFER_TRANSITIONS = {
   // A provider may issue a new deposit wallet while still awaiting payment
@@ -258,6 +287,12 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   },
   provider_settled: {
     from: PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+    to: "settling",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // A provider's word is not delivery. Only the chain verifier may complete.
+  delivery_verified: {
+    from: ["settling"],
     to: "completed",
     types: RAMP_TRANSFER_TYPES,
   },
@@ -266,6 +301,20 @@ export const RAMP_TRANSFER_TRANSITIONS = {
     to: "failed",
     types: RAMP_TRANSFER_TYPES,
   },
+  // A failed MoonPay checkout attempt releases its transaction reference so
+  // the same transfer can be retried. The caller separately guards funding.
+  moonpay_attempt_failed: {
+    from: MOONPAY_UNCLAIMED_TRANSFER_STATUSES,
+    to: "awaiting_payment",
+    types: ["onramp"],
+  },
+  // A failed sale closes its deposit instruction before another deposit can
+  // claim it. A deposit already claimed stays open for reconciliation.
+  moonpay_sell_failed: {
+    from: MOONPAY_UNCLAIMED_TRANSFER_STATUSES,
+    to: "failed",
+    types: ["offramp"],
+  },
   // Not from `settling`: a stale redelivered expiry must not undo a transfer
   // another event already revived.
   provider_expired: {
@@ -273,9 +322,58 @@ export const RAMP_TRANSFER_TRANSITIONS = {
     to: "expired",
     types: RAMP_TRANSFER_TYPES,
   },
+  // SDP's own verdict from provider silence (HOO-2040): no provider activity
+  // past the abandonment horizon. Never from `processing` or `settling`, where
+  // funds may be moving; a later provider observation revives it.
+  checkout_abandoned: {
+    from: ["pending", "awaiting_payment"],
+    to: "expired",
+    types: RAMP_TRANSFER_TYPES,
+  },
+
+  canceled: {
+    from: CANCELABLE_RAMP_TRANSFER_STATUSES,
+    to: "canceled",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // A quote that creates its row before calling the provider (MoonPay) records
+  // the provider's answer on that pending row.
+  quote_issued: {
+    from: ["pending"],
+    to: "pending",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  quote_failed: {
+    from: ["pending"],
+    to: "failed",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  offramp_deposit_claimed: {
+    from: ["awaiting_payment"],
+    to: "processing",
+    types: ["offramp"],
+  },
+  // A landed deposit waits on the provider's payout, so it settles instead of
+  // confirming like a wallet send.
+  offramp_deposit_confirmed: {
+    from: ["processing"],
+    to: "settling",
+    types: ["offramp"],
+  },
+  offramp_deposit_failed: {
+    from: ["processing"],
+    to: "failed",
+    types: ["offramp"],
+  },
 } as const satisfies Record<string, RampTransferTransition>;
 
 export type RampTransferTransitionId = keyof typeof RAMP_TRANSFER_TRANSITIONS;
+
+/** The transition a funded off-ramp deposit takes for the status a wallet send would land on. */
+export const OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS = {
+  confirmed: "offramp_deposit_confirmed",
+  failed: "offramp_deposit_failed",
+} as const satisfies Record<"confirmed" | "failed", RampTransferTransitionId>;
 
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
 export const ONCHAIN_TRANSFER_STATUSES = [
@@ -677,6 +775,19 @@ export function isEditableRecurringPaymentStatus(status: PaymentRecurringPayment
 export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
   "active",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
+/**
+ * A recurring payment that collects, or will once its activation, update or
+ * resume in flight finishes, or once a cancel in flight fails back to active:
+ * revoke-and-cancel must see all of them, or one mid-way would become active
+ * after the revoke that was meant to stop it.
+ */
+export const LIVE_RECURRING_PAYMENT_STATUSES = [
+  ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
+  "activating",
+  "updating",
+  "canceling",
+  "resuming",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isCollectableRecurringPaymentStatus(
   status: PaymentRecurringPaymentStatus
 ): boolean {
@@ -955,16 +1066,26 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
-export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+export const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
   at: string;
 }
 
+/**
+ * A payment request as reads return it. It carries no link token: that is a
+ * bearer secret, returned only by {@link CreatedPaymentRequest} and
+ * {@link PaymentRequestLink} (APE-849).
+ */
 export interface PaymentRequest {
   id: string;
-  publicToken: string;
   organizationId: string;
   projectId: string | null;
   counterpartyId: string | null;
@@ -981,6 +1102,20 @@ export interface PaymentRequest {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** The create response: the record plus the token behind its hosted `/pay/{publicToken}` link. */
+export interface CreatedPaymentRequest extends PaymentRequest {
+  publicToken: string;
+}
+
+/**
+ * `GET /v1/payments/requests/{id}/link` (`payment_requests.manage`): the
+ * request's link token.
+ */
+export interface PaymentRequestLink {
+  id: string;
+  publicToken: string;
 }
 
 export interface ListPaymentRequestsResponse {
@@ -1145,8 +1280,6 @@ export interface ListPaymentSubscriptionCollectionAttemptsResponse {
   pageSize: number;
 }
 
-export type PaymentRampExecutionStatus = "pending" | "processing" | "completed" | "failed";
-
 export interface CryptoDepositPaymentRampInstruction {
   provider: RampProviderId;
   kind: "crypto_deposit";
@@ -1270,7 +1403,8 @@ export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "s
 interface BasePaymentRampQuote {
   id: string;
   provider: RampProviderId;
-  status: PaymentRampExecutionStatus;
+  /** Every provider's quote opens its transfer before the customer pays. */
+  status: "pending";
   deliveryMode: PaymentRampQuoteDeliveryMode;
 }
 

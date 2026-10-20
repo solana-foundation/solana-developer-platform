@@ -76,16 +76,17 @@ export interface GuardedFetchInit {
   signal?: AbortSignal;
   /**
    * How many redirects to follow. Zero is the probe's existing `redirect:
-   * "manual"`. The relay follows a few, because a provider answering on a
-   * canonical or regional host is ordinary, and every hop is resolved through
-   * the guard again rather than trusted for having come from an allowed one.
+   * "manual"`. A customer RPC transport follows a few, because a provider
+   * answering on a canonical or regional host is ordinary, and every hop is
+   * resolved through the guard again rather than trusted for having come from
+   * an allowed one.
    */
   maxRedirects?: number;
   /**
    * Stop buffering the response body past this many bytes. A probe that only
    * reads a status and a short reason takes the silent truncation; a caller
-   * that hands the body onward sets `rejectOversizeResponse` with it, because
-   * for a relay a shorter body under a 2xx is corruption, not a bound.
+   * that parses the body sets `rejectOversizeResponse` with it, because for
+   * a JSON-RPC answer a shorter body under a 2xx is corruption, not a bound.
    */
   maxResponseBytes?: number;
   /** Fail with `EgressResponseTooLargeError` instead of truncating at the cap. */

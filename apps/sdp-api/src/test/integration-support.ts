@@ -19,6 +19,7 @@ import { closeDatabasePools, getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { app } from "@/index";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -42,6 +43,7 @@ import {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
+import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -63,6 +65,7 @@ export const apiTestSupport = {
   createVaultDeadline,
   depositIntoVault,
   CustodyConfigStore,
+  ensureTestClerkIssuer,
   DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
@@ -73,7 +76,9 @@ export const apiTestSupport = {
   KoraClient,
   resolveEarnExecutionClient,
   resolveKoraEndpoint,
+  runAsMoneyPrincipal,
   seedTestDatabase,
+  signTestClerkJwt,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
   supportsVaultDirect,

@@ -1,9 +1,11 @@
 ---
 title: Manage API Keys
-description: Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
+description: Create, rotate, and revoke API keys with explicit grants by module, a signing wallet scope, and zero-downtime rotation.
 ---
 
-Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and carries a role plus optional fine-grained controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and holds an explicit list of grants plus optional controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+
+Keys are credentials, not administrators: they are created, changed, rotated, and revoked by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever it is granted.
 
 The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
@@ -14,20 +16,62 @@ The full secret is returned exactly once — at creation and at rotation. SDP st
 | Sandbox | `sk_test_` | devnet |
 | Production | `sk_live_` | mainnet-beta |
 
-## Roles
+## Grants by module
 
-| Role | Description |
+Every API route performs exactly one **action**, named `module.verb`, and a key may call a route only when it holds that action. A key holds an explicit list of grants: there is no role and no wildcard.
+
+| Verb | What it allows |
 | --- | --- |
-| `api_admin` | Full access including custody and platform operations |
-| `api_developer` | Read/write access, excludes custody actions |
-| `api_readonly` | Read-only access to all resources |
+| `read` | View the module's records |
+| `manage` | Create and edit records reversibly: drafts, pausing, cancelling |
+| `execute` | Anything irreversible or that leaves SDP: on-chain transactions, provider calls, moving money, and changing where money goes, such as a payout destination or a recurring amount |
+| `enforce` | Token enforcement: freeze, pause, seize, force-burn, allowlist |
+| `authority` | Transferring or revoking a token's authorities |
 
-A key can also carry explicit `permissions` that override the role's defaults. A key can only be granted permissions its creator holds.
+`manage` and `execute` each include the same module's `read`. Nothing else implies another action: `execute` does not include `manage`, and a grant on one module gives nothing on another. These are the actions a key can be granted on this deployment:
+
+<ApiKeyGrantsTable />
+
+Some actions are never granted to a key, because keys are credentials, not administrators: key, member, organization and project administration, and every provider, credential or connection setup (`configure`). A create or update naming one is refused with `400`. So is a grant on a module this deployment does not run; a key that already holds one keeps it when an update sends it back.
+
+A request without the route's action is refused with `403 INSUFFICIENT_PERMISSIONS`, and `error.details.action` names the missing action. Nothing runs or is recorded on refusal. Grants are read on every request, so a change applies to the key's next request.
+
+When you create a key you can grant only actions you hold yourself. **Everything** in the dashboard writes out every action available when the key is created; an action added to SDP later is not granted to existing keys.
+
+## Wallet access
+
+A key's wallet scope decides which custody wallets SDP may sign with on its behalf:
+
+| `walletScope` | Signs with |
+| --- | --- |
+| `all` | Every custody wallet in the key's project |
+| `selected` | Only the wallets listed in `walletIds`. With none listed, the key signs nothing |
+
+`walletIds` are custody wallet ids, the `id` (`cwlt_…`) that `GET /v1/wallets` returns, not a provider's wallet id. A key keeps the exact wallets you listed: a wallet created later, even one reusing a provider id, is never added.
+
+SDP checks the scope each time it signs, together with the key's grants and whether it is still active, so a narrowed scope or a revoked key stops the next signature, including one later in the same request. A signature outside the scope is refused with `403 FORBIDDEN` and `error.details.reason` set to `wallet_out_of_scope`; nothing is signed or sent.
+
+The scope narrows what a key may sign with, not what it may read. A `selected` key's wallet list (`GET /v1/wallets`) and wallet detail reads show only its wallets; every other read, such as transfers, batches and recurring payments, covers the whole project. Give a separate project to an integration that must not see another's records.
+
+The dashboard starts a key that holds any `execute` action on **Selected wallets**, so it can sign with nothing you did not give it; choose **All wallets** to widen it.
+
+```bash title="Create a key that may only pay from one wallet"
+curl -X POST https://api.solana.com/v1/api-keys \
+  -H "Authorization: Bearer $DASHBOARD_SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Payouts worker",
+    "grants": ["transfers.execute"],
+    "walletScope": "selected",
+    "walletIds": ["cwlt_0f2c8c1e"]
+  }'
+```
+
+## Recurring payments outlive the key
+
+A recurring payment is collected on schedule as its own mandate, not as the key or member that activated it. SDP still checks that the payment is active, that it pays from its own source wallet, and that the organization may move money. Revoking or narrowing the key that activated it does not stop it, so rotating a key never interrupts a customer's schedule.
 
 ## Create a key
-
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
 
 1. Navigate to **API keys** in the sidebar. You start with an empty list.
 
@@ -35,9 +79,10 @@ A key can also carry explicit `permissions` that override the role's defaults. A
 
 2. Click **New API key** in the top right, then fill in the key details:
    - **Name** — a descriptive label (e.g., "CI deploy key")
-   - **Role** — Admin, Developer, or Read only
+   - **Permissions** — a checkbox per verb for each module (Read, Manage, Execute); ticking Manage or Execute includes Read. **Everything** ticks every offered action
    - **Wallet access** — All wallets or Selected wallets
    - **Expiration (optional)** — date/time picker
+   - **Allowed IP addresses (optional)** — one IPv4 or IPv6 address or CIDR range per line; empty allows any address. Edit the key to change or clear it
 
    ![Create API key modal](/images/getting-started/api-key-create.png)
 
@@ -49,199 +94,24 @@ A key can also carry explicit `permissions` that override the role's defaults. A
 
    ![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
 
-5. Dismiss the modal. The key now appears in the table with its prefix, role, environment, and status.
+5. Dismiss the modal. The key now appears in the table with its prefix, grants, environment, and status.
 
    ![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
-</Tab>
-<Tab value="API">
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/api-keys \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "CI deploy key",
-    "role": "api_developer",
-    "walletScope": "all",
-    "expiresAt": "2026-12-31T23:59:59Z"
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript title="create-api-key.ts"
-const response = await fetch("https://api.solana.com/v1/api-keys", {
-  method: "POST",
-  headers: {
-    "Authorization": "Bearer sk_test_...",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    name: "CI deploy key",
-    role: "api_developer",
-    walletScope: "all",
-    expiresAt: "2026-12-31T23:59:59Z",
-  }),
-});
-const { data } = await response.json();
-// data.apiKey.key — save this, only shown once
-```
-</Tab>
-<Tab value="Java">
-```java title="CreateApiKey.java"
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/api-keys"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "name": "CI deploy key",
-          "role": "api_developer",
-          "walletScope": "all",
-          "expiresAt": "2026-12-31T23:59:59Z"
-        }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-The new key belongs to the project of the key that created it and inherits that project's environment — there is no environment field on the request. The response includes the full `key` value — **save it, it is only returned once**.
-
-Optional fields: `description`, `permissions` (fine-grained overrides), `allowedIps` (IPv4/IPv6/CIDR ranges), `signingWalletId` / `signingWalletIds`, `walletBindings` (per-wallet permission lists).
-
-</Tab>
-</Tabs>
-
-## Allowed operations
-
-A key can carry a list of the operation families and types it may perform on the wallets it can access. The list is an allow-list. An empty or missing list places no restriction. An operation that is not in a non-empty list is refused with `OPERATION_NOT_ALLOWED` before anything executes. Nothing is recorded on refusal, like a missing permission.
-
-<AllowedOperationsTable />
-
-Set the list when you create a key, or change it later with `PATCH /v1/api-keys/{keyId}`. A family entry covers every type in it, and a single type can be listed on its own. A key can only grant operations inside its own list.
-
-```bash
-curl -X POST https://api.solana.com/v1/api-keys \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Payouts worker",
-    "walletScope": "selected",
-    "signingWalletIds": ["wal_123"],
-    "allowedOperations": ["payment_transfer_execute", "payment_transfer_batch_execute"]
-  }'
-```
-
-Use `null` or an empty list on update to remove the restriction. Actions that get funds back out are never restricted by this list.
+The key belongs to the project you create it in and inherits that project's environment.
 
 ## Rotate a key
 
-Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and allowed operations, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's grants, IP allowlist, and wallet scope, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
 
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
-
-1. In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API for a custom value (0–168h).
+1. In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**.
 
    ![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
 
 2. Copy the new key value from the generated key modal — it is shown once.
 
-</Tab>
-<Tab value="API">
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/api-keys/key_abc123/rotate \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{ "gracePeriodHours": 24 }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript title="rotate-api-key.ts"
-const response = await fetch(
-  "https://api.solana.com/v1/api-keys/key_abc123/rotate",
-  {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ gracePeriodHours: 24 }),
-  }
-);
-const { data } = await response.json();
-// data.apiKey — the new key, only shown once
-// data.previousKey.rotationDeadline — when the old key stops working
-```
-</Tab>
-<Tab value="Java">
-```java title="RotateApiKey.java"
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123/rotate"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        { "gracePeriodHours": 24 }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key or a Clerk JWT from the dashboard.
-
-</Tab>
-</Tabs>
-
 ## Revoke a key
 
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
+Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working on its next request and cannot be restored. Deleting a rotated key during its grace period ends the overlap early: the replacement keeps working.
 
-Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working immediately and cannot be restored.
-
-</Tab>
-<Tab value="API">
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash title="Terminal"
-curl -X DELETE https://api.solana.com/v1/api-keys/key_abc123 \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{ "confirmation": "CI deploy key" }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript title="revoke-api-key.ts"
-await fetch("https://api.solana.com/v1/api-keys/key_abc123", {
-  method: "DELETE",
-  headers: {
-    "Authorization": "Bearer sk_test_...",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({ confirmation: "CI deploy key" }),
-});
-```
-</Tab>
-<Tab value="Java">
-```java title="RevokeApiKey.java"
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/api-keys/key_abc123"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .method("DELETE", HttpRequest.BodyPublishers.ofString("""
-        { "confirmation": "CI deploy key" }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-The `confirmation` field must match the key's **name**. Revocation takes effect immediately, is idempotent (revoking an already-revoked key succeeds), and cannot be undone. As with rotation, a key cannot revoke itself.
-
-</Tab>
-</Tabs>
+If the key may be compromised, also cancel the recurring payments it activated: send `"cancelRecurringPayments": true` with the revocation. A recurring payment answers to the key that activated or last resumed it, or that last changed its source wallet, recipient, token, amount or period: that change re-authorizes where its money goes. Changing only its metadata or next collection date does not. The response lists the recurring payments it canceled and any it could not, which you can cancel one by one.

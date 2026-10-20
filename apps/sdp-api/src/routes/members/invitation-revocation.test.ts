@@ -1,16 +1,17 @@
-import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { invitationWasRevoked } from "@/lib/invitations";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_ORG } from "@/test/fixtures/organizations";
+import { clerkHeaders, ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const CLERK_API_URL = "https://clerk.example.test/v1";
 const CLERK_ORG_ID = "org_clerk_invitation_revocation";
-const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
+const ORGANIZATION_ID = TEST_ORG.id;
 const INVITEE_EMAIL = "duplicate-invite@example.com";
 
 /** The invitation the local row was created for. */
@@ -22,6 +23,8 @@ const LOCAL_INVITATION_ID = "inv_revocation_target";
 const INVITER_USER_ID = "usr_revocation_inviter";
 const ADMIN_USER_ID = "usr_revocation_admin";
 const ADMIN_CLERK_USER_ID = "clerk_user_admin";
+const ADMIN_PROJECT_ID = "prj_invitation_revocation";
+let adminToken: string;
 
 interface ClerkInvitationStub {
   id: string;
@@ -61,8 +64,13 @@ function stubClerk(options: {
   const requestingUserIds: string[] = [];
   let listCall = 0;
 
+  const realFetch = globalThis.fetch;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = typeof input === "string" ? input : String(input);
+    // The admin's session token verifies against the local test issuer.
+    if (env.CLERK_JWKS_URL && url.startsWith(env.CLERK_JWKS_URL)) {
+      return realFetch(input, init);
+    }
 
     if (url.includes("/invitations?status=pending")) {
       if (options.failListAfterFirst && listCall > 0) {
@@ -136,38 +144,25 @@ async function seedInvitation(clerkInvitationId: string | null): Promise<void> {
       ),
   ]);
 
-  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
-    organizationId: ORGANIZATION_ID,
-    permissions: ["*"],
-  });
+  await signInAdmin();
 }
 
-async function seedSystemInvitationWithAdmin(): Promise<void> {
+/**
+ * Signs in an organization admin: invitations are revoked by a signed-in
+ * person, never an API key (HOO-2099), and Clerk is told that person asked.
+ */
+async function signInAdmin(): Promise<void> {
   const db = getDb(env);
-
   await db.batch([
-    db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Invitation Revocation', 'invitation-revocation', 'individual', 'active')"
-      )
-      .bind(ORGANIZATION_ID),
     db
       .prepare(
         "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'revocation-admin@example.com', 1, 'active')"
       )
       .bind(ADMIN_USER_ID),
-    // Deliberately has no auth_user_identities row, so no Clerk id resolves.
     db
       .prepare(
-        "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'revocation-noclerk@example.com', 1, 'active')"
-      )
-      .bind(INVITER_USER_ID),
-    db
-      .prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id)
-         VALUES ('aui_revocation_admin', 'clerk', ?, ?)`
+        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+         VALUES ('aui_revocation_admin', 'clerk', ?, ?, 'revocation-admin@example.com')`
       )
       .bind(ADMIN_CLERK_USER_ID, ADMIN_USER_ID),
     db
@@ -176,41 +171,28 @@ async function seedSystemInvitationWithAdmin(): Promise<void> {
          VALUES ('mem_revocation_admin', ?, ?, 'admin', 'active')`
       )
       .bind(ORGANIZATION_ID, ADMIN_USER_ID),
-    db
-      .prepare(
-        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-         VALUES ('aoi_revocation', 'clerk', ?, ?, 'invitation-revocation')`
-      )
-      .bind(CLERK_ORG_ID, ORGANIZATION_ID),
-    db
-      .prepare(
-        `INSERT INTO invitations
-           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id)
-         VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending', ?)`
-      )
-      .bind(
-        LOCAL_INVITATION_ID,
-        ORGANIZATION_ID,
-        INVITEE_EMAIL,
-        INVITER_USER_ID,
-        "hash_revocation_system",
-        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        OUR_CLERK_INVITATION_ID
-      ),
   ]);
-
-  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
+  await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
-    permissions: ["*"],
+    createdBy: ADMIN_USER_ID,
+    members: [ADMIN_USER_ID],
+    ids: { sandbox: ADMIN_PROJECT_ID, production: `${ADMIN_PROJECT_ID}_production` },
+  });
+  await ensureTestClerkIssuer(env);
+  adminToken = await signTestClerkJwt({
+    clerkUserId: ADMIN_CLERK_USER_ID,
+    clerkOrgId: CLERK_ORG_ID,
+    orgRole: "admin",
+    orgSlug: "invitation-revocation",
+    email: "revocation-admin@example.com",
+    expiresInSeconds: 300,
   });
 }
 
 async function revoke(): Promise<Response> {
   return app.request(
     `/v1/members/invitations/${LOCAL_INVITATION_ID}`,
-    { method: "DELETE", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+    { method: "DELETE", headers: clerkHeaders(adminToken, ADMIN_PROJECT_ID) },
     env
   );
 }
@@ -253,6 +235,7 @@ describe("invitation revocation identity", () => {
     // The second invitation belongs to someone else's request for the same
     // address; revoking it would cancel an invite nobody asked to withdraw.
     expect(clerk.revokedIds).toEqual([OUR_CLERK_INVITATION_ID]);
+    expect(clerk.requestingUserIds).toEqual([ADMIN_CLERK_USER_ID]);
     expect(await invitationStatus()).toBe("revoked");
   });
 
@@ -346,22 +329,5 @@ describe("invitation revocation identity", () => {
     // enforced is that none survive.
     expect(clerk.revokedIds).toEqual([OUR_CLERK_INVITATION_ID, OTHER_CLERK_INVITATION_ID]);
     expect(await invitationStatus()).toBe("revoked");
-  });
-  it("revokes via an organisation admin when no other Clerk identity resolves", async () => {
-    // Every more specific source of a Clerk user is empty here: an API key is
-    // acting so there is no Clerk user of its own, the inviter is a real user
-    // with no Clerk identity row, and Clerk's invitation carries no inviter_id.
-    // Without a fallback the invitation could never be withdrawn.
-    await seedSystemInvitationWithAdmin();
-    const clerk = stubClerk({
-      pendingByCall: [[{ ...clerkInvitation(OUR_CLERK_INVITATION_ID), inviter_id: "" }]],
-    });
-
-    const response = await revoke();
-
-    expect(response.status).toBe(204);
-    expect(clerk.revokedIds).toEqual([OUR_CLERK_INVITATION_ID]);
-    expect(await invitationStatus()).toBe("revoked");
-    expect(clerk.requestingUserIds).toEqual([ADMIN_CLERK_USER_ID]);
   });
 });

@@ -23,12 +23,10 @@ import {
   requestWithApiKey,
   TEST_ORG,
   TEST_PROJECT,
-  TEST_PROJECT_CACHED_KEY,
 } from "#/helpers/integration";
 import { env } from "#env-impl";
 
 const {
-  createKVStoreSet,
   createPostgresEarnRepository,
   createVaultDeadline,
   getDb,
@@ -198,7 +196,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     env.MARKETS_ENABLED = "true";
     env.EARN_ENABLED = "true";
     await putForkClockAheadOfLazyClones();
-    const { apiKeyHash } = await initIntegrationSuite();
+    await initIntegrationSuite();
     await getDb(env)
       .prepare("UPDATE projects SET environment = 'production' WHERE id = ?")
       .bind(TEST_PROJECT.id)
@@ -212,10 +210,6 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
         TEST_ORG.id
       )
       .run();
-    await createKVStoreSet(env).apiKeys.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify({ ...TEST_PROJECT_CACHED_KEY, environment: "production" })
-    );
     const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
       provider: "jupiter_lend",
       providerReference: JUPITER_LEND_USDT.assetMint,

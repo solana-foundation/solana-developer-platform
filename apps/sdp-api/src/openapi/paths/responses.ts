@@ -111,7 +111,6 @@ import {
   projectProviderAvailabilityResponseSchema,
   projectResponseSchema,
 } from "@/openapi/schemas/projects";
-import { rpcRelayResponseSchema } from "@/openapi/schemas/rpc";
 
 export const organizationResponse = successResponseSchema(organizationSchema);
 
@@ -168,7 +167,6 @@ export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKe
 export function projectProviderAvailabilityResponse(publishEarn: boolean) {
   return successResponseSchema(projectProviderAvailabilityResponseSchema(publishEarn));
 }
-export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
 export const tokenWithAssetProfileResponse = successResponseSchema(

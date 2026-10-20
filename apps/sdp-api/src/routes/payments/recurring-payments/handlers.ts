@@ -2,13 +2,13 @@ import {
   decideRecurringPaymentUpdateTransition,
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import type {
-  ListPaymentRecurringPaymentsResponse,
-  PaymentRecurringPayment,
-  PaymentRecurringPaymentCollectionResponse,
-  PaymentRecurringPaymentResponse,
+import {
+  isInFlightRecurringPaymentAttemptStatus,
+  type ListPaymentRecurringPaymentsResponse,
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentCollectionResponse,
+  type PaymentRecurringPaymentResponse,
 } from "@sdp/types/payments";
-import { isInFlightRecurringPaymentAttemptStatus } from "@sdp/types/payments";
 import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -38,8 +38,6 @@ import {
   getPaymentsRepository,
 } from "@/routes/payments/context";
 import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
-import { assertPaymentWalletReadAccess } from "@/routes/payments/wallets";
-import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
 import {
@@ -360,6 +358,13 @@ export const updateRecurringPayment = async (
     request: body,
     createdBy: await resolveCreatorUserId(c),
     idempotency: requiredIdempotency(c),
+    admitStart: (custodyWalletId) =>
+      assertMoneyStartAdmitted(
+        c.env,
+        { organizationId: auth.organizationId, projectId },
+        { surface: "http", movement: "recurring.update", subjectId: recurringPayment.id },
+        { custodyWalletId }
+      ),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -389,7 +394,8 @@ export const activateRecurringPayment = async (
       assertMoneyStartAdmitted(
         c.env,
         { organizationId: auth.organizationId, projectId },
-        { surface: "http", movement: "recurring.activate", subjectId: recurringPayment.id }
+        { surface: "http", movement: "recurring.activate", subjectId: recurringPayment.id },
+        { custodyWalletId: sourceWallet.id }
       ),
     idempotencyKey: requiredIdempotency(c).key,
   });
@@ -432,7 +438,8 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
                 surface: "http",
                 movement: "recurring.resume",
                 subjectId: recurringPayment.id,
-              }
+              },
+              { custodyWalletId: sourceWallet.id }
             ),
           idempotencyKey: requiredIdempotency(c).key,
         });
@@ -471,7 +478,8 @@ export const collectRecurringPayment = async (
       assertMoneyStartAdmitted(
         c.env,
         { organizationId: auth.organizationId, projectId },
-        { surface: "http", movement: "recurring.collect", subjectId: recurringPayment.id }
+        { surface: "http", movement: "recurring.collect", subjectId: recurringPayment.id },
+        { custodyWalletId: sourceWallet.id }
       ),
     idempotencyKey: requiredIdempotency(c).key,
   });
@@ -494,29 +502,11 @@ export const listRecurringPayments = async (c: AppContext) => {
   }
 
   const { page, pageSize, counterpartyId, status } = parsed.data;
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:read",
-  ]);
-
-  if (
-    walletAuthorization &&
-    walletAuthorization.custodyWalletIds.length === 0 &&
-    walletAuthorization.providerWalletIds.length === 0
-  ) {
-    const response: ListPaymentRecurringPaymentsResponse = {
-      recurringPayments: [],
-      total: 0,
-      page,
-      pageSize,
-    };
-    return success(c, response);
-  }
 
   const { rows, total } = await getPaymentRecurringPaymentsRepository(c).listRecurringPayments({
     organizationId: auth.organizationId,
     projectId,
     counterpartyId,
-    walletAuthorization,
     status,
     limit: pageSize,
     offset: (page - 1) * pageSize,
@@ -540,23 +530,15 @@ export const getRecurringPayment = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:read",
-  ]);
   const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
     recurringPaymentId: params.data.id,
     organizationId: auth.organizationId,
     projectId,
-    walletAuthorization,
   });
 
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
-  assertPaymentWalletReadAccess(c, {
-    custodyWalletId: recurringPayment.source_custody_wallet_id,
-    providerWalletId: recurringPayment.source_wallet_id,
-  });
 
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(recurringPayment),

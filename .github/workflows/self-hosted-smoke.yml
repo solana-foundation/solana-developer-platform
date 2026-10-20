@@ -1,6 +1,13 @@
 # Nightly end-to-end smoke test of the self-hosted release: install.sh fetches and
 # verifies the latest published bundle, then the API is driven from health through
 # wallet creation against the released GHCR images.
+#
+# Initializing custody is `wallets.configure`, which no API key can hold, so the
+# smoke signs in the way a self-hosted operator does: as an organization admin
+# with a Clerk session. The workflow plays Clerk itself: it mints the session
+# token with its own signing key and serves the matching JWKS to sdp-api, which
+# verifies it through the same CLERK_ISSUER / CLERK_JWKS_URL path as a real
+# Clerk instance. No Clerk account or secret is involved.
 name: Self-Hosted Smoke
 
 on:
@@ -108,6 +115,22 @@ jobs:
           echo "::add-mask::$postgres_password"
           echo "::add-mask::$custody_private_key"
 
+          # The smoke's stand-in Clerk instance: a signing key the token below is
+          # minted with, and the JWKS sdp-api fetches to verify it.
+          mkdir -p "$INSTALL_DIR/smoke-jwks"
+          (umask 077 && node - "$RUNNER_TEMP/smoke-clerk.pem" "$INSTALL_DIR/smoke-jwks/jwks.json" <<'NODE'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const [pemPath, jwksPath] = process.argv.slice(2);
+          const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+          fs.writeFileSync(pemPath, privateKey.export({ type: "pkcs8", format: "pem" }));
+          const jwk = { ...publicKey.export({ format: "jwk" }), kid: "smoke", alg: "RS256", use: "sig" };
+          fs.writeFileSync(jwksPath, JSON.stringify({ keys: [jwk] }), { mode: 0o644 });
+          NODE
+          )
+          chmod 755 "$INSTALL_DIR/smoke-jwks"
+          chmod 644 "$INSTALL_DIR/smoke-jwks/jwks.json"
+
           umask 077
           # Compose interpolates the whole file, so sdp-web's required Clerk vars
           # need a value even though only the api stack is started.
@@ -119,15 +142,24 @@ jobs:
           CUSTODY_PRIVATE_KEY=$custody_private_key
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=unused
           CLERK_SECRET_KEY=unused
+          CLERK_ISSUER=https://clerk.smoke.invalid
+          CLERK_JWKS_URL=http://smoke-jwks:8080/jwks.json
           EOF
-
-          echo "API_KEY_PEPPER=$pepper" >>"$GITHUB_ENV"
 
       - name: Start the stack
         working-directory: ${{ env.INSTALL_DIR }}
         run: |
           set -euo pipefail
           docker compose pull sdp-api
+          # Serve the stand-in Clerk JWKS on the stack's network, from the image
+          # already pulled, before sdp-api boots and fetches it.
+          docker compose run -d --rm --no-deps --name smoke-jwks \
+            -v "$INSTALL_DIR/smoke-jwks:/jwks:ro" --entrypoint node sdp-api -e '
+              const fs = require("fs");
+              require("http").createServer((req, res) => {
+                res.setHeader("content-type", "application/json");
+                res.end(fs.readFileSync("/jwks/jwks.json"));
+              }).listen(8080);'
           # Pulls in postgres, redis and migrate via depends_on; web/docs stay down.
           docker compose up -d sdp-api
 
@@ -144,44 +176,68 @@ jobs:
           echo "sdp-api did not become healthy within 60s"
           exit 1
 
-      - name: Seed an API key
+      - name: Sign in as an organization admin
         working-directory: ${{ env.INSTALL_DIR }}
         run: |
           set -euo pipefail
 
-          api_key="sk_test_$(openssl rand -hex 24)"
-          key_prefix="${api_key:0:11}"
-          # Must match the runtime: HMAC-SHA256(message=key, key=pepper), hex.
-          key_hash="$(printf '%s' "$api_key" \
-            | openssl dgst -sha256 -hmac "$API_KEY_PEPPER" -hex \
-            | awk '{print $NF}')"
-
-          echo "::add-mask::$api_key"
-          echo "::add-mask::$key_hash"
-          echo "SMOKE_API_KEY=$api_key" >>"$GITHUB_ENV"
-
-          # NULL permissions grants the wildcard scope, covering custody:admin below.
-          docker compose exec -T postgres \
-            psql -v ON_ERROR_STOP=1 -U sdp -d sdp \
-              -v key_hash="$key_hash" -v key_prefix="$key_prefix" <<'SQL'
+          # The rows Clerk's webhook and first sign-in would have written: a
+          # user, an organization with its admin membership, a sandbox project
+          # the admin belongs to, and the Clerk identities that map to them.
+          # No API key: initializing custody is configuration, which keys never hold.
+          docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U sdp -d sdp <<'SQL'
           INSERT INTO users (id, email, email_verified, name, status)
-            VALUES ('usr_smoke', 'smoke@localhost', 1, 'Smoke Test', 'active');
-          INSERT INTO organizations (id, name, slug, tier, status)
-            VALUES ('org_smoke', 'Smoke Test', 'smoke-test', 'enterprise', 'active');
+            VALUES ('usr_smoke', 'smoke@example.com', 1, 'Smoke Test', 'active');
+          -- The local signer is a manual provider: the operator enables it in the
+          -- organization's settings (Clerk private metadata, synced here).
+          INSERT INTO organizations (id, name, slug, tier, status, settings)
+            VALUES ('org_smoke', 'Smoke Test', 'smoke-test', 'enterprise', 'active',
+                    '{"providerOverrides":{"custody":{"local":true}}}');
+          INSERT INTO organization_members (id, organization_id, user_id, role, status)
+            VALUES ('mem_smoke', 'org_smoke', 'usr_smoke', 'admin', 'active');
           INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-            VALUES ('proj_smoke', 'org_smoke', 'Smoke Test', 'smoke-test', 'sandbox', 'active', 'usr_smoke');
-          INSERT INTO api_keys
-            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
-            VALUES ('key_smoke', 'org_smoke', 'proj_smoke', 'usr_smoke', 'Smoke Key',
-                    :'key_prefix', :'key_hash', 'api_admin', 'active');
+            VALUES ('proj_smoke', 'org_smoke', 'Smoke Test', 'default-sandbox', 'sandbox', 'active', 'usr_smoke');
+          INSERT INTO project_members (id, project_id, user_id, role)
+            VALUES ('pm_smoke', 'proj_smoke', 'usr_smoke', 'admin');
+          INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+            VALUES ('aui_smoke', 'clerk', 'user_smoke', 'usr_smoke', 'smoke@example.com');
+          INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+            VALUES ('aoi_smoke', 'clerk', 'org_clerk_smoke', 'org_smoke', 'smoke-test');
           SQL
+
+          # A Clerk session token for that admin, signed with the stand-in key.
+          session_token="$(node - "$RUNNER_TEMP/smoke-clerk.pem" <<'NODE'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const key = fs.readFileSync(process.argv[2]);
+          const b64 = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+          const now = Math.floor(Date.now() / 1000);
+          const header = b64({ alg: "RS256", kid: "smoke", typ: "JWT" });
+          const payload = b64({
+            iss: "https://clerk.smoke.invalid",
+            sub: "user_smoke",
+            iat: now,
+            nbf: now - 5,
+            exp: now + 900,
+            email: "smoke@example.com",
+            org_id: "org_clerk_smoke",
+            org_role: "org:admin",
+            org_slug: "smoke-test",
+          });
+          const signature = crypto.sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), key);
+          process.stdout.write(`${header}.${payload}.${signature.toString("base64url")}`);
+          NODE
+          )"
+          echo "::add-mask::$session_token"
+          echo "SMOKE_SESSION_TOKEN=$session_token" >>"$GITHUB_ENV"
 
       - name: Create a wallet
         run: |
           set -euo pipefail
           code="$(curl -sS -o /tmp/wallet.json -w '%{http_code}' \
             -X POST http://localhost:8787/v1/wallets/initialize \
-            -H "Authorization: Bearer $SMOKE_API_KEY" \
+            -H "Authorization: Bearer $SMOKE_SESSION_TOKEN" \
+            -H 'x-project-id: proj_smoke' \
             -H 'content-type: application/json' \
             -d '{"provider":"local"}')"
           echo "create wallet -> $code"
@@ -198,4 +254,5 @@ jobs:
         if: always()
         run: |
           cd "$INSTALL_DIR" 2>/dev/null || exit 0
+          docker rm -f smoke-jwks || true
           docker compose down -v || true

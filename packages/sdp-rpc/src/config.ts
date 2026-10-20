@@ -64,7 +64,7 @@ function withOptionalApiKeyTemplate(url: string, apiKey?: string): string {
 }
 
 /** One configured provider in this deployment's managed pool. */
-export interface ManagedRpcProvider {
+interface ManagedRpcProvider {
   id: OrganizationRpcProvider;
   url: string;
 }
@@ -136,7 +136,7 @@ function buildManagedRpcProviders(env: RpcEnv): ManagedRpcProvider[] {
  * @param env - Process env carrying the managed provider URLs and keys.
  * @returns The configured providers in failover order.
  */
-export function resolveManagedRpcProviders(env: RpcEnv): ManagedRpcProvider[] {
+function resolveManagedRpcProviders(env: RpcEnv): ManagedRpcProvider[] {
   const providers = buildManagedRpcProviders(env);
   const preferred = env.SOLANA_RPC_DEFAULT_PROVIDER
     ? providers.find((provider) => provider.id === env.SOLANA_RPC_DEFAULT_PROVIDER)

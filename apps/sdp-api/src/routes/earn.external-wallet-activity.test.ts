@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {
@@ -12,8 +11,8 @@ import { app } from "@/index";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
@@ -70,17 +69,15 @@ const OPEN_WITHDRAWAL_REQUEST_STATUSES = [
   "closed_or_unknown",
 ] as const;
 
-function cachedKey(): CachedApiKey {
+function cachedKey(): SeededApiKey {
   return {
     id: KEY.id,
     organizationId: ORG,
     projectId: PROJECT,
-    role: "api_developer",
-    permissions: ["earn:read"],
+    grants: ["earn.read"],
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -88,7 +85,7 @@ function cachedKey(): CachedApiKey {
 
 async function seedScope() {
   const keyHash = await hashString(KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey());
+  await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -108,10 +105,9 @@ async function seedScope() {
     organizationId: ORG,
     projectId: `${PROJECT}_production`,
     createdBy: USER,
-    role: "api_developer",
-    permissions: ["earn:read"],
+    grants: ["earn.read"],
   });
-  await seedCachedApiKey(env, productionKeyHash, {
+  await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
     id: PRODUCTION_KEY.id,
     projectId: `${PROJECT}_production`,
@@ -121,10 +117,10 @@ async function seedScope() {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'External activity', 'sk_test_act', ?, 'api_developer', '["earn:read"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'External activity', 'sk_test_act', ?, ?, 'active')`
       )
-      .bind(KEY.id, ORG, PROJECT, USER, keyHash),
+      .bind(KEY.id, ORG, PROJECT, USER, keyHash, ["earn.read"]),
   ]);
 }
 

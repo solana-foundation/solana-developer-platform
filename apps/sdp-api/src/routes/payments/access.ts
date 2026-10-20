@@ -6,13 +6,14 @@ import {
   getCounterpartiesRepository,
   getPaymentSubscriptionsRepository,
 } from "./context";
-import { authorizeProviderWallet, findRetainedPaymentWalletByWalletId } from "./wallets";
+import { findRetainedPaymentWalletByWalletId } from "./wallets";
 
 /**
  * Access checks for the payment routes that name wallets, plans and
  * counterparties (HOO-1918, ADR 0009). Each loads what the request names in the
- * caller's project, whatever its status, and checks the key's wallet access
- * fresh. State (an archived plan, an inactive wallet) stays in the handler.
+ * caller's project, whatever its status. Project-scoped: whether a key may
+ * sign with a wallet is the custody signer's decision (HOO-2099). State (an
+ * archived plan, an inactive wallet) stays in the handler.
  */
 
 function body<T>(input: AuthorizeInput): T {
@@ -30,7 +31,6 @@ export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInp
   const { walletId, counterpartyId } = body<{ walletId: string; counterpartyId: string | null }>(
     input
   );
-  authorizeProviderWallet(c, walletId, ["payments:write"]);
   const [wallet, counterparty] = await Promise.all([
     findRetainedPaymentWalletByWalletId(c, walletId),
     counterpartyId
@@ -51,9 +51,9 @@ export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInp
 }
 
 /**
- * The owner wallet and any puller wallet: the key's binding to each, as
- * authentication read it (HOO-2048), and each in the caller's project whatever its status, so a
- * foreign wallet is a 404 before the key. Whether it is active is the handler's.
+ * The owner wallet and any puller wallet, each in the caller's project whatever
+ * its status, so a foreign wallet is a 404 before the key. Whether it is active
+ * is the handler's.
  */
 async function authorizePlanWallets(
   c: AppContext,
@@ -62,9 +62,6 @@ async function authorizePlanWallets(
 ): Promise<void> {
   const walletIds =
     typeof pullerWalletId === "string" ? [ownerWalletId, pullerWalletId] : [ownerWalletId];
-  for (const walletId of walletIds) {
-    authorizeProviderWallet(c, walletId, ["payments:write"]);
-  }
   const wallets = await Promise.all(
     walletIds.map((walletId) => findRetainedPaymentWalletByWalletId(c, walletId))
   );
