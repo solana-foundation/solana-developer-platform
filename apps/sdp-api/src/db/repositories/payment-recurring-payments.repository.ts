@@ -1,5 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
+  CollectableRecurringPaymentStatus,
   PaymentRecurringPaymentActivationAttemptStage,
   PaymentRecurringPaymentAttemptStatus,
   PaymentRecurringPaymentLifecycleAttemptStage,
@@ -9,6 +10,21 @@ import type {
   PaymentRecurringPaymentUpdateAttemptStage,
   RecurringPaymentStatusWithRecoverableCollection,
 } from "@sdp/types/payments";
+
+/** A new recurring payment activation attempt's id. */
+export function generateRecurringPaymentActivationAttemptId(): string {
+  return `prpa_${crypto.randomUUID()}`;
+}
+
+/** A new recurring payment update attempt's id. */
+export function generateRecurringPaymentUpdateAttemptId(): string {
+  return `prpu_${crypto.randomUUID()}`;
+}
+
+/** A new recurring payment update event's id. */
+export function generateRecurringPaymentUpdateEventId(): string {
+  return `prue_${crypto.randomUUID()}`;
+}
 
 export interface PaymentRecurringPaymentRow {
   id: string;
@@ -47,7 +63,7 @@ export interface RecurringPaymentCollectionCycleRow extends PaymentRecurringPaym
 }
 
 export interface CollectibleRecurringPaymentRow extends RecurringPaymentCollectionCycleRow {
-  status: "active";
+  status: CollectableRecurringPaymentStatus;
 }
 
 export interface RecoverableCollectionRecurringPaymentRow
@@ -235,6 +251,8 @@ export interface UpdatePaymentRecurringPaymentActivationInput {
   authorizationSignature?: string | null;
   nextCollectionDueAt?: string | null;
   destinationTokenAccount?: string | null;
+  /** The activation run's claim stamp: the write applies only while the row still carries it. */
+  expectedUpdatedAt?: string;
   updatedAt: string;
 }
 
@@ -678,6 +696,8 @@ export interface PaymentRecurringPaymentsRepository {
     recurringPaymentId: string;
     organizationId: string;
     projectId: string;
+    /** The activation run's claim stamp: the reset applies only while the row still carries it. */
+    expectedUpdatedAt: string;
     updatedAt: string;
   }): Promise<PaymentRecurringPaymentRow | null>;
   updateRecurringPaymentActivation(

@@ -6,6 +6,16 @@ import type {
 } from "@sdp/types/payments";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
+/** A new subscription plan's id. */
+export function generatePaymentSubscriptionPlanId(): string {
+  return `psp_${crypto.randomUUID()}`;
+}
+
+/** A new subscription's id. */
+export function generatePaymentSubscriptionId(): string {
+  return `psub_${crypto.randomUUID()}`;
+}
+
 export interface PaymentSubscriptionPlanRow {
   id: string;
   organization_id: string;

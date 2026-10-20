@@ -91,11 +91,11 @@ export function decideRecurringPaymentUpdateTransition(input: {
   updatedAt: string;
   nowIso: string;
 }): RecurringPaymentTransition {
-  const { claimableStatuses, processingStatus } = RECURRING_PAYMENT_UPDATE_TRANSITION;
+  const { editableStatuses, processingStatus } = RECURRING_PAYMENT_UPDATE_TRANSITION;
   if (input.status === processingStatus) {
     return isRecurringPaymentOperationStale(input) ? "recoverable" : "processing";
   }
-  return claimableStatuses.some((status) => status === input.status) ? "claimable" : "invalid";
+  return editableStatuses.some((status) => status === input.status) ? "claimable" : "invalid";
 }
 
 /**

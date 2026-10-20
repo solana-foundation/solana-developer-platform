@@ -1,6 +1,8 @@
 import {
+  COLLECTABLE_RECURRING_PAYMENT_STATUSES,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
+  FAILED_COLLECTION_ATTEMPT_STATUSES,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   LIVE_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES,
@@ -10,10 +12,12 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
+  RECURRING_PAYMENT_ACTIVATION_TRANSITION,
   RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
+  RECURRING_PAYMENT_UPDATE_TRANSITION,
 } from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
@@ -194,7 +198,7 @@ function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringP
 }
 
 const collectibleRecurringPaymentProjectionSchema = z.object({
-  status: z.literal("active"),
+  status: z.enum(COLLECTABLE_RECURRING_PAYMENT_STATUSES),
   subscription_id: z.string(),
   next_collection_due_at: z.string(),
 });
@@ -389,7 +393,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `SELECT rp.* FROM payment_recurring_payments rp
            JOIN projects p ON p.id = rp.project_id
-          WHERE p.environment = ? AND rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
+          WHERE p.environment = ? AND rp.status = ANY(?::text[]) AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
             AND NOT EXISTS (SELECT 1 FROM payment_subscription_collection_attempts active_attempt
               WHERE active_attempt.organization_id = rp.organization_id AND active_attempt.project_id = rp.project_id
                 AND active_attempt.subscription_id = rp.subscription_id AND active_attempt.due_at = rp.next_collection_due_at
@@ -397,13 +401,15 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             AND NOT EXISTS (SELECT 1 FROM payment_subscription_collection_attempts failed_attempt
               WHERE failed_attempt.organization_id = rp.organization_id AND failed_attempt.project_id = rp.project_id
                 AND failed_attempt.subscription_id = rp.subscription_id AND failed_attempt.due_at = rp.next_collection_due_at
-                AND failed_attempt.status = 'failed' AND failed_attempt.updated_at > ?)
+                AND failed_attempt.status = ANY(?::text[]) AND failed_attempt.updated_at > ?)
           ORDER BY rp.next_collection_due_at ASC LIMIT ?`
         )
         .bind(
           environment,
+          [...COLLECTABLE_RECURRING_PAYMENT_STATUSES],
           dueBefore,
           [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE],
+          [...FAILED_COLLECTION_ATTEMPT_STATUSES],
           retryBefore,
           limit
         )
@@ -616,28 +622,32 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async claimRecurringPaymentActivation(params) {
+      const { processingStatus, claimableStatus } = RECURRING_PAYMENT_ACTIVATION_TRANSITION;
       const staleBefore = params.staleBefore ?? null;
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
-              SET status = 'activating',
+              SET status = ?,
                   updated_at = ?,
                   ${ACTIVATED_BY_ASSIGNMENTS}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
               AND (
-                status = 'pending_activation'
-                OR (status = 'activating' AND ?::text IS NOT NULL AND updated_at <= ?)
+                status = ?
+                OR (status = ? AND ?::text IS NOT NULL AND updated_at <= ?)
               )
           RETURNING *`
         )
         .bind(
+          processingStatus,
           params.updatedAt,
           ...activatedByBindings(params.activatedBy),
           params.recurringPaymentId,
           params.organizationId,
           params.projectId,
+          claimableStatus,
+          processingStatus,
           staleBefore,
           staleBefore
         )
@@ -652,17 +662,26 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           // A row back in pending_activation was never activated, so it has
           // no activator: a refused or failed claim leaves none behind.
           `UPDATE payment_recurring_payments
-              SET status = 'pending_activation',
+              SET status = ?,
                   updated_at = ?,
                   activated_by_api_key_id = NULL,
                   activated_by_user_id = NULL
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'activating'
+              AND status = ?
+              AND updated_at = ?
           RETURNING *`
         )
-        .bind(params.updatedAt, params.recurringPaymentId, params.organizationId, params.projectId)
+        .bind(
+          RECURRING_PAYMENT_ACTIVATION_TRANSITION.claimableStatus,
+          params.updatedAt,
+          params.recurringPaymentId,
+          params.organizationId,
+          params.projectId,
+          RECURRING_PAYMENT_ACTIVATION_TRANSITION.processingStatus,
+          params.expectedUpdatedAt
+        )
         .first<Record<string, unknown>>();
 
       return row ? mapRecurringPaymentRow(row) : null;
@@ -693,7 +712,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'activating'
+              AND status = ?
+              AND (?::boolean = false OR updated_at = ?)
           RETURNING *`
         )
         .bind(
@@ -721,7 +741,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.recurringPaymentId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          RECURRING_PAYMENT_ACTIVATION_TRANSITION.processingStatus,
+          input.expectedUpdatedAt !== undefined,
+          input.expectedUpdatedAt === undefined ? null : input.expectedUpdatedAt
         )
         .first<Record<string, unknown>>();
 
@@ -740,7 +763,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND next_collection_due_at = ?
-              AND status = 'active'
+              AND status = ANY(?::text[])
           RETURNING *`
         )
         .bind(
@@ -751,7 +774,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
-          input.currentCollectionDueAt
+          input.currentCollectionDueAt,
+          [...COLLECTABLE_RECURRING_PAYMENT_STATUSES]
         )
         .first<Record<string, unknown>>();
 
@@ -769,7 +793,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'active'
+              AND status = ANY(?::text[])
           RETURNING *`
         )
         .bind(
@@ -777,7 +801,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.recurringPaymentId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          [...COLLECTABLE_RECURRING_PAYMENT_STATUSES]
         )
         .first<Record<string, unknown>>();
 
@@ -821,28 +846,32 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async claimRecurringPaymentUpdate(input: ClaimPaymentRecurringPaymentUpdateInput) {
+      const { processingStatus, claimableStatus } = RECURRING_PAYMENT_UPDATE_TRANSITION;
       const staleBefore = input.staleBefore ?? null;
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
-              SET status = 'updating',
+              SET status = ?,
                   updated_at = ?,
                   ${ACTIVATED_BY_ASSIGNMENTS}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
               AND (
-                status = 'active'
-                OR (status = 'updating' AND ?::text IS NOT NULL AND updated_at <= ?)
+                status = ?
+                OR (status = ? AND ?::text IS NOT NULL AND updated_at <= ?)
               )
           RETURNING *`
         )
         .bind(
+          processingStatus,
           input.updatedAt,
           ...activatedByBindings(input.activatedBy),
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
+          claimableStatus,
+          processingStatus,
           staleBefore,
           staleBefore
         )
@@ -1523,12 +1552,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                 -- An update in flight already names its caller, and puts the
                 -- key it replaced back if it fails: that key still answers
                 -- for the payment until the update lands.
-                OR (rp.status = 'updating' AND EXISTS (
+                OR (rp.status = ? AND EXISTS (
                   SELECT 1 FROM payment_recurring_payment_update_attempts a
                    WHERE a.recurring_payment_id = rp.id
                      AND a.organization_id = rp.organization_id
                      AND a.project_id = rp.project_id
-                     AND a.status = 'processing'
+                     AND a.status = ANY(?::text[])
                      AND a.previous_activator->>'apiKeyId' IN (SELECT id FROM lineage)
                 ))
               )
@@ -1543,6 +1572,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           params.projectId,
           params.organizationId,
           params.projectId,
+          RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
+          [...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES],
           [...LIVE_RECURRING_PAYMENT_STATUSES]
         )
         .all<Record<string, unknown>>();

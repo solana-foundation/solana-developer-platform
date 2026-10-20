@@ -20,7 +20,6 @@ export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
   batchSize: 25,
   maxBatchSize: 100,
   retryAfterMinutes: 30,
-  staleAfterMs: 15 * 60 * 1000,
 } as const satisfies Record<string, number>;
 
 export function assertNever(value: never): never {
@@ -795,6 +794,8 @@ export function isEditableRecurringPaymentStatus(status: PaymentRecurringPayment
 export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
   "active",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
+export type CollectableRecurringPaymentStatus =
+  (typeof COLLECTABLE_RECURRING_PAYMENT_STATUSES)[number];
 /**
  * A recurring payment that collects, or will once its activation, update or
  * resume in flight finishes, or once a cancel in flight fails back to active:
@@ -927,12 +928,18 @@ export const RECURRING_PAYMENT_ACTIVATION_TRANSITION = {
   PaymentRecurringPaymentStatus
 >;
 
+/**
+ * An update's statuses: a request may edit a schedule in any editable status, but only an
+ * `active` one is claimed into `updating`, since a `pending_activation` edit writes the row alone.
+ */
 export const RECURRING_PAYMENT_UPDATE_TRANSITION = {
   processingStatus: "updating",
-  claimableStatuses: EDITABLE_RECURRING_PAYMENT_STATUSES,
+  claimableStatus: "active",
+  editableStatuses: EDITABLE_RECURRING_PAYMENT_STATUSES,
 } as const satisfies {
   processingStatus: PaymentRecurringPaymentStatus;
-  claimableStatuses: readonly PaymentRecurringPaymentStatus[];
+  claimableStatus: PaymentRecurringPaymentStatus;
+  editableStatuses: readonly PaymentRecurringPaymentStatus[];
 };
 
 /**

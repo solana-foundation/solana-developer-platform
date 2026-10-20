@@ -10,6 +10,7 @@ import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   assertNever,
+  COLLECTABLE_RECURRING_PAYMENT_STATUSES,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_FAILABLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
@@ -707,7 +708,7 @@ async function lockOpenCollectionCycle(
         WHERE id = ?
           AND organization_id = ?
           AND project_id = ?
-          AND status = 'active'
+          AND status = ANY(?::text[])
           AND source_custody_wallet_id IS NOT DISTINCT FROM ?
           AND source_wallet_id = ?
           AND source_address = ?
@@ -720,6 +721,7 @@ async function lockOpenCollectionCycle(
       input.recurringPayment.id,
       input.organizationId,
       input.projectId,
+      [...COLLECTABLE_RECURRING_PAYMENT_STATUSES],
       input.recurringPayment.source_custody_wallet_id,
       input.recurringPayment.source_wallet_id,
       input.recurringPayment.source_address,

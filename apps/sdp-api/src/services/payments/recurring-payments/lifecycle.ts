@@ -8,8 +8,11 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { MovementId } from "@sdp/types/movements";
 import {
+  assertNever,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isPendingActivationRecurringPaymentStatus,
+  RECURRING_PAYMENT_ACTIVATION_TRANSITION,
+  RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
 } from "@sdp/types/payments";
 import type { Address, Instruction, MaybeAccount, Signature, TransactionSigner } from "@solana/kit";
 import type { SubscriptionDelegation } from "@solana/subscriptions";
@@ -105,19 +108,20 @@ function assertLifecyclePreconditions(input: {
     updatedAt: input.recurringPayment.updated_at,
     nowIso: input.nowIso,
   });
-  if (
-    transition === "already_final" ||
-    transition === "claimable" ||
-    transition === "recoverable"
-  ) {
-    return;
+  switch (transition) {
+    case "already_final":
+    case "claimable":
+    case "recoverable":
+      return;
+    case "processing":
+      throw conflict(`Recurring payment ${input.operation} is already processing`);
+    case "invalid":
+      throw conflict(
+        `Recurring payment cannot be ${input.operation === "cancel" ? "canceled" : "resumed"} from this status`
+      );
+    default:
+      assertNever(transition);
   }
-  if (transition === "processing") {
-    throw conflict(`Recurring payment ${input.operation} is already processing`);
-  }
-  throw conflict(
-    `Recurring payment cannot be ${input.operation === "cancel" ? "canceled" : "resumed"} from this status`
-  );
 }
 
 async function getOrCreateLifecycleAttempt(input: {
@@ -745,8 +749,8 @@ async function cancelPendingRecurringPayment(input: {
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: "canceled",
-      expectedStatus: "pending_activation",
+      status: RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus,
+      expectedStatus: RECURRING_PAYMENT_ACTIVATION_TRANSITION.claimableStatus,
       updatedAt: canceledAt,
     });
     if (!updated) {

@@ -1,3 +1,4 @@
+import { getRecurringPaymentOperationStaleBefore } from "@sdp/payments/recurring-payment-lifecycle";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { RECURRING_PAYMENT_COLLECTION_CONFIG } from "@sdp/types/payments";
 import { getDb } from "@/db/client";
@@ -447,9 +448,7 @@ export async function collectDueRecurringPayments(
   const result = emptyResult();
   const limit = RECURRING_PAYMENT_COLLECTION_CONFIG.batchSize;
   const dueBefore = now.toISOString();
-  const staleBefore = new Date(
-    now.getTime() - RECURRING_PAYMENT_COLLECTION_CONFIG.staleAfterMs
-  ).toISOString();
+  const staleBefore = getRecurringPaymentOperationStaleBefore(dueBefore);
   const retryBefore = new Date(
     now.getTime() - RECURRING_PAYMENT_COLLECTION_CONFIG.retryAfterMinutes * 60 * 1000
   ).toISOString();
