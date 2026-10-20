@@ -5573,7 +5573,8 @@ describe("Payments routes — recurring", () => {
       await getDb(env)
         .prepare(
           `UPDATE payment_recurring_payment_update_attempts
-              SET status = 'processing', stage = 'claim', plan_update_signature = NULL, updated_at = ?
+              SET status = 'processing', stage = 'claim', plan_update_signature = NULL,
+                  last_valid_block_height = NULL, updated_at = ?
             WHERE idempotency_key = ?`
         )
         .bind(staleAt, recordKey(key))
@@ -6234,7 +6235,8 @@ describe("Payments routes — recurring", () => {
       await getDb(env)
         .prepare(
           `UPDATE payment_recurring_payment_lifecycle_attempts
-              SET status = 'processing', stage = 'claim', signature = NULL, updated_at = ?
+              SET status = 'processing', stage = 'claim', signature = NULL,
+                  last_valid_block_height = NULL, updated_at = ?
             WHERE idempotency_key = ?`
         )
         .bind(staleAt, recordKey(firstKey))
@@ -6542,7 +6544,8 @@ describe("Payments routes — recurring", () => {
       await getDb(env)
         .prepare(
           `UPDATE payment_recurring_payment_lifecycle_attempts
-              SET status = 'processing', stage = 'claim', signature = NULL, updated_at = ?
+              SET status = 'processing', stage = 'claim', signature = NULL,
+                  last_valid_block_height = NULL, updated_at = ?
             WHERE idempotency_key = ?`
         )
         .bind(staleAt, recordKey(firstKey))
@@ -6655,6 +6658,7 @@ describe("Payments routes — recurring", () => {
           .prepare(
             `UPDATE payment_recurring_payment_lifecycle_attempts
                 SET status = 'processing', stage = 'submit', signature = NULL,
+                    last_valid_block_height = NULL,
                     idempotency_key = NULL, updated_at = ?
               WHERE idempotency_key = ?`
           )
