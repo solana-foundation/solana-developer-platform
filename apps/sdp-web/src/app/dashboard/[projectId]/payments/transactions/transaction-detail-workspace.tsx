@@ -26,6 +26,7 @@ import {
   RecordSection,
   RecordStateBand,
 } from "@/app/dashboard/[projectId]/payments/payments-record";
+import { rampPhaseCopy } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
@@ -76,32 +77,21 @@ function paymentDirection(
 }
 
 /**
- * Why a payment is in its state, in the design's words. Ramp states name the provider and the
- * token when the transfer says which; a failure carries the API's own reason when it gave one.
+ * Why a payment is in its state, in the design's words; a ramp reads from its phase instead. A
+ * failure carries the API's own reason when it gave one.
  */
 function paymentWhy(
   status: PaymentTransferStatus,
   transfer: PaymentTransferDetail | null,
-  token: string | null,
   t: Translate
 ): string {
-  const provider = transfer?.provider ? getRampProviderLabel(transfer.provider) : null;
   switch (status) {
     case "processing":
-      return provider
-        ? t("DashboardPayments.transactionDetail.why.processingProvider", { provider })
-        : t("DashboardPayments.transactionDetail.why.processing");
+      return t("DashboardPayments.transactionDetail.why.processing");
     case "settling":
-      return provider
-        ? t("DashboardPayments.transactionDetail.why.settlingProvider", {
-            provider,
-            token: token ?? t("DashboardPayments.transactionDetail.theTokens"),
-          })
-        : t("DashboardPayments.transactionDetail.why.settling");
+      return t("DashboardPayments.transactionDetail.why.settling");
     case "completed":
-      return provider
-        ? t("DashboardPayments.transactionDetail.why.completedProvider", { provider })
-        : t("DashboardPayments.transactionDetail.why.completed");
+      return t("DashboardPayments.transactionDetail.why.completed");
     case "failed":
       return transfer?.error?.trim() || t("DashboardPayments.transactionDetail.why.failed");
     case "awaiting_payment":
@@ -176,7 +166,7 @@ function useTransactionSummary(
 ) {
   const t = useTranslations();
   const locale = useLocale();
-  const status = useTransactionStatus()(transaction);
+  const ledgerStatus = useTransactionStatus()(transaction);
   const { amount, token } = transactionAmountLabel(transaction, issuedTokensByMint, locale);
   const direction = paymentDirection(transaction, transfer);
   const { contact, party } = transactionParty(transaction, transfer, direction, counterpartyName);
@@ -185,9 +175,19 @@ function useTransactionSummary(
       ? "DashboardPayments.transactionDetail.titleFrom"
       : "DashboardPayments.transactionDetail.titleTo";
   const title = amount && party ? t(titleKey, { amount, party }) : (amount ?? transaction.id);
-  const why =
-    transaction.module === "payments" && isPaymentTransferStatus(transaction.moduleStatus)
-      ? paymentWhy(transaction.moduleStatus, transfer, token, t)
+  // A ramp reads from its whole transfer, so a held delivery or a reported payout says so.
+  const ramp =
+    transfer && (transfer.type === "onramp" || transfer.type === "offramp")
+      ? rampPhaseCopy(t, transfer, { tokenLabel: token, locale })
+      : null;
+  const status =
+    ramp?.kind === "needs_review"
+      ? { label: t("DashboardPayments.ramps.phase.review.badge"), tone: "attention" as const }
+      : ledgerStatus;
+  const why = ramp
+    ? ramp.description
+    : transaction.module === "payments" && isPaymentTransferStatus(transaction.moduleStatus)
+      ? paymentWhy(transaction.moduleStatus, transfer, t)
       : undefined;
   return { status, amount, direction, contact, title, why };
 }
