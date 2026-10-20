@@ -5,7 +5,7 @@
  * Requires Kora to be running locally (pnpm kora:local:up) or CI environment.
  *
  * Run locally:
- *   pnpm kora:local:up && KORA_DEVNET_URL=http://127.0.0.1:18081 pnpm --filter @sdp/api-integration test
+ *   pnpm kora:local:up && KORA_DEVNET_URL=http://127.0.0.1:18081 KORA_DEVNET_API_KEY="$(sed -n 's/^KORA_API_KEY=//p' ~/.config/sdp/kora-local-api-key.env)" pnpm --filter @sdp/api-integration test
  *
  * Override URL for CI:
  *   KORA_DEVNET_URL=http://kora:8080 pnpm --filter @sdp/api-integration test

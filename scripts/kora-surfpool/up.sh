@@ -323,6 +323,16 @@ require_command curl
 require_command node
 require_command pnpm
 
+KORA_PORT="$(url_port "${KORA_SURFPOOL_KORA_URL}")"
+
+# `pnpm dev`'s mainnet Kora (scripts/kora-local/up.sh, compose project kora-mainnet) holds this
+# port until `pnpm kora:local:down`; a standalone run refuses before it starts its own fork.
+if [ "${KORA_SURFPOOL_SHARED:-}" != "1" ] && command -v docker >/dev/null 2>&1 &&
+  [[ "$(docker port kora-mainnet-kora-1 8080/tcp 2>/dev/null || true)" == *:"${KORA_PORT}" ]]; then
+  echo "The mainnet Kora from \`pnpm dev\` already holds 127.0.0.1:${KORA_PORT}; run \`pnpm kora:local:down\` first." >&2
+  exit 1
+fi
+
 case "${KORA_SURFPOOL_RUNTIME}" in
   embedded)
     configure_embedded_remote_rpc
@@ -356,7 +366,6 @@ if [ -z "${SIGNER_PRIVATE_KEY:-}" ]; then
 fi
 
 KORA_DOCKER_RPC_URL="${KORA_DOCKER_RPC_URL:-http://host.docker.internal:$(url_port "${SURFPOOL_RPC_URL}")}"
-KORA_PORT="$(url_port "${KORA_SURFPOOL_KORA_URL}")"
 
 umask 077
 cat >"${ENV_FILE}" <<EOF
@@ -406,6 +415,8 @@ NODE
       if [ -n "${gateway_ip}" ]; then
         echo "Forwarding Surfpool RPC on ${gateway_ip}:${surfpool_port} for the Kora container."
         stop_pid_file "${KORA_RPC_PROXY_PID_FILE}"
+        # Its own process group, like the fork it forwards to, so Ctrl-C leaves both up.
+        set -m
         (
           cd "${ROOT_DIR}/packages/sdp-api-integration"
           export KORA_RPC_PROXY_LISTEN_HOST="${gateway_ip}"
@@ -414,6 +425,7 @@ NODE
           exec node scripts/kora-surfpool-rpc-proxy.mjs
         ) >"${KORA_RPC_PROXY_LOG}" 2>&1 &
         echo "$!" >"${KORA_RPC_PROXY_PID_FILE}"
+        set +m
       fi
     fi
     echo "Starting local Kora with upstream RPC ${KORA_DOCKER_RPC_URL}."
