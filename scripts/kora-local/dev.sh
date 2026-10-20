@@ -17,8 +17,9 @@ unset DATABASE_URL REDIS_URL
 
 # One port slot per running `pnpm dev`, so worktrees run side by side: slot N moves the
 # API, worker, web and docs ports up by 10*N, and the first slot whose four ports are all
-# free wins. The exports below beat .env.local for the web (Next keeps a variable the
-# process already has) and the worker; the API's own .env.local still wins for the API.
+# free wins. These exports are the run's only port source: they beat every .env.local
+# (Next keeps a variable the process already has; dev-env.mjs reads SDP_API_PORT from the
+# process first), so each service binds where its URLs point.
 # ponytail: two runs starting in the same second can pick one slot; the loser's API fails
 # to bind and a rerun takes the next slot.
 port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
@@ -49,7 +50,7 @@ mkdir -p "$(dirname "${URLS_FILE}")"
   echo "API_URL=${SDP_API_BASE_URL}"
   echo "DOCS_URL=${SDP_DOCS_PROXY_ORIGIN}"
 } >"${URLS_FILE}"
-echo "This worktree: web http://localhost:${PORT}  API ${SDP_API_BASE_URL}  docs ${SDP_DOCS_PROXY_ORIGIN} (also in ${URLS_FILE#"${ROOT_DIR}"/})."
 
 "${ROOT_DIR}/scripts/kora-local/up.sh"
+echo "This worktree: web http://localhost:${PORT}  API ${SDP_API_BASE_URL}  docs ${SDP_DOCS_PROXY_ORIGIN} (also in ${URLS_FILE#"${ROOT_DIR}"/})."
 turbo run dev dev:worker dev:db dev:webhook dev:kora --env-mode=loose --continue=always

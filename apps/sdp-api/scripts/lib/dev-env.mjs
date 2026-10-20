@@ -43,7 +43,9 @@ export const localEnv = {
   ...loadLocalEnvFile(koraLocalEnvPath),
   ...loadLocalEnvFile(localEnvPath),
 };
-export const apiPort = localEnv.SDP_API_PORT ?? process.env.SDP_API_PORT ?? "8787";
+// `pnpm dev` exports the port slot it picked (scripts/kora-local/dev.sh), so the process env wins
+// here: every URL that run builds for the API uses that same port.
+export const apiPort = process.env.SDP_API_PORT ?? localEnv.SDP_API_PORT ?? "8787";
 export const workerPort = process.env.SDP_WORKER_PORT ?? "8789";
 export const databaseUrl =
   // biome-ignore lint/security/noSecrets: Local Docker Postgres fallback.
