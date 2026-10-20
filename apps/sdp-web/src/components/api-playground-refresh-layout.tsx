@@ -505,7 +505,7 @@ function EndpointLine({
         onClick={onRun}
         disabled={runDisabled}
         aria-keyshortcuts="Meta+Enter Control+Enter"
-        className="!h-9 !gap-0 self-center rounded-control !px-5 sm:!h-[58px]"
+        className="!h-9 !gap-0 self-center rounded-control !px-5 sm:!h-[3.625rem]"
       >
         <span className="flex items-center whitespace-nowrap">
           <span className="flex items-center gap-1.5">

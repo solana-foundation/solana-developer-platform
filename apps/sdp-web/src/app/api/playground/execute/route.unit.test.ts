@@ -1,5 +1,6 @@
 import type { SdpReleaseChannel } from "@sdp/types/release-channels";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { z } from "zod";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
@@ -53,10 +54,18 @@ function upstreamOk(body: unknown = { data: {} }, init: ResponseInit = {}): Resp
   });
 }
 
+type UpstreamRequest = Mock<(path: string, init: RequestInit) => Promise<Response>>;
+
+/** The session client's `request`, typed so its calls read without assertions. */
+function upstreamRequest(): UpstreamRequest {
+  return vi.fn<(path: string, init: RequestInit) => Promise<Response>>();
+}
+
 /** The headers the route handed the session client for its one upstream call. */
-function forwardedHeaders(request: ReturnType<typeof vi.fn>): Headers {
-  const init = request.mock.calls[0]?.[1] as RequestInit;
-  return new Headers(init.headers);
+function forwardedHeaders(request: UpstreamRequest): Headers {
+  const call = request.mock.calls[0];
+  if (call === undefined) throw new Error("the route made no upstream call");
+  return new Headers(call[1].headers);
 }
 
 describe("POST /api/playground/execute", () => {
@@ -89,7 +98,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("runs a catalog operation on the dashboard session client, query included", async () => {
-    const request = vi.fn().mockResolvedValue(upstreamOk({ data: { wallets: [] } }));
+    const request = upstreamRequest().mockResolvedValue(upstreamOk({ data: { wallets: [] } }));
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(
@@ -120,7 +129,7 @@ describe("POST /api/playground/execute", () => {
     ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/allowlist"],
     ["backslash parent segments", "GET", "/v1/wallets/..\\..\\admin/allowlist"],
   ])("refuses %s that is not in the playground catalog", async (_label, method, path) => {
-    const request = vi.fn();
+    const request = upstreamRequest();
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(executeRequest({ method, path }));
@@ -131,7 +140,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("refuses a catalog operation the deployment's release channel does not run", async () => {
-    const request = vi.fn().mockResolvedValue(upstreamOk());
+    const request = upstreamRequest().mockResolvedValue(upstreamOk());
     mocks.createSdpApiClient.mockResolvedValue({ request });
     const issue = { method: "POST", path: "/v1/issuance/tokens", body: { name: "T" } };
 
@@ -145,7 +154,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("matches a literal segment before a path parameter", async () => {
-    const request = vi.fn().mockResolvedValue(upstreamOk());
+    const request = upstreamRequest().mockResolvedValue(upstreamOk());
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(executeRequest({ method: "GET", path: "/v1/wallets/configs" }));
@@ -159,7 +168,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("forwards the shell's idempotency key on a POST, and the same key on its retry", async () => {
-    const request = vi.fn().mockResolvedValue(upstreamOk({ data: { id: "trf_1" } }));
+    const request = upstreamRequest().mockResolvedValue(upstreamOk({ data: { id: "trf_1" } }));
     mocks.createSdpApiClient.mockResolvedValue({ request });
     const transfer = {
       method: "POST",
@@ -172,7 +181,7 @@ describe("POST /api/playground/execute", () => {
     await POST(executeRequest({ ...transfer, idempotencyKey }));
 
     expect(request).toHaveBeenCalledTimes(2);
-    for (const [path, init] of request.mock.calls as [string, RequestInit][]) {
+    for (const [path, init] of request.mock.calls) {
       expect(path).toBe("/v1/payments/transfers");
       expect(new Headers(init.headers).get("Idempotency-Key")).toBe(idempotencyKey);
       expect(init.body).toBe(JSON.stringify({ amount: "1.00" }));
@@ -180,7 +189,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("does not forward an Idempotency-Key on a GET", async () => {
-    const request = vi.fn().mockResolvedValue(upstreamOk());
+    const request = upstreamRequest().mockResolvedValue(upstreamOk());
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     await POST(
@@ -195,7 +204,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("forwards nothing else from the client, an Authorization bearer least of all", async () => {
-    const request = vi.fn().mockResolvedValue(upstreamOk());
+    const request = upstreamRequest().mockResolvedValue(upstreamOk());
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     await POST(
@@ -222,7 +231,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("refuses an envelope that still carries a pasted API key", async () => {
-    const request = vi.fn();
+    const request = upstreamRequest();
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(
@@ -238,7 +247,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("refuses an oversized Idempotency-Key", async () => {
-    const request = vi.fn();
+    const request = upstreamRequest();
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(
@@ -255,7 +264,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("passes only allowlisted response headers through", async () => {
-    const request = vi.fn().mockResolvedValue(
+    const request = upstreamRequest().mockResolvedValue(
       upstreamOk(
         { data: [] },
         {
@@ -272,7 +281,9 @@ describe("POST /api/playground/execute", () => {
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(executeRequest({ method: "GET", path: "/v1/wallets/configs" }));
-    const envelope = (await response.json()) as { headers: Record<string, string> };
+    const envelope = z
+      .object({ headers: z.record(z.string(), z.string()) })
+      .parse(await response.json());
 
     expect(envelope.headers).toEqual({
       "content-type": "application/json",
@@ -282,7 +293,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("fails closed with a generic 500 when the upstream call throws", async () => {
-    const request = vi.fn().mockRejectedValue(new Error("socket hang up"));
+    const request = upstreamRequest().mockRejectedValue(new Error("socket hang up"));
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(executeRequest({ method: "GET", path: "/v1/wallets/configs" }));
@@ -292,7 +303,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("rejects an oversized request envelope before parsing it", async () => {
-    const request = vi.fn();
+    const request = upstreamRequest();
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(
@@ -321,7 +332,7 @@ describe("POST /api/playground/execute", () => {
   });
 
   it("forwards documented request bodies for DELETE operations", async () => {
-    const request = vi.fn().mockResolvedValue(upstreamOk({ deleted: true }));
+    const request = upstreamRequest().mockResolvedValue(upstreamOk({ deleted: true }));
     mocks.createSdpApiClient.mockResolvedValue({ request });
     const body = { provider: "anchorage", walletId: "anchorage_wallet_123" };
 

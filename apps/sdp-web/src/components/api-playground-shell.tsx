@@ -409,11 +409,18 @@ function getExecutionStatus(
  * too; an answer that retires a key (`answerRetiresKey`) clears it, a Send of
  * a different write replaces it, and a GET (keyless) leaves it. It is one
  * entry of an idempotency key store, so it is scoped by user and org with the
- * dashboard's other keys. The request can carry a pasted API key, so only its
- * digest ({@link storageFingerprint}) is stored, never the request.
+ * dashboard's other keys. Only the request's digest ({@link storageFingerprint})
+ * is stored, never the request.
  */
 const playgroundRetryKeys = createIdempotencyKeyStore("sdp:playground:retry:idempotency:v1");
-const UNSETTLED_SEND = "unsettled-send";
+const UNSETTLED_SEND = "unsettled-send-session";
+/**
+ * The entry a build that sent playground requests with a pasted API key left.
+ * Its digest names the key, so no Send of this build matches it, and its key
+ * was bound to that credential: replaying it as the session would be refused.
+ * A write it may have landed is checked by the user, not sent again blind.
+ */
+const KEY_BUILD_UNSETTLED_SEND = "unsettled-send";
 const unsettledSendSchema = z.object({ request: z.string(), key: z.string() });
 
 /** What the store's single entry holds: the request digest and its key. */
@@ -514,6 +521,16 @@ async function executePlaygroundRequest({
   // Idempotency-Key, which the money routes require. A money route whose key
   // the browser would not keep is not sent, as the dashboard's own forms
   // refuse it: a reload would lose the key and the retry could pay twice.
+  // A write the previous build sent and never heard back about may have landed,
+  // and no Send here can retry it under its key: stop once so the user checks it
+  // first, then forget it so the next Send goes out.
+  if (hasRequestBody(activeEndpoint.method) && playgroundRetryKeys.has(KEY_BUILD_UNSETTLED_SEND)) {
+    const unsettled = playgroundRetryKeys.claim(KEY_BUILD_UNSETTLED_SEND);
+    playgroundRetryKeys.release(KEY_BUILD_UNSETTLED_SEND, unsettled.key);
+    onExecutionError(t("Shared.SharedComponents.earlierPlaygroundWriteUnsettled"));
+    return;
+  }
+
   // The request runs as the signed-in member against the tab's Project, so the
   // Project is part of what makes two Sends the same request.
   const { projectId } = parseDashboardPathname(window.location.pathname);
@@ -1322,7 +1339,10 @@ export function ApiPlaygroundShell({
   const runPending = useRef(false);
 
   if (!activeEndpoint) {
-    return null;
+    // Every operation this surface offers is outside the published catalog.
+    return endpoints.length === 0 && offeredEndpoints.length > 0 ? (
+      <EmptyState>{t("Shared.SharedComponents.noPublishedPlaygroundOperations")}</EmptyState>
+    ) : null;
   }
 
   const panelContent = resolvePanelContent(activePanel, codeSnippet, responseBody, exampleBody);

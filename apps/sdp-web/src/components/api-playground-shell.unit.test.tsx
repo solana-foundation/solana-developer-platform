@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -7,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import {
+  createIdempotencyKeyStore,
+  resetIdempotencyKeyStoresForTests,
+} from "@/lib/idempotency-key-store";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
@@ -15,6 +19,11 @@ import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-play
 const mocks = vi.hoisted(() => ({
   replaceSearchParams: vi.fn(),
   searchParamGet: vi.fn(() => null as string | null),
+  workspace: undefined as { flags: { releaseChannel: SdpReleaseChannel } } | undefined,
+}));
+
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => mocks.workspace,
 }));
 
 vi.mock("@/lib/dashboard-url-state", () => ({
@@ -49,6 +58,7 @@ describe("ApiPlaygroundShell", () => {
 
   afterEach(() => {
     cleanup();
+    mocks.workspace = undefined;
     restoreWindowLocation();
     vi.unstubAllGlobals();
   });
@@ -81,6 +91,43 @@ describe("ApiPlaygroundShell", () => {
       path: "/v1/test",
       body: null,
     });
+  });
+
+  // Greptile (#2433): the previous build kept a lost write's key under a digest
+  // that named the pasted key, so no Send here retries it; it must not go out
+  // again unchecked under a new key.
+  it("stops the first write after an update left an earlier write unanswered, once", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    createIdempotencyKeyStore("sdp:playground:retry:idempotency:v1").claim("unsettled-send", () =>
+      JSON.stringify({ request: "digest-from-the-key-build", key: "key-from-the-key-build" })
+    );
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        new Response(
+          JSON.stringify({ ok: true, status: 201, statusText: "Created", body: {}, headers: {} }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          endpoints={[{ ...endpoint, id: "post-after-update", method: "POST" }]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() =>
+      expect(view.container.textContent).toContain(
+        "A request sent before the dashboard was updated never got an answer"
+      )
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   });
 
   it("sends a new Idempotency-Key with each Send of a POST, and none with a GET", async () => {
@@ -363,6 +410,24 @@ describe("ApiPlaygroundShell refresh layout", () => {
     const panels = view.getAllByTestId("api-playground-code");
     expect(panels).toHaveLength(2);
     expect(panels[0].textContent).toContain("/v1/test");
+  });
+
+  it("says the playground has nothing to run when no offered operation is published", () => {
+    mocks.workspace = { flags: { releaseChannel: "experimental" } };
+    try {
+      const view = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
+        </I18nProvider>
+      );
+      expect(
+        view.getByText(
+          "None of these operations are in the public API reference yet, so the playground has nothing to run here."
+        )
+      ).toBeTruthy();
+    } finally {
+      mocks.workspace = undefined;
+    }
   });
 
   it("offers Run with no API key at all", () => {
