@@ -19,7 +19,6 @@ import { createPostgresPaymentsRepository } from "./payments.repository.postgres
 const TEST_PROJECT_ID = "prj_payments_repo_test";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
-const CANCELABLE = ["pending", "awaiting_payment"] as const;
 
 async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
   const db = getDb(env);
@@ -114,7 +113,7 @@ function transferInput(overrides: {
   };
 }
 
-describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
+describe("PaymentsRepository transfer writes (postgres)", () => {
   let projects: SeededDefaultProjects;
   let repo: PaymentsRepository;
 
@@ -193,15 +192,14 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     return row?.status ?? null;
   }
 
-  it("transitions the status when the current status is in fromStatuses", async () => {
+  it("applies a transition from one of its source statuses", async () => {
     await seedTransfer({ id: "xfr_guard_ok", status: "awaiting_payment" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_ok",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -314,41 +312,40 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       updatedAt: "2026-08-31T11:00:00.000Z",
     };
     await expect(
-      repo.setProviderReferenceIfEmpty({ ...input, environment: "production" })
+      repo.claimProviderReference({ ...input, environment: "production" })
     ).resolves.toBeNull();
     await expect(
       repo.getTransferProjectEnvironment({ transferId: transfer.id, provider: "moonpay" })
     ).resolves.toBe("sandbox");
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    await expect(repo.claimProviderReference(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    await expect(repo.claimProviderReference(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
     await expect(
-      repo.setProviderReferenceIfEmpty({
+      repo.claimProviderReference({
         ...input,
         providerReference: "moonpay-transaction-2",
         updatedAt: "2026-08-31T11:01:00.000Z",
       })
     ).resolves.toBeNull();
     await expect(
-      repo.setProviderReferenceIfEmpty({
+      repo.claimProviderReference({
         ...input,
         provider: "stripe",
       })
     ).resolves.toBeNull();
   });
 
-  it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
+  it("is a no-op returning null when the status left the sources (the race)", async () => {
     await seedTransfer({ id: "xfr_guard_race", status: "settling" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_race",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -357,12 +354,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   });
 
   it("returns null for a transfer that does not exist", async () => {
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_missing",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -372,12 +368,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("does not transition a transfer owned by a different organization", async () => {
     await seedTransfer({ id: "xfr_guard_org", status: "awaiting_payment" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_org",
       organizationId: "org_someone_else",
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -388,12 +383,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("does not transition a transfer scoped to another project", async () => {
     await seedTransfer({ id: "xfr_guard_project", status: "awaiting_payment" });
     const transition = (projectId: string) =>
-      repo.updateTransferStatusGuarded({
+      repo.transitionRampTransfer({
         transferId: "xfr_guard_project",
         organizationId: TEST_ORG.id,
         projectId,
-        fromStatuses: CANCELABLE,
-        toStatus: "canceled",
+        transition: "canceled",
         updatedAt: new Date().toISOString(),
       });
     await expectProjectScoped(
@@ -810,7 +804,7 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
   });
 });
 
-describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
+describe("PaymentsRepository.listTransfers exact wallet and project history (postgres)", () => {
   const WALLET_A = "wallet_allowlist_a";
   const WALLET_B = "wallet_allowlist_b";
   const CUSTODY_WALLET_A = "cwlt_allowlist_a";
@@ -887,35 +881,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     offset: 0,
   };
 
-  it("matches nothing for an empty allowlist instead of dropping the filter", async () => {
-    const repo = await seedTwoWallets();
-
-    // walletIds carries an API key's authorized-wallet allowlist. An empty
-    // allowlist means "authorized for no wallet"; silently dropping the
-    // filter would hand that key every transfer in scope.
-    const denied = await repo.listTransfers({ ...listArgs, walletIds: [] });
-
-    expect(denied.rows).toHaveLength(0);
-    expect(denied.total).toBe(0);
-  });
-
-  it("scopes a non-empty allowlist to exactly its wallets", async () => {
-    const repo = await seedTwoWallets();
-
-    const scoped = await repo.listTransfers({ ...listArgs, walletIds: [WALLET_A] });
-
-    expect(scoped.rows).toHaveLength(2);
-    expect(scoped.rows.every((row) => row.wallet_id === WALLET_A)).toBe(true);
-  });
-
-  it("keeps an absent allowlist unfiltered", async () => {
-    const repo = await seedTwoWallets();
-
-    const all = await repo.listTransfers({ ...listArgs, walletIds: undefined });
-
-    expect(all.rows).toHaveLength(3);
-  });
-
   it("filters by one exact wallet", async () => {
     const repo = await seedTwoWallets();
 
@@ -928,43 +893,35 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
   });
 
-  it("authorizes exact transfers and legacy null-pin history before pagination", async () => {
+  it("retains exact and null-pin history only in its project before pagination", async () => {
     const repo = await seedTwoWallets();
+    const all = await repo.listTransfers(listArgs);
 
-    const authorized = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: {
-        custodyWalletIds: [CUSTODY_WALLET_B],
-        providerWalletIds: [WALLET_A],
-      },
-    });
-    const denied = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
-    });
-
-    expect(authorized.total).toBe(2);
-    expect(authorized.rows.map((row) => row.id).sort()).toEqual(["xfr_a-2", "xfr_b-1"]);
-    const nextPage = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: {
-        custodyWalletIds: [CUSTODY_WALLET_B],
-        providerWalletIds: [WALLET_A],
-      },
-      limit: 1,
-      offset: 1,
-    });
-    expect(nextPage).toMatchObject({ rows: [{ id: "xfr_a-2" }], total: 2 });
-    const providerOnly = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [WALLET_A] },
-    });
-    expect(providerOnly.total).toBe(1);
-    expect(providerOnly.rows.map((row) => row.id)).toEqual(["xfr_a-2"]);
-    expect(authorized.rows).not.toContainEqual(
-      expect.objectContaining({ custody_wallet_id: CUSTODY_WALLET_A })
+    expect(all.total).toBe(3);
+    expect(all.rows).toHaveLength(3);
+    expect(all.rows).toContainEqual(
+      expect.objectContaining({ id: "xfr_a-1", custody_wallet_id: CUSTODY_WALLET_A })
     );
-    expect(denied).toEqual({ rows: [], total: 0 });
+    expect(all.rows).toContainEqual(
+      expect.objectContaining({ id: "xfr_a-2", custody_wallet_id: null })
+    );
+    expect(all.rows).toContainEqual(
+      expect.objectContaining({ id: "xfr_b-1", custody_wallet_id: CUSTODY_WALLET_B })
+    );
+    await expect(repo.listTransfers({ ...listArgs, limit: 1, offset: 1 })).resolves.toMatchObject({
+      rows: [expect.objectContaining({ project_id: TEST_PROJECT_ID })],
+      total: 3,
+    });
+    await expect(
+      repo.listTransfers({ ...listArgs, projectId: `${TEST_PROJECT_ID}_production` })
+    ).resolves.toEqual({ rows: [], total: 0 });
+    await expect(
+      repo.getTransferById({
+        transferId: "xfr_a-2",
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_production`,
+      })
+    ).resolves.toBeNull();
   });
 });
 

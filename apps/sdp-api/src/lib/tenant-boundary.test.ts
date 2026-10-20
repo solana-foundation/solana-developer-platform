@@ -81,7 +81,6 @@ describe("tenant data-access boundary", () => {
       "db/identity.ts",
       "db/operator-access.ts",
       "cron/runner.ts",
-      "job.ts",
       "middleware/auth.ts",
       "middleware/clerk-auth.ts",
       // Pre-link Clerk surface: resolves the Clerk-org mapping before any

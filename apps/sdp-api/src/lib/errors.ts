@@ -220,7 +220,7 @@ export class AppError extends Error {
    * that submitted the data in it, so stripping its own counterparty fields out
    * of a validation error would cost the caller the one thing that makes the
    * error actionable. PII scrubbing belongs at the sinks we read —
-   * `scrubTelemetry` for logs and Sentry, `scrubAuditMetadata` for the ledger.
+   * `scrubTelemetry` for logs, `scrubAuditMetadata` for the ledger.
    */
   toResponse(): ErrorResponse {
     const details = this.details ? redactCredentialSecrets(this.details) : undefined;
@@ -405,27 +405,4 @@ export async function nullOnExpected<T>(
     }
     throw err;
   }
-}
-
-export function redactErrorForCapture(err: Error): Error {
-  const sanitized = new Error(redactCredentialString(err.message));
-  sanitized.name = err.name;
-  sanitized.stack = err.stack ? redactCredentialString(err.stack) : undefined;
-
-  const source = err as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  const target = sanitized as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  if (source.context !== undefined) {
-    target.context = redactCredentialSecrets(source.context);
-  }
-  if (source.cause !== undefined) {
-    target.cause = redactCredentialSecrets(source.cause);
-  }
-
-  return sanitized;
 }

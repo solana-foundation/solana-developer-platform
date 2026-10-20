@@ -115,7 +115,6 @@ function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
   const locale = useLocale();
   const { isBusy, canRunSignerCheck, runSignerCheck, lastProof } = useWalletActions({
     walletId: wallet.walletId,
-    walletAddress: wallet.publicKey,
     supportsSignerCheck: wallet.supportsSignerCheck,
   });
   const blocked = !wallet.isRuntimeExecutionAllowed

@@ -11,6 +11,18 @@ const wallet: PaymentsDashboardWallet = {
 };
 
 describe("Request playground recipient selection", () => {
+  it("keeps the bearer token only in the create response example", () => {
+    const endpoints = buildPaymentRequestsPlaygroundEndpointConfigs([wallet], [], (key) => key);
+    const list = endpoints.find((endpoint) => endpoint.id === "list-payment-requests");
+    const create = endpoints.find((endpoint) => endpoint.id === "create-payment-request");
+    expect(list?.expectedResponse).toMatchObject({
+      paymentRequests: [expect.objectContaining({ custodyWalletId: "cwlt_example" })],
+    });
+    expect(list?.expectedResponse).toHaveProperty("paymentRequests.0");
+    expect(list?.expectedResponse).not.toHaveProperty("paymentRequests.0.publicToken");
+    expect(create?.expectedResponse).toHaveProperty("publicToken", "example-public-token");
+  });
+
   it("keeps separate SDP IDs for wallets sharing a label, provider reference and address", () => {
     const create = buildPaymentRequestsPlaygroundEndpointConfigs(
       [wallet, { ...wallet, id: "cwlt_b" }],

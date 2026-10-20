@@ -18,10 +18,6 @@ import {
   issuanceTransactionWalletFilterSchema,
   listTokenTransactionsQuerySchema,
 } from "@/routes/issuance/schemas";
-import {
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyCustodyWalletIdsForPermissions,
-} from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
@@ -91,9 +87,6 @@ async function resolveWalletFilter(
   walletId: string
 ): Promise<{ publicKey: string }> {
   const auth = getAuth(c);
-
-  assertApiKeyWalletAccess(auth, walletId, ["tokens:read"]);
-
   const wallet = await new CustodyRuntimeTargets(
     getDb(c.env),
     c.env,
@@ -190,7 +183,6 @@ async function resolveWalletTransactionScope(
       env: c.env,
       auth,
       custodyWalletId,
-      requiredWalletPermissions: ["tokens:read"],
     });
     return buildWalletTransactionScope(tokenService, {
       organizationId: auth.organizationId,
@@ -208,30 +200,7 @@ async function resolveWalletTransactionScope(
     });
   }
 
-  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
-    "tokens:read",
-  ]);
-  if (allowedCustodyWalletIds === null) {
-    return undefined;
-  }
-  if (allowedCustodyWalletIds.length === 0) {
-    return { publicKeys: [], tokenAccounts: [] };
-  }
-
-  const allowedWalletIdSet = new Set(allowedCustodyWalletIds);
-  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
-    organizationId: auth.organizationId,
-    projectId: requireProjectId(c),
-  });
-  const publicKeys = wallets
-    .filter((wallet) => allowedWalletIdSet.has(wallet.id))
-    .map((wallet) => wallet.publicKey);
-
-  return buildWalletTransactionScope(tokenService, {
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-    publicKeys,
-  });
+  return undefined;
 }
 
 export const listTokenTransactions = async (c: AppContext) => {

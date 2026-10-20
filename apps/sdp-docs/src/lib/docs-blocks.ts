@@ -1,12 +1,11 @@
-import type { OperationFamily } from "@sdp/types/allowed-operations";
 import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import {
+  DOCS_ACTION_MODULES,
   DOCS_MODULES,
-  DOCS_OPERATION_FAMILIES,
   DOCS_RAMP_PROVIDERS,
   type ModuleEntry,
   publishedRampProviderIds,
@@ -28,7 +27,7 @@ import {
  * - `<ModuleTable />`: the modules, with what each does.
  * - `<ModuleCapabilities />`: one capability line per module (the AI guide).
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
- * - `<AllowedOperationsTable />`: API-key operation families and their types.
+ * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
  *
  * Each block is rendered once, to Markdown, from docs-catalog.ts and the
  * build's manifest. `remarkDocsBlocks` swaps it into the MDX tree before
@@ -77,29 +76,19 @@ const BLOCKS = {
         entry.bestFor,
       ])
     ),
-  AllowedOperationsTable: (surface) =>
+  ApiKeyGrantsTable: (surface) =>
     table(
-      ["Family", "Covers", "Operation types"],
-      // Families in the catalog's reading order (payment first).
-      [...surface.allowedOperations]
-        .sort((left, right) => familyRank(left.family) - familyRank(right.family))
-        .map(({ family, types }) => [
-          `\`${family}\``,
-          DOCS_OPERATION_FAMILIES[family],
-          types.map((type) => `\`${type}\``).join(", "),
-        ])
+      ["Module", "Actions", "Covers"],
+      // Modules in registry order, which the manifest keeps.
+      surface.grantableActions.map(({ module, verbs }) => [
+        `\`${module}\``,
+        verbs.map((verb) => `\`${module}.${verb}\``).join(", "),
+        DOCS_ACTION_MODULES[module],
+      ])
     ),
 } satisfies Record<string, (surface: PublicSurface) => string>;
 
 type BlockName = keyof typeof BLOCKS;
-
-const FAMILY_ORDER: readonly OperationFamily[] = Object.keys(DOCS_OPERATION_FAMILIES).filter(
-  (family): family is OperationFamily => Object.hasOwn(DOCS_OPERATION_FAMILIES, family)
-);
-
-function familyRank(family: OperationFamily): number {
-  return FAMILY_ORDER.indexOf(family);
-}
 
 function isBlockName(name: string | null): name is BlockName {
   return name !== null && Object.hasOwn(BLOCKS, name);

@@ -129,6 +129,32 @@ describe("database-enforced tenant isolation", () => {
     expect(organizations).toEqual([{ id: ORG_A }]);
   });
 
+  it("keeps retired MoonPay transaction ids in system scope", async () => {
+    await runWithSystemDatabaseIdentity("test", () =>
+      getDb(env).execute(
+        `INSERT INTO moonpay_failed_transactions
+           (transaction_id, transfer_id, provider_observed_at)
+         VALUES ('moonpay_failed_rls', 'xfr_moonpay_failed_rls', '2026-10-19T00:00:00.000Z')`
+      )
+    );
+
+    const tenantRows = await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
+      getDb(env).queryMany<{ transaction_id: string }>(
+        "SELECT transaction_id FROM moonpay_failed_transactions"
+      )
+    );
+    expect(tenantRows).toEqual([]);
+    await expect(
+      runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
+        getDb(env).execute(
+          `INSERT INTO moonpay_failed_transactions
+             (transaction_id, transfer_id, provider_observed_at)
+           VALUES ('moonpay_failed_tenant', 'xfr_moonpay_failed_tenant', '2026-10-19T00:00:00.000Z')`
+        )
+      )
+    ).rejects.toThrow(/row-level security/);
+  });
+
   it("turns cross-tenant updates into zero-row no-ops for a tenant identity", async () => {
     const affected = await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
       getDb(env).execute("UPDATE counterparties SET display_name = 'stolen' WHERE id = ?", [

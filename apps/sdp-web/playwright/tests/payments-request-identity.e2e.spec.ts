@@ -1,11 +1,15 @@
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
-import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  CreatedPaymentRequest,
+  PaymentRequestLink,
+  PaymentsDashboardWallet,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { Client } from "pg";
 import { z } from "zod";
 import {
+  createdPaymentRequestSchema,
   type DashboardPaymentRequest,
-  paymentRequestSchema,
 } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "../env";
@@ -49,7 +53,7 @@ test.describe
     let aliasWalletId: string | undefined;
     let connectionId: string | undefined;
     let credentialId: string | undefined;
-    const requests: DashboardPaymentRequest[] = [];
+    const requests: CreatedPaymentRequest[] = [];
 
     async function database<T>(run: (db: Client) => Promise<T>): Promise<T> {
       const db = new Client({ connectionString: isolatedDatabaseUrl() });
@@ -225,7 +229,7 @@ test.describe
       const raw = await response.json();
       expect(raw.data).not.toHaveProperty("walletId");
       expect(raw.data).not.toHaveProperty("providerWalletId");
-      const { data } = z.object({ data: paymentRequestSchema }).parse(raw);
+      const { data } = z.object({ data: createdPaymentRequestSchema }).parse(raw);
       requests.push(data);
       expect(data).toMatchObject({
         custodyWalletId: wallet.id,
@@ -404,10 +408,16 @@ test.describe
         const row = retained.paymentRequests.find(({ id }) => id === request.id);
         expect(row).toMatchObject({
           id: request.id,
-          publicToken: request.publicToken,
           destinationAddress: request.destinationAddress,
           reference: request.reference,
           status: "canceled",
+        });
+        expect(row).not.toHaveProperty("publicToken");
+        expect(
+          await api.get<PaymentRequestLink>(`/v1/payments/requests/${request.id}/link`)
+        ).toEqual({
+          id: request.id,
+          publicToken: request.publicToken,
         });
         expect(row).not.toHaveProperty("walletId");
         expect(row).not.toHaveProperty("providerWalletId");

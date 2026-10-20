@@ -15,3 +15,7 @@ export const listPaymentRequestsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   status: z.enum(PAYMENT_REQUEST_STATUSES).optional(),
 });
+
+export const paymentRequestParamsSchema = z.object({
+  paymentRequestId: z.string().min(1),
+});

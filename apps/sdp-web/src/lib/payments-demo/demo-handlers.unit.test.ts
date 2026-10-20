@@ -505,7 +505,10 @@ describe("requests", () => {
       expiresAt: "2026-10-28T00:00:00.000Z",
       createdAt: "2026-09-28T11:59:59.000Z",
     });
-    expect(saved?.publicToken).toMatch(/^demo_pt_/);
+    expect(saved).not.toHaveProperty("publicToken");
+    expect(demoWorldBody(world(), `/v1/payments/requests/${recorded.id}/link`)).toMatchObject({
+      data: { id: recorded.id, publicToken: expect.stringMatching(/^demo_pt_/) },
+    });
     expect(saved?.reference).toBeTruthy();
     expect(ops).toEqual([recorded]);
   });

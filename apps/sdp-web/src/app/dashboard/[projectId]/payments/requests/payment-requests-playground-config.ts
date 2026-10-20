@@ -9,7 +9,6 @@ import type { PaymentRequestTokenOption } from "./payment-requests-page.data";
 
 const exampleRequest = {
   id: "preq_abc123",
-  publicToken: "example-public-token",
   custodyWalletId: "cwlt_example",
   status: "awaiting_payment",
   amount: "10.00",
@@ -91,7 +90,7 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
           placeholder: "2026-07-01T00:00:00.000Z",
         },
       ],
-      expectedResponse: exampleRequest,
+      expectedResponse: { ...exampleRequest, publicToken: "example-public-token" },
     },
   ];
 }

@@ -745,6 +745,17 @@ export interface SignerCheckResponse {
   checkedAt: string;
 }
 
+/** Where a devnet faucet airdrop stood when the endpoint stopped waiting for it. */
+export const WALLET_FAUCET_STATUSES = ["confirmed", "failed", "timeout"] as const;
+export type WalletFaucetStatus = (typeof WALLET_FAUCET_STATUSES)[number];
+
+export interface WalletFaucetResponse {
+  signature: string;
+  status: WalletFaucetStatus;
+  /** The airdropped amount in lamports, as a decimal string. */
+  lamports: string;
+}
+
 /**
  * Lifecycle a custody Connection can be in. Counts of these are safe to publish
  * per provider; the Connections themselves are read from their own resource.

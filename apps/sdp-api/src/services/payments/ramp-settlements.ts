@@ -10,13 +10,10 @@ import {
   type RampWebhookProcessResult,
 } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { asTransactionalClient, getDb } from "@/db/client";
+import { asTransactionalClient, type DatabaseClient, getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import {
-  createSystemPaymentsRepository,
-  createSystemTransactionalPaymentsRepository,
-} from "@/db/repositories/repository-factory";
+import { createSystemTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
@@ -41,6 +38,63 @@ function isSettlementFinalStatus(status: PaymentTransferStatus): boolean {
   return status !== "expired" && isTerminalRampTransferStatus(status);
 }
 
+function settlementTransition(
+  transfer: PaymentTransferRow,
+  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
+): RampTransferTransitionId {
+  if (event.kind !== "failed" || event.provider !== "moonpay" || transfer.type !== "offramp") {
+    return RAMP_SETTLEMENT_TRANSITION[event.kind];
+  }
+  // A deposit reported by either side still needs reconciliation after the
+  // provider fails the sale; do not make it terminal.
+  return event.onchain !== undefined ||
+    transfer.signature !== null ||
+    transfer.submission_started_at !== null
+    ? "provider_settling"
+    : "moonpay_sell_failed";
+}
+
+function settlementObservationFields(
+  transfer: PaymentTransferRow,
+  event: Exclude<RampSettlementEvent, { kind: "ignore" }>
+): Pick<
+  Parameters<PaymentsRepository["transitionRampTransfer"]>[0],
+  "providerData" | "providerSettlementUnclaimed" | "providerSettlementMissingSignature"
+> {
+  const providerData: Record<string, unknown> = {};
+  const receivedAmount = "receivedAmount" in event ? event.receivedAmount : undefined;
+  const observation: Record<string, unknown> = {
+    kind: event.kind,
+    reference: event.reference,
+  };
+  if (event.providerObservedAt) observation.observedAt = event.providerObservedAt;
+  if (event.onchain) observation.onchain = event.onchain;
+  if (receivedAmount !== undefined) observation.receivedAmount = receivedAmount;
+  if (event.refundAddress !== undefined) observation.refundAddress = event.refundAddress;
+  providerData.observedDelivery = observation;
+  if (event.kind === "settled") {
+    const settlement: Record<string, unknown> = { reference: event.reference };
+    if (event.providerObservedAt) settlement.observedAt = event.providerObservedAt;
+    if (event.onchain) settlement.onchain = event.onchain;
+    if (event.receivedAmount !== undefined) settlement.receivedAmount = event.receivedAmount;
+    if (event.refundAddress !== undefined) settlement.refundAddress = event.refundAddress;
+    providerData.providerSettlement = settlement;
+    if (event.providerObservedAt !== undefined) return { providerData };
+    if (event.onchain?.signature && transfer.type === "onramp") {
+      return { providerData, providerSettlementMissingSignature: true };
+    }
+    return { providerData, providerSettlementUnclaimed: true };
+  }
+  // Stripe has no per-session observation time. An untimed event cannot
+  // supersede an accepted settled claim while chain proof is pending.
+  if (event.providerObservedAt === undefined) {
+    providerData.providerSettlement = null;
+    return { providerData, providerSettlementUnclaimed: true };
+  }
+  providerData.providerSettlement = null;
+  return { providerData };
+}
+
 /**
  * Builds the guarded transfer update one settlement event produces.
  *
@@ -56,31 +110,24 @@ function buildRampSettlementUpdate(
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
-    transition: RAMP_SETTLEMENT_TRANSITION[event.kind],
+    transition: settlementTransition(transfer, event),
     updatedAt: new Date().toISOString(),
+    ...settlementObservationFields(transfer, event),
   };
-  if (event.onchain) {
-    if (transfer.signature === null) {
-      update.signature = event.onchain.signature;
-    }
-    update.sourceAddress = event.onchain.sourceAddress;
-    update.destinationAddress = event.onchain.destinationAddress;
-    update.amount = event.onchain.amount;
+  if (event.providerObservedAt !== undefined) {
+    update.providerObservation = {
+      reference: event.reference,
+      observedAt: event.providerObservedAt,
+    };
   }
-  // Record the actual amount the provider reports: for `settled` the fiat
-  // payout (off-ramp) or delivered crypto (on-ramp); for `settling` an on-ramp
-  // pay-in observed on the funding wallet writes the fiat the bank delivered.
-  if (event.kind === "settling" || event.kind === "settled") {
-    if (event.receivedAmount !== undefined) {
-      if (event.kind === "settled" ? transfer.type === "offramp" : transfer.type === "onramp") {
-        update.fiatAmount = event.receivedAmount;
-      } else {
-        update.amount = event.receivedAmount;
-      }
-    }
+  if (event.onchain && transfer.type === "onramp" && transfer.signature === null) {
+    update.signature = event.onchain.signature;
   }
   if ((event.kind === "failed" || event.kind === "expired") && event.error) {
     update.error = event.error;
+  }
+  if (event.kind === "failed" && transfer.type === "offramp") {
+    update.providerData = { ...update.providerData, cryptoDeposit: null };
   }
   // The provider's deposit instruction lets the dashboard send the crypto on
   // the customer's behalf; each event replaces the previous instruction, and
@@ -121,17 +168,17 @@ function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId 
 export async function applyRampSettlementEvent(
   env: Env,
   environment: SdpEnvironment,
-  event: RampSettlementEvent
+  event: RampSettlementEvent,
+  db: DatabaseClient = getDb(env)
 ): Promise<RampWebhookProcessResult & { applied: boolean }> {
   if (event.kind === "ignore") {
     return { applied: false, outcome: "ignored" };
   }
 
-  // Reconciliation key: the provider-issued quote/session reference the row
-  // was created with. provider_reference is never rewritten, so the lookup is
-  // exact for the row's whole life; an event whose reference matches no row
-  // is acknowledged and logged, never guessed at.
-  const repo = createSystemPaymentsRepository(env);
+  // Reconciliation key: the provider-issued transaction reference currently
+  // bound to this row. A failed MoonPay attempt may release its reference for
+  // retry; an event whose reference matches no row is never guessed at.
+  const repo = createSystemTransactionalPaymentsRepository(db);
   const transfer = await repo.getTransferByProviderReference({
     provider: event.provider,
     providerReference: event.reference,
@@ -202,7 +249,7 @@ export async function applyRampSettlementEvent(
   // provider event, so they land or roll back together — and an event whose
   // transition was ignored (lost race, out-of-order redelivery) has no
   // effects at all: no link write.
-  const { applied, linkedReference } = await getDb(env).transaction(async (tx) => {
+  const { applied, linkedReference } = await db.transaction(async (tx) => {
     const client = asTransactionalClient(tx);
     const updated =
       await createSystemTransactionalPaymentsRepository(client).transitionRampTransfer(update);

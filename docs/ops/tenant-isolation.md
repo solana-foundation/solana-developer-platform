@@ -27,7 +27,7 @@ The policies (`sdp_tenant_isolation` on each table) admit:
 - **system** — everything. Granted only at registered entry points: the auth
   middlewares (key/session/Clerk resolution runs before a tenant is known),
   provider webhooks, the public payment page and token metadata, the login
-  routes, cron ticks, the managed reconciliation job, and ops scripts. The
+  routes, Cron Definition runs on the Worker, and ops scripts. The
   registry is enforced by `src/lib/tenant-boundary.test.ts`.
 - **operator** — everything, but only obtainable through
   `runWithOperatorDatabaseAccess` (`src/db/operator-access.ts`), which

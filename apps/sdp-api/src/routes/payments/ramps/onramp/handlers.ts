@@ -19,7 +19,6 @@ import {
   persistRampQuoteTransfer,
   providersFromPairs,
   type RampQuoteResolved,
-  rampQuoteTransferStatus,
   resolveRampQuoteRequest,
   uniqueSorted,
 } from "@/routes/payments/ramps/shared";
@@ -134,11 +133,11 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           externalCustomerId: counterparty.id,
           paymentTransferId: pendingTransfer.id,
         });
-        const updated = await getPaymentsRepository(c).updateTransfer({
+        const updated = await getPaymentsRepository(c).transitionRampTransfer({
           transferId: pendingTransfer.id,
           organizationId: scope.auth.organizationId,
           projectId,
-          status: rampQuoteTransferStatus(quote),
+          transition: "quote_issued",
           deliveryMode: quote.deliveryMode,
           updatedAt: new Date().toISOString(),
         });
@@ -146,11 +145,11 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           throw internalError("Failed to complete MoonPay on-ramp transfer record");
         }
       } catch (error) {
-        await getPaymentsRepository(c).updateTransfer({
+        await getPaymentsRepository(c).transitionRampTransfer({
           transferId: pendingTransfer.id,
           organizationId: scope.auth.organizationId,
           projectId,
-          status: "failed",
+          transition: "quote_failed",
           error: error instanceof Error ? error.message : String(error),
           updatedAt: new Date().toISOString(),
         });

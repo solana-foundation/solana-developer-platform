@@ -5,45 +5,87 @@
  * avoiding non-null assertions while adding defensive runtime checks.
  */
 
-import type { AllowedOperation } from "@sdp/types/allowed-operations";
-import type { ApiKeyWalletAuthorizationBinding, ApiKeyWalletScope } from "@sdp/types/api-keys";
-import type { Permission } from "@sdp/types/permissions";
+import { type Action, apiKeyMayPerform, organizationRoleMayPerform } from "@sdp/types/actions";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
+import { z } from "zod";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
 export type AuthType = "api_key" | "clerk";
 
+/**
+ * Which custody wallets the caller may sign with and list (HOO-2099): every
+ * wallet in the project, or the exact custody wallet ids a selected API key
+ * lists. Signing enforces it at the custody signer; only the wallet list and
+ * wallet detail reads filter by it. Every other read is project-scoped.
+ */
+export const walletAccessSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("all") }),
+  z.object({ scope: z.literal("selected"), custodyWalletIds: z.array(z.string()).readonly() }),
+]);
+
+export type WalletAccess = Readonly<z.infer<typeof walletAccessSchema>>;
+
 interface AuthContextBase {
   id: string;
   organizationId: string;
   projectId: string | null;
-  role: string;
-  permissions: Permission[];
   environment: string;
-  /** Operation families/types the key may perform; null or [] is unrestricted. Always null for non-key actors. */
-  allowedOperations?: AllowedOperation[] | null;
-  walletScope?: ApiKeyWalletScope | null;
-  signingWalletId: string | null;
-  signingWalletIds: string[];
-  walletBindings: ApiKeyWalletAuthorizationBinding[];
+  walletAccess: WalletAccess;
 }
 
 /**
  * Normalized auth context returned by getAuth(), discriminated on authType:
- * API key requests always carry apiKeyId; Clerk requests always carry userId.
+ * API key requests always carry apiKeyId and the key's grants; Clerk requests
+ * always carry userId and the member's organization role.
  */
 export type ApiKeyContext = AuthContextBase &
   (
-    | { authType: "api_key"; apiKeyId: string; userId: null }
-    | { authType: "clerk"; apiKeyId: null; userId: string }
+    | {
+        authType: "api_key";
+        apiKeyId: string;
+        userId: null;
+        grants: readonly Action[];
+        role: null;
+      }
+    | {
+        authType: "clerk";
+        apiKeyId: null;
+        userId: string;
+        grants: null;
+        role: OrganizationRole;
+      }
   );
+
+/**
+ * Whether this caller may perform the action: an API key by its grants (never
+ * an action no key may hold), a member by their organization role.
+ */
+export function authMayPerform(auth: ApiKeyContext, action: Action): boolean {
+  switch (auth.authType) {
+    case "api_key":
+      return apiKeyMayPerform(auth.grants, action);
+    case "clerk":
+      return organizationRoleMayPerform(auth.role, action);
+    default: {
+      const exhaustive: never = auth;
+      throw new Error(`Unknown auth type: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+const ALL_WALLETS: WalletAccess = Object.freeze({ scope: "all" });
+
+/** Whether the caller may list or open this custody wallet (`GET /v1/wallets`, `/:walletId`). */
+export function walletAccessAllows(access: WalletAccess, custodyWalletId: string): boolean {
+  return access.scope === "all" || access.custodyWalletIds.includes(custodyWalletId);
+}
 
 export interface ClerkAuthContext {
   userId: string;
   organizationId: string;
-  role: string;
-  permissions: Permission[];
+  role: OrganizationRole;
   clerkUserId: string;
   clerkOrgId: string;
   email: string | null;
@@ -69,19 +111,13 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       id: apiKey.id,
       organizationId: apiKey.organizationId,
       projectId: apiKey.projectId,
-      role: apiKey.role,
-      permissions: apiKey.permissions,
       environment: apiKey.environment,
-      allowedOperations: apiKey.allowedOperations ?? null,
-      walletScope:
-        apiKey.walletScope ??
-        ((apiKey.walletBindings?.length ?? 0) > 0 || apiKey.signingWalletId ? "selected" : "all"),
-      signingWalletId: apiKey.signingWalletId ?? null,
-      signingWalletIds: apiKey.signingWalletIds ?? [],
-      walletBindings: apiKey.walletBindings ?? [],
+      walletAccess: apiKey.walletAccess,
       authType: "api_key",
       userId: null,
       apiKeyId: apiKey.id,
+      grants: apiKey.grants,
+      role: null,
     };
   }
 
@@ -93,17 +129,13 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       id: clerk.userId,
       organizationId: clerk.organizationId,
       projectId,
-      role: clerk.role,
-      permissions: clerk.permissions,
       environment: c.get("projectEnvironment") ?? "dashboard",
-      allowedOperations: null,
-      walletScope: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
+      walletAccess: ALL_WALLETS,
       authType: "clerk",
       userId: clerk.userId,
       apiKeyId: null,
+      grants: null,
+      role: clerk.role,
     };
   }
 
@@ -153,20 +185,12 @@ export function requireAuthProjectId(auth: ApiKeyContext): string {
 }
 
 /**
- * Whether a dashboard identity may manage organization-wide credentials.
- *
- * Clerk contexts carry both the normalized organization role and its derived
- * permissions; accepting either admin representation keeps capability hints
- * aligned with the authenticated membership. API keys are deliberately excluded
- * from credential-administration surfaces.
+ * Whether a dashboard identity may manage organization-wide credentials: an
+ * organization administrator, the only role that holds `organizations.manage`.
+ * API keys are deliberately excluded from credential-administration surfaces.
  */
 export function canManageOrganizationCredentials(auth: ApiKeyContext): boolean {
-  if (auth.authType !== "clerk") return false;
-  return (
-    auth.role === "admin" ||
-    auth.permissions.includes("org:admin") ||
-    auth.permissions.includes("*")
-  );
+  return auth.authType === "clerk" && authMayPerform(auth, "organizations.manage");
 }
 
 export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {
@@ -178,7 +202,6 @@ export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {
     userId: auth.userId,
     organizationId: auth.organizationId,
     role: auth.role,
-    permissions: auth.permissions,
     clerkUserId: auth.clerkUserId,
     clerkOrgId: auth.clerkOrgId,
     email: auth.email ?? null,

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams } from "@/middleware/validate";
 import {
   authorizeSubscriptionPlanCreate,
@@ -26,23 +26,23 @@ export const subscriptionPlans = new Hono<{ Bindings: Env }>();
 
 subscriptionPlans.post(
   "/",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("recurring.manage"),
   validateBody(createSubscriptionPlanSchema),
   authorize(authorizeSubscriptionPlanCreate),
   idempotent({ key: "accepted", serverErrors: "store" }),
   createSubscriptionPlan
 );
-subscriptionPlans.get("/", requirePermissions("payments:read"), listSubscriptionPlans);
+subscriptionPlans.get("/", requireAction("recurring.read"), listSubscriptionPlans);
 subscriptionPlans.post(
   "/:planId/prepare-create",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("recurring.manage"),
   validateBody(prepareSubscriptionPlanCreateSchema),
   prepareCreateSubscriptionPlan
 );
-subscriptionPlans.get("/:planId", requirePermissions("payments:read"), getSubscriptionPlan);
+subscriptionPlans.get("/:planId", requireAction("recurring.read"), getSubscriptionPlan);
 subscriptionPlans.patch(
   "/:planId",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("recurring.execute"),
   validateParams(subscriptionPlanIdParamsSchema),
   validateBody(updateSubscriptionPlanSchema),
   authorize(authorizeSubscriptionPlanUpdate),

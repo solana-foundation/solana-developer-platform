@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
@@ -8,15 +7,11 @@ import { generateEarnPositionId } from "@/db/repositories/earn-movements.reposit
 import { app } from "@/index";
 import { badRequest, conflict } from "@/lib/errors";
 import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  clearKVStores,
-  readRateLimitCount,
-  seedCachedApiKey,
-  seedRateLimit,
-} from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
@@ -35,7 +30,7 @@ const resolveVaultWithdrawClient = vi.hoisted(() =>
 );
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
 // Flip to simulate a rate-limit counter-store outage for the requests that
-// follow. Only the rateLimits store breaks: auth still reads its key cache.
+// follow. Only the rateLimits store breaks; auth reads the key's rows from Postgres.
 const rateLimitStoreDown = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) => ({
@@ -101,21 +96,19 @@ const TEST_USER = { id: "usr_earn_ext", email: "earn-ext@example.com" };
 const TEST_API_KEY = { id: "key_earn_ext", raw: "sk_test_earn_ext", prefix: "sk_test_ear" };
 const PROD_API_KEY = { id: "key_earn_ext_prod", raw: "sk_live_earn_ext", prefix: "sk_live_ear" };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
-const PROD_CACHED_API_KEY: CachedApiKey = {
-  ...TEST_CACHED_API_KEY,
+const PROD_CACHED_API_KEY: SeededApiKey = {
+  ...TEST_SEEDED_API_KEY,
   id: PROD_API_KEY.id,
   projectId: TEST_PRODUCTION_PROJECT.id,
   environment: "production",
@@ -132,9 +125,9 @@ let originalEarnEnabled: string | undefined;
 async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
   const entitled = options.entitled ?? true;
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, prodKeyHash, PROD_CACHED_API_KEY);
+  await seedApiKeyRow(env, prodKeyHash, PROD_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -165,8 +158,8 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn Ext Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Earn Ext Test Key', ?, ?, ?, 'active')`
       )
       .bind(
         TEST_API_KEY.id,
@@ -174,13 +167,14 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
         TEST_PROJECT.id,
         TEST_USER.id,
         TEST_API_KEY.prefix,
-        keyHash
+        keyHash,
+        ALL_API_KEY_GRANTS
       ),
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn Ext Prod Key', ?, ?, 'api_admin', '["*"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Earn Ext Prod Key', ?, ?, ?, 'active')`
       )
       .bind(
         PROD_API_KEY.id,
@@ -188,7 +182,8 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
         TEST_PRODUCTION_PROJECT.id,
         TEST_USER.id,
         PROD_API_KEY.prefix,
-        prodKeyHash
+        prodKeyHash,
+        ALL_API_KEY_GRANTS
       ),
   ]);
 }

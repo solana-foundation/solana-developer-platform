@@ -731,8 +731,8 @@ describe("Requests", () => {
       };
       const originalRequest = harness.apiClient.request;
       vi.spyOn(harness.apiClient, "request").mockImplementation(async (path, init) => {
-        if (path.startsWith("/v1/payments/requests")) {
-          return Response.json({ data: { paymentRequests: [request], total: 1 } });
+        if (path === `/v1/payments/requests/${request.id}`) {
+          return Response.json({ data: request });
         }
         if (path.startsWith("/v1/wallets")) {
           return Response.json({

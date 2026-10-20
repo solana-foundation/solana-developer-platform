@@ -1,5 +1,10 @@
 import type { PaginatedResponse } from "@sdp/types/pagination";
-import { PAYMENT_REQUEST_STATUSES, type PaymentRequest } from "@sdp/types/payments";
+import {
+  type CreatedPaymentRequest,
+  PAYMENT_REQUEST_STATUSES,
+  type PaymentRequest,
+  type PaymentRequestLink,
+} from "@sdp/types/payments";
 import {
   type SolanaCluster,
   WELL_KNOWN_TOKENS,
@@ -10,6 +15,14 @@ import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
+
+/** The link read's envelope, parsed: its token is a bearer credential (APE-849). */
+const paymentRequestLinkResponseSchema = z.object({
+  data: z.object({
+    id: z.string(),
+    publicToken: z.string().min(1),
+  }) satisfies z.ZodType<PaymentRequestLink>,
+});
 
 export interface PaymentRequestTokenOption {
   mintAddress: string;
@@ -25,7 +38,6 @@ export type PaymentRequestsResult = PaginatedResponse<DashboardPaymentRequest> &
 const paymentRequestStatusSchema = z.enum(PAYMENT_REQUEST_STATUSES);
 export const paymentRequestSchema = z.object({
   id: z.string(),
-  publicToken: z.string().min(1),
   organizationId: z.string(),
   projectId: z.string().nullable(),
   counterpartyId: z.string().nullable(),
@@ -43,6 +55,14 @@ export const paymentRequestSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 }) satisfies z.ZodType<DashboardPaymentRequest>;
+
+/** Creation alone returns the bearer token used by the hosted payment link. */
+export const createdPaymentRequestSchema = paymentRequestSchema.extend({
+  publicToken: z.string().min(1),
+}) satisfies z.ZodType<CreatedPaymentRequest>;
+
+/** A detail read uses the same token-free record as list reads. */
+const paymentRequestDetailResponseSchema = z.object({ data: paymentRequestSchema });
 
 const paymentRequestsResponseSchema = z.object({
   data: z.object({
@@ -273,9 +293,8 @@ export type PaymentRequestDetailResult =
   | { status: "error"; error: string | undefined };
 
 /**
- * One payment request by id. The API reads requests only as a list, so this pages through it
- * newest first and stops at the match, or once the pages run out; a request just created is on
- * the first page.
+ * One payment request by id. Reads never carry the pay link's token (APE-849); see
+ * {@link fetchPaymentRequestLinkToken}.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param requestId - The request's id.
@@ -285,16 +304,36 @@ export async function fetchPaymentRequestDetail(
   request: SdpApiClient["request"],
   requestId: string
 ): Promise<PaymentRequestDetailResult> {
-  // TODO(api): read the request by id once the API has GET /v1/payments/requests/{id}. Until then
-  // this pages through the list, so an older request costs one read per 100 newer ones. Known
-  // limitation of the API, not of this page.
-  for (let page = 1; ; page += 1) {
-    const result = await fetchPaymentRequests(request, { page });
-    if (!result.ok) return { status: "error", error: result.error };
-    const match = result.data.find((candidate) => candidate.id === requestId);
-    if (match) return { status: "found", request: match };
-    if (result.data.length === 0 || page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) {
-      return { status: "not_found" };
-    }
+  try {
+    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}`);
+    if (response.status === 404) return { status: "not_found" };
+    if (!response.ok) return { status: "error", error: await response.text() };
+    const json = paymentRequestDetailResponseSchema.parse(await response.json());
+    return { status: "found", request: json.data };
+  } catch (error) {
+    return { status: "error", error: error instanceof Error ? error.message : undefined };
+  }
+}
+
+/**
+ * The pay link's token, or null when the member's role does not hold
+ * `payment_requests.manage` (a 403): the token is a bearer credential (APE-849).
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @param requestId - The request's id.
+ * @returns The token, null when refused, or the load error; never throws.
+ */
+export async function fetchPaymentRequestLinkToken(
+  request: SdpApiClient["request"],
+  requestId: string
+): Promise<{ ok: true; publicToken: string | null } | { ok: false; error: string | undefined }> {
+  try {
+    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}/link`);
+    if (response.status === 403) return { ok: true, publicToken: null };
+    if (!response.ok) return { ok: false, error: await response.text() };
+    const json = paymentRequestLinkResponseSchema.parse(await response.json());
+    return { ok: true, publicToken: json.data.publicToken };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : undefined };
   }
 }

@@ -59,7 +59,7 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
 export const SDP_MODULE_STAGES = {
   payments: "stable",
   recurring_payments: "stable",
-  compliance: "stable",
+  compliance: "experimental",
   issuance: "experimental",
   earn: "beta",
   dvp: "experimental",

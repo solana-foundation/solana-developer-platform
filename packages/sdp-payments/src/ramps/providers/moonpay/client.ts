@@ -2,7 +2,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Counterparty } from "@sdp/types/counterparties";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId, RampCurrencyLimit } from "@sdp/types/payment-rails";
-import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments";
+import type { PaymentRampEstimate, PaymentRampQuote, RampTransferType } from "@sdp/types/payments";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@solana/kit";
 import { z } from "zod";
@@ -27,8 +27,16 @@ import type {
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
+  RampTransferLookup,
   ValidateCounterpartyOptions,
 } from "#/ramps/types";
+import {
+  type MoonpaySettlementEvent,
+  moonpayBuyTransactionSchema,
+  moonpaySellTransactionSchema,
+  moonpaySellTransactionSettlementEvent,
+  moonpayTransactionSettlementEvent,
+} from "./event-status-mapping";
 
 const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
@@ -389,6 +397,93 @@ export function distillMoonpayRailSupport(
   };
 }
 
+/** Where MoonPay looks transactions up by the external id SDP signs into the widget. */
+const MOONPAY_TRANSFER_LOOKUP_PATHS = {
+  onramp: "/v1/transactions/ext",
+  offramp: "/v3/sell_transactions/ext",
+} as const satisfies Record<RampTransferType, string>;
+
+/** Every buy MoonPay holds for one external id. */
+const moonpayBuyLookupSchema = z.array(moonpayBuyTransactionSchema);
+
+/** Every sale MoonPay holds for one external id, with the crypto each one sells. */
+const moonpaySellLookupSchema = z.array(
+  moonpaySellTransactionSchema.extend({
+    baseCurrency: z.object({ code: z.string() }).optional(),
+  })
+);
+
+/** The fields every looked-up transaction carries, for correlation and order. */
+interface MoonpayLookupTransaction {
+  externalTransactionId?: string | null;
+  updatedAt: string;
+}
+
+/**
+ * Reads every transaction MoonPay holds for one transfer, oldest update
+ * first. MoonPay answers an external id it holds nothing for with 404, which
+ * reads as none; every other failure throws.
+ *
+ * @param url - The external-id lookup URL, carrying the publishable key.
+ * @param transferId - The SDP transfer id the lookup asks about.
+ * @param schema - The direction's transaction list schema.
+ * @returns The transactions, oldest `updatedAt` first.
+ * @throws SdpPaymentsError PROVIDER_RESPONSE_INVALID when a transaction names another transfer.
+ */
+async function lookUpMoonpayTransactions<TTransaction extends MoonpayLookupTransaction>(
+  url: URL,
+  transferId: string,
+  schema: z.ZodType<TTransaction[]>
+): Promise<TTransaction[]> {
+  let transactions: TTransaction[];
+  try {
+    transactions = await providerFetchJson("moonpay", url.toString(), { method: "GET" }, schema);
+  } catch (error) {
+    if (error instanceof SdpPaymentsError && error.details?.providerStatus === 404) {
+      return [];
+    }
+    throw error;
+  }
+  // The settlement guard locks the transfer an event names, so every event must name this one.
+  if (transactions.some((transaction) => transaction.externalTransactionId !== transferId)) {
+    throw new SdpPaymentsError(
+      "PROVIDER_RESPONSE_INVALID",
+      "moonpay returned a transaction for another transfer",
+      { provider: "moonpay", outcome: "unknown" }
+    );
+  }
+  return [...transactions].sort(
+    (left, right) => Date.parse(left.updatedAt) - Date.parse(right.updatedAt)
+  );
+}
+
+/**
+ * A completed transaction names the crypto it moved, so settlement can refuse
+ * another asset, as the webhook path does. A completed one without it cannot
+ * be redelivered like a webhook, so it is unreadable.
+ *
+ * @param event - The transaction's settlement event.
+ * @param cryptoCode - The MoonPay code of the crypto the transaction moved.
+ * @returns The event, with `deliveredAssetRail` when it is settled.
+ * @throws SdpPaymentsError PROVIDER_RESPONSE_INVALID for a completed transaction without its crypto.
+ */
+function withSettledMoonpayAsset(
+  event: MoonpaySettlementEvent,
+  cryptoCode: string | undefined
+): MoonpaySettlementEvent {
+  if (event.kind !== "settled") {
+    return event;
+  }
+  if (cryptoCode === undefined) {
+    throw new SdpPaymentsError(
+      "PROVIDER_RESPONSE_INVALID",
+      "moonpay returned a completed transaction without its crypto",
+      { provider: "moonpay", outcome: "unknown" }
+    );
+  }
+  return { ...event, deliveredAssetRail: moonpayCryptoRail(cryptoCode) };
+}
+
 export class MoonpayRampClient implements RampProvider {
   readonly id = "moonpay";
   readonly declaredRailSupport = MOONPAY_DECLARED_RAIL_SUPPORT;
@@ -550,5 +645,30 @@ export class MoonpayRampClient implements RampProvider {
       deliveryMode: "hosted",
       hostedUrl,
     };
+  }
+
+  /**
+   * One request: every transaction MoonPay holds under the transfer's id,
+   * mapped as the webhook maps it. A retried checkout leaves one transaction
+   * per attempt, and the settlement guard orders each only against itself.
+   */
+  async fetchTransferStatus(
+    { env, mode }: RampRuntimeContext,
+    lookup: RampTransferLookup
+  ): Promise<readonly MoonpaySettlementEvent[]> {
+    const config = readMoonpayConfig(env, mode);
+    const path = MOONPAY_TRANSFER_LOOKUP_PATHS[lookup.rampType];
+    const url = new URL(`${MOONPAY_API_BASE_URL}${path}/${encodeURIComponent(lookup.transferId)}`);
+    url.searchParams.set("apiKey", config.apiKey);
+    if (lookup.rampType === "onramp") {
+      const buys = await lookUpMoonpayTransactions(url, lookup.transferId, moonpayBuyLookupSchema);
+      return buys.map((buy) =>
+        withSettledMoonpayAsset(moonpayTransactionSettlementEvent(buy), buy.currency?.code)
+      );
+    }
+    const sales = await lookUpMoonpayTransactions(url, lookup.transferId, moonpaySellLookupSchema);
+    return sales.map((sale) =>
+      withSettledMoonpayAsset(moonpaySellTransactionSettlementEvent(sale), sale.baseCurrency?.code)
+    );
   }
 }

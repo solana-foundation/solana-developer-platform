@@ -17,7 +17,6 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
@@ -159,9 +158,10 @@ export interface AuthorizedBatchRequest {
 }
 
 /**
- * The access check for a batch (HOO-1918): project scope, source wallet access
- * from the key's snapshot, and every named counterparty account in the
- * project and under the counterparty the recipient names. Status is state and
+ * The access check for a batch (HOO-1918): project scope and every named
+ * counterparty account in the project and under the counterparty the
+ * recipient names. Whether the caller may sign with the source wallet is the
+ * custody signer's decision (HOO-2099). Status is state and
  * is checked later, so a request that already ran is still answered.
  *
  * @param retainedCustodyWalletId - Resolve this wallet even when inactive, so a replay of a request that ran is answered.
@@ -169,8 +169,6 @@ export interface AuthorizedBatchRequest {
 export async function authorizeBatchRequest(
   c: AppContext,
   input: CreateTransferBatchInput,
-  /** Null when the caller already checked the source wallet's binding fresh. */
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2] | null,
   retainedCustodyWalletId?: string
 ): Promise<AuthorizedBatchRequest> {
   const projectId = requireProjectId(c);
@@ -178,9 +176,7 @@ export async function authorizeBatchRequest(
   assertPaymentProjectScope(input.projectId, projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
-  if (requiredWalletPermissions !== null) {
-    assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
-  }
+
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
 
   const rows = await getCounterpartyAccountsRepository(c).listCounterpartyAccountsByIdsInProject({
@@ -236,16 +232,11 @@ export async function resolveBatchMovement(
  *
  * @param c - Request context.
  * @param input - Parsed create/estimate request body.
- * @param requiredWalletPermissions - Permissions the API key must hold on the source wallet.
  * @returns Everything the estimate path needs to build transactions.
  */
 export async function resolveBatchRequest(
   c: AppContext,
-  input: CreateTransferBatchInput,
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2]
+  input: CreateTransferBatchInput
 ): Promise<ResolvedBatchRequest> {
-  return resolveBatchMovement(
-    input,
-    await authorizeBatchRequest(c, input, requiredWalletPermissions)
-  );
+  return resolveBatchMovement(input, await authorizeBatchRequest(c, input));
 }

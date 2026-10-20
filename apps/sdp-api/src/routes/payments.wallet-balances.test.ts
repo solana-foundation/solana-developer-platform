@@ -74,54 +74,32 @@ describe("Payments wallet balance identity", () => {
     });
   });
 
-  it("uses an unambiguous selected-key binding and rejects a wallet without read permission", async () => {
-    const unboundCustodyWalletId = "cwlt_balance_unbound";
-    await seedCustodyWalletFixture({
-      id: unboundCustodyWalletId,
-      walletId: "wal_balance_unbound",
-      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
-      label: "Unbound balance wallet",
-    });
+  it("checks the resolved internal ID against the selected signing-wallet list", async () => {
+    await seedConnectionOwnedDuplicateProviderWallet();
     await seedCachedKey({
       walletScope: "selected",
-      walletBindings: [
-        {
-          custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          walletId: TEST_WALLET_ID,
-          permissions: ["wallets:read"],
-        },
-      ],
+      walletIds: [TEST_CUSTODY_WALLET_ID],
     });
     const exact = await readBalances(TEST_CUSTODY_WALLET_ID);
     expect(exact.status).toBe(200);
     expect(await exact.json()).toMatchObject({
       data: { walletBalances: { custodyWalletId: TEST_CUSTODY_WALLET_ID } },
     });
-    expect((await readBalances(unboundCustodyWalletId)).status).toBe(403);
-    await seedCachedKey({
-      walletScope: "selected",
-      walletBindings: [
-        {
-          custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          walletId: TEST_WALLET_ID,
-          permissions: ["payments:write"],
-        },
-      ],
-    });
-    expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(403);
+    expect((await readBalances("cwlt_payments_duplicate_test")).status).toBe(404);
+    expect((await readBalances(TEST_WALLET_ID)).status).toBe(409);
     expect(rpc.calls.filter((call) => call.method === "getAccountInfo")).toHaveLength(1);
     expect(rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner")).toHaveLength(2);
   });
 
-  it("rejects selected-key reads when the provider binding matches multiple wallets", async () => {
-    await seedConnectionOwnedDuplicateProviderWallet();
-    await seedCachedKey({
-      walletScope: "selected",
-      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:read"] }],
-    });
-    for (const custodyWalletId of [TEST_CUSTODY_WALLET_ID, "cwlt_payments_duplicate_test"]) {
-      expect((await readBalances(custodyWalletId)).status).toBe(403);
-    }
+  it("refuses balance reads for an empty selected list or a missing action", async () => {
+    await seedCachedKey({ walletScope: "selected", walletIds: [] });
+    expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(404);
+    expect((await readBalances(TEST_WALLET_ID)).status).toBe(404);
+
+    await seedCachedKey({ grants: ["transfers.execute"] });
+    expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(403);
+    await seedCachedKey({ grants: [] });
+    expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(403);
     expect(rpc.calls).toEqual([]);
   });
 

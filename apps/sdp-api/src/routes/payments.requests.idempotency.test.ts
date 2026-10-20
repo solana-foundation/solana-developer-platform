@@ -77,30 +77,23 @@ describe("Payments routes — payment request access before the key", () => {
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
   });
 
-  it("refuses a saved response after the exact recipient grant is revoked", async () => {
+  it("refuses a saved response after the manage action is revoked", async () => {
     await seedCachedKey({
+      grants: ["payment_requests.manage"],
       walletScope: "selected",
-      walletBindings: [
-        {
-          walletId: TEST_WALLET_ID,
-          custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          permissions: ["payments:write"],
-        },
-      ],
+      walletIds: [],
     });
     const body = {
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       token: DEVNET_USDC_MINT,
       amount: "1",
     };
-    const key = "payreq-revoked-recipient";
+    const key = "payreq-revoked-manage";
     expect((await postPaymentRequest(body, key)).status).toBe(201);
     expect(await storedKeyCount(key)).toBe(1);
 
     await getDb(env)
-      .prepare(
-        "UPDATE api_key_wallet_permissions SET permissions = '[]'::jsonb WHERE api_key_id = ?"
-      )
+      .prepare("UPDATE api_keys SET grants = '{}'::text[] WHERE id = ?")
       .bind(TEST_API_KEY.id)
       .run();
 

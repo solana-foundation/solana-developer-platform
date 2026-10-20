@@ -23,11 +23,6 @@ export interface MeteredQuotaConfig {
   actorMax: number;
   /** Max admitted requests per window for the whole organization. */
   orgMax: number;
-  /**
-   * Units one admitted request charges — for a route where one request fans
-   * out into that many upstream calls (a JSON-RPC batch). Defaults to 1.
-   */
-  units?: (c: Context<{ Bindings: Env }>) => number;
 }
 
 export interface AnonymousMeteredQuotaConfig {
@@ -67,14 +62,9 @@ export async function enforceMeteredQuota(
   const actor = auth.authType === "api_key" ? `key:${auth.apiKeyId}` : `user:${auth.userId}`;
   const orgScope = `metered:${config.name}:org:${auth.organizationId}`;
 
-  const cost = Math.max(1, Math.floor(config.units?.(c) ?? 1));
-
   try {
-    await enforceRateLimit(c, `${orgScope}:${actor}`, config.actorMax, {
-      failClosed: true,
-      cost,
-    });
-    await enforceRateLimit(c, orgScope, config.orgMax, { failClosed: true, cost });
+    await enforceRateLimit(c, `${orgScope}:${actor}`, config.actorMax, { failClosed: true });
+    await enforceRateLimit(c, orgScope, config.orgMax, { failClosed: true });
   } catch (error) {
     if (error instanceof AppError) {
       getLogger().warn(

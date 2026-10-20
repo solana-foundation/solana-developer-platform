@@ -694,6 +694,10 @@ export interface ParsedTokenBalance {
 
 export interface ParsedTransaction {
   slot: bigint;
+  /** Unix seconds the cluster stamped on the block; absent or null when the RPC didn't report it. */
+  blockTime?: bigint | null;
+  /** Message account order, needed to attribute native SOL balance changes. */
+  accountKeys?: readonly string[];
   /** Whether metadata establishes success or failure; absent metadata is unknown. */
   executionResultKnown: boolean;
   err: unknown | null;
@@ -819,6 +823,10 @@ export async function getTransaction(
 
   return {
     slot: response.slot,
+    blockTime: response.blockTime,
+    accountKeys: response.transaction.message.accountKeys.map((key) =>
+      typeof key === "string" ? key : key.pubkey
+    ),
     executionResultKnown: response.meta?.err !== undefined,
     err: response.meta?.err ?? null,
     fee: response.meta?.fee ?? 0n,

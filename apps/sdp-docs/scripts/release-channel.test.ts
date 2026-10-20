@@ -19,7 +19,7 @@ const STABLE: PublicSurface = {
   releaseChannel: "stable",
   modules: ["custody", "payments", "compliance"],
   rampProviders: [],
-  allowedOperations: [{ family: "payment", types: ["payment_transfer_execute"] }],
+  grantableActions: [{ module: "transfers", verbs: ["read", "execute"] }],
   ...ALL,
 };
 
@@ -27,9 +27,9 @@ const EXPERIMENTAL: PublicSurface = {
   releaseChannel: "experimental",
   modules: ["custody", "payments", "ramps", "issuance", "compliance"],
   rampProviders: ["stripe"],
-  allowedOperations: [
-    { family: "payment", types: ["payment_transfer_execute"] },
-    { family: "ramp", types: ["ramp_onramp_quote"] },
+  grantableActions: [
+    { module: "transfers", verbs: ["read", "execute"] },
+    { module: "onramp", verbs: ["read", "execute"] },
   ],
   ...ALL,
 };
@@ -45,7 +45,7 @@ const PAGE = [
   "",
   "<RampProviderMatrix />",
   "",
-  "<AllowedOperationsTable />",
+  "<ApiKeyGrantsTable />",
   "",
   '```bash title="Terminal" rotate-providers',
   'curl -d \'{ "provider": "moonpay" }\'',
@@ -79,8 +79,8 @@ describe("docs follow the release channel", () => {
   it("renders generated blocks for what the build publishes, in text", () => {
     const stable = expandDocsBlocks(PAGE, "page.mdx", { surface: STABLE });
     assert.match(stable, /\| \*\*Payments\*\* \|/);
-    assert.doesNotMatch(stable, /Issuance|Ramps|Stripe|ramp_onramp_quote|ModuleTable/);
-    assert.match(stable, /`payment_transfer_execute`/);
+    assert.doesNotMatch(stable, /Issuance|Ramps|Stripe|onramp\.execute|ModuleTable/);
+    assert.match(stable, /`transfers\.execute`/);
 
     const experimental = expandDocsBlocks(PAGE, "page.mdx", { surface: EXPERIMENTAL });
     assert.match(experimental, /\| \*\*Issuance\*\* \|/);

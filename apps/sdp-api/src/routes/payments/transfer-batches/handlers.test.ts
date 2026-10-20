@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
@@ -27,11 +26,10 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { transferBatchListResponse } from "@/openapi/paths/responses";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
-import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaSigner from "@/services/solana/signer";
-
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
@@ -48,8 +46,8 @@ import {
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -84,16 +82,14 @@ const TEST_API_KEY = {
   raw: "sk_test_batch_payments",
   prefix: "sk_test_bat",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -139,7 +135,7 @@ function ownedSubmissionAdapter(
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
 
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(
@@ -167,8 +163,8 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -178,8 +174,7 @@ async function seedAuthAndWallet(): Promise<void> {
         "Batch Payments Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -270,53 +265,6 @@ async function seedConnectionOwnedDuplicateProviderWallet(): Promise<void> {
       )
       .bind(TEST_DUPLICATE_CUSTODY_WALLET_ID, connectionId),
   ]);
-}
-
-async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
-  const configId = "cust_cfg_batch_exact_duplicate_test";
-  await seedTestCustodyRows(env, {
-    configs: [
-      {
-        id: configId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        provider: "privy",
-        configEncrypted: "test-config",
-        status: "active",
-      },
-    ],
-    wallets: [
-      {
-        id: TEST_DUPLICATE_CUSTODY_WALLET_ID,
-        owner: { kind: "config", custodyConfigId: configId },
-        walletId: TEST_WALLET_ID,
-        publicKey: TEST_SOLANA_ADDRESSES.wallet3,
-        label: "Config duplicate",
-        purpose: "transfer",
-        status: "active",
-      },
-    ],
-  });
-}
-
-async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise<void> {
-  await replaceApiKeyWalletBindings(getDb(env), TEST_API_KEY.id, [
-    { walletId: TEST_WALLET_ID, permissions: ["payments:write"] },
-  ]);
-  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
-    walletScope: "selected",
-    signingWalletId: TEST_WALLET_ID,
-    signingWalletIds: [TEST_WALLET_ID],
-    walletBindings: [
-      {
-        walletId: TEST_WALLET_ID,
-        custodyWalletId,
-        permissions: ["payments:write"],
-      },
-    ],
-  });
 }
 
 async function seedCounterparty(externalId: string): Promise<string> {
@@ -811,6 +759,75 @@ describe("payment transfer batches", () => {
     expect(listBody.data.map((batch) => batch.id)).toContain(body.data.batch.id);
   });
 
+  // HOO-2099: the custody signer refuses a wallet outside a selected key's
+  // scope; authorize refuses it first, so a refused batch writes nothing and
+  // its Idempotency-Key works again once the scope allows the wallet.
+  it("refuses a batch from a wallet outside the key's scope before writing anything", async () => {
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+    const counterpartyId = await seedCounterparty("batch_scope_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const idempotencyKey = crypto.randomUUID();
+    const postBatch = () =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            externalId: "batch-scope-001",
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [
+              {
+                externalId: "batch-scope-recipient-001",
+                counterpartyId,
+                counterpartyAccountId: accountId,
+                amount: "0.1",
+              },
+            ],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+    const count = async (sql: string) =>
+      required(await getDb(env).prepare(sql).bind(idempotencyKey).first<{ count: number }>()).count;
+
+    const refused = await postBatch();
+
+    expect(refused.status).toBe(403);
+    await expect(refused.json()).resolves.toMatchObject({
+      error: { details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(
+      await count(
+        "SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE idempotency_key = ?"
+      )
+    ).toBe(0);
+    expect(
+      await count("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
+    ).toBe(0);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_SEEDED_API_KEY,
+      walletIds: [TEST_CUSTODY_WALLET_ID],
+    });
+    expect((await postBatch()).status).toBe(200);
+  });
+
   it("executes the exact Config-owned wallet when a Connection duplicates its Provider ID", async () => {
     await seedConnectionOwnedDuplicateProviderWallet();
     const counterpartyId = await seedCounterparty("batch_exact_duplicate_counterparty");
@@ -942,110 +959,99 @@ describe("payment transfer batches", () => {
     expect(detailBody.error.code).toBe("CONFLICT");
   });
 
-  it("retains authorized legacy batch history until cutover", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(`INSERT INTO payment_transfer_batches
-          (id, organization_id, project_id, source_custody_wallet_id,
-           source_wallet_id, source_address, token, created_at)
-          VALUES ('xbatch_exact_authorized', ?, ?, ?, ?, ?, ?, '2026-10-12T00:00:00.000Z')`)
-        .bind(
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          TEST_CUSTODY_WALLET_ID,
-          TEST_WALLET_ID,
-          TEST_SOLANA_ADDRESSES.wallet1,
-          WELL_KNOWN_TOKENS.SOL.symbol
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO payment_transfer_batches
-             (id, organization_id, project_id, source_custody_wallet_id,
-              source_wallet_id, source_address, token, created_at)
-           VALUES ('xbatch_legacy_authorized', ?, ?, NULL, ?, ?, 'SOL', '2026-10-12T00:00:01.000Z')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
-      getDb(env)
-        .prepare(
-          `INSERT INTO payment_transfer_batches
-             (id, organization_id, project_id, source_custody_wallet_id,
-              source_wallet_id, source_address, token)
-           VALUES ('xbatch_legacy_unauthorized', ?, ?, NULL, 'wal_batch_legacy_unauthorized', ?, 'SOL')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_SOLANA_ADDRESSES.wallet2),
-    ]);
-    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
-      walletScope: "selected",
-      walletBindings: [
-        {
-          walletId: TEST_WALLET_ID,
-          custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          permissions: ["payments:read"],
-        },
-      ],
-    });
+  it.each([{ walletIds: [TEST_CUSTODY_WALLET_ID] }, { walletIds: [] }])(
+    "keeps pinned and null-pin batch history project-scoped with signing wallets $walletIds",
+    async ({ walletIds }) => {
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(`INSERT INTO payment_transfer_batches
+            (id, organization_id, project_id, source_custody_wallet_id,
+             source_wallet_id, source_address, token, created_at)
+            VALUES ('xbatch_exact_history', ?, ?, ?, ?, ?, ?, '2026-10-12T00:00:00.000Z')`)
+          .bind(
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            TEST_CUSTODY_WALLET_ID,
+            TEST_WALLET_ID,
+            TEST_SOLANA_ADDRESSES.wallet1,
+            WELL_KNOWN_TOKENS.SOL.symbol
+          ),
+        getDb(env)
+          .prepare(`INSERT INTO payment_transfer_batches
+            (id, organization_id, project_id, source_custody_wallet_id,
+             source_wallet_id, source_address, token, created_at)
+            VALUES ('xbatch_legacy_same_reference', ?, ?, NULL, ?, ?, 'SOL', '2026-10-12T00:00:01.000Z')`)
+          .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
+        getDb(env)
+          .prepare(`INSERT INTO payment_transfer_batches
+            (id, organization_id, project_id, source_custody_wallet_id,
+             source_wallet_id, source_address, token, created_at)
+            VALUES ('xbatch_legacy_other_reference', ?, ?, NULL, 'wal_batch_legacy_other', ?, 'SOL', '2026-10-12T00:00:02.000Z')`)
+          .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_SOLANA_ADDRESSES.wallet2),
+        getDb(env)
+          .prepare(`INSERT INTO payment_transfer_batches
+            (id, organization_id, project_id, source_custody_wallet_id,
+             source_wallet_id, source_address, token)
+            VALUES ('xbatch_foreign_project', ?, ?, NULL, 'wal_batch_foreign', ?, 'SOL')`)
+          .bind(TEST_ORG.id, `${TEST_PROJECT.id}_production`, TEST_SOLANA_ADDRESSES.wallet2),
+      ]);
+      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+      await seedApiKeyRow(env, keyHash, {
+        ...TEST_SEEDED_API_KEY,
+        grants: ["transfer_batches.read"],
+        walletScope: "selected",
+        walletIds,
+      });
+      const headers = { Authorization: `Bearer ${TEST_API_KEY.raw}` };
 
-    const response = await app.request(
-      "/v1/payments/transfer-batches",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
+      const response = await app.request("/v1/payments/transfer-batches", { headers }, env);
 
-    expect(response.status).toBe(200);
-    const body = transferBatchListResponse.parse(await response.json());
-    expect(body.data.map((batch) => batch.id).sort()).toEqual([
-      "xbatch_exact_authorized",
-      "xbatch_legacy_authorized",
-    ]);
-    expect(body.meta.total).toBe(2);
-    const nextPage = await app.request(
-      "/v1/payments/transfer-batches?pageSize=1&page=2",
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(nextPage.status).toBe(200);
-    expect(await nextPage.json()).toMatchObject({
-      data: [{ id: "xbatch_exact_authorized" }],
-      meta: { total: 2 },
-    });
-    const scopedDetail = await app.request(
-      "/v1/payments/transfer-batches/xbatch_legacy_authorized",
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(scopedDetail.status).toBe(200);
-    const unauthorizedDetail = await app.request(
-      "/v1/payments/transfer-batches/xbatch_legacy_unauthorized",
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(unauthorizedDetail.status).toBe(403);
-    await seedCachedApiKey(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
-      walletScope: "all",
-      walletBindings: [],
-    });
-    const tenantDetail = await app.request(
-      "/v1/payments/transfer-batches/xbatch_legacy_authorized",
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(tenantDetail.status).toBe(200);
-    const tenantList = await app.request(
-      "/v1/payments/transfer-batches",
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(tenantList.status).toBe(200);
-    expect(await tenantList.json()).toMatchObject({ meta: { total: 3 } });
-  });
+      expect(response.status).toBe(200);
+      const body = transferBatchListResponse.parse(await response.json());
+      expect(
+        body.data.map((row) => ({ id: row.id, sourceCustodyWalletId: row.sourceCustodyWalletId }))
+      ).toEqual([
+        { id: "xbatch_legacy_other_reference", sourceCustodyWalletId: null },
+        { id: "xbatch_legacy_same_reference", sourceCustodyWalletId: null },
+        { id: "xbatch_exact_history", sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID },
+      ]);
+      expect(body.meta.total).toBe(3);
+      const nextPage = await app.request(
+        "/v1/payments/transfer-batches?pageSize=1&page=3",
+        { headers },
+        env
+      );
+      expect(nextPage.status).toBe(200);
+      expect(transferBatchListResponse.parse(await nextPage.json())).toMatchObject({
+        data: [{ id: "xbatch_exact_history", sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID }],
+        meta: { total: 3 },
+      });
+      for (const row of body.data) {
+        const detail = await app.request(
+          `/v1/payments/transfer-batches/${row.id}`,
+          { headers },
+          env
+        );
+        expect(detail.status).toBe(200);
+        expect(await detail.json()).toMatchObject({
+          data: { batch: { id: row.id, sourceCustodyWalletId: row.sourceCustodyWalletId } },
+        });
+      }
+      const foreignDetail = await app.request(
+        "/v1/payments/transfer-batches/xbatch_foreign_project",
+        { headers },
+        env
+      );
+      expect(foreignDetail.status).toBe(404);
+
+      await seedApiKeyRow(env, keyHash, { ...TEST_SEEDED_API_KEY, grants: [] });
+      const denied = await app.request("/v1/payments/transfer-batches", { headers }, env);
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toMatchObject({
+        error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "transfer_batches.read" } },
+      });
+    }
+  );
 
   it("keeps exact persisted batch history readable after the wallet becomes inactive", async () => {
     await getDb(env)
@@ -1373,7 +1379,6 @@ describe("payment transfer batches", () => {
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as { data: unknown };
 
-    await seedSelectedApiKeyWalletBinding(TEST_CUSTODY_WALLET_ID);
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(TEST_CUSTODY_WALLET_ID)
@@ -1389,47 +1394,6 @@ describe("payment transfer batches", () => {
     expect(replay.status).toBe(200);
     const replayBody = (await replay.json()) as { data: unknown };
     expect(replayBody.data).toEqual(firstBody.data);
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-  });
-
-  it("denies a completed batch replay for a duplicate exact wallet outside the key binding", async () => {
-    await seedConfigOwnedDuplicateProviderWallet();
-    createOrgSignerForCustodyWalletMock.mockResolvedValue(
-      createNoopSigner(address(TEST_SOLANA_ADDRESSES.wallet3))
-    );
-    const counterpartyId = await seedCounterparty("batch_duplicate_exact_replay");
-    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
-      counterpartyId,
-      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
-    });
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Idempotency-Key": "duplicate-exact-wallet-batch-replay",
-    };
-    const body = JSON.stringify({
-      sourceCustodyWalletId: TEST_DUPLICATE_CUSTODY_WALLET_ID,
-      token: "SOL",
-      recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-      options: { preflight: false },
-    });
-    const first = await app.request(
-      "/v1/payments/transfer-batches",
-      { method: "POST", headers, body },
-      env
-    );
-    expect(first.status).toBe(200);
-
-    await seedSelectedApiKeyWalletBinding(TEST_CUSTODY_WALLET_ID);
-    createOrgSignerForCustodyWalletMock.mockClear();
-
-    const replay = await app.request(
-      "/v1/payments/transfer-batches",
-      { method: "POST", headers, body },
-      env
-    );
-
-    expect(replay.status).toBe(403);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 
@@ -2101,8 +2065,8 @@ describe("payment transfer batches", () => {
       .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
       .bind(productionProjectId, TEST_API_KEY.id)
       .run();
-    await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-      ...TEST_CACHED_API_KEY,
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
       projectId: productionProjectId,
       environment: "production",
     });

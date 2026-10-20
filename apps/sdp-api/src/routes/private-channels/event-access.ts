@@ -1,8 +1,7 @@
-import { hasPermission } from "@sdp/types/permissions";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
-import type { AppContext } from "./context";
-import { getPrivateChannelUserRepository } from "./context";
+import { callerMayPerform } from "@/middleware/require-action";
+import { type AppContext, getPrivateChannelUserRepository } from "./context";
 
 export type EventViewer =
   | { scope: "all" }
@@ -20,7 +19,9 @@ interface EventViewerResolverDependencies {
 export async function resolveEventViewerForAuth(
   auth: ApiKeyContext,
   projectId: string,
-  dependencies: EventViewerResolverDependencies
+  dependencies: EventViewerResolverDependencies,
+  /** Whether the caller may perform `projects.manage` (`callerMayPerform`): it then sees every event. */
+  callerManagesProject: boolean
 ): Promise<EventViewer> {
   if (auth.authType === "api_key") {
     if (auth.projectId !== projectId) {
@@ -28,7 +29,7 @@ export async function resolveEventViewerForAuth(
     }
     return { scope: "all" };
   }
-  if (hasPermission(auth.permissions, "projects:write")) {
+  if (callerManagesProject) {
     return { scope: "all" };
   }
   if (!auth.userId) {
@@ -54,9 +55,14 @@ export async function resolveEventViewer(c: AppContext): Promise<EventViewer> {
   const projectId = requireProjectId(c);
   const userRepository = getPrivateChannelUserRepository(c);
 
-  return resolveEventViewerForAuth(auth, projectId, {
-    findPrivateChannelUser: (scope) => userRepository.findDefaultPrincipalByProject(scope),
-    listMemberships: (privateChannelUserId) =>
-      userRepository.listMembershipsForUser(privateChannelUserId),
-  });
+  return resolveEventViewerForAuth(
+    auth,
+    projectId,
+    {
+      findPrivateChannelUser: (scope) => userRepository.findDefaultPrincipalByProject(scope),
+      listMemberships: (privateChannelUserId) =>
+        userRepository.listMembershipsForUser(privateChannelUserId),
+    },
+    callerMayPerform(c, "projects.manage")
+  );
 }

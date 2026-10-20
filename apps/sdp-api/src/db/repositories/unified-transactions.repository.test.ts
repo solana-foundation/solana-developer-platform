@@ -1,4 +1,7 @@
-import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
+import {
+  PAYMENT_TRANSACTION_KINDS,
+  type UnifiedTransactionModule,
+} from "@sdp/types/unified-transactions";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
@@ -131,6 +134,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       module: "payments",
       kind: "batch_pay",
       status: "succeeded",
@@ -153,6 +157,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"] as UnifiedTransactionModule[],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 25,
     };
 
@@ -187,6 +192,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       counterpartyId: "cpty_match",
       limit: 25,
     });
@@ -224,6 +230,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 25,
     });
 
@@ -261,6 +268,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments", "issuance"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 1,
     });
     if (first.nextCursor === null) throw new Error("first page did not produce a cursor");
@@ -269,6 +277,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments", "issuance"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       cursor: first.nextCursor,
       limit: 1,
     });
@@ -276,87 +285,6 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       "xfr_unified_a",
       "itx_unified_b",
     ]);
-  });
-
-  it("restricts wallet authorization to explicitly allowlisted custody rows", async () => {
-    await seedTransfer({
-      id: "xfr_unified_allowed",
-      type: "transfer",
-      status: "processing",
-      custodyWalletId: CUSTODY_WALLET,
-      counterpartyId: null,
-    });
-    await seedTransfer({
-      id: "xfr_unified_denied",
-      type: "transfer",
-      status: "processing",
-      custodyWalletId: OTHER_CUSTODY_WALLET,
-      counterpartyId: null,
-    });
-    await seedTransfer({
-      id: "xfr_unified_null",
-      type: "transfer",
-      status: "processing",
-      custodyWalletId: null,
-      counterpartyId: null,
-    });
-    const result = await createPostgresUnifiedTransactionsRepository(getDb(env)).list({
-      organizationId: TEST_ORG.id,
-      projectId: PROJECT,
-      modules: ["payments"],
-      excludedRampProviders: [],
-      moduleWalletScopes: [{ module: "payments", custodyWalletIds: [CUSTODY_WALLET] }],
-      limit: 25,
-    });
-    expect(result.rows.map((row) => row.id)).toEqual(["xfr_unified_allowed"]);
-  });
-
-  it("pairs each wallet allowlist with its own module", async () => {
-    await seedTransfer({
-      id: "xfr_unified_scoped_wallet",
-      type: "transfer",
-      status: "processing",
-      custodyWalletId: CUSTODY_WALLET,
-      counterpartyId: null,
-    });
-    await seedTransfer({
-      id: "xfr_unified_earn_only_wallet",
-      type: "transfer",
-      status: "processing",
-      custodyWalletId: OTHER_CUSTODY_WALLET,
-      counterpartyId: null,
-    });
-    const result = await createPostgresUnifiedTransactionsRepository(getDb(env)).list({
-      organizationId: TEST_ORG.id,
-      projectId: PROJECT,
-      modules: ["payments", "earn"],
-      excludedRampProviders: [],
-      moduleWalletScopes: [
-        { module: "payments", custodyWalletIds: [CUSTODY_WALLET] },
-        { module: "earn", custodyWalletIds: [OTHER_CUSTODY_WALLET] },
-      ],
-      limit: 25,
-    });
-    expect(result.rows.map((row) => row.id)).toEqual(["xfr_unified_scoped_wallet"]);
-  });
-
-  it("denies an empty custody-wallet allowlist", async () => {
-    await seedTransfer({
-      id: "xfr_unified_empty_allowlist",
-      type: "transfer",
-      status: "processing",
-      custodyWalletId: CUSTODY_WALLET,
-      counterpartyId: null,
-    });
-    const result = await createPostgresUnifiedTransactionsRepository(getDb(env)).list({
-      organizationId: TEST_ORG.id,
-      projectId: PROJECT,
-      modules: ["payments"],
-      excludedRampProviders: [],
-      moduleWalletScopes: [{ module: "payments", custodyWalletIds: [] }],
-      limit: 25,
-    });
-    expect(result.rows).toEqual([]);
   });
 
   it("projects the custody wallet label for labeled, unlabeled, and walletless rows", async () => {
@@ -391,6 +319,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 25,
     });
 
@@ -411,6 +340,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
         projectId: PROJECT,
         modules: ["payments"],
         excludedRampProviders: [],
+        paymentKinds: PAYMENT_TRANSACTION_KINDS,
         cursor: encodeKeysetCursor(JSON.stringify({ createdAt: CREATED_AT }), "missing-fields"),
         limit: 25,
       })

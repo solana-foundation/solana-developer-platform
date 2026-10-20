@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import type { Counterparty } from "@sdp/types/counterparties";
-import type { PaymentRequest, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  CreatedPaymentRequest,
+  PaymentRequest,
+  PaymentsDashboardWallet,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -503,7 +507,7 @@ describe("Previous design requests", () => {
 
   it("sends the exact selected recipient when provider references and addresses coincide", async () => {
     const writes: unknown[] = [];
-    const created: PaymentRequest = {
+    const created: CreatedPaymentRequest = {
       id: "preq_settlement",
       publicToken: "tok_settlement",
       organizationId: "org_test",
@@ -568,7 +572,6 @@ describe("Previous design requests", () => {
     async ({ custodyWalletId, expectedName }) => {
       const request: PaymentRequest = {
         id: "preq_legacy",
-        publicToken: "tok_legacy",
         organizationId: "org_test",
         projectId: "proj_test",
         counterpartyId: null,
@@ -586,6 +589,9 @@ describe("Previous design requests", () => {
         createdAt: "2026-10-12T00:00:00.000Z",
         updatedAt: "2026-10-12T00:00:00.000Z",
       };
+      vi.stubGlobal("fetch", async () =>
+        Response.json({ data: { id: request.id, publicToken: "tok_legacy" } })
+      );
       render(
         <LegacyPaymentRequestsWorkspace
           initialPaymentRequests={[request]}
@@ -598,11 +604,11 @@ describe("Previous design requests", () => {
       );
       const user = userEvent.setup();
       await user.click(screen.getAllByRole("button", { name: /5.00 SOL/ })[0]);
-      const detail = within(screen.getByRole("dialog", { name: "Payment request details" }));
+      const detail = within(await screen.findByRole("dialog", { name: "Payment request details" }));
       expect(detail.getByText(wallet.publicKey)).toBeTruthy();
       expect(detail.queryByText("Settlement")).toBeNull();
       expect(Boolean(detail.queryByText("Treasury"))).toBe(expectedName !== null);
-      const originalLink = `${window.location.origin}/pay/${request.publicToken}`;
+      const originalLink = `${window.location.origin}/pay/tok_legacy`;
       expect(detail.getByText(originalLink)).toBeTruthy();
       await user.click(detail.getByRole("button", { name: /^Copy$/ }));
       expect(await navigator.clipboard.readText()).toBe(originalLink);

@@ -26,7 +26,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 
 const requestFieldsSchema = z.object({
   id: z.string().min(1),
-  publicToken: z.string().min(1),
+  publicToken: z.never().optional(),
   reference: z.string().min(1),
   custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
   walletId: z.never().optional(),
@@ -37,7 +37,9 @@ const requestFieldsSchema = z.object({
   expiresAt: z.string().nullable(),
   status: z.enum(PAYMENT_REQUEST_STATUSES),
 });
-const requestResponseSchema = successResponseSchema(requestFieldsSchema);
+const requestResponseSchema = successResponseSchema(
+  requestFieldsSchema.extend({ publicToken: z.string().min(1) })
+);
 const requestsResponseSchema = successResponseSchema(
   z.object({
     paymentRequests: z.array(requestFieldsSchema),
@@ -60,22 +62,6 @@ function createRequest(selector: Record<string, unknown>) {
     },
     env
   );
-}
-
-async function selectWallet(permissions: ("payments:read" | "payments:write")[]) {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-       VALUES ('akw_requests_selected', ?, ?, ?)`
-    )
-    .bind(TEST_API_KEY.id, TEST_WALLET_ID, JSON.stringify(permissions))
-    .run();
-  await seedCachedKey({
-    walletScope: "selected",
-    walletBindings: [
-      { walletId: TEST_WALLET_ID, custodyWalletId: TEST_CUSTODY_WALLET_ID, permissions },
-    ],
-  });
 }
 
 async function seedConnectionWallet(projectId = TEST_PROJECT.id) {
@@ -146,7 +132,6 @@ describe("Payments routes — Payment Requests exact recipient", () => {
         paymentRequests: [
           {
             id: created.data.id,
-            publicToken: created.data.publicToken,
             reference: created.data.reference,
             custodyWalletId: TEST_CUSTODY_WALLET_ID,
           },
@@ -204,9 +189,13 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       });
     }
     expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(400);
-    await selectWallet(["payments:write"]);
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(403);
-    expect((await createRequest({ custodyWalletId: "cwlt_requests_duplicate" })).status).toBe(403);
+    await seedCachedKey({
+      grants: ["payment_requests.manage"],
+      walletScope: "selected",
+      walletIds: [],
+    });
+    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
+    expect((await createRequest({ custodyWalletId: "cwlt_requests_duplicate" })).status).toBe(201);
   });
 
   it.each([
@@ -349,18 +338,21 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(404);
   });
 
-  it("checks per-wallet payments:write independently of the route permissions", async () => {
-    await selectWallet(["payments:read"]);
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(403);
+  it("creates a same-project Request without granting custody signing access", async () => {
+    await seedCachedKey({
+      grants: ["payment_requests.manage"],
+      walletScope: "selected",
+      walletIds: [],
+    });
+    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 
-  it("rejects a freshly revoked wallet grant despite the cached authorization", async () => {
-    await selectWallet(["payments:write"]);
+  it("rejects a freshly revoked manage action while retaining readable history", async () => {
+    await seedCachedKey({ grants: ["payment_requests.manage", "payment_requests.read"] });
     expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
     await getDb(env)
-      .prepare(
-        "UPDATE api_key_wallet_permissions SET permissions = '[]'::jsonb WHERE api_key_id = ?"
-      )
+      .prepare("UPDATE api_keys SET grants = '{payment_requests.read}'::text[] WHERE id = ?")
       .bind(TEST_API_KEY.id)
       .run();
     expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(403);
@@ -368,9 +360,13 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     expect(requestsResponseSchema.parse(await list.json())).toMatchObject({ data: { total: 1 } });
   });
 
-  it("preserves the wallets:read route permission", async () => {
-    await seedCachedKey({ permissions: ["payments:write"] });
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(403);
+  it("refuses creation without the payment_requests.manage action", async () => {
+    await seedCachedKey({ grants: ["payment_requests.read"] });
+    const response = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { details: { action: "payment_requests.manage" } },
+    });
   });
 
   it("preserves counterparty, expiry and amount semantics", async () => {
@@ -392,7 +388,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     });
   });
 
-  it("lists project history across wallet grants including nullable terminal recipients", async () => {
+  it("lists project history outside the signing scope including nullable terminal recipients", async () => {
     const first = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
     expect(first.status).toBe(201);
     const created = requestResponseSchema.parse(await first.json());
@@ -404,7 +400,11 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       )
       .bind(created.data.id)
       .run();
-    await selectWallet(["payments:read"]);
+    await seedCachedKey({
+      grants: ["payment_requests.read"],
+      walletScope: "selected",
+      walletIds: [],
+    });
 
     const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
     expect(list.status).toBe(200);
@@ -413,7 +413,6 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     expect(listed.data.paymentRequests).toContainEqual(
       expect.objectContaining({
         id: created.data.id,
-        publicToken: created.data.publicToken,
         reference: created.data.reference,
         custodyWalletId: null,
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
@@ -424,11 +423,10 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       expect.objectContaining({ custodyWalletId: "cwlt_requests_connection" })
     );
 
-    await seedCachedKey({
-      projectId: `${TEST_PROJECT.id}_production`,
-      walletScope: "all",
-      walletBindings: [],
-    });
+    await getDb(env)
+      .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+      .bind(`${TEST_PROJECT.id}_production`, TEST_API_KEY.id)
+      .run();
     const otherProject = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
     expect(otherProject.status).toBe(200);
     expect(requestsResponseSchema.parse(await otherProject.json())).toMatchObject({

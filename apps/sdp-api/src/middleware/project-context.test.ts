@@ -6,7 +6,7 @@ import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import {
@@ -16,8 +16,8 @@ import {
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { projectContextMiddleware } from "./project-context";
 
@@ -107,10 +107,10 @@ describe("projectContextMiddleware", () => {
   });
 
   it("pins the API key project and ignores the project header", async () => {
-    await seedCachedApiKey(
+    await seedApiKeyRow(
       env,
       await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
-      TEST_CACHED_API_KEY
+      TEST_SEEDED_API_KEY
     );
     const res = await buildApp().request(
       "/probe",
@@ -124,8 +124,8 @@ describe("projectContextMiddleware", () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      projectId: TEST_CACHED_API_KEY.projectId,
-      projectEnvironment: TEST_CACHED_API_KEY.environment,
+      projectId: TEST_SEEDED_API_KEY.projectId,
+      projectEnvironment: TEST_SEEDED_API_KEY.environment,
     });
   });
 
@@ -167,7 +167,7 @@ describe("projectContextMiddleware", () => {
   describe("production entitlement (APE-351)", () => {
     const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
     const PRODUCTION_CACHED_API_KEY = {
-      ...TEST_CACHED_API_KEY,
+      ...TEST_SEEDED_API_KEY,
       projectId: PRODUCTION_PROJECT_ID,
       environment: "production" as const,
     };
@@ -197,7 +197,7 @@ describe("projectContextMiddleware", () => {
     }
 
     beforeEach(async () => {
-      await seedCachedApiKey(
+      await seedApiKeyRow(
         env,
         await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
         PRODUCTION_CACHED_API_KEY
