@@ -11,6 +11,7 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { CHECK_VIOLATION } from "@/test/helpers/migration-db";
 import { seedRecurringDatabaseTenant, testSignature } from "@/test/helpers/recurring-payments";
@@ -33,6 +34,24 @@ const TEST_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_test";
 const TEST_SIBLING_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_sibling";
 const TEST_PROVIDER_WALLET_ID = "wallet_recurring_payments_repo_test";
 const TEST_SOURCE_ADDRESS = "Sender111111111111111111111111111111111";
+
+/** Waits until a write to an activation attempt row is blocked behind another transaction's row lock. */
+async function untilActivationAttemptWriteWaitsOnRowLock(): Promise<void> {
+  for (let poll = 0; poll < 100; poll++) {
+    const waiting = required(
+      await getDb(env).queryOne<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock'
+            AND datname = current_database()
+            AND pid <> pg_backend_pid()
+            AND position('UPDATE payment_recurring_payment_activation_attempts' in query) > 0`
+      )
+    );
+    if (waiting.count > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("No activation attempt write started waiting on the row lock");
+}
 
 describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   let repo: PaymentRecurringPaymentsRepository;
@@ -729,6 +748,144 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
           projectId,
         })
       ).toBeNull();
+    });
+  });
+
+  describe("lockEmptyStepSlot", () => {
+    const lockPlanSlot = (input: { id: string; recurringPaymentId: string; projectId: string }) =>
+      repo.lockEmptyStepSlot({ ...input, slot: PLAN_SLOT, organizationId: TEST_ORG.id });
+
+    it("locks an in-flight attempt's empty slot while an earlier step's slot holds a signature", async () => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_lock_empty_slot");
+      await fillActivationSlots(attempt.id, {
+        planCreationSignature: testSignature(1),
+        authorizationSetupSignature: null,
+        lastValidBlockHeight: "301",
+      });
+
+      expect(
+        await repo.lockEmptyStepSlot({
+          slot: SETUP_SLOT,
+          id: attempt.id,
+          recurringPaymentId: attempt.recurring_payment_id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+        })
+      ).toBe(true);
+      expect(await savedActivationSlots(attempt.id)).toEqual({
+        plan_creation_signature: testSignature(1),
+        authorization_setup_signature: null,
+        last_valid_block_height: "301",
+      });
+    });
+
+    type UnlockedStepSlot = {
+      refused: string;
+      projectId: string;
+      scheduleOf: "attempt" | "sibling";
+      status: PaymentRecurringPaymentAttemptStatus;
+      held: ActivationSlotValues;
+    };
+    const emptySlots: ActivationSlotValues = {
+      planCreationSignature: null,
+      authorizationSetupSignature: null,
+      lastValidBlockHeight: null,
+    };
+
+    it.each<UnlockedStepSlot>([
+      {
+        refused: "a slot that holds a signature",
+        projectId: TEST_PROJECT_ID,
+        scheduleOf: "attempt",
+        status: "processing",
+        held: {
+          planCreationSignature: testSignature(1),
+          authorizationSetupSignature: null,
+          lastValidBlockHeight: "301",
+        },
+      },
+      ...PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES.filter(
+        (status) => !isInFlightRecurringPaymentAttemptStatus(status)
+      ).map(
+        (status): UnlockedStepSlot => ({
+          refused: `a ${status} attempt`,
+          projectId: TEST_PROJECT_ID,
+          scheduleOf: "attempt",
+          status,
+          held: emptySlots,
+        })
+      ),
+      {
+        refused: "an attempt under another schedule",
+        projectId: TEST_PROJECT_ID,
+        scheduleOf: "sibling",
+        status: "processing",
+        held: emptySlots,
+      },
+      {
+        refused: "another project's attempt",
+        projectId: SIBLING_PROJECT_ID,
+        scheduleOf: "attempt",
+        status: "processing",
+        held: emptySlots,
+      },
+    ])("refuses $refused", async ({ projectId, scheduleOf, status, held }) => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_lock_refused");
+      const sibling = await createUnsignedActivationAttempt("prpa_repo_lock_refused_sibling");
+      await fillActivationSlots(attempt.id, held);
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payment_activation_attempts SET status = ? WHERE id = ?")
+        .bind(status, attempt.id)
+        .run();
+
+      expect(
+        await lockPlanSlot({
+          id: attempt.id,
+          recurringPaymentId:
+            scheduleOf === "attempt" ? attempt.recurring_payment_id : sibling.recurring_payment_id,
+          projectId,
+        })
+      ).toBe(false);
+    });
+
+    it("holds a concurrent save into the slot until the failure settles the attempt, which then refuses it", async () => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_lock_holds_save");
+      const locked = deferred<boolean>();
+      const settle = deferred<void>();
+      const failure = getDb(env).transaction(async (tx) => {
+        locked.resolve(
+          await createPostgresPaymentRecurringPaymentsRepository(tx).lockEmptyStepSlot({
+            slot: PLAN_SLOT,
+            id: attempt.id,
+            recurringPaymentId: attempt.recurring_payment_id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+          })
+        );
+        await settle.promise;
+        await tx.execute(
+          "UPDATE payment_recurring_payment_activation_attempts SET status = 'failed' WHERE id = ?",
+          [attempt.id]
+        );
+      });
+      expect(await locked.promise).toBe(true);
+
+      const save = repo.setStepSignature({
+        slot: PLAN_SLOT,
+        id: attempt.id,
+        recurringPaymentId: attempt.recurring_payment_id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(2),
+        lastValidBlockHeight: "302",
+        updatedAt: STEP_UPDATED_AT,
+      });
+      await untilActivationAttemptWriteWaitsOnRowLock();
+      settle.resolve();
+      await failure;
+
+      expect(await save).toBe(false);
+      expect(await savedActivationSlots(attempt.id)).toEqual(UNSIGNED_SLOTS);
     });
   });
 

@@ -38,6 +38,7 @@ import {
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import type { RecurringPaymentStepSignatureSlot } from "@/db/repositories/payment-recurring-payments.repository";
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
@@ -7934,6 +7935,76 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
       });
 
+      it("leaves a resumed activation in flight when another run saved a subscribe into the slot before its refused subscribe unwinds", async () => {
+        const { created, planSignature } = await leaveSubscribeInFlight();
+        // The crashed run claimed subscribe but saved nothing, so the resume sends it again.
+        expect(
+          await getDb(env)
+            .prepare(
+              `UPDATE payment_recurring_payment_activation_attempts
+                  SET authorization_signature = NULL
+                WHERE recurring_payment_id = ?`
+            )
+            .bind(created.id)
+            .run()
+        ).toBe(1);
+        rejectPoolSendAfter(0, sendTransactionPreflightError());
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const locks = vi.fn<(slot: RecurringPaymentStepSignatureSlot, locked: boolean) => void>();
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => {
+            const repository = createRepository(db);
+            return {
+              ...repository,
+              lockEmptyStepSlot: async (input) => {
+                // A run that took the attempt over saves its own subscribe before the unwind.
+                await getDb(env)
+                  .prepare(
+                    `UPDATE payment_recurring_payment_activation_attempts
+                        SET authorization_signature = ?, last_valid_block_height = 2000
+                      WHERE id = ?`
+                  )
+                  .bind(testSignature(9), input.id)
+                  .run();
+                const locked = await repository.lockEmptyStepSlot(input);
+                locks(input.slot, locked);
+                return locked;
+              },
+            };
+          });
+        onTestFinished(() => repositorySpy.mockRestore());
+        const sent = sends();
+
+        const retry = await activate(created.id, crypto.randomUUID());
+
+        expect(retry.status).toBe(409);
+        expect(errorResponseSchema.parse(await retry.json()).error).toMatchObject({
+          code: "CONFLICT",
+          message: "Recurring payment step signature changed concurrently",
+        });
+        expect(locks.mock.calls).toEqual([
+          [{ row: "activation_attempt", column: "authorization_signature" }, false],
+        ]);
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          plan_creation_signature: planSignature,
+          authorization_signature: testSignature(9),
+          last_valid_block_height: "2000",
+        });
+        expect(await scheduleSignatures(created.id)).toEqual({
+          status: "activating",
+          plan_creation_signature: planSignature,
+          authorization_signature: null,
+        });
+      });
+
       it("fails an activation whose setup send expired without landing back to pending_activation, clearing its setup signature", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         // No subscription authority yet, so the setup goes out between the plan and subscribe.
@@ -8158,6 +8229,42 @@ describe("Payments routes — recurring", () => {
         });
         // The refused plan, then subscribe.
         expect(sent).toHaveBeenCalledTimes(2);
+      });
+
+      it("activates a schedule that records its plan created with no signature without sending or reading the plan", async () => {
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const planId = `psp_${crypto.randomUUID()}`;
+        const now = new Date().toISOString();
+        await seedPlanRow(planId, "active", now);
+        // A plan resend refused as already existing and then read records the plan with no signature.
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payments
+                SET status = 'pending_activation', plan_id = ?, plan_pda = ?,
+                    plan_created_at = '1770000000', plan_creation_signature = NULL, updated_at = ?
+              WHERE id = ?`
+          )
+          .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, now, created.id)
+          .run();
+        const planReads = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
+        onTestFinished(() => planReads.mockRestore());
+        const sent = sends();
+
+        const activation = await activate(created.id, crypto.randomUUID());
+
+        expect(activation.status).toBe(200);
+        expect((await parseRecurringResponse(activation)).data.recurringPayment).toMatchObject({
+          status: "active",
+          planCreationSignature: null,
+          authorizationSignature: poolSentSignatures()[0],
+        });
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(planReads).not.toHaveBeenCalled();
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          plan_creation_signature: null,
+        });
       });
 
       it("drops a pending schedule's landed plan and subscription when its terms change, and keeps them for a first-collection edit", async () => {
