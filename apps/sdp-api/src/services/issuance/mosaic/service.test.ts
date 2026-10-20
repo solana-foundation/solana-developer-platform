@@ -41,7 +41,6 @@ const PLACEHOLDER_FEE_PAYER = Kit.createNoopSigner(
 );
 
 type CreateStablecoinReturn = Awaited<ReturnType<typeof MosaicSdk.createStablecoinInitTransaction>>;
-type CreateMintToReturn = Awaited<ReturnType<typeof MosaicSdk.createMintToTransaction>>;
 
 /**
  * Named view over the positional createStablecoinInitTransaction arguments, so
@@ -370,9 +369,12 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const koraSignature = "kora-sig" as Signature;
       const { partialSpy } = stubSponsoredSubmission(koraSignature);
       const tokenAccount = (await Kit.generateKeyPairSigner()).address;
-      vi.spyOn(MosaicSdk, "createMintToTransaction").mockResolvedValue(
-        FAKE_FULL_TX as unknown as CreateMintToReturn
+      const mintTx = Kit.pipe(
+        Kit.createTransactionMessage({ version: 0 }),
+        (tx) => Kit.setTransactionMessageFeePayer(koraAddress, tx),
+        (tx) => Kit.setTransactionMessageLifetimeUsingBlockhash(FAKE_FULL_TX.lifetimeConstraint, tx)
       );
+      vi.spyOn(MosaicSdk, "createMintToTransaction").mockResolvedValue(mintTx);
       vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
         tokenAccount,
         isInitialized: true,
@@ -399,13 +401,13 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         onBeforeSubmit
       );
 
-      expect(partialSpy).toHaveBeenCalledWith(FAKE_FULL_TX);
+      expect(partialSpy).toHaveBeenCalledWith(mintTx);
       expect(onBeforeSubmit).toHaveBeenCalledOnce();
       expect(onBeforeSubmit).toHaveBeenCalledBefore(fee.submitSponsored);
       expect(fee.submitSponsored).toHaveBeenCalledOnce();
       const [{ transaction, lastValidBlockHeight, rpc }] = fee.submitSponsored.mock.calls[0];
       expect(transaction).toEqual(new Uint8Array([1, 2, 3]));
-      expect(lastValidBlockHeight).toBe(FAKE_FULL_TX.lifetimeConstraint.lastValidBlockHeight);
+      expect(lastValidBlockHeight).toBe(mintTx.lifetimeConstraint.lastValidBlockHeight);
       expect(rpc).toBe(createRpcSpy.mock.results[0].value);
       expect(confirmSpy).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ signature: koraSignature, slot: 7n, tokenAccount });

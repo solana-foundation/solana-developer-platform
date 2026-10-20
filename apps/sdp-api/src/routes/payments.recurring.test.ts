@@ -4531,6 +4531,57 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
   });
 
+  it("resets an activation whose plan creation is refused at preflight, clearing its saved signature so a retry sends again", async () => {
+    mockDistinctRecentBlockhashes();
+    const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError(17));
+    const activate = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+    const refused = await activate();
+
+    expect(refused.status).toBe(400);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT rp.status, rp.plan_creation_signature,
+                  a.status AS attempt_status,
+                  a.plan_creation_signature AS attempt_plan_creation_signature
+             FROM payment_recurring_payments rp
+             JOIN payment_recurring_payment_activation_attempts a ON a.recurring_payment_id = rp.id
+            WHERE rp.id = ?`
+        )
+        .bind(recurringPayment.id)
+        .first<{
+          status: string;
+          plan_creation_signature: string | null;
+          attempt_status: string;
+          attempt_plan_creation_signature: string | null;
+        }>()
+    ).toEqual({
+      status: "pending_activation",
+      plan_creation_signature: null,
+      attempt_status: "failed",
+      attempt_plan_creation_signature: null,
+    });
+    vi.mocked(subscriptionsProgram.fetchMaybePlan)
+      .mockResolvedValueOnce(noAccount)
+      .mockResolvedValueOnce(noAccount);
+
+    const retried = await activate();
+
+    expect(retried.status).toBe(200);
+    expect((await parseRecurringResponse(retried)).data.recurringPayment).toMatchObject({
+      status: "active",
+      planCreationSignature: poolSentSignatures()[1],
+    });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+  });
+
   it("clears failed authorization signatures when finalization cannot find the subscription", async () => {
     const _sourceSigner = recurringExecution.sourceSigner();
     mockDistinctRecentBlockhashes();

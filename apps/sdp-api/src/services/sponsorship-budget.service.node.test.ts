@@ -386,6 +386,31 @@ describe("BudgetedFeePayment", () => {
     expect(lifecycle.markStarted).not.toHaveBeenCalled();
   });
 
+  it("releases an owned submission when Kora returns a structured policy rejection", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
+      new FeePaymentError("Kora Error -32001: Validation error", "PROVIDER_REJECTED")
+    );
+    const lifecycle = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(
+      feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)
+    ).rejects.toMatchObject({ code: "PROVIDER_REJECTED" });
+
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "Kora Error -32001: Validation error"
+    );
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).toHaveBeenCalledOnce();
+    expect(lifecycle.persistSigned).not.toHaveBeenCalled();
+  });
+
   it("releases an owned submission when its signed payment cannot be persisted", async () => {
     const { feePayment, repository, budgetRedis } = harness();
     const lifecycle = {
@@ -406,7 +431,7 @@ describe("BudgetedFeePayment", () => {
     expect(lifecycle.markStarted).not.toHaveBeenCalled();
   });
 
-  it("releases a persisted owned submission when sponsorship is killed before its marker", async () => {
+  it("releases an owned submission killed after signing before anything is persisted", async () => {
     const { feePayment, repository, budgetRedis } = harness();
     repository.resolvePolicies
       .mockResolvedValueOnce([policy("global"), policy("organization"), policy("project")])
@@ -419,9 +444,13 @@ describe("BudgetedFeePayment", () => {
 
     await expect(
       feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)
-    ).rejects.toMatchObject({ code: "PROVIDER_NOT_AVAILABLE" });
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+      message: "Sponsorship is disabled for this scope",
+    });
 
-    expect(lifecycle.persistSigned).toHaveBeenCalledOnce();
+    expect(repository.markSigned).not.toHaveBeenCalled();
+    expect(lifecycle.persistSigned).not.toHaveBeenCalled();
     expect(lifecycle.markStarted).not.toHaveBeenCalled();
     expect(repository.markReleased).toHaveBeenCalledOnce();
     expect(budgetRedis.settle).toHaveBeenCalledWith(
@@ -555,6 +584,27 @@ describe("BudgetedFeePayment", () => {
       "devnet",
       "Owned submission accounting persistence failed"
     );
+  });
+
+  it("fails closed when owned submitted accounting loses its durable transition", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    repository.markSubmitted.mockResolvedValueOnce("stale");
+    const lifecycle = {
+      persistSigned: vi.fn().mockResolvedValue(undefined),
+      markStarted: vi.fn().mockResolvedValue(undefined),
+      hasStarted: vi.fn(),
+    };
+
+    await expect(
+      feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)
+    ).rejects.toMatchObject({ code: "PROVIDER_NOT_AVAILABLE" });
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      "Owned submission accounting lost its durable state transition"
+    );
+    expect(repository.markReleased).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
   });
 
   it("releases an owned submission that is not fully signed", async () => {

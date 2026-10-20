@@ -353,12 +353,26 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       signedTransaction = await this.provider.signAsFeePayer(transaction);
     } catch (error) {
+      // As in signAsFeePayer: a structured Kora verdict proves nothing was signed.
+      if (isStructuredProviderRejection(error)) {
+        await this.releaseDeterministic(reservation, error);
+        throw error;
+      }
       await this.markAmbiguous(reservation, error);
       throw error;
     }
     const decoded = await this.verifySponsorResponse(signedTransaction, reservation);
     let submission: PreparedOwnedSubmission;
     try {
+      // Before anything is persisted: a refusal here must not leave a saved signature behind on
+      // the caller's row, which only a definite send refusal clears.
+      const policies = await this.resolveEnabledPolicies(this.network);
+      if (policies.some((policy) => !policy.enabled)) {
+        throw new FeePaymentError(
+          "Sponsorship is disabled for this scope",
+          "PROVIDER_NOT_AVAILABLE"
+        );
+      }
       submission = {
         ...getFullySignedSubmission(decoded),
         releaseDefinitelyUnbroadcast: (error) =>
@@ -377,13 +391,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         );
       }
       await lifecycle.persistSigned(submission);
-      const policies = await this.resolveEnabledPolicies(this.network);
-      if (policies.some((policy) => !policy.enabled)) {
-        throw new FeePaymentError(
-          "Sponsorship is disabled for this scope",
-          "PROVIDER_NOT_AVAILABLE"
-        );
-      }
     } catch (error) {
       await this.releaseDeterministic(reservation, error);
       throw error;
