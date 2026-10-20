@@ -5,12 +5,15 @@
 #             only when SOLANA_MAINNET_RPC_URL or SURFPOOL_REMOTE_RPC_URL is set
 # Writes .secrets/kora-local/api.env, which apps/sdp-api/scripts/lib/dev-env.mjs
 # loads under the developer's own .env.local. Run under Doppler (pnpm dev)
-# so the RPC URLs and the funded devnet signer come from the dev config.
+# so the RPC URLs come from the dev config.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="${KORA_LOCAL_STATE_DIR:-"${ROOT_DIR}/.secrets/kora-local"}"
-SIGNER_CACHE_FILE="${STATE_DIR}/devnet.env"
+# One test-only fee payer per machine, shared by every worktree and both clusters,
+# so funding it on devnet once lasts. Never the deployed KMS payer: a fork
+# transaction can carry a real mainnet blockhash and replay there.
+SIGNER_CACHE_FILE="${XDG_CONFIG_HOME:-"${HOME}/.config"}/sdp/kora-local-signer.env"
 MAINNET_STATE_DIR="${STATE_DIR}/mainnet"
 API_ENV_FILE="${STATE_DIR}/api.env"
 
@@ -34,22 +37,18 @@ mkdir -p "${STATE_DIR}"
 chmod 700 "${STATE_DIR}"
 
 # --- devnet -----------------------------------------------------------------
-# Signer: Doppler's funded key, else the one generated on an earlier run, else a new one.
-devnet_signer="${KORA_SIGNER_PRIVATE_KEY:-}"
-if [ -z "${devnet_signer}" ] && [ -f "${SIGNER_CACHE_FILE}" ]; then
-  devnet_signer="$(env_value "${SIGNER_CACHE_FILE}" SIGNER_PRIVATE_KEY)"
+if [ ! -f "${SIGNER_CACHE_FILE}" ]; then
+  echo "Generating the local Kora fee payer at ${SIGNER_CACHE_FILE}."
+  mkdir -p "$(dirname "${SIGNER_CACHE_FILE}")"
+  chmod 700 "$(dirname "${SIGNER_CACHE_FILE}")"
+  (umask 077 && echo "SIGNER_PRIVATE_KEY=$(pnpm --silent --filter @sdp/api keygen:local --quiet)" >"${SIGNER_CACHE_FILE}")
 fi
-if [ -z "${devnet_signer}" ]; then
-  echo "Generating a local devnet Kora signer (no KORA_SIGNER_PRIVATE_KEY in env)."
-  devnet_signer="$(pnpm --silent --filter @sdp/api keygen:local --quiet)"
-  echo "SIGNER_PRIVATE_KEY=${devnet_signer}" >"${SIGNER_CACHE_FILE}"
-  chmod 600 "${SIGNER_CACHE_FILE}"
-  fresh_devnet_signer=1
-fi
+signer="$(env_value "${SIGNER_CACHE_FILE}" SIGNER_PRIVATE_KEY)"
+[ -n "${signer}" ] || { echo "${SIGNER_CACHE_FILE} has no SIGNER_PRIVATE_KEY; delete it to generate a new fee payer." >&2; exit 1; }
 
 echo "Starting devnet Kora on 127.0.0.1:${DEVNET_PORT}."
 COMPOSE_PROJECT_NAME=kora-devnet KORA_PORT="${DEVNET_PORT}" KORA_REDIS_PORT="${DEVNET_REDIS_PORT}" \
-  RPC_URL="${KORA_DEVNET_RPC_URL:-https://api.devnet.solana.com}" SIGNER_PRIVATE_KEY="${devnet_signer}" \
+  RPC_URL="${KORA_DEVNET_RPC_URL:-https://api.devnet.solana.com}" SIGNER_PRIVATE_KEY="${signer}" \
   docker compose -f "${ROOT_DIR}/infra/kora/docker-compose.yml" up -d redis kora
 
 # `compose up -d` succeeds even when the container then crash-loops.
@@ -68,7 +67,8 @@ mainnet_upstream_rpc="${SURFPOOL_REMOTE_RPC_URL:-${SOLANA_MAINNET_RPC_URL:-}}"
 surfpool_rpc_url=""
 if [ -n "${mainnet_upstream_rpc}" ]; then
   echo "Starting mainnet Kora on 127.0.0.1:${MAINNET_PORT} against a Surfpool fork."
-  COMPOSE_PROJECT_NAME=kora-mainnet KORA_SURFPOOL_MODE=docker KORA_SURFPOOL_STATE_DIR="${MAINNET_STATE_DIR}" \
+  # The fork airdrops the shared fee payer SOL on boot.
+  SIGNER_PRIVATE_KEY="${signer}" COMPOSE_PROJECT_NAME=kora-mainnet KORA_SURFPOOL_MODE=docker KORA_SURFPOOL_STATE_DIR="${MAINNET_STATE_DIR}" \
     SURFPOOL_REMOTE_RPC_URL="${mainnet_upstream_rpc}" KORA_REDIS_PORT="${MAINNET_REDIS_PORT}" \
     "${ROOT_DIR}/scripts/kora-surfpool/up.sh"
   surfpool_rpc_url="$(env_value "${MAINNET_STATE_DIR}/runtime.env" SURFPOOL_RPC_URL)"
@@ -100,6 +100,6 @@ fi
 } >"${API_ENV_FILE}"
 
 echo "Local paymasters ready; API env written to ${API_ENV_FILE#"${ROOT_DIR}"/}."
-if [ -n "${fresh_devnet_signer:-}" ]; then
-  echo "The generated devnet fee payer holds no SOL. Fund it from the devnet faucet, or set KORA_SIGNER_PRIVATE_KEY (Doppler dev has a funded one)."
-fi
+fee_payer="$(curl -fsS -X POST "http://127.0.0.1:${DEVNET_PORT}" -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"getPayerSigner","params":[]}' | sed -n 's/.*"signer_address":"\([^"]*\)".*/\1/p')"
+echo "Local fee payer ${fee_payer}: keep it funded on devnet (https://faucet.solana.com)."
