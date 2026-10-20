@@ -82,6 +82,7 @@ interface TurnkeyActivityResponse {
 }
 
 export interface ProvisionFireblocksOptions {
+  idempotencyKey?: string;
   orgId: string;
   orgSlug: string;
   vaultAccountId?: string;
@@ -244,6 +245,7 @@ export async function provisionFireblocksVaultAccount(
       apiSecretPem,
       method: "POST",
       uri: "/v1/vault/accounts",
+      idempotencyKey: options.idempotencyKey ? `${options.idempotencyKey}:vault` : undefined,
       body: {
         name,
         customerRefId: options.orgId,
@@ -264,6 +266,7 @@ export async function provisionFireblocksVaultAccount(
     apiSecretPem,
     method: "POST",
     uri: `/v1/vault/accounts/${vaultAccountId}/${assetId}`,
+    idempotencyKey: options.idempotencyKey ? `${options.idempotencyKey}:asset` : undefined,
     body: {},
     allowStatuses: [409],
   });

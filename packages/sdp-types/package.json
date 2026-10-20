@@ -234,10 +234,10 @@
       "import": "./src/wisdomtree-programs.ts",
       "default": "./src/wisdomtree-programs.ts"
     },
-    "./fireblocks-policy": {
-      "types": "./src/fireblocks-policy.ts",
-      "import": "./src/fireblocks-policy.ts",
-      "default": "./src/fireblocks-policy.ts"
+    "./fireblocks": {
+      "types": "./src/fireblocks.ts",
+      "import": "./src/fireblocks.ts",
+      "default": "./src/fireblocks.ts"
     }
   },
   "scripts": {

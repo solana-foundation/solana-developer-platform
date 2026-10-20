@@ -93,14 +93,14 @@ export function parseByokCredential(
 export function credentialDisplayMetadata(fields: ByokCredentialFields): {
   appIdSuffix?: string;
   apiKeySuffix?: string;
+  primaryVaultId?: string;
 } {
-  return "appId" in fields
-    ? fields.appId.length > 4
-      ? { appIdSuffix: fields.appId.slice(-4) }
-      : {}
-    : fields.apiKey.length > 4
-      ? { apiKeySuffix: fields.apiKey.slice(-4) }
-      : {};
+  if ("appId" in fields)
+    return { appIdSuffix: fields.appId.length > 4 ? fields.appId.slice(-4) : undefined };
+  return {
+    apiKeySuffix: fields.apiKey.length > 4 ? fields.apiKey.slice(-4) : undefined,
+    primaryVaultId: fields.vaultAccountId,
+  };
 }
 
 export type ByokCredentialCheck =

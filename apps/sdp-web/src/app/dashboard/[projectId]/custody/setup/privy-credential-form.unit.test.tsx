@@ -4,10 +4,12 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import useSWR, { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as byokActions from "@/app/dashboard/[projectId]/custody/byok-actions";
 import {
   recheckPrivyCredentialAction,
   submitPrivyCredentialAction,
 } from "@/app/dashboard/[projectId]/custody/byok-actions";
+import * as csrActions from "@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions";
 import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance-query-key";
 import { earnQueryKeys } from "@/app/dashboard/[projectId]/markets/earn/earn-query-key";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
@@ -18,32 +20,21 @@ import { PRODUCTION_PROJECT } from "@/test/projects";
 import { generateFireblocksCsrAction, loadFireblocksCsrAction } from "./fireblocks-csr-actions";
 import { PrivyCredentialForm } from "./privy-credential-form";
 
-vi.mock("@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () => ({
-  loadFireblocksCsrAction: vi.fn(),
-  generateFireblocksCsrAction: vi.fn(),
-  loadFireblocksVaultsAction: vi.fn(async () => ({
-    status: "success",
-    vaults: [
-      { id: "0", name: "Treasury", hasSolanaWallet: true },
-      { id: "7", name: "Operations", hasSolanaWallet: true },
-    ],
-    nextCursor: null,
-  })),
-}));
-
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
-vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
-  submitPrivyCredentialAction: vi.fn(),
-  recheckPrivyCredentialAction: vi.fn(),
-}));
 
 const WALLETS_HREF = `/dashboard/${PRODUCTION_PROJECT.id}/wallets`;
 
-function renderForm(provider: "privy" | "fireblocks" = "privy") {
+function renderForm(
+  provider: "privy" | "fireblocks" = "privy",
+  onPendingChange?: (pending: boolean) => void
+) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <PrivyCredentialForm formId="byok-test-form" provider={provider} />
+      <PrivyCredentialForm
+        formId="byok-test-form"
+        provider={provider}
+        onPendingChange={onPendingChange}
+      />
     </I18nProvider>
   );
 }
@@ -61,6 +52,18 @@ function submittedKey(call: number): string {
 
 describe("PrivyCredentialForm", () => {
   beforeEach(() => {
+    vi.spyOn(byokActions, "submitPrivyCredentialAction");
+    vi.spyOn(byokActions, "recheckPrivyCredentialAction");
+    vi.spyOn(csrActions, "loadFireblocksCsrAction");
+    vi.spyOn(csrActions, "generateFireblocksCsrAction");
+    vi.spyOn(csrActions, "loadFireblocksVaultsAction").mockResolvedValue({
+      status: "success",
+      vaults: [
+        { id: "0", name: "Treasury", hasSolanaWallet: true },
+        { id: "7", name: "Operations", hasSolanaWallet: true },
+      ],
+      nextCursor: null,
+    });
     cleanup();
     setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`, {});
     dashboardRouter.push.mockClear();
@@ -83,6 +86,42 @@ describe("PrivyCredentialForm", () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("keeps the host informed while registration and vault discovery are in flight", async () => {
+    const registration =
+      Promise.withResolvers<Awaited<ReturnType<typeof loadFireblocksCsrAction>>>();
+    const discovery =
+      Promise.withResolvers<Awaited<ReturnType<typeof csrActions.loadFireblocksVaultsAction>>>();
+    vi.mocked(loadFireblocksCsrAction).mockReturnValueOnce(registration.promise);
+    vi.mocked(csrActions.loadFireblocksVaultsAction).mockReturnValueOnce(discovery.promise);
+    const pending = vi.fn();
+    const user = userEvent.setup();
+    renderForm("fireblocks", pending);
+    expect(pending).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("button", { name: "Connect and verify" })).toHaveProperty(
+      "disabled",
+      true
+    );
+    registration.resolve({
+      status: "success",
+      csr: {
+        id: "fbcsr_pending",
+        csrPem: "public-csr",
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    });
+    await waitFor(() => expect(pending).toHaveBeenLastCalledWith(false));
+    await user.type(screen.getByLabelText("API user ID"), "api-user");
+    await user.click(screen.getByRole("button", { name: "Load vaults" }));
+    expect(pending).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("button", { name: "Connect and verify" })).toHaveProperty(
+      "disabled",
+      true
+    );
+    discovery.reject(new Error("Network disconnected"));
+    await waitFor(() => expect(pending).toHaveBeenLastCalledWith(false));
+    expect(submitPrivyCredentialAction).not.toHaveBeenCalled();
   });
 
   it("reloads registration after every rejected Fireblocks attempt and connects with a fresh CSR", async () => {

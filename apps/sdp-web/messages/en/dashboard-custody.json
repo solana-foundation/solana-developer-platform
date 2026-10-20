@@ -783,6 +783,7 @@
     "fireblocksIpRequirement": "If Fireblocks restricts API IP addresses, allow the SDP server’s public outbound IP. For local testing, use your network or VPN’s public IP.",
     "fireblocksTestingInstructions": "Keep SOL in the source vault for network fees, including USDC payments. Send a small payment and approve it in Fireblocks. SDP tracks the payment while you approve. Signer check tests the separate RAW-signing path and is not required for these payments.",
     "fireblocksRawGuide": "Fireblocks RAW signing requirements",
-    "fireblocksVaultsFailed": "Could not load vaults. Check your connection and try again."
+    "fireblocksVaultsFailed": "Could not load vaults. Check your connection and try again.",
+    "fireblocksCredentialVault": "Credential verification vault — keep this vault when rotating credentials."
   }
 }

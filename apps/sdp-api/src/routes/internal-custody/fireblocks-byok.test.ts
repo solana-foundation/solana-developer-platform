@@ -63,7 +63,7 @@ function request(
         "Content-Type": "application/json",
         "Idempotency-Key": key,
       },
-      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+      body: payload === undefined ? undefined : JSON.stringify(payload),
     },
     testEnv
   );

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl } from "./common";
 import { FireblocksApiError, fireblocksRequest } from "./fireblocks-http";
@@ -20,28 +21,49 @@ export interface FireblocksTransferRequest {
   note: string;
 }
 
-export interface FireblocksTransferResult {
-  id: string;
-  status: string;
-  subStatus?: string;
-  txHash?: string;
-  externalTxId?: string;
-  operation?: string;
-  assetId?: string;
-  source?: { type: string; id: string };
-  destinationAddress?: string;
-  amountInfo?: { amount?: string; requestedAmount?: string; netAmount?: string };
-  feeCurrency?: string;
-  feeInfo?: { networkFee?: string };
-}
-
-interface Asset {
-  id: string;
-  type: string;
-  nativeAsset: string;
-  issuerAddress?: string;
-  decimals: number;
-}
+const optionalText = z
+  .string()
+  .max(256)
+  .nullish()
+  .transform((value) => value ?? undefined);
+const optionalAmount = z
+  .string()
+  .max(100)
+  .regex(/^\d+(\.\d+)?$/)
+  .nullish()
+  .transform((value) => value ?? undefined);
+const transferResultSchema = z.object({
+  id: z.string().min(1).max(256),
+  status: z.string().regex(/^[A-Z_]{1,100}$/),
+  subStatus: optionalText,
+  txHash: optionalText,
+  externalTxId: optionalText,
+  operation: optionalText,
+  assetId: optionalText,
+  source: z
+    .object({ type: z.string().max(256), id: z.string().max(256) })
+    .nullish()
+    .transform((value) => value ?? undefined),
+  destinationAddress: optionalText,
+  amountInfo: z
+    .object({ amount: optionalAmount, requestedAmount: optionalAmount, netAmount: optionalAmount })
+    .nullish()
+    .transform((value) => value ?? undefined),
+  feeCurrency: optionalText,
+  feeInfo: z
+    .object({ networkFee: optionalAmount })
+    .nullish()
+    .transform((value) => value ?? undefined),
+});
+export type FireblocksTransferResult = z.infer<typeof transferResultSchema>;
+const assetSchema = z.object({
+  id: z.string().min(1).max(256),
+  type: z.string(),
+  nativeAsset: optionalText,
+  issuerAddress: optionalText,
+  decimals: z.number().int().min(0).max(255).optional(),
+});
+type Asset = z.infer<typeof assetSchema>;
 const catalogues = new Map<string, { expires: number; value: Promise<Asset[]> }>();
 
 function config(access: FireblocksTransferAccess) {
@@ -54,45 +76,8 @@ function invalid(): never {
   throw new SigningError("Invalid Fireblocks transfer response", "NETWORK_ERROR");
 }
 function result(value: unknown): FireblocksTransferResult {
-  if (!value || typeof value !== "object") return invalid();
-  const item = value as FireblocksTransferResult;
-  if (
-    typeof item.id !== "string" ||
-    !item.id ||
-    item.id.length > 256 ||
-    typeof item.status !== "string" ||
-    !/^[A-Z_]{1,100}$/.test(item.status)
-  )
-    return invalid();
-  for (const key of [
-    "subStatus",
-    "txHash",
-    "externalTxId",
-    "operation",
-    "assetId",
-    "destinationAddress",
-  ] as const) {
-    if (item[key] != null && (typeof item[key] !== "string" || item[key].length > 256))
-      return invalid();
-  }
-  if (item.source != null) {
-    if (typeof item.source !== "object" || Array.isArray(item.source)) return invalid();
-    for (const key of ["type", "id"] as const) {
-      if (typeof item.source[key] !== "string" || item.source[key].length > 256) return invalid();
-    }
-  }
-  if (item.amountInfo != null) {
-    if (typeof item.amountInfo !== "object" || Array.isArray(item.amountInfo)) return invalid();
-    for (const key of ["amount", "requestedAmount", "netAmount"] as const) {
-      const amount = item.amountInfo[key];
-      if (
-        amount != null &&
-        (typeof amount !== "string" || amount.length > 100 || !/^\d+(\.\d+)?$/.test(amount))
-      )
-        return invalid();
-    }
-  }
-  return item;
+  const parsed = transferResultSchema.safeParse(value);
+  return parsed.success ? parsed.data : invalid();
 }
 
 /** Static catalogue only: share concurrent reads, cache successes for five minutes. */
@@ -108,13 +93,13 @@ export async function resolveFireblocksTransferAsset(
   let entry = catalogues.get(cacheKey);
   if (!entry || entry.expires <= runtime.now()) {
     if (catalogues.size >= 100) catalogues.delete(catalogues.keys().next().value as string);
-    const value = fireblocksRequest<Asset[]>(runtime, {
+    const value = fireblocksRequest<unknown>(runtime, {
       ...credentials,
       method: "GET",
       uri: "/v1/supported_assets",
     }).then((assets) => {
-      if (!Array.isArray(assets)) return invalid();
-      return assets;
+      const parsed = z.array(assetSchema).max(100_000).safeParse(assets);
+      return parsed.success ? parsed.data : invalid();
     });
     entry = { expires: runtime.now() + 300_000, value };
     catalogues.set(cacheKey, entry);
@@ -132,6 +117,7 @@ export async function resolveFireblocksTransferAsset(
   if (
     matches.length !== 1 ||
     typeof matches[0]?.id !== "string" ||
+    typeof matches[0].decimals !== "number" ||
     !Number.isInteger(matches[0].decimals) ||
     matches[0].decimals < 0 ||
     matches[0].decimals > 18
@@ -155,7 +141,6 @@ export async function createFireblocksTransfer(
       ...config(access),
       method: "POST",
       uri: "/v1/transactions",
-      idempotencyKey: body.externalTxId,
       body,
     })
   );

@@ -13,7 +13,7 @@ const config = {
   network: "mainnet-beta",
   projectId: "prj_live",
   custodyWalletId: "cwlt_live",
-  rpcUrl: "https://rpc.example.test",
+  rpcUrl: "https://rpc.example.test/",
   feePayer: recipient,
   payment: { destination: recipient, token: "SOL", amount: "0.00001" },
 };
@@ -27,7 +27,7 @@ const wallet = {
   publicKey: source,
 };
 const transfer = {
-  id: "xfer_live",
+  id: "xfr_live",
   custodyWalletId: wallet.id,
   projectId: config.projectId,
   source,
@@ -162,12 +162,11 @@ test("unknown payment outcome preserves the exact intent and key on retry", asyn
     assert.equal(before.headers["Idempotency-Key"], after.headers["Idempotency-Key"]);
     assert.equal(before.body, after.body);
     const result = JSON.parse(await readFile(`${receiptPath}.result.json`, "utf8"));
-    assert.deepEqual(result, {
-      transferId: transfer.id,
-      signature: transfer.signature,
-      status: transfer.status,
-    });
-    await assert.rejects(paymentAttempt(receiptPath, { different: "intent" }), /different payment/);
+    assert.deepEqual(result, { transferId: transfer.id });
+    await assert.rejects(
+      paymentAttempt(receiptPath, { different: "intent" }, "sk_test"),
+      /different payment/
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -178,9 +177,9 @@ test("concurrent runner starts share the same durable payment key", async () => 
   try {
     const path = join(dir, "intent.json");
     const [first, ...retries] = await Promise.all([
-      paymentAttempt(path, { amount: "1" }),
-      paymentAttempt(path, { amount: "1" }),
-      paymentAttempt(path, { amount: "1" }),
+      paymentAttempt(path, { amount: "1" }, "sk_test"),
+      paymentAttempt(path, { amount: "1" }, "sk_test"),
+      paymentAttempt(path, { amount: "1" }, "sk_test"),
     ]);
     assert(retries.every((attempt) => attempt.idempotencyKey === first.idempotencyKey));
   } finally {
@@ -207,6 +206,36 @@ test("native payment returns pending and status mode reconciles by GET without a
     assert.equal(confirmed.status, "confirmed");
     assert.equal(
       read.calls.filter((call) => call.method === "POST" && call.url !== config.rpcUrl).length,
+      0
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("refuses a new API key against an existing receipt before submitting", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fireblocks-key-binding-"));
+  try {
+    const receiptPath = join(dir, "payment.json");
+    const first = transport();
+    await runLive(config, "payment", {
+      ...first,
+      apiKey: "sk_original",
+      receiptPath,
+      sendMainnet: true,
+    });
+    const second = transport();
+    await assert.rejects(
+      runLive(config, "payment", {
+        ...second,
+        apiKey: "sk_rotated",
+        receiptPath,
+        sendMainnet: true,
+      }),
+      /different SDP API key/
+    );
+    assert.equal(
+      second.calls.filter((call) => call.url.endsWith("/v1/payments/transfers")).length,
       0
     );
   } finally {

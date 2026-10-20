@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
+
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import * as csrActions from "@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { loadFireblocksVaultsAction } from "./fireblocks-csr-actions";
 import { FireblocksVaultPicker } from "./fireblocks-vault-picker";
 
-vi.mock("./fireblocks-csr-actions", () => ({ loadFireblocksVaultsAction: vi.fn() }));
 const ready = vi.fn();
-function renderPicker(multiple = true) {
+function renderPicker(multiple = true, primaryVaultId?: string) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <form aria-label="Vault selection">
@@ -17,16 +18,21 @@ function renderPicker(multiple = true) {
           signingKeyId="fbcsr_test"
           multiple={multiple}
           onReadyChange={ready}
+          primaryVaultId={primaryVaultId}
         />
       </form>
     </I18nProvider>
   );
 }
 beforeEach(() => {
+  vi.spyOn(csrActions, "loadFireblocksVaultsAction");
   vi.mocked(loadFireblocksVaultsAction).mockReset();
   ready.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 it("keeps selections across pages and invalidates them when the API user changes", async () => {
   vi.mocked(loadFireblocksVaultsAction)
@@ -124,5 +130,24 @@ it("clears old selections and lets users retry after a network failure", async (
   expect(ready).toHaveBeenLastCalledWith(false);
   await user.click(screen.getByRole("button", { name: "Load vaults" }));
   await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
+  expect(ready).toHaveBeenLastCalledWith(true);
+});
+
+it("preselects the verification vault on rotation and prevents a different account", async () => {
+  vi.mocked(loadFireblocksVaultsAction).mockResolvedValue({
+    status: "success",
+    vaults: [
+      { id: "0", name: "Treasury", hasSolanaWallet: true },
+      { id: "7", name: "Operations", hasSolanaWallet: true },
+    ],
+    nextCursor: null,
+  });
+  const user = userEvent.setup();
+  renderPicker(false, "7");
+  await user.type(screen.getByLabelText("API user ID"), "api-user");
+  await user.click(screen.getByRole("button", { name: "Load vaults" }));
+  expect(await screen.findByRole("radio", { name: /Operations/ })).toHaveProperty("checked", true);
+  expect(screen.getByRole("radio", { name: /Treasury/ })).toHaveProperty("disabled", true);
+  expect(new FormData(screen.getByRole("form") as HTMLFormElement).get("vaultAccountId")).toBe("7");
   expect(ready).toHaveBeenLastCalledWith(true);
 });

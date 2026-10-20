@@ -1,3 +1,5 @@
+import { FIREBLOCKS_ADDRESS_STATUSES, type FireblocksAddressStatus } from "@sdp/types/fireblocks";
+import { z } from "zod";
 import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl } from "./common";
 import { fireblocksRequest } from "./fireblocks-http";
@@ -10,10 +12,25 @@ export interface FireblocksAddressEntry {
   name: string;
   assetId: string;
   address: string;
-  status: string;
+  status: FireblocksAddressStatus;
   activationTime: string | null;
 }
-const STATUSES = new Set(["WAITING_FOR_APPROVAL", "APPROVED", "CANCELLED", "REJECTED", "FAILED"]);
+const bookSchema = z
+  .array(
+    z.object({
+      id: z.string().min(1),
+      name: z.string(),
+      assets: z.array(
+        z.object({
+          id: z.string(),
+          address: z.string(),
+          status: z.enum(FIREBLOCKS_ADDRESS_STATUSES),
+          activationTime: z.string().nullish(),
+        })
+      ),
+    })
+  )
+  .max(10_000);
 const books = new Map<
   string,
   { expires: number; pending: boolean; entries: Promise<FireblocksAddressEntry[]> }
@@ -37,38 +54,19 @@ function parseBook(
   value: unknown,
   walletType: FireblocksAddressEntry["walletType"]
 ): FireblocksAddressEntry[] {
-  if (!Array.isArray(value) || value.length > 10_000) return invalid();
-  return value.flatMap((wallet) => {
-    if (
-      !wallet ||
-      typeof wallet.id !== "string" ||
-      !wallet.id ||
-      typeof wallet.name !== "string" ||
-      !Array.isArray(wallet.assets)
-    )
-      return invalid();
-    return wallet.assets.map((asset: Record<string, unknown>) => {
-      if (
-        !asset ||
-        typeof asset.id !== "string" ||
-        typeof asset.address !== "string" ||
-        typeof asset.status !== "string" ||
-        !STATUSES.has(asset.status)
-      )
-        return invalid();
-      if (asset.activationTime != null && typeof asset.activationTime !== "string")
-        return invalid();
-      return {
-        walletId: wallet.id,
-        walletType,
-        name: wallet.name.slice(0, 200),
-        assetId: asset.id,
-        address: asset.address,
-        status: asset.status,
-        activationTime: asset.activationTime ?? null,
-      };
-    });
-  });
+  const parsed = bookSchema.safeParse(value);
+  if (!parsed.success) return invalid();
+  return parsed.data.flatMap((wallet) =>
+    wallet.assets.map((asset) => ({
+      walletId: wallet.id,
+      walletType,
+      name: wallet.name.slice(0, 200),
+      assetId: asset.id,
+      address: asset.address,
+      status: asset.status,
+      activationTime: asset.activationTime ?? null,
+    }))
+  );
 }
 /** Two independent reads, shared across concurrent checks; failed reads are never cached. */
 export async function readFireblocksAddressBook(

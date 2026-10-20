@@ -658,8 +658,10 @@ function mapSafeCredential(target: InstallationConnectionState): SafeProviderCre
     status: target.credential_status,
     createdAt: target.credential_created_at,
     displayMetadata: {
-      ...(appIdSuffix ? { appIdSuffix } : {}),
-      ...(typeof metadata.apiKeySuffix === "string" ? { apiKeySuffix: metadata.apiKeySuffix } : {}),
+      appIdSuffix,
+      apiKeySuffix: typeof metadata.apiKeySuffix === "string" ? metadata.apiKeySuffix : undefined,
+      primaryVaultId:
+        typeof metadata.primaryVaultId === "string" ? metadata.primaryVaultId : undefined,
     },
   };
 }

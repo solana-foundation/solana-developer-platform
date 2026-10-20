@@ -42,6 +42,7 @@ export function RotateCredentialsModal({
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
   // Keep the attempt outside Modal's children, which unmount while it is hidden.
+  const [childPending, setChildPending] = useState(false);
   const [fireblocksReady, setFireblocksReady] = useState(false);
   const [csrAttempt, setCsrAttempt] = useState(0);
   const [appId, setAppId] = useState("");
@@ -51,11 +52,14 @@ export function RotateCredentialsModal({
 
   const connectionCount = lifecycle.impact.connections.length;
   const fieldsDisabled = pending || attempt !== null || !canRotate;
-  const handleClose = () => onClose(attempt !== null);
+  const inFlight = pending || childPending;
+  const handleClose = () => {
+    if (!inFlight) onClose(attempt !== null);
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending || (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady))))
+    if (inFlight || (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady))))
       return;
     // Keep fields, key and target together: a refresh may replace the current
     // credential while the original request's response is still unknown.
@@ -97,8 +101,8 @@ export function RotateCredentialsModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={pending ? undefined : handleClose}
-      closeDisabled={pending}
+      onClose={inFlight ? undefined : handleClose}
+      closeDisabled={inFlight}
       size="lg"
       ariaLabel={t("DashboardCustody.rotateTitle")}
     >
@@ -116,6 +120,8 @@ export function RotateCredentialsModal({
             multiple={false}
             key={csrAttempt}
             onReadyChange={setFireblocksReady}
+            onPendingChange={setChildPending}
+            primaryVaultId={lifecycle.providerCredential.displayMetadata.primaryVaultId}
             disabled={fieldsDisabled}
           />
         ) : (
@@ -146,13 +152,13 @@ export function RotateCredentialsModal({
         )}
 
         <div className="flex items-center justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={handleClose} disabled={pending}>
+          <Button type="button" variant="secondary" onClick={handleClose} disabled={inFlight}>
             {t(attempt ? "DashboardCustody.close" : "DashboardCustody.cancel")}
           </Button>
           <Button
             type="submit"
             disabled={
-              pending ||
+              inFlight ||
               (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady)))
             }
             iconLeft={

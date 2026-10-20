@@ -590,6 +590,7 @@ export class CustodyRuntimeTargets {
         provisioned = await provisionFireblocksVaultAccount(this.env, {
           orgId: target.organizationId,
           orgSlug: target.projectId,
+          idempotencyKey: params.idempotency?.requestId,
           apiKey: authentication.apiKey,
           apiSecretPem: authentication.apiSecretPem,
           assetId: authentication.assetId,

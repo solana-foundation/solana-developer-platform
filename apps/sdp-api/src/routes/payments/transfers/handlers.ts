@@ -925,6 +925,36 @@ function compareTransferRows(
   return createdAtComparison || right.id.localeCompare(left.id);
 }
 
+async function executeFireblocksTransfer(
+  c: AppContext,
+  transfer: TransferRow,
+  fireblocks: NonNullable<Awaited<ReturnType<typeof prepareFireblocksTransfer>>>,
+  auditService: AuditService,
+  auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>
+) {
+  // Once claimed, an ambiguous provider response must never enter the local
+  // transaction failure/rebroadcast path. The durable provider intent owns recovery.
+  let updated: TransferRow;
+  try {
+    updated = await submitFireblocksTransfer(c.env, getPaymentsRepository(c), transfer, fireblocks);
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { status: "failed" },
+    });
+    throw error;
+  }
+  if (updated.provider_reference || updated.status === "failed") {
+    await auditService.completeCritical(c, auditIntent, {
+      status: updated.status === "failed" ? "failure" : "success",
+      metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
+    });
+  }
+  if (updated.status === "failed")
+    throw transactionFailed(updated.error ?? "Fireblocks refused the transfer");
+  return success(c, { transfer: mapTransferRow(updated) });
+}
+
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
@@ -1014,32 +1044,8 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
     });
     throw error;
   }
-  if (fireblocks) {
-    // Once claimed, an ambiguous provider response must never enter the local
-    // transaction failure/rebroadcast path. The durable provider intent owns recovery.
-    let updated: TransferRow;
-    try {
-      updated = await submitFireblocksTransfer(
-        c.env,
-        getPaymentsRepository(c),
-        transfer,
-        fireblocks
-      );
-    } catch (error) {
-      await auditService.completeCritical(c, auditIntent, {
-        status: "failure",
-        metadata: { status: "failed" },
-      });
-      throw error;
-    }
-    if (updated.provider_reference || updated.status === "failed") {
-      await auditService.completeCritical(c, auditIntent, {
-        status: updated.status === "failed" ? "failure" : "success",
-        metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
-      });
-    }
-    return success(c, { transfer: mapTransferRow(updated) });
-  }
+  if (fireblocks)
+    return executeFireblocksTransfer(c, transfer, fireblocks, auditService, auditIntent);
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(

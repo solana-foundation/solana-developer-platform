@@ -60,7 +60,7 @@ function request(
         "Content-Type": "application/json",
         "Idempotency-Key": key,
       },
-      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+      body: payload === undefined ? undefined : JSON.stringify(payload),
     },
     testEnv
   );
@@ -230,7 +230,7 @@ async function bookRequest(method = "GET", overrides = {}, projectId = PROJECT_I
         "X-Project-ID": projectId,
         "Content-Type": "application/json",
       },
-      ...(method === "POST" ? { body: JSON.stringify(input) } : {}),
+      body: method === "POST" ? JSON.stringify(input) : undefined,
     },
     testEnv
   );
@@ -283,7 +283,7 @@ describe("Fireblocks read-only address book", () => {
     expect((await bookRequest("GET", {}, `${PROJECT_ID}_production`)).status).toBe(404);
     expect(calls).toHaveLength(0);
   });
-  it("allows a read-only SDP key to check the book", async () => {
+  it("rejects API keys on the internal dashboard book endpoint", async () => {
     await ready();
     const raw = `sk_test_${crypto.randomUUID().replaceAll("-", "")}`;
     await seedProjectApiKey(getDb(env), testEnv, {
@@ -294,8 +294,8 @@ describe("Fireblocks read-only address book", () => {
       grants: ["wallets.read", "counterparties.read"],
     });
     token = raw;
-    expect((await bookRequest()).status).toBe(200);
-    expect(calls.every((call) => call.method === "GET")).toBe(true);
+    expect((await bookRequest()).status).toBe(403);
+    expect(calls).toEqual([]);
   });
   it("removes the whitelist endpoint even for an administrator", async () => {
     await ready();
@@ -314,92 +314,6 @@ describe("Fireblocks read-only address book", () => {
     );
     expect(response.status).toBe(200);
     expect((await response.json()).data.counterparties).toHaveLength(1);
-    expect(calls).toEqual([]);
-  });
-});
-
-function policyProvider() {
-  const fallback = vi.mocked(fetch).getMockImplementation();
-  if (!fallback) throw new Error("Provider fixture is not initialized");
-  const state = { rules: [] as Record<string, unknown>[], denied: false, calls: 0 };
-  vi.mocked(fetch).mockImplementation(async (url, init) => {
-    const parsed = new URL(String(url));
-    if (parsed.pathname !== "/v1/policy/active_policy") return fallback(url, init);
-    expect(init?.method).toBe("GET");
-    expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
-    expect(parsed.searchParams.get("policyType")).toBe("TRANSFER");
-    state.calls++;
-    if (state.denied) return Response.json({ message: "Private error" }, { status: 403 });
-    return Response.json({
-      policy: { rules: state.rules, metadata: {} },
-      validation: { status: "SUCCESS", checkResult: { errors: 0, results: [] } },
-    });
-  });
-  return state;
-}
-function policyRequest(path = "", payload?: unknown, projectId = PROJECT_ID) {
-  return api.request(
-    `/internal/dashboard/fireblocks/policy${path}${payload === undefined ? `?${new URLSearchParams({ ...selection(), amount: "0.01" })}` : ""}`,
-    {
-      method: payload === undefined ? "GET" : "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Project-ID": projectId,
-        "Content-Type": "application/json",
-      },
-      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
-    },
-    testEnv
-  );
-}
-describe("Fireblocks read-only policy check", () => {
-  it("keeps a denied read distinct from a missing policy and enforces project scope", async () => {
-    await ready();
-    const provider = policyProvider();
-    provider.denied = true;
-    expect((await (await policyRequest()).json()).data).toEqual({ state: "permission_required" });
-    expect(calls).toEqual([]); // no address-book reads after policy permission denial
-    expect((await policyRequest("", undefined, `${PROJECT_ID}_production`)).status).toBe(404);
-    expect(provider.calls).toBe(1);
-  });
-  it.each(["missing", "covered", "blocked", "unknown"])(
-    "reports %s without writing",
-    async (state) => {
-      await ready();
-      const provider = policyProvider();
-      if (state !== "missing")
-        provider.rules = [
-          {
-            id: "rule",
-            name: "Treasury SOL",
-            type: "TRANSFER",
-            policyEngineVersion: "v2",
-            initiator: { operator: "INCLUDES", users: [fields.apiKey] },
-            source: { operator: "INCLUDES", ids: [{ type: "VAULT", id: "0" }] },
-            destination: {
-              operator: "INCLUDES",
-              addressType: "ONE_TIME",
-              type: ["ONE_TIME_ADDRESS"],
-            },
-            asset: { nftTransfer: false, assetTypes: ["SOL_TEST"] },
-            amount: { currency: "USD", range: { min: "0" } },
-            verdict: { action: state === "blocked" ? "BLOCK" : "2-TIER" },
-            ...(state === "unknown" ? { amountOverTime: { period: "DAY" } } : {}),
-          },
-        ];
-      expect((await (await policyRequest()).json()).data.state).toBe(state);
-      expect(provider.calls).toBe(1);
-      expect(calls).toHaveLength(2);
-      expect(calls.every((c) => c.method === "GET")).toBe(true);
-    }
-  );
-  it("has no policy setup, draft or publish endpoints even for an administrator", async () => {
-    await ready();
-    const provider = policyProvider();
-    expect((await policyRequest("/setup")).status).toBe(404);
-    expect((await policyRequest("/draft", { selection: selection() })).status).toBe(404);
-    expect((await policyRequest("/publish", { proposalId: "old-proposal" })).status).toBe(404);
-    expect(provider.calls).toBe(0);
     expect(calls).toEqual([]);
   });
 });

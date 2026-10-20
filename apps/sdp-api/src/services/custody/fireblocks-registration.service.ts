@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
 import {
   type ByokCustodyProvider,
@@ -66,7 +65,7 @@ export async function getPendingFireblocksCsr(c: AppContext): Promise<Fireblocks
   const scope = await admitFireblocksRegistration(c);
   const row = await getDb(c.env).queryOne<CsrRow>(
     `SELECT id, csr_pem, expires_at FROM fireblocks_csr_requests
-     WHERE organization_id = ? AND project_id = ? AND encrypted_private_key IS NOT NULL
+     WHERE organization_id = ? AND project_id = ? AND status = 'active' AND encrypted_private_key IS NOT NULL
        AND claim_fingerprint IS NULL AND expires_at > sdp_iso_now()
      ORDER BY created_at DESC LIMIT 1`,
     [scope.organizationId, scope.projectId]
@@ -122,7 +121,7 @@ export async function createFireblocksCsr(
     if (replay) return replay;
     const pending = await tx.queryOne<{ count: string }>(
       `SELECT count(*)::text AS count FROM fireblocks_csr_requests
-       WHERE organization_id = ? AND project_id = ? AND encrypted_private_key IS NOT NULL
+       WHERE organization_id = ? AND project_id = ? AND status = 'active' AND encrypted_private_key IS NOT NULL
          AND expires_at > sdp_iso_now()`,
       [scope.organizationId, scope.projectId]
     );
@@ -159,17 +158,15 @@ export async function resolveRegistrationPayload(
   const parsed = fireblocksRegistrationSchema.safeParse(fields);
   if (!parsed.success) throw badRequest("Use a generated Fireblocks CSR to register an API user");
   const input = parsed.data;
-  const fingerprint = createHash("sha256")
-    .update(
-      JSON.stringify([
-        c.req.path,
-        idempotencyKey,
-        input.signingKeyId,
-        input.apiKey,
-        input.vaultAccountId,
-      ])
-    )
-    .digest("hex");
+  // These are public identifiers, not a password. Store their canonical identity
+  // directly: exact replay equality needs neither a password hash nor a digest.
+  const fingerprint = JSON.stringify([
+    c.req.path,
+    idempotencyKey,
+    input.signingKeyId,
+    input.apiKey,
+    input.vaultAccountId,
+  ]);
   let cache = requestPayloads.get(c);
   if (!cache) {
     cache = new Map();
@@ -182,7 +179,7 @@ export async function resolveRegistrationPayload(
     const row = await getDb(c.env).queryOne<CsrRow>(
       `UPDATE fireblocks_csr_requests SET claim_fingerprint = ?
        WHERE id = ? AND organization_id = ? AND project_id = ?
-         AND encrypted_private_key IS NOT NULL AND expires_at > sdp_iso_now()
+         AND status = 'active' AND encrypted_private_key IS NOT NULL AND expires_at > sdp_iso_now()
          AND (claim_fingerprint IS NULL OR claim_fingerprint = ?)
        RETURNING id, csr_pem, expires_at, encrypted_private_key, claim_fingerprint`,
       [fingerprint, input.signingKeyId, scope.organizationId, scope.projectId, fingerprint]
@@ -221,7 +218,7 @@ export async function retireFireblocksCsr(
     return;
   const auth = getAuth(c);
   await getDb(c.env).execute(
-    `UPDATE fireblocks_csr_requests SET encrypted_private_key = NULL, consumed_at = sdp_iso_now()
+    `UPDATE fireblocks_csr_requests SET status = 'archived', encrypted_private_key = NULL, consumed_at = sdp_iso_now()
      WHERE id = ? AND organization_id = ? AND project_id = ?
        AND EXISTS (SELECT 1 FROM provider_credentials WHERE id = ? AND organization_id = ?
          AND (encrypted_secret_payload IS NOT NULL OR secret_version_ref IS NOT NULL))`,
@@ -237,7 +234,7 @@ export async function retireFireblocksCsr(
 
 /** Called by the existing secret-retirement worker; bounded and idempotent. */
 export async function eraseExpiredFireblocksCsrs(db: DatabaseClient): Promise<void> {
-  await db.execute(`UPDATE fireblocks_csr_requests SET encrypted_private_key = NULL
+  await db.execute(`UPDATE fireblocks_csr_requests SET status = 'archived', encrypted_private_key = NULL
     WHERE id IN (SELECT id FROM fireblocks_csr_requests
       WHERE encrypted_private_key IS NOT NULL AND expires_at <= sdp_iso_now()
       ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
@@ -258,7 +255,7 @@ export async function discoverFireblocksVaults(
   const row = await getDb(c.env).queryOne<CsrRow>(
     `SELECT id, encrypted_private_key FROM fireblocks_csr_requests
      WHERE id = ? AND organization_id = ? AND project_id = ?
-       AND encrypted_private_key IS NOT NULL AND claim_fingerprint IS NULL
+       AND status = 'active' AND encrypted_private_key IS NOT NULL AND claim_fingerprint IS NULL
        AND expires_at > sdp_iso_now()`,
     [input.signingKeyId, scope.organizationId, scope.projectId]
   );

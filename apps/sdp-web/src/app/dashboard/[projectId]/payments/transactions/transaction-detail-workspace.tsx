@@ -502,14 +502,14 @@ function TransactionRecord({
         }
       : initialTransaction;
   const router = useRouter();
-  const waitingForFireblocks = Boolean(transfer?.fireblocks && transfer.status === "processing");
+  const waitingForPayment = transaction.module === "payments" && transaction.status === "pending";
   useEffect(() => {
-    if (!waitingForFireblocks) return;
+    if (!waitingForPayment) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") router.refresh();
     }, 15_000);
     return () => clearInterval(timer);
-  }, [waitingForFireblocks, router]);
+  }, [waitingForPayment, router]);
   const summary = useTransactionSummary(
     transaction,
     transfer,

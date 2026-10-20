@@ -266,7 +266,6 @@ exports[`route actions > pins each route's action 1`] = `
   "wallets.manage PATCH /v1/wallets/:walletId",
   "wallets.manage POST /v1/wallets",
   "wallets.read GET /internal/dashboard/fireblocks/destination",
-  "wallets.read GET /internal/dashboard/fireblocks/policy",
   "wallets.read GET /v1/payments/wallets/:walletId/balances",
   "wallets.read GET /v1/wallets",
   "wallets.read GET /v1/wallets/:walletId",

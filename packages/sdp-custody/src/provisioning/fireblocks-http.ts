@@ -47,16 +47,17 @@ export async function fireblocksRequest<T>(
     bodyStr
   );
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "X-API-Key": params.apiKey,
+  };
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  if (params.body) headers["Content-Type"] = "application/json";
   const response = await runtime.fetch(`${params.apiBaseUrl}${params.uri}`, {
     method: params.method,
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "X-API-Key": params.apiKey,
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-      ...(params.body ? { "Content-Type": "application/json" } : {}),
-    },
+    headers,
     body: params.body ? bodyStr : undefined,
   });
 

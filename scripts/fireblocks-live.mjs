@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Opt-in live tests through SDP. No Fireblocks private key is exported or accepted here.
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, scryptSync } from "node:crypto";
 import { link, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -29,12 +29,20 @@ export function validateConfig(config) {
   assert(!rpc.username && !rpc.password && !rpc.hash, "Invalid RPC URL");
   for (const key of ["projectId", "custodyWalletId"]) {
     assert.equal(typeof config[key], "string", `${key} is required`);
-    assert(config[key].length > 0, `${key} is required`);
+    assert(/^[a-zA-Z0-9_-]{1,128}$/.test(config[key]), `Invalid ${key}`);
   }
   if (config.feePayer !== undefined)
     assert(ADDRESS.test(config.feePayer), "Invalid fee payer address");
   assert.equal(config.network, "mainnet-beta", "This runner is explicitly for mainnet-beta");
-  return { ...config, baseUrl: base.origin };
+  return {
+    baseUrl: base.origin,
+    rpcUrl: rpc.href,
+    projectId: config.projectId,
+    custodyWalletId: config.custodyWalletId,
+    network: "mainnet-beta",
+    feePayer: config.feePayer,
+    payment: config.payment,
+  };
 }
 
 function paymentBody(config) {
@@ -60,16 +68,24 @@ function paymentBody(config) {
     destination: payment.destination,
     token: payment.token,
     amount: payment.amount,
-    ...(payment.memo === undefined ? {} : { memo: payment.memo }),
+    memo: payment.memo,
   };
 }
 
 /** Persist intent BEFORE the first request. Retries never choose a fresh payment key. */
-export async function paymentAttempt(path, intent) {
+export async function paymentAttempt(path, intent, apiKey) {
+  assert(
+    typeof apiKey === "string" && apiKey.startsWith("sk_"),
+    "A receipt must be bound to an SDP API key"
+  );
+  const apiKeyFingerprint = scryptSync(apiKey, "sdp-fireblocks-live-receipt-v1", 32).toString(
+    "hex"
+  );
   const fingerprint = createHash("sha256").update(JSON.stringify(intent)).digest("hex");
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const proposed = {
     fingerprint,
+    apiKeyFingerprint,
     idempotencyKey: randomUUID(),
     createdAt: new Date().toISOString(),
   };
@@ -93,8 +109,20 @@ export async function paymentAttempt(path, intent) {
       fingerprint,
       "This receipt belongs to a different payment. Review it; choose a new receipt path only for an intentional new payment."
     );
+    assert.equal(
+      existing.apiKeyFingerprint,
+      apiKeyFingerprint,
+      "This receipt belongs to a different SDP API key (or predates key binding). Do not resend. Inspect the original transfer in SDP and Fireblocks."
+    );
     assert.match(existing.idempotencyKey, /^[a-f0-9-]{36}$/);
-    return existing;
+    assert.equal(typeof existing.createdAt, "string");
+    assert(Number.isFinite(Date.parse(existing.createdAt)), "Invalid receipt creation date");
+    return {
+      fingerprint,
+      apiKeyFingerprint,
+      idempotencyKey: existing.idempotencyKey,
+      createdAt: existing.createdAt,
+    };
   } finally {
     await unlink(temporary);
   }
@@ -127,18 +155,19 @@ export async function runLive(rawConfig, mode, options = {}) {
     paymentBody(config);
   }
   const api = async (path, body, idempotencyKey) => {
+    const headers = {
+      Authorization: `Bearer ${apiKey}`,
+      "X-Project-ID": config.projectId,
+      "Content-Type": "application/json",
+    };
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     let response;
     try {
       response = await fetcher(`${config.baseUrl}${path}`, {
         method: body === undefined ? "GET" : "POST",
         redirect: "error",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "X-Project-ID": config.projectId,
-          "Content-Type": "application/json",
-          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(180_000),
       });
     } catch {
@@ -245,12 +274,16 @@ export async function runLive(rawConfig, mode, options = {}) {
     wallet.publicKey,
     "Choose a distinct recipient for the payment test"
   );
-  const attempt = await paymentAttempt(options.receiptPath, {
-    baseUrl: config.baseUrl,
-    projectId: config.projectId,
-    source: wallet.publicKey,
-    body,
-  });
+  const attempt = await paymentAttempt(
+    options.receiptPath,
+    {
+      baseUrl: config.baseUrl,
+      projectId: config.projectId,
+      source: wallet.publicKey,
+      body,
+    },
+    apiKey
+  );
   log(
     JSON.stringify({
       action: mode === "status" ? "read-payment-status" : "send-mainnet-payment",
@@ -262,7 +295,10 @@ export async function runLive(rawConfig, mode, options = {}) {
   let result;
   if (mode === "status") {
     const saved = JSON.parse(await readFile(`${options.receiptPath}.result.json`, "utf8"));
-    assert(typeof saved.transferId === "string", "Receipt is missing its transfer ID");
+    assert(
+      typeof saved.transferId === "string" && /^xfr_[a-zA-Z0-9_-]{1,100}$/.test(saved.transferId),
+      "Receipt has an invalid transfer ID"
+    );
     result = await api(`/v1/payments/transfers/${encodeURIComponent(saved.transferId)}`);
   } else {
     log(
@@ -282,10 +318,15 @@ export async function runLive(rawConfig, mode, options = {}) {
   assert.equal(transfer.destination, body.destination);
   assert.equal(transfer.amount, body.amount);
   assert.equal(transfer.token, body.token === "SOL" ? SOL_MINT : body.token);
-  // Store only identifiers and outcome, never wire transaction bytes or credentials.
+  assert(
+    typeof transfer.id === "string" && /^xfr_[a-zA-Z0-9_-]{1,100}$/.test(transfer.id),
+    "Invalid transfer ID in SDP response"
+  );
+  // The local receipt only needs this validated identifier for status recovery.
+  // Do not persist arbitrary response fields, provider metadata or credentials.
   await writeFile(
     `${options.receiptPath}.result.json`,
-    `${JSON.stringify({ transferId: transfer.id, signature: transfer.signature, status: transfer.status, fireblocks: transfer.fireblocks }, null, 2)}\n`,
+    `${JSON.stringify({ transferId: transfer.id }, null, 2)}\n`,
     { mode: 0o600 }
   );
   if (transfer.status === "processing") {

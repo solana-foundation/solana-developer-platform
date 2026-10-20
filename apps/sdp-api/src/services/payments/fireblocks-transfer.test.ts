@@ -62,7 +62,7 @@ function request(
         "Content-Type": "application/json",
         "Idempotency-Key": key,
       },
-      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+      body: payload === undefined ? undefined : JSON.stringify(payload),
     },
     testEnv
   );
@@ -188,6 +188,7 @@ async function ready(projectId = PROJECT_ID) {
         },
       ]);
     if (path === "/v1/transactions" && init?.method === "POST") {
+      expect(new Headers(init.headers).has("Idempotency-Key")).toBe(false);
       createBody = JSON.parse(String(init.body));
       if (lostResponse) throw new Error("Timeout after provider accepted payment");
       if (createStatus !== 200)
@@ -406,19 +407,106 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(other.status).toBe(404);
     expect(mock).toHaveBeenCalledTimes(1);
   });
-  it("returns a recorded failure for a definitive rejection and keeps server failures pending", async () => {
+  it.each([400, 401, 403, 422, 429])(
+    "returns and replays TRANSACTION_FAILED for HTTP %s",
+    async (status) => {
+      const mock = await ready();
+      createStatus = status;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await send();
+        expect(response.status).toBe(400);
+        const body = await response.json();
+        expect(body.error.code).toBe("TRANSACTION_FAILED");
+        expect(body.error.message).not.toContain("secret must not be echoed");
+      }
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    }
+  );
+  it.each(["REJECTED", "BLOCKED"])(
+    "returns an error for an immediate %s result",
+    async (status) => {
+      await ready();
+      providerStatus = status;
+      const response = await send();
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("TRANSACTION_FAILED");
+    }
+  );
+  it("keeps server failures pending and does not resubmit", async () => {
     const mock = await ready();
-    createStatus = 403;
-    const response = await send();
-    expect(response.status).toBe(200);
-    const failed = (await response.json()).data.transfer;
-    expect(failed.status).toBe("failed");
-    expect(failed.error).not.toContain("secret must not be echoed");
     createStatus = 503;
-    const uncertain = await send("second");
-    expect(uncertain.status).toBe(200);
-    expect((await uncertain.json()).data.transfer.status).toBe("processing");
-    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await send();
+      expect(response.status).toBe(200);
+      expect((await response.json()).data.transfer.status).toBe("processing");
+    }
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+  it("fails an unacknowledged intent only after authenticated 404s separated by 24 hours", async () => {
+    const mock = await ready();
+    lostResponse = true;
+    readMissing = true;
+    const response = await send();
+    const id = (await response.json()).data.transfer.id;
+    expect(await refresh(id)).toMatchObject({ status: "processing" });
+    await getDb(env).execute(
+      "UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb WHERE id = ?",
+      [
+        JSON.stringify({
+          fireblocksFirstMissingAt: new Date(Date.now() - 86_400_001).toISOString(),
+        }),
+        id,
+      ]
+    );
+    expect(await refresh(id)).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("24 hours"),
+    });
+    expect((await (await send()).json()).data.transfer.id).toBe(id);
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+  it("never fails an acknowledged transfer because a lookup returns 404", async () => {
+    await ready();
+    const response = await send();
+    const id = (await response.json()).data.transfer.id;
+    readMissing = true;
+    await getDb(env).execute(
+      "UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb WHERE id = ?",
+      [
+        JSON.stringify({
+          fireblocksFirstMissingAt: new Date(Date.now() - 86_400_001).toISOString(),
+        }),
+        id,
+      ]
+    );
+    expect(await refresh(id)).toMatchObject({ status: "processing" });
+  });
+  it("does not expire an intent acknowledged while the absence lookup is in flight", async () => {
+    const mock = await ready();
+    lostResponse = true;
+    const id = (await (await send()).json()).data.transfer.id;
+    await getDb(env).execute(
+      "UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb WHERE id = ?",
+      [
+        JSON.stringify({
+          fireblocksFirstMissingAt: new Date(Date.now() - 86_400_001).toISOString(),
+        }),
+        id,
+      ]
+    );
+    mock.mockImplementationOnce(async () => {
+      await getDb(env).execute(
+        "UPDATE payment_transfers SET provider_reference = 'fb-proposal' WHERE id = ?",
+        [id]
+      );
+      return Response.json({}, { status: 404 });
+    });
+    expect(await refresh(id)).toMatchObject({ status: "processing" });
+    const row = await getDb(env).queryOne<{ provider_reference: string; error: string | null }>(
+      "SELECT provider_reference, error FROM payment_transfers WHERE id = ?",
+      [id]
+    );
+    expect(row).toEqual({ provider_reference: "fb-proposal", error: null });
   });
   it("joins concurrent sends under one intent and throttles concurrent status reads", async () => {
     const mock = await ready();

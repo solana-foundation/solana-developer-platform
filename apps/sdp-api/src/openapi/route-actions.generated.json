@@ -20,7 +20,6 @@
   "GET /internal/dashboard/custody/fireblocks/csr": "wallets.configure",
   "GET /internal/dashboard/custody/providers": "wallets.configure",
   "GET /internal/dashboard/fireblocks/destination": "wallets.read",
-  "GET /internal/dashboard/fireblocks/policy": "wallets.read",
   "GET /internal/dashboard/helius-rings/connections": "helius_rings.configure",
   "GET /v1/api-keys": "api_keys.read",
   "GET /v1/api-keys/:_": "api_keys.read",

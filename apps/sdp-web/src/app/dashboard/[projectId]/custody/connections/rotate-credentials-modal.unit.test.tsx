@@ -2,28 +2,12 @@
 
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as csrActions from "@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { setPageRequest } from "@/test/request-project";
-
-vi.mock("@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () => ({
-  loadFireblocksCsrAction: vi.fn(async () => ({
-    status: "success",
-    csr: {
-      id: "fbcsr_11111111-1111-4111-8111-111111111111",
-      csrPem: "public-csr",
-      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-    },
-  })),
-  generateFireblocksCsrAction: vi.fn(),
-  loadFireblocksVaultsAction: vi.fn(async () => ({
-    status: "success",
-    vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
-    nextCursor: null,
-  })),
-}));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
@@ -36,6 +20,22 @@ import { ConnectionCredentialsSection } from "./connection-credentials-section";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
 import { RotateCredentialsModal } from "./rotate-credentials-modal";
 
+beforeEach(() => {
+  vi.spyOn(csrActions, "loadFireblocksCsrAction").mockResolvedValue({
+    status: "success",
+    csr: {
+      id: "fbcsr_11111111-1111-4111-8111-111111111111",
+      csrPem: "public-csr",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    },
+  });
+  vi.spyOn(csrActions, "generateFireblocksCsrAction");
+  vi.spyOn(csrActions, "loadFireblocksVaultsAction").mockResolvedValue({
+    status: "success",
+    vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
+    nextCursor: null,
+  });
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

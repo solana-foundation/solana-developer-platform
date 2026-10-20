@@ -1209,10 +1209,8 @@ export class ProviderCredentialStore {
         params.providerCredentialScopeKey,
         params.requestDelayMs ?? null,
         JSON.stringify({
-          ...(params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}),
-          ...(params.pendingFireblocksVaultIds
-            ? { pendingFireblocksVaultIds: params.pendingFireblocksVaultIds }
-            : {}),
+          pendingWalletLabel: params.pendingWalletLabel || undefined,
+          pendingFireblocksVaultIds: params.pendingFireblocksVaultIds,
         }),
         params.createdBy,
       ]
@@ -1277,10 +1275,8 @@ export class ProviderCredentialStore {
         params.providerCredentialScopeKey,
         params.requestDelayMs ?? null,
         JSON.stringify({
-          ...(params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}),
-          ...(params.pendingFireblocksVaultIds
-            ? { pendingFireblocksVaultIds: params.pendingFireblocksVaultIds }
-            : {}),
+          pendingWalletLabel: params.pendingWalletLabel || undefined,
+          pendingFireblocksVaultIds: params.pendingFireblocksVaultIds,
         }),
         params.id,
         params.expectedProviderCredentialId,

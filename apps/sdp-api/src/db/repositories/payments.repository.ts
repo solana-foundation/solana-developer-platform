@@ -110,6 +110,8 @@ export interface UpdatePaymentTransferInput {
   /** Timeout CAS: only an unsigned row with no submission start may match. */
   requireUnsigned?: true;
   expectedStatus?: PaymentTransferStatus;
+  /** Guard a missing-provider verdict against a concurrent acknowledgement. */
+  expectedProviderReference?: string | null;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;

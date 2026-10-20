@@ -8,6 +8,7 @@ import {
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
+import { isFireblocksTransactionFailed } from "@sdp/types/fireblocks";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { assertIsSignature } from "@solana/kit";
 import { z } from "zod";
@@ -16,6 +17,7 @@ import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/p
 import { badRequest, conflict } from "@/lib/errors";
 import { assertMoneyStartAdmitted, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
+import { describeError } from "@/runtime/money-path-events";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
   isNativePaymentToken,
@@ -104,7 +106,6 @@ export async function prepareFireblocksTransfer(
   };
 }
 
-const failed = new Set(["FAILED", "REJECTED", "CANCELLED", "CANCELED", "BLOCKED"]);
 function providerFailure(result: FireblocksTransferResult): string {
   const subStatus =
     result.subStatus && /^[A-Z0-9_]{1,100}$/.test(result.subStatus) ? ` (${result.subStatus})` : "";
@@ -170,7 +171,11 @@ async function persistResult(
       /* An unavailable fee must not prevent recording a confirmed payment. */
     }
   }
-  const status = failed.has(result.status) ? "failed" : completed ? "confirmed" : "processing";
+  const status = isFireblocksTransactionFailed(result.status)
+    ? "failed"
+    : completed
+      ? "confirmed"
+      : "processing";
   return (
     (await repo.updateTransfer({
       transferId: row.id,
@@ -250,13 +255,14 @@ export async function submitFireblocksTransfer(
         expectedStatus: "processing",
         status: "failed",
         error: error.message,
+        providerData: { executionFailure: { code: error.code } },
         updatedAt: new Date().toISOString(),
       });
       throw error;
     }
     // A timeout, duplicate-ID conflict, invalid response, or DB failure may follow acceptance.
     // Keep the claim and recover by externalTxId; never turn uncertainty into permission to resend.
-    if (error instanceof FireblocksApiError && [400, 401, 403, 422].includes(error.status)) {
+    if (error instanceof FireblocksApiError && [400, 401, 403, 422, 429].includes(error.status)) {
       return (
         (await repo.updateTransfer({
           transferId: row.id,
@@ -269,9 +275,52 @@ export async function submitFireblocksTransfer(
         })) ?? currentRow(repo, row)
       );
     }
-    getLogger().warn({ transferId: row.id }, "fireblocks_transfer_submission_outcome_unknown");
+    getLogger().warn(
+      { transferId: row.id, ...describeError(error) },
+      "fireblocks_transfer_submission_outcome_unknown"
+    );
     return currentRow(repo, claimed);
   }
+}
+
+const MISSING_TRANSACTION_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** A known provider transaction can never be failed from an unavailable lookup. */
+async function recordMissingTransaction(
+  repo: PaymentsRepository,
+  row: PaymentTransferRow,
+  now: number
+) {
+  if (row.provider_reference) {
+    getLogger().error(
+      { transferId: row.id, fireblocksTransactionId: row.provider_reference },
+      "fireblocks_known_transaction_missing"
+    );
+    return row;
+  }
+  const firstMissing = row.provider_data.fireblocksFirstMissingAt;
+  const elapsed = typeof firstMissing === "string" ? now - Date.parse(firstMissing) : 0;
+  // Two authenticated 404s separated by at least 24h, bound to the same
+  // account, establish that the unacknowledged intent is still absent.
+  const absent = elapsed >= MISSING_TRANSACTION_WINDOW_MS;
+  if (absent) getLogger().warn({ transferId: row.id }, "fireblocks_unaccepted_transfer_expired");
+  return (
+    (await repo.updateTransfer({
+      transferId: row.id,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      expectedStatus: "processing",
+      status: absent ? "failed" : "processing",
+      expectedProviderReference: null,
+      providerData: {
+        fireblocksFirstMissingAt:
+          typeof firstMissing === "string" ? firstMissing : new Date(now).toISOString(),
+      },
+      error: absent
+        ? "Fireblocks still has no transaction for this payment after 24 hours of recovery. Review the payment in Fireblocks before intentionally starting a new transfer."
+        : null,
+      updatedAt: new Date(now).toISOString(),
+    })) ?? currentRow(repo, row)
+  );
 }
 
 /** Dashboard and cron reconciliation. Neither path can POST or automatically resubmit. */
@@ -317,9 +366,14 @@ export async function refreshFireblocksTransfer(
     )
       throw conflict("Fireblocks connection does not match the payment intent");
     const result = await readFireblocksTransfer(runtime, access, row.id);
-    return result ? await persistResult(repo, claimed, result, true) : claimed;
-  } catch {
-    getLogger().warn({ transferId: row.id }, "fireblocks_transfer_status_unavailable");
+    return result
+      ? await persistResult(repo, claimed, result, true)
+      : await recordMissingTransaction(repo, claimed, now);
+  } catch (error) {
+    getLogger().warn(
+      { transferId: row.id, ...describeError(error) },
+      "fireblocks_transfer_status_unavailable"
+    );
     return currentRow(repo, claimed);
   }
 }

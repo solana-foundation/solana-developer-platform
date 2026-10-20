@@ -9,7 +9,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { isFireblocksByokWallet } from "@/app/dashboard/[projectId]/payments/fireblocks-wallet";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import type { CreateTransferInput } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
@@ -36,7 +35,7 @@ import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import { useFireblocksDestination } from "./use-fireblocks-destination";
+import { useFireblocksPaymentAdvisory } from "./use-fireblocks-payment-advisory";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard.redesign";
 
@@ -337,13 +336,15 @@ export function useOnchainSendWizard({
   );
   const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance } =
     useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
-  useFireblocksDestination({
-    enabled:
-      isFireblocksByokWallet(selectedWallet) && !signingUnavailable && !submitting && !finished,
+  useFireblocksPaymentAdvisory({
+    wallet: selectedWallet,
+    signingUnavailable,
+    submitting,
+    finished,
     walletId: fields.walletId,
     counterpartyId,
-    accountId: selectedAccount?.id ?? "",
-    token: selectedAssetBalance?.mint ?? null,
+    account: selectedAccount,
+    balance: selectedAssetBalance,
     address: destinationAddress,
   });
 

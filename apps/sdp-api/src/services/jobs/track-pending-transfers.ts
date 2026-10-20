@@ -217,6 +217,11 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   const now = new Date();
   const nowIso = now.toISOString();
 
+  await recoverStuckProcessingTransfers(env, repo, now, nowIso);
+  await syncProcessingTransfersOnChain(env, repo, nowIso);
+  await finalizeConfirmedTransfers(repo, now, nowIso);
+  await failStrandedTransferBatches(env, now);
+
   // Human approvals have no five-minute signing timeout. This path only reads
   // the provider; a missing/ambiguous create response can never trigger a POST.
   const fireblocks = await repo.listTransfersByStatus({
@@ -228,11 +233,6 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   await mapSettledWithConcurrency(fireblocks, 5, (transfer) =>
     refreshFireblocksTransfer(env, repo, transfer)
   );
-
-  await recoverStuckProcessingTransfers(env, repo, now, nowIso);
-  await syncProcessingTransfersOnChain(env, repo, nowIso);
-  await finalizeConfirmedTransfers(repo, now, nowIso);
-  await failStrandedTransferBatches(env, now);
 }
 
 /** Past any request's lifetime (renewal cap plus lease), with room to spare. */

@@ -3,7 +3,6 @@
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
@@ -11,7 +10,6 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import {
   ArrowUpRightIcon,
-  ExternalLinkIcon,
   LandmarkIcon,
   PlusIcon,
   StickyNoteIcon,
@@ -29,11 +27,10 @@ import {
 import type { OnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard.redesign";
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
 import { FireblocksTransferPolicy } from "./fireblocks-transfer-policy";
+import { OnchainSendResult } from "./onchain-send-result";
 import { AmountFields, SourceWalletField } from "./payment-form-fields";
 
 /** Whether this project can send privately, for the "Send privately" row; null hides it. */
@@ -361,14 +358,6 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
         enabled={
           isFireblocksByokWallet(wizard.selectedWallet) && !wizard.submitting && !wizard.finished
         }
-        selection={{
-          walletId: wizard.fields.walletId,
-          counterpartyId: wizard.counterpartyId,
-          accountId: wizard.selectedAccount?.id ?? "",
-          token: wizard.selectedAssetBalance?.mint ?? "",
-          address: wizard.destinationAddress ?? "",
-          amount: wizard.fields.amount || "0",
-        }}
       />
     </div>
   );
@@ -432,9 +421,6 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 }
 
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
-  const t = useTranslations();
-  const href = useProjectHref();
-  const cluster = useSolanaCluster();
   const { transferResult } = wizard;
   const summary = (
     <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5 refresh:rounded-none refresh:bg-transparent refresh:p-0">
@@ -446,47 +432,7 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
   if (transferResult === null) {
     return summary;
   }
-  const signature = transferResult.signature;
-  return (
-    <div className="flex flex-col gap-6">
-      <p className="text-sm text-tertiary">
-        {transferResult.status === "failed"
-          ? transferResult.error
-          : transferResult.fireblocks && signature === null
-            ? t(
-                transferResult.fireblocks.transactionId
-                  ? "DashboardPayments.onchainSend.fireblocksPending"
-                  : "DashboardPayments.onchainSend.fireblocksUnknown"
-              )
-            : signature === null
-              ? t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })
-              : t("DashboardPayments.onchainSend.transferSuccess")}
-      </p>
-      {summary}
-      {transferResult.fireblocks ? (
-        <Button asChild variant="secondary">
-          <Link
-            href={href(`/dashboard/payments/transactions/${encodeURIComponent(transferResult.id)}`)}
-          >
-            {t("DashboardPayments.onchainSend.viewTransaction")}
-          </Link>
-        </Button>
-      ) : null}
-      {signature === null ? null : (
-        <Button
-          type="button"
-          variant="secondary"
-          className="w-full"
-          iconLeft={<ExternalLinkIcon />}
-          onClick={() =>
-            window.open(explorerTxUrl(signature, cluster), "_blank", "noopener,noreferrer")
-          }
-        >
-          {t("DashboardPayments.onchainSend.viewOnExplorer")}
-        </Button>
-      )}
-    </div>
-  );
+  return <OnchainSendResult transferResult={transferResult} summary={summary} />;
 }
 
 export function OnchainSendStepContent(props: StepProps) {

@@ -64,7 +64,7 @@ export interface SafeProviderCredential {
   projectId: string | null;
   status: ProviderCredentialRow["status"];
   createdAt: string;
-  displayMetadata: { appIdSuffix?: string; apiKeySuffix?: string };
+  displayMetadata: { appIdSuffix?: string; apiKeySuffix?: string; primaryVaultId?: string };
 }
 
 export interface ProviderCredentialSubmissionResult {
@@ -833,9 +833,7 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
       provider: params.input.provider,
       requestDelayMs: params.input.requestDelayMs,
       walletLabel: params.input.walletLabel,
-      ...(params.input.fireblocksVaultAccountIds
-        ? { fireblocksVaultAccountIds: params.input.fireblocksVaultAccountIds }
-        : {}),
+      fireblocksVaultAccountIds: params.input.fireblocksVaultAccountIds,
       fields: params.input.fields,
     })
   );
@@ -1035,10 +1033,13 @@ export function mapProviderCredential(row: ProviderCredentialRow): SafeProviderC
     status: row.status,
     createdAt: row.created_at,
     displayMetadata: {
-      ...(appIdSuffix ? { appIdSuffix } : {}),
-      ...(typeof storedMetadata.apiKeySuffix === "string"
-        ? { apiKeySuffix: storedMetadata.apiKeySuffix }
-        : {}),
+      appIdSuffix,
+      apiKeySuffix:
+        typeof storedMetadata.apiKeySuffix === "string" ? storedMetadata.apiKeySuffix : undefined,
+      primaryVaultId:
+        typeof storedMetadata.primaryVaultId === "string"
+          ? storedMetadata.primaryVaultId
+          : undefined,
     },
   };
 }

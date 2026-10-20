@@ -5,7 +5,7 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState, useTransition } from "react";
+import { type FormEvent, useCallback, useRef, useState, useTransition } from "react";
 import {
   type PrivyByokSubmitResult,
   recheckPrivyCredentialAction,
@@ -55,6 +55,7 @@ function CredentialFields({
   defaultLabel,
   onAppSecretChange,
   onFireblocksReadyChange,
+  onFireblocksPendingChange,
   fireblocksResetKey,
   t,
 }: {
@@ -63,6 +64,7 @@ function CredentialFields({
   defaultLabel: string;
   onAppSecretChange: (value: string) => void;
   onFireblocksReadyChange: (ready: boolean) => void;
+  onFireblocksPendingChange: (pending: boolean) => void;
   fireblocksResetKey: number;
   t: ReturnType<typeof useTranslations>;
 }) {
@@ -88,6 +90,7 @@ function CredentialFields({
         <FireblocksCredentialFields
           key={fireblocksResetKey}
           onReadyChange={onFireblocksReadyChange}
+          onPendingChange={onFireblocksPendingChange}
         />
       ) : (
         <>
@@ -197,11 +200,13 @@ function isRecoveryState(check: CheckState): check is RecoveryCheckState {
  * attempt rather than from an effect a render later.
  */
 function usePrivyCredentialSubmission({
+  canSubmit,
   onPendingChange,
   onRecoveryChange,
   onRecoveryLockChange,
   onSuccess,
 }: {
+  canSubmit: boolean;
   onPendingChange?: (pending: boolean) => void;
   onRecoveryChange?: (inRecovery: boolean) => void;
   onRecoveryLockChange?: (locked: boolean) => void;
@@ -296,7 +301,7 @@ function usePrivyCredentialSubmission({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
-    if (isPending || !form.reportValidity()) {
+    if (isPending || !canSubmit || !form.reportValidity()) {
       return;
     }
     const formData = new FormData(form);
@@ -522,6 +527,23 @@ export function ByokCredentialForm({
   onPendingChange?: (pending: boolean) => void;
 }) {
   const t = useTranslations();
+  const [fireblocksReady, setFireblocksReady] = useState(false);
+  const [childPending, setChildPending] = useState(false);
+  const ready = provider !== "fireblocks" || fireblocksReady;
+  const handleReady = useCallback(
+    (value: boolean) => {
+      setFireblocksReady(value);
+      onReadyChange?.(value);
+    },
+    [onReadyChange]
+  );
+  const handleChildPending = useCallback(
+    (value: boolean) => {
+      setChildPending(value);
+      onPendingChange?.(value);
+    },
+    [onPendingChange]
+  );
   const {
     appSecret,
     check,
@@ -532,17 +554,13 @@ export function ByokCredentialForm({
     isPending,
     setAppSecret,
   } = usePrivyCredentialSubmission({
+    canSubmit: ready && !childPending,
     onPendingChange,
     onRecoveryChange,
     onRecoveryLockChange,
     onSuccess,
   });
 
-  const [fireblocksReady, setFireblocksReady] = useState(false);
-  const ready = provider !== "fireblocks" || fireblocksReady;
-  useEffect(() => {
-    onReadyChange?.(ready);
-  }, [onReadyChange, ready]);
   const defaultLabel = resolveDefaultLabel(provider);
   if (defaultLabel === null) {
     return null;
@@ -561,28 +579,20 @@ export function ByokCredentialForm({
   }
 
   return (
-    <form
-      id={formId}
-      onSubmit={(event) => {
-        if (!ready) {
-          event.preventDefault();
-          return;
-        }
-        handleSubmit(event);
-      }}
-      className="grid gap-4"
-      data-privy-byok-form="true"
-    >
+    <form id={formId} onSubmit={handleSubmit} className="grid gap-4" data-privy-byok-form="true">
       <input type="hidden" name="provider" value={provider} />
-      <CredentialFields
-        provider={provider}
-        appSecret={appSecret}
-        defaultLabel={defaultLabel}
-        onAppSecretChange={setAppSecret}
-        onFireblocksReadyChange={setFireblocksReady}
-        fireblocksResetKey={credentialAttempt}
-        t={t}
-      />
+      <fieldset disabled={isPending} className="grid gap-4">
+        <CredentialFields
+          provider={provider}
+          appSecret={appSecret}
+          defaultLabel={defaultLabel}
+          onAppSecretChange={setAppSecret}
+          onFireblocksReadyChange={handleReady}
+          onFireblocksPendingChange={handleChildPending}
+          fireblocksResetKey={credentialAttempt}
+          t={t}
+        />
+      </fieldset>
 
       {check.kind === "failed" ? (
         <div
@@ -595,7 +605,7 @@ export function ByokCredentialForm({
 
       {showSubmitButton ? (
         <div>
-          <Button type="submit" disabled={isPending || !ready}>
+          <Button type="submit" disabled={isPending || childPending || !ready}>
             {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
           </Button>
         </div>

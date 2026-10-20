@@ -104,16 +104,6 @@
       "import": "./src/provisioning/fireblocks-http.ts",
       "default": "./src/provisioning/fireblocks-http.ts"
     },
-    "./provisioning/fireblocks-policy": {
-      "types": "./src/provisioning/fireblocks-policy.ts",
-      "import": "./src/provisioning/fireblocks-policy.ts",
-      "default": "./src/provisioning/fireblocks-policy.ts"
-    },
-    "./provisioning/fireblocks-policy-match": {
-      "types": "./src/provisioning/fireblocks-policy-match.ts",
-      "import": "./src/provisioning/fireblocks-policy-match.ts",
-      "default": "./src/provisioning/fireblocks-policy-match.ts"
-    },
     "./provisioning/fireblocks-transfers": {
       "types": "./src/provisioning/fireblocks-transfers.ts",
       "import": "./src/provisioning/fireblocks-transfers.ts",
@@ -147,7 +137,6 @@
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",
-    "@solana/fixed-points": "7.1.1",
     "@solana/keychain-cdp": "1.4.0",
     "@solana/keychain-core": "1.4.0",
     "@solana/keychain-fireblocks": "1.4.0",
@@ -157,6 +146,7 @@
     "@solana/keychain-utila": "1.4.0",
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
-    "jose": "6.2.12"
+    "jose": "6.2.12",
+    "zod": "4.6.5"
   }
 }

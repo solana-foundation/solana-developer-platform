@@ -303,6 +303,10 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   if (input.requireUnstarted) {
     clauses.push("submission_started_at IS NULL");
   }
+  if (input.expectedProviderReference !== undefined) {
+    clauses.push("provider_reference IS NOT DISTINCT FROM ?");
+    values.push(input.expectedProviderReference);
+  }
   // Ramp statuses move only through RAMP_TRANSFER_TRANSITIONS.
   if (input.status !== undefined) {
     clauses.push("type <> ALL(?)");

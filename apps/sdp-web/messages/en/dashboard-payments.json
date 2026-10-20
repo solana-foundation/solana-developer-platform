@@ -1601,7 +1601,8 @@
       "unknown": "SDP could not determine whether Fireblocks allows this payment. Review your transfer policy in Fireblocks.",
       "permissions": "Your Fireblocks API user cannot read policies. Check in Fireblocks that a transfer rule allows this payment.",
       "recheck": "Check again",
-      "openFireblocks": "Open Fireblocks"
+      "openFireblocks": "Open Fireblocks",
+      "configure": "Configure a Transfer policy in Fireblocks for this API user, source vault, destination and asset, with your approvers and a designated human signer. SDP cannot inspect policies using the recommended Editor role."
     },
     "fireblocksWarnings": {
       "suppress": "Don’t show again",

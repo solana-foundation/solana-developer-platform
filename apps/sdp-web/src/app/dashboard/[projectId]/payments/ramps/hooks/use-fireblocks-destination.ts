@@ -36,8 +36,6 @@ export function useFireblocksDestination({
   const projectId = useProjectId();
   const offered = useRef(new Set<string>());
   const { suppressed, suppress, canSuppress, scopeKey } = useFireblocksWarning("whitelist");
-  const suppressRef = useRef(suppress);
-  suppressRef.current = suppress;
   useEffect(() => {
     if (
       suppressed ||
@@ -76,19 +74,17 @@ export function useFireblocksDestination({
         duration: 15000,
         style: { flexWrap: "wrap" },
         classNames: { content: "!basis-full" },
-        ...(canSuppress
+        action: canSuppress
           ? {
-              action: {
-                label: t("DashboardPayments.fireblocksWarnings.suppress"),
-                onClick: () => {
-                  if (active && !suppressRef.current()) {
-                    toast.error(t("DashboardPayments.fireblocksWarnings.saveFailed"));
-                    offered.current.delete(key);
-                  }
-                },
+              label: t("DashboardPayments.fireblocksWarnings.suppress"),
+              onClick: () => {
+                if (active && !suppress()) {
+                  toast.error(t("DashboardPayments.fireblocksWarnings.saveFailed"));
+                  offered.current.delete(key);
+                }
               },
             }
-          : {}),
+          : undefined,
         cancel: {
           label: t("DashboardPayments.fireblocksWarnings.dismiss"),
           onClick: () => undefined,
@@ -111,6 +107,7 @@ export function useFireblocksDestination({
     projectId,
     t,
     suppressed,
+    suppress,
     canSuppress,
     scopeKey,
   ]);

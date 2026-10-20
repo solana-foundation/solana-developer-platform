@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl } from "./common";
 import { fireblocksRequest } from "./fireblocks-http";
@@ -19,24 +20,24 @@ interface VaultAccess {
   assetId: "SOL" | "SOL_TEST";
 }
 
-function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new SigningError("Invalid Fireblocks vault response", "PROVIDER_NOT_CONFIGURED");
-  return value as Record<string, unknown>;
-}
+const vaultSchema = z.object({
+  id: z.string().regex(/^\d{1,100}$/),
+  name: z.string(),
+  assets: z.array(z.object({ id: z.string() })),
+});
+const pageSchema = z.object({
+  accounts: z.array(vaultSchema).max(50),
+  paging: z.object({ after: z.string().max(512).nullish() }).nullish(),
+});
 function vault(value: unknown, assetId: string): FireblocksVault {
-  const item = record(value);
-  if (
-    typeof item.id !== "string" ||
-    !/^\d{1,100}$/.test(item.id) ||
-    typeof item.name !== "string" ||
-    !Array.isArray(item.assets)
-  )
+  const parsed = vaultSchema.safeParse(value);
+  if (!parsed.success)
     throw new SigningError("Invalid Fireblocks vault response", "PROVIDER_NOT_CONFIGURED");
+  const item = parsed.data;
   return {
     id: item.id,
     name: item.name.trim().slice(0, 256) || `Vault ${item.id}`,
-    hasSolanaWallet: item.assets.some((asset: unknown) => record(asset).id === assetId),
+    hasSolanaWallet: item.assets.some((asset) => asset.id === assetId),
   };
 }
 function requestConfig(config: VaultAccess) {
@@ -57,17 +58,16 @@ export async function listFireblocksVaults(
   const query = new URLSearchParams({ limit: "50", assetId: config.assetId });
   if (options.after) query.set("after", options.after);
   if (options.namePrefix) query.set("namePrefix", options.namePrefix);
-  const result = record(
+  const parsed = pageSchema.safeParse(
     await fireblocksRequest<unknown>(runtime, {
       ...requestConfig(config),
       uri: `/v1/vault/accounts_paged?${query}`,
     })
   );
-  if (!Array.isArray(result.accounts) || result.accounts.length > 50)
+  if (!parsed.success)
     throw new SigningError("Invalid Fireblocks vault page", "PROVIDER_NOT_CONFIGURED");
-  const after = result.paging == null ? undefined : record(result.paging).after;
-  if (after != null && (typeof after !== "string" || after.length > 512))
-    throw new SigningError("Invalid Fireblocks pagination cursor", "PROVIDER_NOT_CONFIGURED");
+  const result = parsed.data;
+  const after = result.paging?.after;
   return {
     vaults: result.accounts
       .map((item) => vault(item, config.assetId))

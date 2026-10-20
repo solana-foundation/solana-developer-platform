@@ -155,11 +155,9 @@ describe.each([
         .map(([input]) => new URL(String(input), "http://localhost").pathname)
         .filter((path) => path.startsWith("/api/dashboard/fireblocks/"));
       expect(checks.sort()).toEqual(
-        walletId === "wallet_byok"
-          ? ["/api/dashboard/fireblocks/destination", "/api/dashboard/fireblocks/policy"]
-          : []
+        walletId === "wallet_byok" ? ["/api/dashboard/fireblocks/destination"] : []
       );
-      expect(screen.queryByRole("button", { name: "Check again" }) !== null).toBe(
+      expect(screen.queryByRole("link", { name: "Open Fireblocks" }) !== null).toBe(
         walletId === "wallet_byok"
       );
       view.rerender(

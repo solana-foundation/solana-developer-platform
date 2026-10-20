@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { useProjectId } from "@/lib/use-dashboard-project";
@@ -34,7 +34,7 @@ export function useFireblocksWarning(kind: "whitelist" | "policy") {
     },
     () => false
   );
-  function suppress(): boolean {
+  const suppress = useCallback((): boolean => {
     if (!key) return false;
     try {
       window.localStorage.setItem(key, "dismissed");
@@ -43,6 +43,6 @@ export function useFireblocksWarning(kind: "whitelist" | "policy") {
     } catch {
       return false;
     }
-  }
+  }, [key]);
   return { suppressed, suppress, canSuppress: key !== null, scopeKey: key };
 }

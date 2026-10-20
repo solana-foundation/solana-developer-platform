@@ -63,7 +63,7 @@ describe("native Fireblocks HTTP protocol", () => {
       expect(init.body).toBe(JSON.stringify(body));
       const headers = new Headers(init.headers);
       expect(headers.get("X-API-Key")).toBe(credentials.apiKey);
-      expect(headers.get("Idempotency-Key")).toBe(body.externalTxId);
+      expect(headers.has("Idempotency-Key")).toBe(false);
       const authorization = headers.get("Authorization");
       if (!authorization) throw new Error("Missing authorization header");
       const { payload } = await jwtVerify(authorization.slice(7), rsa.publicKey);

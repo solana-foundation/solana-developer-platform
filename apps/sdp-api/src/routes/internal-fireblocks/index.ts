@@ -4,11 +4,11 @@ import { z } from "zod";
 import { badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { assertCallerMayPerform, requireAction } from "@/middleware/require-action";
 import { checkFireblocksDestination } from "@/services/custody/fireblocks-address-book.service";
-import { checkFireblocksPolicy } from "@/services/custody/fireblocks-policy.service";
 import type { Env } from "@/types/env";
 
 const input = z
@@ -21,14 +21,9 @@ const input = z
   })
   .strict();
 export const internalFireblocks = new Hono<{ Bindings: Env }>();
-const policySelection = input.extend({
-  amount: z
-    .string()
-    .max(100)
-    .regex(/^\d+(\.\d+)?$/),
-});
 internalFireblocks.use("*", bodyLimit({ maxSize: 4096 }));
 internalFireblocks.use("*", unifiedAuthMiddleware());
+internalFireblocks.use("*", requireHumanSession());
 internalFireblocks.use("*", projectContextMiddleware());
 
 internalFireblocks.use("*", async (c, next) => {
@@ -41,11 +36,4 @@ internalFireblocks.get("/destination", requireAction("wallets.read"), async (c) 
   if (!parsed.success) throw badRequest("Invalid Fireblocks destination");
   await enforceMeteredQuota(c, { name: "fireblocks-destination", actorMax: 60, orgMax: 300 });
   return success(c, await checkFireblocksDestination(c, parsed.data));
-});
-internalFireblocks.get("/policy", requireAction("wallets.read"), async (c) => {
-  assertCallerMayPerform(c, "counterparties.read");
-  const parsed = policySelection.safeParse(c.req.query());
-  if (!parsed.success) throw badRequest("Invalid Fireblocks payment selection");
-  await enforceMeteredQuota(c, { name: "fireblocks-policy-check", actorMax: 60, orgMax: 300 });
-  return success(c, await checkFireblocksPolicy(c, parsed.data));
 });

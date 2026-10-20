@@ -2,6 +2,7 @@
 -- into the credential lifecycle's secret store it is erased from this row.
 CREATE TABLE fireblocks_csr_requests (
     id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     idempotency_key TEXT NOT NULL,
