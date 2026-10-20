@@ -260,6 +260,9 @@ export type ValidateCounterpartyOptions =
       collectedData?: CollectedFieldData;
     };
 
+/** What the provider answered when SDP canceled the sale it holds for a canceled transfer. */
+export type RampProviderCancelOutcome = "canceled" | "not_found" | "not_cancelable";
+
 /** The stored transfer a status lookup asks its provider about. */
 export interface RampTransferLookup {
   /** SDP's transfer id, which a provider that takes a caller reference stores with it. */
@@ -291,6 +294,16 @@ export interface RampProvider {
     ctx: RampRuntimeContext,
     lookup: RampTransferLookup
   ) => Promise<readonly RampSettlementEvent[]>;
+  /**
+   * Optional: cancels the sale the provider holds under SDP's transfer id,
+   * once SDP has canceled its own record. `not_found` when the customer never
+   * confirmed a sale; throws when SDP could not ask.
+   */
+  cancelOfframpSale?: (
+    ctx: RampRuntimeContext,
+    transferId: string,
+    signal?: AbortSignal
+  ) => Promise<RampProviderCancelOutcome>;
   /**
    * Support-matrix generation hook (ramp-support script only, never runtime):
    * fetches the provider's raw support dumps via `context.fetchJson` and

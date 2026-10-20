@@ -262,6 +262,62 @@ describe("MoonpayRampClient off-ramp limits", () => {
   });
 });
 
+describe("MoonpayRampClient sale cancel", () => {
+  const TRANSFER_ID = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
+
+  function answerCancel(status: number): Array<{ url: string; init: RequestInit | undefined }> {
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      requests.push({ url: String(input), init });
+      return new Response(status === 204 ? null : JSON.stringify({ message: "x", type: "y" }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    return requests;
+  }
+
+  it("deletes the sale by SDP's id with the secret key", async () => {
+    const requests = answerCancel(204);
+
+    const outcome = await new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID);
+
+    assert.equal(outcome, "canceled");
+    assert.equal(requests.length, 1);
+    const [request] = requests;
+    assert.ok(request);
+    assert.equal(request.url, `https://api.moonpay.com/v3/sell_transactions/ext/${TRANSFER_ID}`);
+    assert.equal(request.init?.method, "DELETE");
+    assert.equal(new Headers(request.init?.headers).get("Authorization"), `Api-Key ${SECRET_KEY}`);
+  });
+
+  it("reads no sale and a finished sale as answers, not failures", async () => {
+    answerCancel(404);
+    assert.equal(
+      await new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID),
+      "not_found"
+    );
+    answerCancel(409);
+    assert.equal(
+      await new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID),
+      "not_cancelable"
+    );
+  });
+
+  it("throws when MoonPay refuses the key", async () => {
+    answerCancel(401);
+
+    await assert.rejects(
+      new MoonpayRampClient().cancelOfframpSale(runtimeContext, TRANSFER_ID),
+      (error: unknown) => {
+        assert.ok(error instanceof SdpPaymentsError);
+        assert.equal(error.code, "PROVIDER_NOT_CONFIGURED");
+        return true;
+      }
+    );
+  });
+});
+
 describe("MoonpayRampClient on-ramp limits", () => {
   const aud = MOONPAY_ONRAMP_CURRENCIES.AUD;
   const usd = MOONPAY_ONRAMP_CURRENCIES.USD;

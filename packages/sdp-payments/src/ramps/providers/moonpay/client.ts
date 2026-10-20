@@ -12,7 +12,12 @@ import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@
 import { z } from "zod";
 import { compareDecimalAmounts, decimalStringFromNumber, sumDecimalAmounts } from "#/decimal";
 import { providerNotConfigured, rampAmountOutOfRange, SdpPaymentsError } from "#/errors";
-import { providerFetch, providerFetchJson, readProviderJson } from "#/ramps/fetch";
+import {
+  classifyProviderFailure,
+  providerFetch,
+  providerFetchJson,
+  readProviderJson,
+} from "#/ramps/fetch";
 import { readyCounterparty } from "#/ramps/requirements";
 import {
   isActiveIso4217CurrencyCode,
@@ -30,6 +35,7 @@ import type {
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
+  RampProviderCancelOutcome,
   RampRuntimeContext,
   RampTransferLookup,
   ValidateCounterpartyOptions,
@@ -680,6 +686,30 @@ export class MoonpayRampClient implements RampProvider {
       deliveryMode: "hosted",
       hostedUrl,
     };
+  }
+
+  /** One request, authorized by the secret key: MoonPay's cancel of the sale held under SDP's id. */
+  async cancelOfframpSale(
+    { env, mode }: RampRuntimeContext,
+    transferId: string,
+    signal?: AbortSignal
+  ): Promise<RampProviderCancelOutcome> {
+    const config = readMoonpayConfig(env, mode);
+    const url = `${MOONPAY_API_BASE_URL}${MOONPAY_TRANSFER_LOOKUP_PATHS.offramp}/${encodeURIComponent(transferId)}`;
+    const { response } = await providerFetch(this.id, url, {
+      method: "DELETE",
+      headers: { Authorization: `Api-Key ${config.secretKey}` },
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (response.ok) return "canceled";
+    if (response.status === 404) return "not_found";
+    if (response.status === 409) return "not_cancelable";
+    const { code, outcome } = classifyProviderFailure(response.status);
+    throw new SdpPaymentsError(code, `${this.id} request failed with status ${response.status}`, {
+      provider: this.id,
+      providerStatus: response.status,
+      outcome,
+    });
   }
 
   /**

@@ -15,6 +15,7 @@ import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repos
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createSystemTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
 import { logEvent } from "@/runtime/money-path-events";
+import { auditRampTransferSystem } from "@/services/payments/ramp-audit";
 import type { Env } from "@/types/env";
 
 // Named, not derived from the event kind, so a renamed transition fails typecheck here.
@@ -149,6 +150,19 @@ function buildRampSettlementUpdate(
   return update;
 }
 
+/** Provider outcomes the audit ledger records: the sale or buy settled, failed or expired. */
+const RAMP_AUDITED_SETTLEMENT_KINDS: ReadonlySet<RampSettlementEvent["kind"]> = new Set([
+  "settled",
+  "failed",
+  "expired",
+]);
+
+/** The provider customer references a counterparty link has displaced. */
+function displacedReferences(metadata: Record<string, unknown>): readonly unknown[] {
+  const references = metadata.mismatchedReferences;
+  return Array.isArray(references) ? references : [];
+}
+
 /** Whether the rail a provider reports delivering is the transfer's own asset. */
 function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId | null): boolean {
   if (rail === null) {
@@ -252,7 +266,7 @@ export async function applyRampSettlementEvent(
   // provider event, so they land or roll back together — and an event whose
   // transition was ignored (lost race, out-of-order redelivery) has no
   // effects at all: no link write.
-  const { applied, linkedReference } = await db.transaction(async (tx) => {
+  const { updated, newlyMismatchedLink } = await db.transaction(async (tx) => {
     const client = asTransactionalClient(tx);
     const updated =
       await createSystemTransactionalPaymentsRepository(client).transitionRampTransfer(update);
@@ -261,19 +275,27 @@ export async function applyRampSettlementEvent(
       event.providerCustomerId !== undefined &&
       transfer.counterparty_id !== null
     ) {
-      const link = await createPostgresCounterpartyProviderAccountsRepository(
-        client
-      ).upsertProviderAccount({
+      const accounts = createPostgresCounterpartyProviderAccountsRepository(client);
+      const linkScope = {
         organizationId: transfer.organization_id,
         projectId: transfer.project_id,
         counterpartyId: transfer.counterparty_id,
         provider: event.provider,
+      };
+      const prior = await accounts.getProviderAccount(linkScope);
+      const link = await accounts.upsertProviderAccount({
+        ...linkScope,
         providerCustomerReference: event.providerCustomerId,
       });
-      return { applied: true, linkedReference: link.provider_customer_reference };
+      // The link keeps every displaced reference, so only a first sighting is news.
+      const newlyMismatched =
+        link.provider_customer_reference !== event.providerCustomerId &&
+        !(prior !== null && displacedReferences(prior.metadata).includes(event.providerCustomerId));
+      return { updated, newlyMismatchedLink: newlyMismatched ? link : null };
     }
-    return { applied: updated !== null, linkedReference: null };
+    return { updated, newlyMismatchedLink: null };
   });
+  const applied = updated !== null;
 
   if (!applied && event.kind === "settled") {
     const current = await repo.getTransferById({
@@ -288,12 +310,8 @@ export async function applyRampSettlementEvent(
 
   // First-write-wins: the event reported a different provider customer than the
   // counterparty's canonical link. The displaced reference is preserved in the
-  // link row's metadata; surface it for operators.
-  if (
-    linkedReference !== null &&
-    event.providerCustomerId !== undefined &&
-    linkedReference !== event.providerCustomerId
-  ) {
+  // link row's metadata; surface it for operators the first time it appears.
+  if (newlyMismatchedLink !== null) {
     logEvent("warn", {
       event: "sdp_api_counterparty_provider_reference_mismatch",
       flow: "ramp-settlement",
@@ -302,8 +320,22 @@ export async function applyRampSettlementEvent(
       transfer_id: transfer.id,
       counterparty_id: transfer.counterparty_id,
       provider: event.provider,
-      canonical_reference: linkedReference,
+      canonical_reference: newlyMismatchedLink.provider_customer_reference,
       mismatched_reference: event.providerCustomerId,
+    });
+  }
+  if (updated !== null && RAMP_AUDITED_SETTLEMENT_KINDS.has(event.kind)) {
+    await auditRampTransferSystem(env, event.kind === "settled" ? "settle" : "update", updated, {
+      source: "provider",
+      transition: update.transition,
+      fromStatus: transfer.status,
+      providerObservedAt: event.providerObservedAt ?? null,
+      ...("receivedAmount" in event && event.receivedAmount !== undefined
+        ? { receivedAmount: event.receivedAmount }
+        : {}),
+      ...("receivedCurrency" in event && event.receivedCurrency !== undefined
+        ? { receivedCurrency: event.receivedCurrency }
+        : {}),
     });
   }
 

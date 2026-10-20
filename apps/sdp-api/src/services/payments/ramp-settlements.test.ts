@@ -2,6 +2,7 @@ import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -445,6 +446,51 @@ describe("applyRampSettlementEvent", () => {
       .first<{ provider_customer_reference: string; metadata: Record<string, unknown> }>();
     expect(link?.provider_customer_reference).toBe("cust_first");
     expect(link?.metadata).toEqual({ mismatchedReferences: ["cust_second"] });
+  });
+
+  it("warns about a displaced provider customer once, not on every event", async () => {
+    await seedCounterparty();
+    await seedTransfer({
+      id: "xfr_linked_first",
+      reference: "order_linked_first",
+      status: "pending",
+      counterpartyId: COUNTERPARTY_ID,
+    });
+    await seedTransfer({
+      id: "xfr_other_customer",
+      reference: "order_other_customer",
+      status: "pending",
+      counterpartyId: COUNTERPARTY_ID,
+    });
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      reference: "order_linked_first",
+      providerCustomerId: "cust_first",
+    });
+    const events = vi.spyOn(moneyPathEvents, "logEvent");
+
+    for (const kind of ["awaiting_payment", "settling", "settled"] as const) {
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind,
+        reference: "order_other_customer",
+        providerCustomerId: "cust_second",
+      });
+    }
+
+    const mismatches = events.mock.calls.filter(
+      ([, payload]) => payload.event === "sdp_api_counterparty_provider_reference_mismatch"
+    );
+    expect(mismatches).toEqual([
+      [
+        "warn",
+        expect.objectContaining({
+          canonical_reference: "cust_first",
+          mismatched_reference: "cust_second",
+        }),
+      ],
+    ]);
   });
 
   it("links the customer from the winning event and never from a refused one", async () => {

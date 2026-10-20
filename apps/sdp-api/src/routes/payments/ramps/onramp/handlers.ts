@@ -23,6 +23,7 @@ import {
   uniqueSorted,
 } from "@/routes/payments/ramps/shared";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
+import { auditRampTransfer } from "@/services/payments/ramp-audit";
 import {
   type createOnrampQuoteSchema,
   type estimateOnrampSchema,
@@ -144,6 +145,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         if (!updated) {
           throw internalError("Failed to complete MoonPay on-ramp transfer record");
         }
+        await auditRampTransfer(c, "create", updated);
       } catch (error) {
         await getPaymentsRepository(c).transitionRampTransfer({
           transferId: pendingTransfer.id,

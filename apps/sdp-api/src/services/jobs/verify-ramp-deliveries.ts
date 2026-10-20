@@ -14,6 +14,7 @@ import { assertIsSignature, type Signature } from "@solana/kit";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
+import { auditRampTransferSystem } from "@/services/payments/ramp-audit";
 import {
   currentProviderSettlement,
   type ProviderSettlement,
@@ -153,6 +154,7 @@ function blockTimeIso(blockTime: bigint | null | undefined): string | null {
 }
 
 async function verifyOnramp(
+  env: Env,
   repo: PaymentsRepository,
   chain: RampChainReader,
   transfer: PaymentTransferRow,
@@ -203,10 +205,20 @@ async function verifyOnramp(
     updatedAt: new Date().toISOString(),
   };
   if (transfer.amount === null) update.amount = amount;
-  return (await repo.transitionRampTransfer(update)) !== null;
+  const completed = await repo.transitionRampTransfer(update);
+  if (completed === null) return false;
+  await auditRampTransferSystem(env, "settle", completed, {
+    source: "chain",
+    fromStatus: transfer.status,
+    signature: transactionSignature,
+    slot,
+    deliveredAmount: amount,
+  });
+  return true;
 }
 
 async function verifyOfframps(
+  env: Env,
   repo: PaymentsRepository,
   chain: RampChainReader,
   transfers: PaymentTransferRow[]
@@ -253,7 +265,15 @@ async function verifyOfframps(
         slot: Number(status.slot),
         updatedAt: new Date().toISOString(),
       });
-      if (updated !== null) completed.push(entry.transfer.id);
+      if (updated !== null) {
+        completed.push(entry.transfer.id);
+        await auditRampTransferSystem(env, "settle", updated, {
+          source: "chain",
+          fromStatus: entry.transfer.status,
+          signature: entry.submittedSignature,
+          slot: Number(status.slot),
+        });
+      }
     } catch (error) {
       getLogger().error(
         { transfer_id: entry.transfer.id, error },
@@ -280,7 +300,7 @@ export async function verifyRampDeliveries(
   const completed = new Set<string>();
   try {
     try {
-      for (const id of await verifyOfframps(repo, chain, offramps)) completed.add(id);
+      for (const id of await verifyOfframps(env, repo, chain, offramps)) completed.add(id);
     } catch (error) {
       getLogger().error(
         { environment: currentClusterScope().environment, error },
@@ -291,7 +311,7 @@ export async function verifyRampDeliveries(
       const settled = currentProviderSettlement(transfer);
       if (!settled) continue;
       try {
-        if (await verifyOnramp(repo, chain, transfer, settled)) completed.add(transfer.id);
+        if (await verifyOnramp(env, repo, chain, transfer, settled)) completed.add(transfer.id);
       } catch (error) {
         getLogger().error(
           { transfer_id: transfer.id, error },

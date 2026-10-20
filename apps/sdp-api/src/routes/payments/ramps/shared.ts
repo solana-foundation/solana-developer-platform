@@ -38,6 +38,7 @@ import {
 } from "@/routes/payments/wallets";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
+import { auditRampTransfer } from "@/services/payments/ramp-audit";
 import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
 import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
@@ -271,6 +272,7 @@ export async function persistRampQuoteTransfer(
   if (!created) {
     throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
   }
+  await auditRampTransfer(c, "create", created);
   return created.id;
 }
 

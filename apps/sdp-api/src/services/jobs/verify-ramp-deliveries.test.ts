@@ -173,6 +173,45 @@ describe("verifyRampDeliveries", () => {
     });
   });
 
+  it("audits the provider's settlement and the chain-verified completion", async () => {
+    await seedTransfer({ id: "xfr_audited", reference: "moonpay_audited" });
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "moonpay_audited",
+      onchain: { signature: SIG_1, destinationAddress: "quoted-destination", amount: "0.5" },
+      receivedAmount: "0.5",
+    });
+    getTransactionMock.mockResolvedValue(landedToken("500000"));
+
+    await sweep();
+
+    const { results } = await getDb(env)
+      .prepare(
+        `SELECT action, metadata FROM audit_logs
+          WHERE resource_id = ? ORDER BY ledger_sequence`
+      )
+      .bind("xfr_audited")
+      .all<{ action: string; metadata: string }>();
+    expect(
+      results.map((entry) => ({ action: entry.action, ...JSON.parse(entry.metadata) }))
+    ).toEqual([
+      expect.objectContaining({
+        action: "settle",
+        source: "provider",
+        status: "settling",
+        receivedAmount: "0.5",
+      }),
+      expect.objectContaining({
+        action: "settle",
+        source: "chain",
+        status: "completed",
+        signature: SIG_1,
+        deliveredAmount: "0.5",
+      }),
+    ]);
+  });
+
   it("keeps a quoted amount and records the actual chain delivery separately", async () => {
     await seedTransfer({ id: "xfr_quote_fixed", reference: "moonpay_quote_fixed", amount: "0.4" });
     await applyRampSettlementEvent(env, "sandbox", {
