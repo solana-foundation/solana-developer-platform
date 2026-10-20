@@ -41,6 +41,29 @@ function formatWalletLabel(walletLabel: string | null, walletAddress: string): s
   return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
 }
 
+function DevnetSolMenuItem({
+  isBusy,
+  canRequest,
+  onSelect,
+}: {
+  isBusy: boolean;
+  canRequest: boolean;
+  onSelect: () => void;
+}) {
+  const t = useTranslations();
+  const label = isBusy
+    ? t("DashboardCustody.requesting")
+    : canRequest
+      ? t("DashboardCustody.requestDevnetSol")
+      : t("DashboardCustody.requestDevnetSolAdminOnly");
+  return (
+    <DropdownMenuItem onSelect={onSelect} disabled={isBusy || !canRequest}>
+      <Droplets className="h-4 w-4" />
+      {label}
+    </DropdownMenuItem>
+  );
+}
+
 export function WalletActionsMenu({
   walletAddress,
   walletId,
@@ -116,14 +139,11 @@ export function WalletActionsMenu({
                 : t("DashboardCustody.proveOwnershipAdminOnly")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy || !canRequestDevnetSol}>
-          <Droplets className="h-4 w-4" />
-          {isBusy
-            ? t("DashboardCustody.requesting")
-            : canRequestDevnetSol
-              ? t("DashboardCustody.requestDevnetSol")
-              : t("DashboardCustody.requestDevnetSolAdminOnly")}
-        </DropdownMenuItem>
+        <DevnetSolMenuItem
+          isBusy={isBusy}
+          canRequest={canRequestDevnetSol}
+          onSelect={requestDevnetSol}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );
