@@ -348,6 +348,22 @@ function testBlock(source: string, title: string): string | null {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
+/**
+ * Whether the test titled `title` would not run: its own declaration is
+ * `skip`, `todo` or `x`-prefixed, or the file skips a describe (which may
+ * enclose it). A disabled test is no evidence.
+ */
+function isDisabledTest(source: string, title: string): boolean {
+  const start = source.indexOf(title);
+  if (start === -1) return false;
+  if (/\b(?:xdescribe|describe(?:\.\w+)*\.(?:skip|todo))\s*[(<]/.test(source)) return true;
+  const declarations = [
+    ...source.slice(0, start).matchAll(/\b(x?)(?:it|test)((?:\.\w+)*)\s*[(<]/g),
+  ];
+  const own = declarations.at(-1);
+  return own !== undefined && (own[1] === "x" || /\.(?:skip|todo)\b/.test(own[2] ?? ""));
+}
+
 const SRC = path.resolve(__dirname, "..");
 const classified: Record<string, Classification> = WALLET_SCOPE_ROUTES;
 
@@ -371,9 +387,23 @@ describe("wallet-scope route inventory", () => {
       "refusedEarly" in classification ? [[route, classification.refusedEarly] as const] : []
     )
   )("%s: its named test asserts wallet_out_of_scope", (_route, { file, test }) => {
-    const block = testBlock(readFileSync(path.join(SRC, file), "utf8"), test);
+    const source = readFileSync(path.join(SRC, file), "utf8");
+    const block = testBlock(source, test);
     expect(block, `${file} has no test named "${test}"`).not.toBeNull();
     expect(block).toMatch(/wallet_?out_?of_?scope/i);
+    expect(isDisabledTest(source, test), `${file} skips "${test}"`).toBe(false);
+  });
+
+  it("counts a skipped or todo test as no evidence", () => {
+    const title = "refuses it out of scope";
+    const body = `("${title}", async () => { expect(error).toBe("wallet_out_of_scope"); });`;
+    expect(isDisabledTest(`it${body}`, title)).toBe(false);
+    expect(isDisabledTest(`it.each([1])${body}`, title)).toBe(false);
+    expect(isDisabledTest(`it.skip${body}`, title)).toBe(true);
+    expect(isDisabledTest(`it.skip.each([1])${body}`, title)).toBe(true);
+    expect(isDisabledTest(`test.todo${body}`, title)).toBe(true);
+    expect(isDisabledTest(`xit${body}`, title)).toBe(true);
+    expect(isDisabledTest(`describe.skip("group", () => { it${body} });`, title)).toBe(true);
   });
 
   // Each gap is a route the custody signer alone refuses, after a write.
