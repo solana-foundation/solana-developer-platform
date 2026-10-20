@@ -1,9 +1,14 @@
-import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types/payments";
+import type {
+  CreatedPaymentRequest,
+  ListPaymentRequestsResponse,
+  PaymentRequest,
+  PaymentRequestLink,
+} from "@sdp/types/payments";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequestQuery } from "@/lib/errors";
+import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -14,13 +19,21 @@ import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
-import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
+import {
+  type createPaymentRequestSchema,
+  listPaymentRequestsQuerySchema,
+  paymentRequestParamsSchema,
+} from "./schemas";
 
+/**
+ * A payment request without its public token. The token is the bearer
+ * credential behind `/pay/:token`, so reads never disclose it (APE-849): only
+ * the create response and the `payment_requests.manage` link read return it.
+ */
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
   const expired = isPaymentRequestExpired(row.expires_at);
   return {
     id: row.id,
-    publicToken: row.public_token,
     organizationId: row.organization_id,
     projectId: row.project_id,
     counterpartyId: row.counterparty_id,
@@ -71,6 +84,42 @@ export async function listPaymentRequests(c: AppContext) {
   return success(c, response);
 }
 
+async function readPaymentRequest(c: AppContext): Promise<PaymentRequestRow> {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = paymentRequestParamsSchema.safeParse(c.req.param());
+  if (!params.success) throw badRequestParams();
+
+  const row = await createPaymentRequestsRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).getPaymentRequestById({
+    requestId: params.data.paymentRequestId,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+  if (!row) throw notFound("Payment request");
+  return row;
+}
+
+export async function getPaymentRequest(c: AppContext) {
+  const row = await readPaymentRequest(c);
+  const reconciled = await reconcilePaymentRequest(c.env, row, { bestEffort: true });
+  return success(c, mapPaymentRequest(reconciled));
+}
+
+/**
+ * The request's payment link token. Sharing the link is a manage-level act
+ * (anyone holding it can build the request's fee-sponsored transaction), so
+ * the route needs `payment_requests.manage`.
+ */
+export async function getPaymentRequestLink(c: AppContext) {
+  const row = await readPaymentRequest(c);
+
+  const response: PaymentRequestLink = { id: row.id, publicToken: row.public_token };
+  return success(c, response);
+}
+
 export async function createPaymentRequest(
   c: ValidatedBodyContext<typeof createPaymentRequestSchema>
 ) {
@@ -98,5 +147,9 @@ export async function createPaymentRequest(
     createdBy: await resolveCreatorUserId(c),
   });
 
-  return created(c, mapPaymentRequest(row));
+  const response: CreatedPaymentRequest = {
+    ...mapPaymentRequest(row),
+    publicToken: row.public_token,
+  };
+  return created(c, response);
 }

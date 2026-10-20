@@ -3,8 +3,8 @@
  */
 
 import type { CustodyProvider } from "./custody";
-import type { OrganizationRole } from "./permissions";
 import type { OrganizationProviderOverrides } from "./provider-access";
+import type { OrganizationRole } from "./roles";
 
 export const ORGANIZATION_TIERS = ["individual", "enterprise"] as const;
 export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
@@ -40,7 +40,17 @@ export function organizationStatusMayStartMoney(status: string): boolean {
   return ORGANIZATION_STATUSES_THAT_MAY_START_MONEY.some((allowed) => allowed === status);
 }
 
-export type MemberStatus = "active" | "suspended" | "removed";
+export const MEMBER_STATUSES = ["active", "suspended", "removed"] as const;
+export type MemberStatus = (typeof MEMBER_STATUSES)[number];
+
+export const MEMBER_STATUSES_THAT_MAY_MOVE_MONEY = [
+  "active",
+] as const satisfies readonly MemberStatus[];
+
+/** Takes the raw column: an unknown membership status may not move money. */
+export function memberStatusMayMoveMoney(status: string): boolean {
+  return MEMBER_STATUSES_THAT_MAY_MOVE_MONEY.some((allowed) => allowed === status);
+}
 
 export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
 export const ORGANIZATION_RPC_PROVIDERS = [

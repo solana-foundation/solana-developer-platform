@@ -1,33 +1,31 @@
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
-import type {
-  CreatePaymentTransferBatchInput,
-  CreatePaymentTransferBatchWithRecipientsInput,
-  CreatePaymentTransferRecipientInput,
-  DeletePaymentTransferBatchInput,
-  DeletePaymentTransferRecipientInput,
-  GetPaymentTransferBatchInput,
-  GetPaymentTransferRecipientInput,
-  ListPaymentTransferBatchesInput,
-  ListPaymentTransferBatchesResult,
-  ListPaymentTransferRecipientsInput,
-  ListPaymentTransferRecipientsResult,
-  PaymentTransferBatchesRepository,
-  PaymentTransferBatchRow,
-  PaymentTransferRecipientRow,
-  RecomputeTransferBatchStatusInput,
-  SettlePaymentTransferBatchInput,
-  UpdatePaymentTransferBatchInput,
-  UpdatePaymentTransferRecipientInput,
-  UpdatePaymentTransferRecipientsStatusInput,
-  UpsertPaymentTransferBatchInput,
-  UpsertPaymentTransferRecipientInput,
-} from "./payment-transfer-batches.repository";
 import {
+  type CreatePaymentTransferBatchInput,
+  type CreatePaymentTransferBatchWithRecipientsInput,
+  type CreatePaymentTransferRecipientInput,
+  type DeletePaymentTransferBatchInput,
+  type DeletePaymentTransferRecipientInput,
   deriveTransferBatchStatus,
+  type GetPaymentTransferBatchInput,
+  type GetPaymentTransferRecipientInput,
   generatePaymentTransferBatchId,
   generatePaymentTransferRecipientId,
+  type ListPaymentTransferBatchesInput,
+  type ListPaymentTransferBatchesResult,
+  type ListPaymentTransferRecipientsInput,
+  type ListPaymentTransferRecipientsResult,
+  type PaymentTransferBatchesRepository,
+  type PaymentTransferBatchRow,
+  type PaymentTransferRecipientRow,
+  type RecomputeTransferBatchStatusInput,
+  type SettlePaymentTransferBatchInput,
+  type UpdatePaymentTransferBatchInput,
+  type UpdatePaymentTransferRecipientInput,
+  type UpdatePaymentTransferRecipientsStatusInput,
+  type UpsertPaymentTransferBatchInput,
+  type UpsertPaymentTransferRecipientInput,
 } from "./payment-transfer-batches.repository";
 
 function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransferBatchRow {
@@ -75,30 +73,6 @@ function mapPaymentTransferRecipientRow(row: Record<string, unknown>): PaymentTr
 
 function jsonParam(value: Record<string, unknown> | undefined): string | null {
   return value === undefined ? null : JSON.stringify(value);
-}
-
-function batchWalletAuthorizationFilter(
-  input: ListPaymentTransferBatchesInput
-): { sql: string; values: string[] } | null {
-  const authorization = input.walletAuthorization;
-  if (!authorization) return null;
-
-  const clauses: string[] = [];
-  const values: string[] = [];
-  if (authorization.custodyWalletIds.length > 0) {
-    clauses.push(
-      `source_custody_wallet_id IN (${authorization.custodyWalletIds.map(() => "?").join(", ")})`
-    );
-    values.push(...authorization.custodyWalletIds);
-  }
-  if (authorization.providerWalletIds.length > 0) {
-    clauses.push(
-      `(source_custody_wallet_id IS NULL AND source_wallet_id IN (${authorization.providerWalletIds.map(() => "?").join(", ")}))`
-    );
-    values.push(...authorization.providerWalletIds);
-  }
-
-  return { sql: clauses.length > 0 ? `(${clauses.join(" OR ")})` : "1 = 0", values };
 }
 
 function buildScopeWhere(params: {
@@ -443,12 +417,6 @@ export function createPostgresPaymentTransferBatchesRepository(
       const extraClauses: string[] = [];
       const extraValues: unknown[] = [];
 
-      const authorizationFilter = batchWalletAuthorizationFilter(input);
-      if (authorizationFilter) {
-        extraClauses.push(authorizationFilter.sql);
-        extraValues.push(...authorizationFilter.values);
-      }
-
       if (input.sourceCustodyWalletId !== undefined) {
         extraClauses.push("source_custody_wallet_id = ?");
         extraValues.push(input.sourceCustodyWalletId);
@@ -456,12 +424,6 @@ export function createPostgresPaymentTransferBatchesRepository(
       if (input.walletId) {
         extraClauses.push("source_wallet_id = ?");
         extraValues.push(input.walletId);
-      } else if (input.walletIds) {
-        if (input.walletIds.length === 0) {
-          return { rows: [], total: 0 };
-        }
-        extraClauses.push(`source_wallet_id IN (${input.walletIds.map(() => "?").join(", ")})`);
-        extraValues.push(...input.walletIds);
       }
       if (input.token) {
         extraClauses.push("token = ?");

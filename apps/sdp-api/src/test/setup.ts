@@ -1,6 +1,7 @@
-import { afterAll } from "vitest";
+import { afterAll, beforeEach } from "vitest";
 import { closeDatabasePools } from "@/db/client";
 import { setDefaultDatabaseIdentityForTesting } from "@/db/identity";
+import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { MANAGED_POOL_ENV_KEYS } from "@/test/helpers/managed-pool-env";
 
@@ -27,6 +28,12 @@ if (!globalWithSecureContext.isSecureContext) {
     globalWithSecureContext.isSecureContext = true;
   }
 }
+
+// Suites reuse key hashes across tests (a fixture key revoked in one test is
+// active in the next), so each test starts with a cold refusal cache.
+beforeEach(() => {
+  resetTerminalRefusalsForTesting();
+});
 
 afterAll(async () => {
   await Promise.all([closeDatabasePools(), closeAllRedisClients()]);

@@ -1,4 +1,4 @@
-import type { OperationFamily, OperationType } from "@sdp/types/allowed-operations";
+import type { ActionModule, ActionVerb } from "@sdp/types/actions";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
@@ -19,7 +19,7 @@ export type PublicSurface = {
   releaseChannel: SdpReleaseChannel;
   modules: readonly SdpModule[];
   rampProviders: readonly RampProviderId[];
-  allowedOperations: readonly { family: OperationFamily; types: readonly OperationType[] }[];
+  grantableActions: readonly { module: ActionModule; verbs: readonly ActionVerb[] }[];
   allModules: readonly SdpModule[];
   allRampProviders: readonly RampProviderId[];
 };

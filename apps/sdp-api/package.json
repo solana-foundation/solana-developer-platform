@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev-local.mjs",
+    "dev": "node scripts/dev-api.mjs",
+    "dev:worker": "node scripts/dev-worker.mjs",
     "dev:db": "pnpm -w db:postgres:up && pnpm -w db:postgres:logs",
     "dev:webhook": "bash scripts/dev-webhook.sh",
     "build": "node scripts/build-node.mjs",
@@ -40,7 +41,9 @@
     "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "route-actions:generate": "tsx scripts/generate-route-actions.ts",
+    "route-actions:check": "tsx scripts/generate-route-actions.ts --check"
   },
   "dependencies": {
     "@clerk/backend": "3.20.1",
@@ -50,12 +53,12 @@
     "@sdp/earn": "workspace:*",
     "@sdp/env-config": "workspace:*",
     "@sdp/fee-payment": "workspace:*",
+    "@sdp/hastra": "workspace:*",
     "@sdp/helius-rings": "workspace:*",
     "@sdp/helius-rings-sdk": "workspace:*",
-    "@sdp/hastra": "workspace:*",
     "@sdp/issuance": "workspace:*",
-    "@sdp/kamino": "workspace:*",
     "@sdp/jupiter-lend": "workspace:*",
+    "@sdp/kamino": "workspace:*",
     "@sdp/ondo": "workspace:*",
     "@sdp/payments": "workspace:*",
     "@sdp/private-channels": "workspace:*",
@@ -80,7 +83,6 @@
     "@solana/subscriptions": "0.5.0",
     "@solana/sysvars": "catalog:",
     "@solana/token-acl-sdk": "catalog:",
-    "@solana/transactions": "catalog:",
     "hono": "4.13.9",
     "ioredis": "6.0.0",
     "jose": "6.2.12",

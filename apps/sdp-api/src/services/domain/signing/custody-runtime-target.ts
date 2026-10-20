@@ -1,15 +1,16 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
-import type {
-  CustodyConfigStatus,
-  CustodyConnectionCheckStatus,
-  CustodyConnectionLifecycle,
-  CustodyMode,
-  CustodyWalletPurpose,
-  CustodyWalletStatus,
-  ProviderCredentialStatus,
+import {
+  CUSTODY_PROVIDERS,
+  type CustodyConfigStatus,
+  type CustodyConnectionCheckStatus,
+  type CustodyConnectionLifecycle,
+  type CustodyMode,
+  type CustodyProvider,
+  type CustodyWalletPurpose,
+  type CustodyWalletStatus,
+  type ProviderCredentialStatus,
 } from "@sdp/types/custody";
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
 import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
@@ -19,7 +20,7 @@ import type { DatabaseClient } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
-import { decideMovement, readMoneyAdmissionFactsWith } from "@/lib/money-admission";
+import { decideMovement, readMovementFactsWith } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
@@ -633,6 +634,9 @@ export class CustodyRuntimeTargets {
    * it is where money admission is enforced for every module (HOO-1955,
    * APE-564): a start's signer reads the organization's live state each time
    * it signs and refuses if the start is no longer admitted (`admittedSigner`).
+   * The same read checks the ambient principal (HOO-2099): live, holding the
+   * movement's action, and allowed to sign with this exact custody wallet.
+   * Callers never authorize the wallet themselves.
    */
   async getTransactionSignerForWalletRecord(
     organizationId: string,
@@ -663,14 +667,16 @@ export class CustodyRuntimeTargets {
       custodySigningTimeoutMs(this.env)
     );
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-    // A start reads the organization's live row each time it signs; an exit
-    // reads nothing.
+    // Each signature reads the organization's and the ambient principal's
+    // live rows in one statement; an exit with no principal reads nothing.
+    const subject = { custodyWalletId };
     return admittedSigner(
       signer,
       async () =>
         decideMovement(
           movement,
-          await readMoneyAdmissionFactsWith(this.db, { organizationId, projectId })
+          await readMovementFactsWith(this.db, { organizationId, projectId }, movement, subject),
+          subject
         ),
       {
         movement,

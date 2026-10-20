@@ -6,8 +6,7 @@ import type {
   PaymentSubscriptionPlanResponse,
   PreparePaymentSubscriptionPlanResponse,
 } from "@sdp/types/payments";
-import type { Address } from "@solana/kit";
-import { createNoopSigner } from "@solana/kit";
+import { type Address, createNoopSigner } from "@solana/kit";
 import { getCreatePlanOverlayInstructionAsync } from "@solana/subscriptions";
 import { z } from "zod";
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
@@ -19,7 +18,6 @@ import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
   buildPreparedSubscriptionTransaction,
@@ -228,7 +226,6 @@ export const prepareCreateSubscriptionPlan = async (
 
   const scope = await resolveScope(c);
   const ownerWallet = resolveWallet(scope.wallets, plan.owner_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
 
   const { owner, planId, planPda } = await derivePlanAddresses(plan);
   if (ownerWallet.publicKey !== owner) {
@@ -299,8 +296,8 @@ export const updateSubscriptionPlan = async (
   // Loaded in the project, its wallets' access checked, by the route's authorize step.
   const existingPlan = getAuthorized<PaymentSubscriptionPlanRow>(c);
 
-  const scope = await resolveScope(c);
-  resolveWallet(scope.wallets, existingPlan.owner_wallet_id);
+  // The plan's owner must still be one of the project's wallets.
+  resolveWallet((await resolveScope(c)).wallets, existingPlan.owner_wallet_id);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const updated = await repo.updatePlan({

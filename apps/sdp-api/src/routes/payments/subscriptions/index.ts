@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import { authorizeSubscriptionCreate } from "@/routes/payments/access";
 import type { Env } from "@/types/env";
@@ -26,40 +26,40 @@ export const subscriptions = new Hono<{ Bindings: Env }>();
 
 subscriptions.post(
   "/",
-  requirePermissions("payments:write", "counterparties:read"),
+  requireAction("recurring.manage"),
   validateBody(createSubscriptionSchema),
   authorize(authorizeSubscriptionCreate),
   idempotent({ key: "accepted", serverErrors: "store" }),
   createSubscription
 );
-subscriptions.get("/", requirePermissions("payments:read"), listSubscriptions);
+subscriptions.get("/", requireAction("recurring.read"), listSubscriptions);
 subscriptions.post(
   "/:subscriptionId/prepare-authorization",
-  requirePermissions("payments:write", "counterparties:read"),
+  requireAction("recurring.execute"),
   validateBody(prepareSubscriptionAuthorizationSchema),
   prepareSubscriptionAuthorization
 );
 subscriptions.post(
   "/:subscriptionId/prepare-cancel",
-  requirePermissions("payments:write"),
+  requireAction("recurring.manage"),
   validateBody(prepareSubscriptionLifecycleSchema),
   prepareCancelSubscription
 );
 subscriptions.post(
   "/:subscriptionId/prepare-resume",
-  requirePermissions("payments:write"),
+  requireAction("recurring.execute"),
   validateBody(prepareSubscriptionLifecycleSchema),
   prepareResumeSubscription
 );
 subscriptions.post(
   "/:subscriptionId/prepare-collection",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("recurring.execute"),
   validateBody(prepareSubscriptionCollectionSchema),
   prepareSubscriptionCollection
 );
-subscriptions.get("/:subscriptionId", requirePermissions("payments:read"), getSubscription);
+subscriptions.get("/:subscriptionId", requireAction("recurring.read"), getSubscription);
 subscriptions.get(
   "/:subscriptionId/collection-attempts",
-  requirePermissions("payments:read"),
+  requireAction("recurring.read"),
   listSubscriptionCollectionAttempts
 );

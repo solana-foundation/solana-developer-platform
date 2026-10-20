@@ -1,10 +1,12 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
+  requestAsOrganizationAdmin,
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
@@ -47,7 +49,8 @@ type RotateApiKeyResponse = {
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation Lifecycle", () => {
   let apiKeyHash: string;
-  const adminRequest = requestWithApiKey();
+  // Keys are managed by a signed-in organization admin, never a key (HOO-2099).
+  let adminRequest: Awaited<ReturnType<typeof requestAsOrganizationAdmin>>;
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
@@ -60,9 +63,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
 
   beforeEach(async () => {
     await resetIntegrationState(apiKeyHash);
+    adminRequest = await requestAsOrganizationAdmin();
   });
 
-  it("rotates a selected-wallet key, preserves old-key access until revoke, then rejects it", {
+  it("rotates a selected-wallet key, keeps both until the old one is revoked, then only the new one", {
     timeout: 240000,
   }, async () => {
     const wallet = await createFundedIntegrationWallet({
@@ -77,11 +81,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
       },
       body: JSON.stringify({
         name: `Rotation key ${Date.now()}`,
-        role: "api_admin",
-        permissions: ["*"],
+        grants: [...API_KEY_GRANTABLE_ACTIONS],
         walletScope: "selected",
-        signingWalletId: wallet.walletId,
-        signingWalletIds: [wallet.walletId],
+        walletIds: [wallet.id],
       }),
     });
 
@@ -135,5 +137,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
     expect(postRevokeOldKeyRes.status).toBe(401);
     const revokedBody = (await postRevokeOldKeyRes.json()) as { error: { code: string } };
     expect(revokedBody.error.code).toBe("REVOKED_API_KEY");
+
+    // Retiring the predecessor early leaves its replacement working.
+    expect((await rotatedKeyRequest("/v1/wallets")).status).toBe(200);
   });
 });

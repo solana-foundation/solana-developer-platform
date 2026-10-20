@@ -6,7 +6,14 @@
 
 import { scrubAuditMetadata } from "@sdp/redaction/scrub";
 import type { Context } from "hono";
-import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { asTransactionalClient, type DatabaseExecutor } from "@/db/client";
+import {
+  currentDatabaseIdentity,
+  type DatabaseIdentity,
+  databaseIdentityConfigStatements,
+  runWithSystemDatabaseIdentity,
+  runWithTenantDatabaseIdentity,
+} from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
 import type { KVStore } from "@/runtime/kv";
@@ -493,6 +500,52 @@ function resolveUserActorLabel(name: string | null, email: string | null): strin
   return somethingWasRecorded ? "Unknown user" : "Team member";
 }
 
+/** Who an audit record attributes its event to. */
+interface AuditActor {
+  organizationId: string | null;
+  userId: string | null;
+  apiKeyId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  requestId: string | null;
+}
+
+/** Longest a row-lock wait inside audited work may hold the ledger lock. */
+const AUDITED_WORK_LOCK_TIMEOUT = "5s";
+
+/** The identity every ledger read and write runs under. */
+const AUDIT_LEDGER_DATABASE_IDENTITY = { kind: "system", component: "audit-ledger" } as const;
+
+/**
+ * Resolve the actor from whichever auth context is present. Dashboard requests
+ * carry a Clerk/session context (a user), API requests carry an apiKey
+ * context; earlier this only read `apiKey`, so dashboard-driven events were
+ * written with a null organization_id/user_id and became invisible to
+ * org-scoped queries.
+ */
+function requestActor(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): AuditActor {
+  const auth = c.get("apiKey");
+  const clerk = c.get("clerk");
+  return {
+    organizationId: entry.organizationId || auth?.organizationId || clerk?.organizationId || null,
+    userId: entry.userId || clerk?.userId || null,
+    apiKeyId: entry.apiKeyId || auth?.id || null,
+    ipAddress: getClientIp(c),
+    userAgent: c.req.header("user-agent") || null,
+    requestId: c.get("requestId"),
+  };
+}
+
+/** Switch an open transaction to `identity` for the statements that follow. */
+async function stampTransactionIdentity(
+  tx: DatabaseExecutor,
+  identity: DatabaseIdentity
+): Promise<void> {
+  for (const statement of databaseIdentityConfigStatements(identity)) {
+    await tx.execute(statement);
+  }
+}
+
 export class AuditService {
   constructor(
     private db: DatabaseClient,
@@ -500,34 +553,76 @@ export class AuditService {
   ) {}
 
   async log(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<void> {
-    // Resolve the actor from whichever auth context is present. Dashboard
-    // requests carry a Clerk/session context (a user), API requests carry an
-    // apiKey context; earlier this only read `apiKey`, so dashboard-driven
-    // events were written with a null organization_id/user_id and became
-    // invisible to org-scoped queries.
-    const auth = c.get("apiKey");
-    const clerk = c.get("clerk");
-    const requestId = c.get("requestId");
-
-    const organizationId =
-      entry.organizationId || auth?.organizationId || clerk?.organizationId || null;
-    const userId = entry.userId || clerk?.userId || null;
-    const apiKeyId = entry.apiKeyId || auth?.id || null;
-
-    const ipAddress = getClientIp(c);
-    const userAgent = c.req.header("user-agent") || null;
-
     await this.persist(
-      entry,
-      {
-        organizationId,
-        userId,
-        apiKeyId,
-        ipAddress,
-        userAgent,
-        requestId,
+      async () => ({ entry, result: undefined }),
+      (resolvedEntry) => requestActor(c, resolvedEntry),
+      this.checkpointStore ??
+        createAuditLedgerCheckpointStore(c.env, AUDIT_LEDGER_REDIS_TIMEOUT_MS),
+      { tolerateCheckpointAdvanceFailure: false }
+    );
+  }
+
+  /**
+   * For grants of authority (create, rotate, update a key): a grant must not
+   * commit unaudited, so it fails closed with the ledger. A reduction of
+   * authority (revoke, organization deletion) commits first and logs its
+   * record best-effort instead, so it never waits on the ledger or Redis.
+   *
+   * Run `work` and append its audit record in one database transaction: the
+   * ledger's serialized writer opens the transaction, `work` runs in it under
+   * the request's own database identity, and the record it returns is sealed
+   * into the hash chain before the single COMMIT. A failed audit write rolls
+   * the work back with it, so a mutation never commits unaudited and a caller
+   * never returns what an unaudited mutation produced (a key secret above all).
+   *
+   * Work runs while the ledger's writer lock is held, so it must be short and
+   * touch only the database; no provider or network call belongs in it.
+   *
+   * Once the transaction commits, the work and its record are durable
+   * together. Advancing the external checkpoint is post-commit: if that fails,
+   * the ledger is left locked for operators exactly as a failed `log` leaves
+   * it, but the committed work is returned rather than reported as a failure.
+   */
+  async logWithin<T>(
+    c: Context<{ Bindings: Env }>,
+    work: (tx: DatabaseClient) => Promise<{ entry: AuditLogEntry | null; result: T }>
+  ): Promise<T> {
+    const requestIdentity = currentDatabaseIdentity();
+    if (!requestIdentity || requestIdentity.kind === "none") {
+      throw new AuditPersistenceError({
+        cause: new Error("Audited work requires a database identity to run under"),
+      });
+    }
+    // Requests run as a tenant or a registered system workload; the operator
+    // identity belongs to the break-glass path alone and is never audited here.
+    if (requestIdentity.kind === "operator") {
+      throw new AuditPersistenceError({
+        cause: new Error("Audited work cannot run under the operator identity"),
+      });
+    }
+    return this.persist(
+      async (tx) => {
+        // The ledger reads span every organization, so its transaction opens
+        // under the system identity; the work itself runs as the request.
+        await stampTransactionIdentity(tx, requestIdentity);
+        // The work runs while the global ledger lock is held: a row-lock wait
+        // inside it must fail rather than stall every audit write.
+        await tx.execute(`SET LOCAL lock_timeout = '${AUDITED_WORK_LOCK_TIMEOUT}'`);
+        // Inside the work the ambient identity is the request's too, so a
+        // query that reaches past `tx` (a stray `getDb()`) still runs under
+        // row-level security rather than the ledger's system grant.
+        const runWork = () => work(asTransactionalClient(tx));
+        const done = await (requestIdentity.kind === "tenant"
+          ? runWithTenantDatabaseIdentity(requestIdentity, runWork)
+          : runWithSystemDatabaseIdentity(requestIdentity.component, runWork));
+        await tx.execute("SET LOCAL lock_timeout TO DEFAULT");
+        await stampTransactionIdentity(tx, AUDIT_LEDGER_DATABASE_IDENTITY);
+        return done;
       },
-      this.checkpointStore ?? createAuditLedgerCheckpointStore(c.env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
+      (resolvedEntry) => requestActor(c, resolvedEntry),
+      this.checkpointStore ??
+        createAuditLedgerCheckpointStore(c.env, AUDIT_LEDGER_REDIS_TIMEOUT_MS),
+      { tolerateCheckpointAdvanceFailure: true }
     );
   }
 
@@ -542,17 +637,19 @@ export class AuditService {
         cause: new Error("System audit writers require the external checkpoint store"),
       });
     }
+    const checkpointStore = this.checkpointStore;
     await this.persist(
-      entry,
-      {
+      async () => ({ entry, result: undefined }),
+      () => ({
         organizationId: entry.organizationId ?? null,
         userId: entry.userId ?? null,
         apiKeyId: entry.apiKeyId ?? null,
         ipAddress: null,
         userAgent: null,
         requestId: entry.requestId ?? null,
-      },
-      this.checkpointStore
+      }),
+      checkpointStore,
+      { tolerateCheckpointAdvanceFailure: false }
     );
   }
 
@@ -776,52 +873,35 @@ export class AuditService {
     };
   }
 
-  private async persist(
-    entry: AuditLogEntry,
-    actor: {
-      organizationId: string | null;
-      userId: string | null;
-      apiKeyId: string | null;
-      ipAddress: string | null;
-      userAgent: string | null;
-      requestId: string | null;
-    },
-    checkpointStore: KVStore
-  ): Promise<void> {
-    const id = `aud_${crypto.randomUUID()}`;
-    // The scrubbing boundary for the ledger. Applied before the row is hashed,
-    // so what the chain commits to is exactly what a reviewer can read back.
-    // Emails are masked rather than dropped: an invitation event whose subject
-    // is unnamed is not an audit trail. Everything else identifying — names,
-    // phone, date of birth, street, bank instrument, whole identity blobs —
-    // goes. `ip_address` and `user_agent` are unaffected: they are dedicated
-    // columns and part of the security record, not caller-supplied metadata.
-    const metadata = entry.metadata ? scrubAuditMetadata(entry.metadata) : null;
-
+  private async persist<T>(
+    prepare: (tx: DatabaseExecutor) => Promise<{ entry: AuditLogEntry | null; result: T }>,
+    resolveActor: (entry: AuditLogEntry) => AuditActor,
+    checkpointStore: KVStore,
+    options: { tolerateCheckpointAdvanceFailure: boolean }
+  ): Promise<T> {
     // The ledger is platform infrastructure: the hash chain's head and anchor
     // reads span every organization, so they run under the system identity
     // regardless of which tenant's request is being audited. The row itself
     // still records the tenant attribution in its columns.
-    return runWithSystemDatabaseIdentity("audit-ledger", () =>
-      this.persistAsLedger(entry, actor, checkpointStore, id, metadata)
+    return runWithSystemDatabaseIdentity(AUDIT_LEDGER_DATABASE_IDENTITY.component, () =>
+      this.persistAsLedger(prepare, resolveActor, checkpointStore, options)
     );
   }
 
-  private async persistAsLedger(
-    entry: AuditLogEntry,
-    actor: {
-      organizationId: string | null;
-      userId: string | null;
-      apiKeyId: string | null;
-      ipAddress: string | null;
-      userAgent: string | null;
-      requestId: string | null;
-    },
+  private async persistAsLedger<T>(
+    prepare: (tx: DatabaseExecutor) => Promise<{ entry: AuditLogEntry | null; result: T }>,
+    resolveActor: (entry: AuditLogEntry) => AuditActor,
     unboundedCheckpointStore: KVStore,
-    id: string,
-    metadata: Record<string, unknown> | null
-  ): Promise<void> {
+    options: { tolerateCheckpointAdvanceFailure: boolean }
+  ): Promise<T> {
     const checkpointStore = boundedAuditCheckpointStore(unboundedCheckpointStore);
+    // Set inside the transaction callbacks; held in objects because control-
+    // flow analysis does not follow assignments made in a callback.
+    const progress: {
+      committed: boolean;
+      work: { value: T } | null;
+      workError: { error: unknown } | null;
+    } = { committed: false, work: null, workError: null };
     try {
       const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(
         this.db
@@ -830,7 +910,7 @@ export class AuditService {
         throw new Error("Database client cannot serialize post-commit audit checkpoints");
       }
 
-      await lockedTransactionWithPostCommit(
+      const { result } = await lockedTransactionWithPostCommit(
         AUDIT_LEDGER_SESSION_LOCK_KEY,
         async (tx) => {
           // This transaction awaits Redis (the checkpoint reads and CAS) while
@@ -839,6 +919,31 @@ export class AuditService {
           // restore would be skipped, and the pending witness would lock
           // every later audit write. Lifted for this transaction only.
           await tx.execute("SET LOCAL idle_in_transaction_session_timeout = 0");
+          let prepared: { entry: AuditLogEntry | null; result: T };
+          try {
+            prepared = await prepare(tx);
+          } catch (error) {
+            // The work's own refusal (a 404, a 409) is not an audit failure.
+            progress.workError = { error };
+            throw error;
+          }
+          const { entry, result } = prepared;
+          progress.work = { value: result };
+          if (entry === null) {
+            // The work changed nothing worth recording (an idempotent no-op).
+            return { checkpoint: null, result };
+          }
+          const actor = resolveActor(entry);
+          const id = `aud_${crypto.randomUUID()}`;
+          // The scrubbing boundary for the ledger. Applied before the row is
+          // hashed, so what the chain commits to is exactly what a reviewer can
+          // read back. Emails are masked rather than dropped: an invitation
+          // event whose subject is unnamed is not an audit trail. Everything
+          // else identifying — names, phone, date of birth, street, bank
+          // instrument, whole identity blobs — goes. `ip_address` and
+          // `user_agent` are unaffected: they are dedicated columns and part of
+          // the security record, not caller-supplied metadata.
+          const metadata = entry.metadata ? scrubAuditMetadata(entry.metadata) : null;
           const currentHead = await tx.queryOne<AuditLedgerHead>(
             `SELECT ledger.ledger_sequence,
                     encode(ledger.previous_entry_hash, 'hex') AS previous_entry_hash,
@@ -948,9 +1053,12 @@ export class AuditService {
             throw new Error("External audit-ledger pending witness was not established");
           }
 
-          return { expectedCheckpoint, pendingCheckpoint, nextCheckpoint };
+          return { checkpoint: { expectedCheckpoint, pendingCheckpoint, nextCheckpoint }, result };
         },
-        async ({ pendingCheckpoint, nextCheckpoint }) => {
+        async ({ checkpoint }) => {
+          progress.committed = true;
+          if (checkpoint === null) return;
+          const { pendingCheckpoint, nextCheckpoint } = checkpoint;
           const advanced = await checkpointStore.compareAndSet(
             AUDIT_LEDGER_CHECKPOINT_KEY,
             pendingCheckpoint,
@@ -962,7 +1070,9 @@ export class AuditService {
             );
           }
         },
-        async ({ expectedCheckpoint, pendingCheckpoint }) => {
+        async ({ checkpoint }) => {
+          if (checkpoint === null) return;
+          const { expectedCheckpoint, pendingCheckpoint } = checkpoint;
           if (
             !(await restorePendingWitness(checkpointStore, expectedCheckpoint, pendingCheckpoint))
           ) {
@@ -972,7 +1082,20 @@ export class AuditService {
           }
         }
       );
+      return result;
     } catch (err) {
+      if (progress.workError && progress.workError.error === err) {
+        throw err;
+      }
+      if (progress.committed && options.tolerateCheckpointAdvanceFailure && progress.work) {
+        // The work and its record committed together; only the external
+        // checkpoint lags, which locks later ledger writes for operators.
+        getLogger().error(
+          { event: "sdp_audit_checkpoint_advance_failed", error: err },
+          "Audited work committed but the external audit checkpoint did not advance"
+        );
+        return progress.work.value;
+      }
       getLogger().error({ error: err }, "Failed to write audit log");
       throw err instanceof AuditPersistenceError ? err : new AuditPersistenceError({ cause: err });
     }

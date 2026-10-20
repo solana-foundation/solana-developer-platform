@@ -41,19 +41,3 @@ export interface RpcEnv extends ManagedRpcEnv {
   SOLANA_DEVNET_RPC_URL?: string;
   SOLANA_MAINNET_RPC_URL?: string;
 }
-
-export interface KVPutOptions {
-  expirationTtl?: number;
-}
-
-export interface KVStore {
-  get(key: string): Promise<string | null>;
-  get<T>(key: string, type: "json"): Promise<T | null>;
-  put(key: string, value: string, options?: KVPutOptions): Promise<void>;
-  delete(key: string): Promise<void>;
-  list(): Promise<{ keys: Array<{ name: string }> }>;
-}
-
-export interface KVStoreSet {
-  cache: KVStore;
-}

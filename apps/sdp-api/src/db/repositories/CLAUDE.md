@@ -120,8 +120,7 @@ invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`)
 ## Ramps: one transition table
 
 `RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
-status change that goes through it, with its source statuses, target and ramp
-types (HOO-2033).
+status change, with its source statuses, target and ramp types (HOO-2033).
 
 - **Sources come from the table, never the caller.**
   `PaymentsRepository.transitionRampTransfer` applies the named entry as a
@@ -131,25 +130,63 @@ types (HOO-2033).
   re-read and refused as `settled_after_cancel`.
 - **No terminal status is a source except `expired`**, which a provider
   observation revives.
-- **Only the settlement core writes through it so far.** Cancel, MoonPay quote
-  fill and failure, and the off-ramp deposit claim and outcome still set the
-  status themselves. The retired provider's writers were removed in HOO-2037.
-  The inventory is in
-  `../../services/payments/ramp-transfer-transitions.test.ts`; it counts guarded
-  writes per file, so a new `updateTransferStatusGuarded` call fails it
-  even in a listed file.
+- **Every ramp status write goes through it** (HOO-2087): settlement, cancel,
+  MoonPay quote fill and failure, MoonPay failed-buy recovery, and the off-ramp
+  deposit claim and outcome, plus chain-verified delivery and the status
+  sweep's abandoned-checkout expiry (`checkout_abandoned`).
+  `updateTransfer` with a `status` matches no ramp row. The deposit claim adds
+  its deposit-instruction preconditions to the same compare-and-swap inside
+  the repository, and a landed deposit moves to `settling`, never `confirmed`
+  (`OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS`). The inventory is in
+  `../../services/payments/ramp-transfer-transitions.test.ts`; it counts
+  guarded writes per file, so a new call fails it even in a listed file.
 - **Add a transition to the table, not a source set to a call site.** Mirror
   what the writer allows today, and let `transitionRampTransfer` read it.
+- **Provider `settled` only enters `settling`.** The cluster-scoped delivery
+  verifier alone takes `delivery_verified` to `completed`. It compares the
+  provider observation and row signature in the same guarded write. Quoted
+  values stay fixed; provider amounts and addresses live in `provider_data`.
+  Every new provider follows `docs/contributing/ramp-provider-safety.md`.
+
+## Ramps: status pull queue
+
+The `sweep-ramp-transfer-statuses` cron recovers missed webhooks (HOO-2040).
+
+- **One claim per row.** `claimRampTransferForStatusPull` selects and stamps
+  `provider_status_last_polled_at` in one statement (`FOR UPDATE SKIP
+  LOCKED`), so overlapping sweeps never ask about the same row. It leaves
+  `updated_at` alone: that column is the abandonment clock.
+- **Its own queue.** The verifier rotates `finalization_last_polled_at`;
+  neither queue stamps the other's column. Open rows drain before expired
+  ones, and a settling row whose evidence the verifier already holds is never
+  claimed.
+- **Expiry loses to a fresh write.** `checkout_abandoned` passes
+  `expectedUpdatedAt`, so a webhook that lands while the pull is in flight
+  wins.
 
 ## Ramps: webhook environment boundary
 
 The verified webhook endpoint supplies the environment for settlement. Stripe
-and MoonPay match the globally unique provider reference, then compare the
-transfer's project environment before applying an event. MoonPay's first
-reference claim checks that environment inside its UPDATE (HOO-2039 PR A).
-Cross-environment events and settlement after cancellation are `refused` with
-specific inbox reasons. Production parks them for review; sandbox discards
-them. Stale and final events remain `ignored`.
+matches the globally unique provider reference. MoonPay first locks the
+transfer named by `externalTransactionId`, checks its direction and project
+environment, then claims the transaction id and applies settlement in one
+transaction. Its first claim also checks the environment inside the UPDATE
+(HOO-2039). `provider_observed_at` orders MoonPay events only within the
+bound transaction id; equal or older observations are ignored. A failed buy
+releases its reference only when neither the row nor the incoming event reports
+payment activity. It records the id in `moonpay_failed_transactions`; archived
+tombstones still block later claims. Claims and failed-ID writes serialize on
+the transaction id; a reference already bound to another transfer is refused.
+Competing ids, conflicting terminal state, unsafe failures, cross-environment
+events, and settlement after cancellation are `refused`. Production parks them
+for review; sandbox discards them.
+A failed MoonPay sale with no claimed deposit moves to `failed` and withdraws
+`cryptoDeposit` in the same guarded transition, but retains its reference and
+returns `refused` for review. A sale whose deposit was already claimed stays
+open for reconciliation and refuses the failure without regressing its state.
+If the failed event reports a deposit hash, the row moves to `settling`, holds
+the reported hash in `provider_data` and its reference, leaves any SDP-signed
+deposit signature untouched, and withdraws the instruction for review.
 
 ## Ramps: retired provider ids
 
@@ -185,11 +222,13 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   After a provider has carried real-money transfers, merge its removal only
   once an operator count shows none open in stage and prod: a merge to main
   deploys to prod in the same run.
-- **A refresh that drops rows needs a second live read.** The weekday
-  `ramp-rails-refresh.yml` run can catch a transient provider answer: on
-  2026-10-14 it got no PYUSD from MoonPay, which still offered it. Re-pull
-  one provider with `DOPPLER_PROJECT=solana-developer-platform
-  DOPPLER_CONFIG=dev pnpm --filter @sdp/api currencies:discover <provider>`,
-  then `ramp-support:generate`. Never build on `automation/ramp-support-refresh`:
-  the job force-pushes it, and opens its PR only if the repo lets Actions
-  create PRs.
+- **Discovery refuses a shrink.** `currencies:discover` fails without writing
+  when a provider's fresh snapshot drops a committed crypto or over a tenth of
+  a direction's corridors; a live read retries once first. MoonPay lists a
+  crypto only while `supportsTestMode` is true, and turned it off for
+  `pyusd_sol` on 2026-10-15 (live mode kept it). Accept a confirmed drop with
+  `DOPPLER_PROJECT=solana-developer-platform DOPPLER_CONFIG=dev pnpm --filter
+  @sdp/api currencies:discover <provider> --allow-shrink`, then
+  `ramp-support:generate`. Never build on `automation/ramp-support-refresh`:
+  the job force-pushes it and opens its PR as the release app, minting that
+  token only after install and discovery.

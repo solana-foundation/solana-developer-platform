@@ -4,6 +4,7 @@ import { badRequest, badRequestParams } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { organizationCredentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { requireModule } from "@/middleware/require-module";
 import {
   createRingsConnection,
@@ -29,9 +30,11 @@ internalHeliusRings.use("*", requireModule("helius_rings"));
 internalHeliusRings.use("*", organizationCredentialAdminAuthMiddleware());
 internalHeliusRings.use("*", projectContextMiddleware());
 
-internalHeliusRings.get("/connections", async (c) => success(c, await listRingsConnections(c)));
+internalHeliusRings.get("/connections", requireAction("helius_rings.configure"), async (c) =>
+  success(c, await listRingsConnections(c))
+);
 
-internalHeliusRings.post("/connections", async (c) => {
+internalHeliusRings.post("/connections", requireAction("helius_rings.configure"), async (c) => {
   const parsed = connectionInputSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     throw badRequest("Invalid request body", { errors: z.flattenError(parsed.error).fieldErrors });
@@ -39,20 +42,32 @@ internalHeliusRings.post("/connections", async (c) => {
   return created(c, await createRingsConnection(c, parsed.data));
 });
 
-internalHeliusRings.post("/connections/:connectionId/test", async (c) => {
-  const params = parseParams(c.req.param());
-  return success(c, await testRingsConnection(c, params.connectionId));
-});
+internalHeliusRings.post(
+  "/connections/:connectionId/test",
+  requireAction("helius_rings.configure"),
+  async (c) => {
+    const params = parseParams(c.req.param());
+    return success(c, await testRingsConnection(c, params.connectionId));
+  }
+);
 
-internalHeliusRings.post("/connections/:connectionId/make-default", async (c) => {
-  const params = parseParams(c.req.param());
-  return success(c, await makeDefaultRingsConnection(c, params.connectionId));
-});
+internalHeliusRings.post(
+  "/connections/:connectionId/make-default",
+  requireAction("helius_rings.configure"),
+  async (c) => {
+    const params = parseParams(c.req.param());
+    return success(c, await makeDefaultRingsConnection(c, params.connectionId));
+  }
+);
 
-internalHeliusRings.post("/connections/:connectionId/deactivate", async (c) => {
-  const params = parseParams(c.req.param());
-  return success(c, await deactivateRingsConnection(c, params.connectionId));
-});
+internalHeliusRings.post(
+  "/connections/:connectionId/deactivate",
+  requireAction("helius_rings.configure"),
+  async (c) => {
+    const params = parseParams(c.req.param());
+    return success(c, await deactivateRingsConnection(c, params.connectionId));
+  }
+);
 
 function parseParams(value: unknown) {
   const parsed = connectionParamsSchema.safeParse(value);

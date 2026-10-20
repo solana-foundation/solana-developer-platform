@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { HUMAN_SESSION_REQUIRED_MESSAGE } from "@/middleware/human-session";
 import { resetNetworkCachesForTests } from "@/services/network/network.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
@@ -149,8 +150,7 @@ describe("GET /internal/dashboard/network", () => {
       organizationId: ORG.id,
       projectId: PROJECT_ID,
       createdBy: USER.id,
-      role: "api_developer",
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
     const fetchSpy = mockSources();
 
@@ -159,10 +159,10 @@ describe("GET /internal/dashboard/network", () => {
       { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
       env
     );
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(403);
     expect(errorSchema.parse(await response.json()).error).toEqual({
-      code: "UNAUTHORIZED",
-      message: "Clerk JWT required",
+      code: "FORBIDDEN",
+      message: HUMAN_SESSION_REQUIRED_MESSAGE,
     });
     expect(sourceCalls(fetchSpy, "data.solana.com")).toBe(0);
   });

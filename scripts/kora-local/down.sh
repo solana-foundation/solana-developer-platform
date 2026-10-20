@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tears down both local paymasters started by up.sh and removes the API hand-off
-# file so the next plain `pnpm dev` goes back to Doppler's Kora settings.
+# file so `pnpm dev:api` and `pnpm -C apps/sdp-api dev` go back to Doppler's Kora settings.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

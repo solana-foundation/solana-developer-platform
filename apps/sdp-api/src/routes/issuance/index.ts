@@ -2,11 +2,11 @@ import { Hono, type Next } from "hono";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
+import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -76,46 +76,47 @@ export const issuance = new Hono<{ Bindings: Env }>();
 // for this path is wired via KV_FREE_PATHS in app.ts.
 // Public lookups resolve a token by id with no tenant in scope, so the
 // handler runs under an explicit system database identity.
-issuance.get("/tokens/:tokenId/metadata.json", (c) =>
-  runWithSystemDatabaseIdentity("http:token-metadata", () => serveTokenMetadata(c))
+issuance.get(
+  "/tokens/:tokenId/metadata.json",
+  publicRoute("token metadata: public on-chain metadata a wallet or explorer fetches"),
+  (c) => runWithSystemDatabaseIdentity("http:token-metadata", () => serveTokenMetadata(c))
 );
 
 issuance.use("*", unifiedAuthMiddleware());
 issuance.use("*", projectContextMiddleware());
 
 // Templates (read-only, any authenticated user can view)
-issuance.get("/templates", requirePermissions("tokens:read"), listTokenTemplates);
-issuance.get("/templates/:templateId", requirePermissions("tokens:read"), getTokenTemplate);
+issuance.get("/templates", requireAction("issuance.read"), listTokenTemplates);
+issuance.get("/templates/:templateId", requireAction("issuance.read"), getTokenTemplate);
 
 // Token CRUD
 issuance.post(
   "/tokens",
-  requirePermissions("tokens:write"),
+  requireAction("issuance.manage"),
   validateBody(createTokenSchema),
   createToken
 );
-issuance.get("/tokens", requirePermissions("tokens:read"), listTokens);
-issuance.get("/transactions", requirePermissions("tokens:read"), listTransactions);
+issuance.get("/tokens", requireAction("issuance.read"), listTokens);
+issuance.get("/transactions", requireAction("issuance.read"), listTransactions);
 // Filter facets for the token list. Registered BEFORE `/tokens/:tokenId` so the
 // literal path wins the match instead of being read as a token id.
-issuance.get("/tokens/facets", requirePermissions("tokens:read"), listTokenFacets);
-issuance.get("/tokens/:tokenId", requirePermissions("tokens:read"), getToken);
+issuance.get("/tokens/facets", requireAction("issuance.read"), listTokenFacets);
+issuance.get("/tokens/:tokenId", requireAction("issuance.read"), getToken);
 issuance.get(
   "/tokens/:tokenId/transactions",
-  requirePermissions("tokens:read"),
+  requireAction("issuance.read"),
   listTokenTransactions
 );
-issuance.get("/tokens/:tokenId/audit", requirePermissions("tokens:read"), getAssetAuditHistory);
+issuance.get("/tokens/:tokenId/audit", requireAction("issuance.read"), getAssetAuditHistory);
 issuance.post(
   "/tokens/:tokenId/supply/refresh",
-  requirePermissions("tokens:read"),
+  requireAction("issuance.read"),
   meteredQuota(ISSUANCE_SUPPLY_QUOTA),
   refreshTokenSupply
 );
 issuance.patch(
   "/tokens/:tokenId",
-  requirePermissions("tokens:write"),
-  requireAllowedOperation("issuance_metadata_update_execute"),
+  requireAction("issuance.execute"),
   validateBody(updateTokenSchema),
   updateToken
 );
@@ -123,14 +124,13 @@ issuance.patch(
 // Deploy
 issuance.post(
   "/tokens/:tokenId/deploy",
-  requirePermissions("tokens:write"),
-  requireAllowedOperation("issuance_deploy_execute"),
+  requireAction("issuance.execute"),
   validateBody(deployTokenSchema),
   deployToken
 );
 issuance.post(
   "/tokens/:tokenId/deploy/prepare",
-  requirePermissions("tokens:write"),
+  requireAction("issuance.execute"),
   validateBody(legacyDeployTokenSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeploy
@@ -141,7 +141,7 @@ issuance.post(
 // from the prepared tx. Required before prepare-metadata can run.
 issuance.post(
   "/tokens/:tokenId/deploy/confirm",
-  requirePermissions("tokens:write"),
+  requireAction("issuance.execute"),
   validateBody(confirmDeploySchema),
   confirmDeploy
 );
@@ -149,7 +149,7 @@ issuance.post(
 // create tx had to be prepared with an empty uri to stay under the packet limit.
 issuance.post(
   "/tokens/:tokenId/deploy/prepare-metadata",
-  requirePermissions("tokens:write"),
+  requireAction("issuance.execute"),
   validateBody(legacyDeployTokenSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeployMetadata
@@ -158,15 +158,14 @@ issuance.post(
 // Mint
 issuance.post(
   "/tokens/:tokenId/mint/prepare",
-  requirePermissions("tokens:write"),
+  requireAction("issuance.execute"),
   validateBody(mintSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareMint
 );
 issuance.post(
   "/tokens/:tokenId/mint",
-  requirePermissions("tokens:write"),
-  requireAllowedOperation("issuance_mint_execute"),
+  requireAction("issuance.execute"),
   validateBody(mintSchema),
   requestGate({
     extract: extractMintRequest,
@@ -179,15 +178,14 @@ issuance.post(
 // Burn
 issuance.post(
   "/tokens/:tokenId/burn/prepare",
-  requirePermissions("tokens:write"),
+  requireAction("issuance.execute"),
   validateBody(burnSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareBurn
 );
 issuance.post(
   "/tokens/:tokenId/burn",
-  requirePermissions("tokens:write"),
-  requireAllowedOperation("issuance_burn_execute"),
+  requireAction("issuance.execute"),
   validateBody(burnSchema),
   executeBurn
 );
@@ -195,15 +193,14 @@ issuance.post(
 // Seize (Force Transfer)
 issuance.post(
   "/tokens/:tokenId/seize/prepare",
-  requirePermissions("tokens:admin"),
+  requireAction("issuance.enforce"),
   validateBody(seizeSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareSeize
 );
 issuance.post(
   "/tokens/:tokenId/seize",
-  requirePermissions("tokens:admin"),
-  requireAllowedOperation("issuance_seize_execute"),
+  requireAction("issuance.enforce"),
   validateBody(seizeSchema),
   executeSeize
 );
@@ -211,15 +208,14 @@ issuance.post(
 // Force Burn
 issuance.post(
   "/tokens/:tokenId/force-burn/prepare",
-  requirePermissions("tokens:admin"),
+  requireAction("issuance.enforce"),
   validateBody(forceBurnSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareForceBurn
 );
 issuance.post(
   "/tokens/:tokenId/force-burn",
-  requirePermissions("tokens:admin"),
-  requireAllowedOperation("issuance_force_burn_execute"),
+  requireAction("issuance.enforce"),
   validateBody(forceBurnSchema),
   executeForceBurn
 );
@@ -227,15 +223,14 @@ issuance.post(
 // Authority Updates
 issuance.post(
   "/tokens/:tokenId/authority/prepare",
-  requirePermissions("tokens:admin"),
+  requireAction("issuance.authority"),
   validateBody(updateAuthoritySchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareUpdateAuthority
 );
 issuance.post(
   "/tokens/:tokenId/authority",
-  requirePermissions("tokens:admin"),
-  requireAllowedOperation("issuance_update_authority_execute"),
+  requireAction("issuance.authority"),
   validateBody(updateAuthoritySchema),
   requestGate({
     extract: extractUpdateAuthorityRequest,
@@ -248,15 +243,13 @@ issuance.post(
 // Pause/Unpause
 issuance.post(
   "/tokens/:tokenId/pause",
-  requirePermissions("tokens:admin"),
-  requireAllowedOperation("issuance_pause_execute"),
+  requireAction("issuance.enforce"),
   validateBody(pauseTokenSchema),
   pauseToken
 );
 issuance.post(
   "/tokens/:tokenId/unpause",
-  requirePermissions("tokens:admin"),
-  requireAllowedOperation("issuance_unpause_execute"),
+  requireAction("issuance.enforce"),
   validateBody(pauseTokenSchema),
   unpauseToken
 );
@@ -264,40 +257,36 @@ issuance.post(
 // Freeze/Unfreeze
 issuance.post(
   "/tokens/:tokenId/freeze",
-  requirePermissions("tokens:admin"),
-  requireAllowedOperation("issuance_freeze_execute"),
+  requireAction("issuance.enforce"),
   validateBody(freezeSchema),
   freezeAccount
 );
 issuance.post(
   "/tokens/:tokenId/unfreeze",
-  requirePermissions("tokens:admin"),
-  requireAllowedOperation("issuance_unfreeze_execute"),
+  requireAction("issuance.enforce"),
   validateBody(unfreezeSchema),
   unfreezeAccount
 );
-issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
+issuance.get("/tokens/:tokenId/frozen", requireAction("issuance.read"), listFrozenAccounts);
 
 // Allowlist
 // `/allowlist/labels` (GET) is registered before the `/allowlist/:entryId`
 // (DELETE) route; distinct methods mean there is no path collision either way.
 issuance.get(
   "/tokens/:tokenId/allowlist/labels",
-  requirePermissions("tokens:read"),
+  requireAction("issuance.read"),
   listAllowlistLabels
 );
-issuance.get("/tokens/:tokenId/allowlist", requirePermissions("tokens:read"), listAllowlist);
+issuance.get("/tokens/:tokenId/allowlist", requireAction("issuance.read"), listAllowlist);
 issuance.post(
   "/tokens/:tokenId/allowlist",
-  requirePermissions("tokens:write"),
-  requireAllowedOperation("issuance_allowlist_add_execute"),
+  requireAction("issuance.enforce"),
   validateBody(addAllowlistSchema),
   addAllowlistEntry
 );
 issuance.delete(
   "/tokens/:tokenId/allowlist/:entryId",
-  requirePermissions("tokens:write"),
-  requireAllowedOperation("issuance_allowlist_remove_execute"),
+  requireAction("issuance.enforce"),
   removeAllowlistEntry
 );
 
@@ -313,13 +302,13 @@ async function requireAssetProfilesFeature(c: AppContext, next: Next) {
 issuance.get(
   "/tokens/:tokenId/holders",
   requireAssetProfilesFeature,
-  requirePermissions("tokens:read"),
+  requireAction("issuance.read"),
   listHolders
 );
 issuance.post(
   "/tokens/:tokenId/holders",
   requireAssetProfilesFeature,
-  requirePermissions("tokens:write"),
+  requireAction("issuance.manage"),
   validateBody(enrollHolderSchema),
   enrollHolder
 );

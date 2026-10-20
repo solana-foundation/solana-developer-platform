@@ -253,9 +253,9 @@ describe("guardedFetch", () => {
   });
 
   it("refuses an oversize response when the caller asked for that", async () => {
-    // A relay hands the body back to its caller, so a truncated payload under
-    // a 2xx would be silent corruption; the byte cap must surface as an error
-    // instead of a shorter body.
+    // A caller that parses the body would read a truncated payload under a
+    // 2xx as silent corruption; the byte cap must surface as an error instead
+    // of a shorter body.
     const server = createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end("x".repeat(2048));

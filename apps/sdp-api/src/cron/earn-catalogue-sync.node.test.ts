@@ -4,19 +4,19 @@ import type {
   EarnVaultProvider,
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Observability } from "@/runtime/observability";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as vendorCalls from "@/runtime/vendor-calls";
+import { deferred } from "@/test/helpers/deferred";
 import type { Env } from "@/types/env";
 import {
-  EARN_CATALOGUE_SYNC_CRON,
   EARN_CATALOGUE_SYNC_DEADLINE_SECONDS,
-  EARN_CATALOGUE_SYNC_MONITOR,
   EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS,
+  EarnCatalogueSyncDeadlineError,
+  earnCatalogueSyncCron,
   runEarnCatalogueSyncIfDue,
 } from "./earn-catalogue-sync";
 
 const SLOT_KEY = "cron:earn-catalogue-sync:slot";
-const MONITOR_SLOT_KEY = "cron:earn-catalogue-sync:disabled-monitor-slot";
 
 // Mutable registry the module reads through the mocked @sdp/earn binding —
 // tests install providers per case, proving the sync is registry-driven and
@@ -101,14 +101,6 @@ function makeProvider(
   } as unknown as EarnVaultProvider;
 }
 
-function makeObservability(): Observability {
-  return {
-    captureException: vi.fn(),
-    withScope: vi.fn(),
-    withMonitor: vi.fn((_slug, fn) => fn()),
-  };
-}
-
 function installProviders(providers: Record<string, EarnVaultProvider>): void {
   for (const key of Object.keys(mocks.providerClients)) {
     delete mocks.providerClients[key];
@@ -116,7 +108,50 @@ function installProviders(providers: Record<string, EarnVaultProvider>): void {
   Object.assign(mocks.providerClients, providers);
 }
 
+function useStatefulSlot(): { value: () => string | null } {
+  let stored: string | null = null;
+  mocks.get.mockImplementation(async () => stored);
+  mocks.compareAndSet.mockImplementation(
+    async (_key: string, expected: string | null, next: string) => {
+      if (stored !== expected) return false;
+      stored = next;
+      return true;
+    }
+  );
+  mocks.compareAndDelete.mockImplementation(async (_key: string, expected: string) => {
+    if (stored !== expected) return false;
+    stored = null;
+    return true;
+  });
+  return { value: () => stored };
+}
+
+function holdProviderCatalogue() {
+  const catalogue = deferred<ProviderStrategySnapshot[]>();
+  const listStrategies = vi.fn(() => catalogue.promise);
+  installProviders({ upshift: makeProvider("upshift", listStrategies) });
+  return { catalogue, listStrategies };
+}
+
+async function runPastDeadline(): Promise<void> {
+  const run = runEarnCatalogueSyncIfDue(env);
+  const deadlineExceeded = expect(run).rejects.toBeInstanceOf(EarnCatalogueSyncDeadlineError);
+  await vi.advanceTimersByTimeAsync(EARN_CATALOGUE_SYNC_DEADLINE_SECONDS * 1000);
+  await deadlineExceeded;
+}
+
+async function drainMicrotasks(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
 describe("runEarnCatalogueSyncIfDue", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     mocks.upsertStrategy.mockReset().mockResolvedValue(undefined);
     mocks.upsertStrategies.mockReset().mockImplementation(async (inputs: unknown[]) => {
@@ -169,21 +204,16 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
-  it("skips without syncing or checking in while a live claim holds the slot", async () => {
+  it("skips without syncing while a live claim holds the slot", async () => {
     const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
     installProviders({ upshift: makeProvider("upshift", listStrategies) });
     mocks.get.mockResolvedValue(`${Date.now() + 60_000}:11111111-2222-3333-4444-555555555555`);
-    const observability = makeObservability();
 
-    const outcome = await runEarnCatalogueSyncIfDue(env, observability);
+    const outcome = await runEarnCatalogueSyncIfDue(env);
 
     expect(outcome).toBe("skipped");
     expect(listStrategies).not.toHaveBeenCalled();
-    // A held slot is respected without a write attempt, and skipped ticks
-    // make no monitor check-in — Sentry must see hourly check-ins, not one
-    // per five-minute job tick.
     expect(mocks.compareAndSet).not.toHaveBeenCalled();
-    expect(observability.withMonitor).not.toHaveBeenCalled();
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
@@ -240,48 +270,6 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
-  it("runs under its own monitor with the hourly crontab schedule", async () => {
-    installProviders({
-      upshift: makeProvider(
-        "upshift",
-        vi.fn(async () => [])
-      ),
-    });
-    const observability = makeObservability();
-
-    await runEarnCatalogueSyncIfDue(env, observability);
-
-    expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
-      EARN_CATALOGUE_SYNC_MONITOR,
-      expect.any(Function),
-      { schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON } }
-    );
-  });
-
-  it("keeps the hourly monitor healthy without running providers while Earn is disabled", async () => {
-    const listStrategies = vi.fn(async () => [makeSnapshot("vault-a")]);
-    installProviders({ upshift: makeProvider("upshift", listStrategies) });
-    const observability = makeObservability();
-
-    const outcome = await runEarnCatalogueSyncIfDue(env, observability, {
-      workEnabled: false,
-    });
-
-    expect(outcome).toBe("disabled");
-    expect(listStrategies).not.toHaveBeenCalled();
-    expect(createEarnRepository).not.toHaveBeenCalled();
-    expect(mocks.compareAndSet).toHaveBeenCalledExactlyOnceWith(
-      MONITOR_SLOT_KEY,
-      null,
-      expect.stringMatching(TOKEN_PATTERN)
-    );
-    expect(observability.withMonitor).toHaveBeenCalledExactlyOnceWith(
-      EARN_CATALOGUE_SYNC_MONITOR,
-      expect.any(Function),
-      { schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON } }
-    );
-  });
-
   it("releases only its own claim token when the sync fails, and rethrows", async () => {
     installProviders({
       upshift: makeProvider(
@@ -303,34 +291,57 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).toHaveBeenCalledExactlyOnceWith(SLOT_KEY, token);
   });
 
-  it("fails a sync that exceeds its deadline and releases the still-owned claim", async () => {
-    vi.useFakeTimers();
-    try {
-      // A provider call that never settles — the deadline, not the provider,
-      // must end the tick, keeping every execution bounded far below the
-      // claim expiry (the lease-validity invariant).
-      const never = new Promise<ProviderStrategySnapshot[]>(() => {});
-      installProviders({
-        upshift: makeProvider(
-          "upshift",
-          vi.fn(() => never)
-        ),
-      });
+  it("fails a sync that exceeds its deadline and keeps the slot claimed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const slot = useStatefulSlot();
+    holdProviderCatalogue();
 
-      const tick = runEarnCatalogueSyncIfDue(env);
-      const assertion = expect(tick).rejects.toThrow(
-        `exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`
-      );
-      await vi.advanceTimersByTimeAsync(EARN_CATALOGUE_SYNC_DEADLINE_SECONDS * 1000);
-      await assertion;
+    await runPastDeadline();
 
-      // Deadline ≪ claim expiry, so the claim is provably still this
-      // execution's and the release frees the next tick to retry.
-      const token = mocks.compareAndSet.mock.calls[0][2] as string;
-      expect(mocks.compareAndDelete).toHaveBeenCalledExactlyOnceWith(SLOT_KEY, token);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(slot.value()).toMatch(TOKEN_PATTERN);
+    expect(mocks.compareAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("releases the slot when the sync abandoned at its deadline later rejects", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const slot = useStatefulSlot();
+    const { catalogue } = holdProviderCatalogue();
+    vi.spyOn(vendorCalls, "logVendorCallFailure").mockImplementation(() => {
+      throw new Error("telemetry pipeline down");
+    });
+
+    await runPastDeadline();
+    catalogue.reject(new Error("provider API down"));
+    await drainMicrotasks();
+
+    expect(slot.value()).toBeNull();
+  });
+
+  it("keeps the slot claimed when the sync abandoned at its deadline later completes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const slot = useStatefulSlot();
+    const { catalogue } = holdProviderCatalogue();
+
+    await runPastDeadline();
+    const claim = slot.value();
+    catalogue.resolve([makeSnapshot("vault-a")]);
+    await drainMicrotasks();
+
+    expect(mocks.upsertStrategy).toHaveBeenCalledTimes(2);
+    expect(slot.value()).toBe(claim);
+    expect(mocks.compareAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("skips a run five minutes after the deadline while the abandoned sync is still running", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    useStatefulSlot();
+    const { listStrategies } = holdProviderCatalogue();
+
+    await runPastDeadline();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    await expect(runEarnCatalogueSyncIfDue(env)).resolves.toBe("skipped");
+    expect(listStrategies).toHaveBeenCalledOnce();
   });
 
   it("never lets a slot-release failure mask the sync error", async () => {
@@ -346,6 +357,19 @@ describe("runEarnCatalogueSyncIfDue", () => {
     mocks.compareAndDelete.mockRejectedValue(new Error("redis gone too"));
 
     await expect(runEarnCatalogueSyncIfDue(env)).rejects.toThrow("database unreachable");
+  });
+
+  it("logs whether the definition's run synced or skipped", async () => {
+    installProviders({});
+
+    await earnCatalogueSyncCron.run(env);
+    mocks.get.mockResolvedValue(`${Date.now() + 60_000}:11111111-2222-3333-4444-555555555555`);
+    await earnCatalogueSyncCron.run(env);
+
+    expect(mocks.logEvent.mock.calls).toEqual([
+      ["info", { event: "sdp_earn_catalogue_sync", outcome: "synced" }],
+      ["info", { event: "sdp_earn_catalogue_sync", outcome: "skipped" }],
+    ]);
   });
 
   it("degrades per provider: one failing provider never sinks the others' pass", async () => {

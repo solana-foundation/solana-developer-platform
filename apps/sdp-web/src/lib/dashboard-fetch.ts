@@ -1,6 +1,10 @@
 import { isBodylessHttpStatus } from "@sdp/types/idempotency";
 import type { IdempotencyRequiredRoute } from "@sdp/types/idempotency-required-routes";
-import { isMoneyMovementStatus, type MoneyMovementStatus } from "@sdp/types/payments";
+import {
+  isMoneyMovementStatus,
+  type MoneyMovementStatus,
+  type RampDirection,
+} from "@sdp/types/payments";
 import { z } from "zod";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
@@ -330,9 +334,21 @@ const UNKEYED_PREFIXES = ["/api/playground/", "/api/dashboard/markets/dvp/"] as 
  * Read-like POSTs, never keyed: an estimate, a quote or a simulation (the
  * ramps sandbox's `/simulate` included) writes nothing a retry could repeat,
  * and they fire as the user types, so each would leave an unanswered key
- * behind that never expires.
+ * behind that never expires. The ramp quotes are the exception
+ * ({@link RAMP_QUOTE_PATHS}).
  */
 const READ_LIKE_POST = /\/(estimate|quote|simulate)$/;
+
+/**
+ * Ramp quotes, keyed like any mutation: each creates the transfer the wizard
+ * then polls (and, for Stripe, a provider session), so a retry under a new
+ * key creates a second one (APE-689). One fires per selection, never as the
+ * user types.
+ */
+const RAMP_QUOTE_PATHS = {
+  onramp: "/api/dashboard/payments/ramps/onramp/quote",
+  offramp: "/api/dashboard/payments/ramps/offramp/quote",
+} as const satisfies Record<RampDirection, string>;
 
 /**
  * Every mutation the dashboard sends takes a key per user action, whatever
@@ -342,10 +358,12 @@ const READ_LIKE_POST = /\/(estimate|quote|simulate)$/;
  */
 function takesActionKey(path: string, init: RequestInit, headers: Headers): boolean {
   const method = (init.method ?? "GET").toUpperCase();
+  const [pathname] = path.split("?", 1);
   return (
     KEYED_METHODS.has(method) &&
     !UNKEYED_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
-    !READ_LIKE_POST.test(path.split("?", 1)[0] ?? path) &&
+    (!READ_LIKE_POST.test(pathname) ||
+      Object.values(RAMP_QUOTE_PATHS).some((quotePath) => quotePath === pathname)) &&
     !headers.has(IDEMPOTENCY_KEY_HEADER) &&
     (init.body === undefined || init.body === null || typeof init.body === "string")
   );

@@ -1,75 +1,91 @@
 /**
- * node-cron wrapper for the API runtime. Schedules reconciliation through the
- * shared helpers so observability and background tracking are wired
- * consistently.
+ * The Worker's scheduler (ADR 0011): registers every Cron Definition on node-cron.
  *
- * Cloud Run services skip registration by default, leaving reconciliation to
- * the dedicated Cloud Run job rather than firing once per web replica.
- * `DISABLE_CRON=false` explicitly opts a service back in; self-hosted runtimes
- * keep the historical enabled-by-default behavior.
+ * Cloud Run services skip registration by default, so web replicas never run cron; the
+ * always-on worker service sets `DISABLE_CRON=false`. Self-hosted runtimes keep the
+ * historical enabled-by-default behavior.
  */
 
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { type ScheduledTask, schedule } from "node-cron";
-import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
-import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
+import { dvpTradesCron } from "@/cron/dvp-trades";
+import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
+import { earnMetricsRefreshCron } from "@/cron/earn-metrics-refresh";
+import { earnSplitSwapsCron } from "@/cron/earn-split-swaps";
+import { earnVaultMovementsCron } from "@/cron/earn-vault-movements";
+import { idempotencyKeyPruneCron } from "@/cron/idempotency-keys";
+import { pendingDepositsCron } from "@/cron/pending-deposits";
+import { pendingTransfersCron } from "@/cron/pending-transfers";
+import { pendingWithdrawalsCron } from "@/cron/pending-withdrawals";
+import { providerCredentialSecretCleanupCron } from "@/cron/provider-credential-secret-cleanup";
+import { rampDeliveriesCron } from "@/cron/ramp-deliveries";
+import { rampTransferStatusesCron } from "@/cron/ramp-transfer-statuses";
+import { rampTransfersCron } from "@/cron/ramp-transfers";
+import { recurringPaymentsCron } from "@/cron/recurring-payments";
+import { ringsIndexingCron } from "@/cron/rings-indexing";
+import { secretRetirementsCron } from "@/cron/secret-retirements";
+import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
-import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
-import { describeError, logEvent } from "@/runtime/money-path-events";
-import { noopObservability, type Observability } from "@/runtime/observability";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import type { Env } from "@/types/env";
-import {
-  EARN_CATALOGUE_SYNC_CRON,
-  EARN_CATALOGUE_SYNC_MONITOR,
-  runEarnCatalogueSync,
-  runEarnCatalogueSyncIfDue,
-} from "./earn-catalogue-sync";
-import {
-  EARN_METRICS_REFRESH_CRON,
-  EARN_METRICS_REFRESH_MONITOR,
-  runEarnMetricsRefresh,
-} from "./earn-metrics-refresh";
-import {
-  EARN_VAULT_MOVEMENTS_CRON,
-  runEarnVaultMovementsReconciliation,
-} from "./earn-vault-movements";
-import { IDEMPOTENCY_KEY_PRUNE_CRON, runIdempotencyKeyPrune } from "./idempotency-keys";
-import {
-  PENDING_DEPOSITS_CRON,
-  PENDING_DEPOSITS_MONITOR,
-  runPendingDepositsReconciliation,
-} from "./pending-deposits";
-import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
-import {
-  PENDING_WITHDRAWALS_CRON,
-  PENDING_WITHDRAWALS_MONITOR,
-  runPendingWithdrawalsReconciliation,
-} from "./pending-withdrawals";
-import {
-  PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
-  runProviderCredentialSecretCleanup,
-} from "./provider-credential-secret-cleanup";
-import { RAMP_TRANSFERS_CRON, runRampTransfersReconciliation } from "./ramp-transfers";
-import {
-  RECURRING_PAYMENTS_COLLECTION_CRON,
-  runRecurringPaymentsCollection,
-} from "./recurring-payments";
-import {
-  REVOKED_API_KEY_CACHE_CRON,
-  runRevokedApiKeyCacheReconciliation,
-} from "./revoked-api-key-cache";
-import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
-import { runWithCronRunEvent } from "./run-event";
-import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
+import type { CronDefinition } from "./define-cron";
+import { type CronRegistration, logCronRun } from "./run-event";
 
 export interface CronDeps {
   env: Env;
   bg: BackgroundRunner;
-  observability?: Observability;
 }
 
 export interface CronHandle {
   stop(): void | Promise<void>;
+}
+
+/** Every Cron Definition the Worker runs. */
+export const CRON_DEFINITIONS: readonly CronDefinition[] = [
+  pendingTransfersCron,
+  sponsorshipBudgetsCron,
+  recurringPaymentsCron,
+  rampTransfersCron,
+  rampDeliveriesCron,
+  rampTransferStatusesCron,
+  earnVaultMovementsCron,
+  earnSplitSwapsCron,
+  dvpTradesCron,
+  ringsIndexingCron,
+  pendingDepositsCron,
+  pendingWithdrawalsCron,
+  secretRetirementsCron,
+  providerCredentialSecretCleanupCron,
+  idempotencyKeyPruneCron,
+  earnCatalogueSyncCron,
+  earnMetricsRefreshCron,
+];
+
+/**
+ * How long a registration's run may stay in flight before the overlap guard gives up on it.
+ * Without a bound, one run that never settles would turn every later slot into
+ * `skipped_overlap` (which still reads as alive) until the Worker restarted. Past it the slot is
+ * logged as `error` and the next slot may start. The deadline frees the registration and
+ * classifies the slot; it cancels nothing (Node cannot stop an async call tree in process), so
+ * the abandoned work keeps running beside its successor. Definitions that write per row tolerate
+ * that through their claims and compare-and-set; a definition whose writes are set- or
+ * snapshot-based holds its own lock until its work settles (the catalogue sync is the exemplar).
+ * Real cancellation is HOO-2163. Ten minutes is far above any healthy run and short enough that
+ * a wedged money exit resumes the same hour. It equals the catalogue sync's own 600 s deadline,
+ * so a sync that runs into its deadline logs two `error` events for one slot (this one first,
+ * then the sync's own rejection).
+ */
+const CRON_SLOT_DEADLINE_MS = 10 * 60_000;
+
+/** A run that outlived `CRON_SLOT_DEADLINE_MS`; its registration was freed for the next slot. */
+class CronSlotDeadlineExceededError extends Error {
+  readonly code = "CRON_SLOT_DEADLINE_EXCEEDED";
+
+  constructor(cron: string) {
+    super(`${cron} run exceeded the ${CRON_SLOT_DEADLINE_MS / 60_000}-minute cron slot deadline`);
+    this.name = "CronSlotDeadlineExceededError";
+  }
 }
 
 const TRUTHY_DISABLE_CRON: ReadonlySet<string> = new Set(["true", "1"]);
@@ -99,237 +115,126 @@ export function assertCronConfig(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): 
   isCronDisabled(env);
 }
 
-const IN_PROCESS_CHECKIN_MARGIN_MINUTES = 3;
-
-function withCheckinMargin(observability: Observability): Observability {
-  return {
-    captureException: (error) => observability.captureException(error),
-    withScope: (callback) => observability.withScope(callback),
-    withMonitor: (slug, work, options) =>
-      observability.withMonitor(slug, () => runWithCronRunEvent(slug, work), {
-        checkinMargin: IN_PROCESS_CHECKIN_MARGIN_MINUTES,
-        ...options,
-      }),
-  };
+/**
+ * The Environments a definition is registered for: one per Environment for `cluster`, a single
+ * environment-less registration for `global`.
+ *
+ * @param definition - The definition to register.
+ * @returns One entry per registration.
+ */
+function registrationEnvironments(definition: CronDefinition): readonly (SdpEnvironment | null)[] {
+  switch (definition.scope) {
+    case "cluster":
+      return SDP_ENVIRONMENTS;
+    case "global":
+      return [null];
+    default: {
+      const unreachable: never = definition.scope;
+      throw new Error(`Unhandled cron scope: ${String(unreachable)}`);
+    }
+  }
 }
 
 /**
- * One catalogue sync at process start, in EVERY deployment mode.
+ * Run one slot of a definition's work under the system database identity (reconciliation is
+ * cross-tenant, and row-level security denies an undeclared workload) and, for a `cluster`
+ * registration, inside that Environment's cluster scope. Logs the slot's outcome and rethrows
+ * a failure so the background runner records it.
  *
- * Deliberately outside `startCron`: a managed Cloud Run service skips in-process
- * scheduling (`K_SERVICE`), yet a fresh managed database would otherwise serve
- * "No strategies available" until the separately scheduled job's first tick.
- * The slotted entry point keeps this idempotent across replicas and restarts:
- * whoever boots first inside the hour syncs, everyone else finds the slot held
- * and skips, and the managed job's own tick skips the same way. No
- * observability on purpose: the scheduled task and the job own the monitor
- * slugs, and an off-schedule check-in would only confuse them.
+ * @param definition - The definition whose slot fired.
+ * @param registration - The registration the slot belongs to.
+ * @param env - Process environment handed to the work.
+ * @returns Resolves once the work has, after logging the outcome.
  */
-export function startEarnCatalogueBootSync(deps: Pick<CronDeps, "env" | "bg">): void {
-  if (!isEarnEnabled(deps.env)) return;
-  // The background runner absorbs tracked rejections by design, and this path
-  // carries no Sentry monitor, so an infrastructure failure here (Redis, the
-  // sync deadline, a provider outage) must be logged or a fresh database stays
-  // empty in silence until the scheduled sync retries. Same structured shape
-  // as the tick events, so Loki can alert on the name.
-  deps.bg.run(
-    runWithSystemDatabaseIdentity("boot:earn-catalogue-sync", () =>
-      runEarnCatalogueSyncIfDue(deps.env)
-    ).catch((error: unknown) => {
-      logEvent("error", {
-        event: "sdp_api_earn_catalogue_boot_sync_failed",
-        ...describeError(error),
-        error_message: error instanceof Error ? error.message : String(error),
-      });
-    })
-  );
+async function runSlot(
+  definition: CronDefinition,
+  registration: CronRegistration,
+  env: Env
+): Promise<void> {
+  const startedAt = Date.now();
+  const environment = registration.environment;
+  try {
+    await runWithSystemDatabaseIdentity(`cron:${definition.name}`, () =>
+      environment === null
+        ? definition.run(env)
+        : runInEnvironmentClusterScope(environment, () => definition.run(env))
+    );
+  } catch (error) {
+    logCronRun(registration, { status: "error", durationMs: Date.now() - startedAt, cause: error });
+    throw error;
+  }
+  logCronRun(registration, { status: "ok", durationMs: Date.now() - startedAt });
 }
 
+/**
+ * Register every Cron Definition on node-cron, once per registration. A disabled definition's
+ * slots only log `disabled`; an enabled one's slot is skipped as `skipped_overlap` while the
+ * same registration's previous run is in flight (for at most `CRON_SLOT_DEADLINE_MS`), otherwise
+ * its work runs and the promise is handed to the background runner so shutdown drains it.
+ *
+ * @param deps - Process environment and background runner.
+ * @returns A handle that stops every registration, or `null` when cron is disabled here.
+ */
 export function startCron(deps: CronDeps): CronHandle | null {
   if (isCronDisabled(deps.env)) {
     return null;
   }
-  deps = {
-    ...deps,
-    observability: withCheckinMargin(deps.observability ?? noopObservability),
-  };
 
   // node-cron's `task.stop()` halts future scheduling but doesn't promise
   // to interrupt a tick already mid-flight. A `stopping` flag short-circuits
   // any callback that fires concurrent with shutdown so no extra background
   // work gets registered after the awaitAll() snapshot is taken.
   let stopping = false;
-
   const tasks: ScheduledTask[] = [];
 
-  // Every tick runs under a named system database identity: reconciliation is
-  // inherently cross-tenant, and row-level security (migration 0079) denies
-  // database access to any workload that never declared one.
-  const scheduleSystemTask = (
-    cronExpression: string,
-    component: string,
-    run: (deps: CronDeps) => void
-  ): ScheduledTask =>
-    schedule(cronExpression, () => {
-      if (stopping) {
-        return;
-      }
-      runWithSystemDatabaseIdentity(component, () =>
-        run({
-          env: deps.env,
-          bg: deps.bg,
-          observability: deps.observability,
-        })
-      );
-    });
-
-  // Feature-gated ticks keep emitting their sdp_cron_run proof-of-life while
-  // the flag is off, mirroring the managed job (job.ts): the staleness alert
-  // counts distinct monitors per window, so a disabled feature must read as a
-  // healthy no-op, not as the silence that means the scheduler died. It takes
-  // no database identity on purpose — the tick does nothing but log, and a
-  // heartbeat is not a reason to hand a disabled feature cross-tenant access.
-  const scheduleDisabledTickProofOfLife = (cron: string, monitor: string) => {
-    tasks.push(
-      schedule(cron, () => {
+  for (const definition of CRON_DEFINITIONS) {
+    const enabled = definition.enabled(deps.env);
+    for (const environment of registrationEnvironments(definition)) {
+      const registration: CronRegistration = { cron: definition.name, environment };
+      // The in-flight run's own token, so a run abandoned at the deadline that settles later
+      // cannot free the registration from under its successor.
+      let inFlight: symbol | null = null;
+      const fire = () => {
         if (stopping) {
           return;
         }
-        deps.bg.run(runWithCronRunEvent(monitor, async () => undefined));
-      })
-    );
-  };
-
-  tasks.push(
-    scheduleSystemTask(
-      PENDING_TRANSFERS_CRON,
-      "cron:pending-transfers",
-      runPendingTransfersReconciliation
-    )
-  );
-
-  // Unconditional: repairs cached credentials for keys Postgres already
-  // revoked. Feature-gating this would leave deployments without the only
-  // recovery path for a revocation whose cache write failed post-commit.
-  tasks.push(
-    scheduleSystemTask(
-      REVOKED_API_KEY_CACHE_CRON,
-      "cron:revoked-api-key-cache",
-      runRevokedApiKeyCacheReconciliation
-    )
-  );
-
-  tasks.push(
-    scheduleSystemTask(
-      RECURRING_PAYMENTS_COLLECTION_CRON,
-      "cron:recurring-payments",
-      runRecurringPaymentsCollection
-    )
-  );
-
-  if (isPrivateChannelsEnabled(deps.env)) {
-    tasks.push(
-      scheduleSystemTask(
-        PENDING_DEPOSITS_CRON,
-        "cron:pending-deposits",
-        runPendingDepositsReconciliation
-      )
-    );
-    tasks.push(
-      scheduleSystemTask(
-        PENDING_WITHDRAWALS_CRON,
-        "cron:pending-withdrawals",
-        runPendingWithdrawalsReconciliation
-      )
-    );
-  } else {
-    scheduleDisabledTickProofOfLife(PENDING_DEPOSITS_CRON, PENDING_DEPOSITS_MONITOR);
-    scheduleDisabledTickProofOfLife(PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR);
+        if (!enabled) {
+          logCronRun(registration, { status: "disabled" });
+          return;
+        }
+        if (inFlight !== null) {
+          logCronRun(registration, { status: "skipped_overlap" });
+          return;
+        }
+        const slot = Symbol(definition.name);
+        inFlight = slot;
+        const deadline = setTimeout(() => {
+          if (inFlight !== slot) {
+            return;
+          }
+          inFlight = null;
+          logCronRun(registration, {
+            status: "error",
+            durationMs: CRON_SLOT_DEADLINE_MS,
+            cause: new CronSlotDeadlineExceededError(definition.name),
+          });
+        }, CRON_SLOT_DEADLINE_MS);
+        deadline.unref();
+        deps.bg.run(
+          runSlot(definition, registration, deps.env).finally(() => {
+            clearTimeout(deadline);
+            if (inFlight === slot) {
+              inFlight = null;
+            }
+          })
+        );
+      };
+      tasks.push(schedule(definition.schedule, fire));
+      if (definition.runOnStart === true) {
+        fire();
+      }
+    }
   }
-
-  // Cheap to schedule unconditionally: the job early-returns unless the rings
-  // flag is on and the live gateway adapter is selected.
-  tasks.push(scheduleSystemTask(RINGS_INDEXING_CRON, "cron:rings-indexing", runRingsIndexingPoll));
-
-  if (isEarnEnabled(deps.env)) {
-    tasks.push(
-      scheduleSystemTask(EARN_CATALOGUE_SYNC_CRON, "cron:earn-catalogue-sync", runEarnCatalogueSync)
-    );
-    // Separate task, not folded into the sync above: the two have different
-    // cadences on purpose (catalogue drift is hourly, rates are not) and
-    // different blast radii — this one can only rewrite figures on rows that
-    // already exist. See cron/earn-metrics-refresh.ts.
-    tasks.push(
-      scheduleSystemTask(
-        EARN_METRICS_REFRESH_CRON,
-        "cron:earn-metrics-refresh",
-        runEarnMetricsRefresh
-      )
-    );
-  } else {
-    scheduleDisabledTickProofOfLife(EARN_CATALOGUE_SYNC_CRON, EARN_CATALOGUE_SYNC_MONITOR);
-    scheduleDisabledTickProofOfLife(EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR);
-  }
-
-  // Outside every feature gate: the queue this drains holds credentials that are already
-  // orphaned, so cleanup must outlive whichever feature queued them.
-  tasks.push(
-    scheduleSystemTask(SECRET_RETIREMENTS_CRON, "cron:secret-retirements", runSecretRetirements)
-  );
-
-  tasks.push(
-    scheduleSystemTask(
-      PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
-      "cron:provider-credential-secret-cleanup",
-      runProviderCredentialSecretCleanup
-    )
-  );
-
-  // Durable signed intents outlive the feature flag that admitted them. Keep
-  // draining their outbox even when Earn is disabled during an incident.
-  tasks.push(
-    scheduleSystemTask(
-      EARN_VAULT_MOVEMENTS_CRON,
-      "cron:earn-vault-movements",
-      runEarnVaultMovementsReconciliation
-    )
-  );
-
-  // The DvP job checks the Markets flag itself and returns early, so it is registered
-  // unconditionally: an open trade holds a counterparty's money in escrow, and
-  // must keep being observed even if the flag is turned off during an incident.
-  // Through scheduleSystemTask like every other sweep, NOT a bare schedule().
-  // Reconciliation is cross-tenant by nature and 0086 puts forced row-level
-  // security on dvp_trades, which fails closed when no identity is declared -
-  // so a bare tick would read zero open trades, find no funding, and go on
-  // reporting success while a counterparty's escrowed deposit sat unnoticed.
-  tasks.push(scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation));
-
-  // Orphaned split-swap detection (PRO-1864). Advisory and read-only against
-  // the ledger, but cross-tenant like every sweep, so it takes the system
-  // identity through scheduleSystemTask: under 0081's forced row-level
-  // security an identity-less tick would read zero open advisories and report
-  // a clean sweep over swaps it never looked at. Registered unconditionally:
-  // an advisory written before an incident flag flip must keep being watched.
-  tasks.push(
-    scheduleSystemTask(EARN_SPLIT_SWAPS_CRON, "cron:earn-split-swaps", runEarnSplitSwapDetection)
-  );
-
-  // The same ramp list the managed job runs (job.ts). Unconditional: replay
-  // skips providers the release channel leaves out.
-  tasks.push(
-    scheduleSystemTask(RAMP_TRANSFERS_CRON, "cron:ramp-transfers", runRampTransfersReconciliation)
-  );
-
-  // Idempotency-Key retention (HOO-1918). Cross-tenant, so it takes the system
-  // identity; behind no flag, because every module's keys expire.
-  tasks.push(
-    scheduleSystemTask(
-      IDEMPOTENCY_KEY_PRUNE_CRON,
-      "cron:idempotency-key-prune",
-      runIdempotencyKeyPrune
-    )
-  );
 
   return {
     stop() {

@@ -1,5 +1,4 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-
 import { z } from "zod";
 import { errorResponseSchema, orgIdParamSchema } from "@/openapi/schemas/base";
 import { updateOrganizationRequestSchema } from "@/openapi/schemas/organizations";
@@ -36,7 +35,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Update organization",
     operationId: "updateOrganization",
     description: "Updates organization name or settings.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         orgId: orgIdParamSchema,
@@ -62,7 +61,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Delete organization",
     operationId: "deleteOrganization",
     description: "Soft deletes the organization and revokes all API keys.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         orgId: orgIdParamSchema,

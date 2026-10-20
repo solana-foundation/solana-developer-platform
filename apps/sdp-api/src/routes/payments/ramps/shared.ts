@@ -18,7 +18,6 @@ import type {
 import type {
   PaymentRampEstimate,
   PaymentRampQuote,
-  PaymentTransferStatus,
   RampProviderEstimateResult,
 } from "@sdp/types/payments";
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
@@ -27,13 +26,12 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
-import { AppError, conflict, redactErrorForCapture, unsupportedRampCorridor } from "@/lib/errors";
+import { AppError, conflict, unsupportedRampCorridor } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
 import {
-  assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
@@ -191,12 +189,7 @@ export async function resolveRampQuoteRequest(
   }
 
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
-  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
-}
-
-export function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
-  return quote.status;
 }
 
 export async function persistRampQuoteTransfer(
@@ -249,7 +242,7 @@ export async function persistRampQuoteTransfer(
       memo: null,
       type: input.direction,
       direction: isOnramp ? "inbound" : "outbound",
-      status: rampQuoteTransferStatus(input.quote),
+      status: input.quote.status,
       provider: input.quote.provider,
       providerReference: input.quote.id,
       deliveryMode: input.quote.deliveryMode,
@@ -331,18 +324,6 @@ export async function estimateAcrossProviders(
           error_diagnostics: paymentsErrorDiagnostics(error),
           ...describeError(error),
         });
-        const observability = c.get("observability");
-        if (observability) {
-          try {
-            observability.withScope((sentryScope) => {
-              sentryScope.setTag("provider", provider);
-              sentryScope.setTag("organization_id", scope.auth.organizationId);
-              observability.captureException(redactErrorForCapture(cause));
-            });
-          } catch {
-            // never let telemetry change the per-provider error contract
-          }
-        }
         return {
           provider,
           status: "error",

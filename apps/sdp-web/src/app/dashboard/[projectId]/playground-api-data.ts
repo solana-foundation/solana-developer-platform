@@ -5,7 +5,6 @@ export interface PlaygroundApiKeyView {
   id: string;
   name: string;
   keyPrefix: string;
-  role: string;
   environment: string;
 }
 
@@ -55,7 +54,6 @@ export async function fetchActiveApiKeys(
           id?: string;
           name?: string;
           keyPrefix?: string;
-          role?: string;
           environment?: string;
           status?: string;
         }>;
@@ -69,7 +67,6 @@ export async function fetchActiveApiKeys(
         id: apiKey.id ?? "",
         name: apiKey.name ?? "Unnamed key",
         keyPrefix: apiKey.keyPrefix ?? "sdp_...",
-        role: apiKey.role ?? "api_developer",
         environment: apiKey.environment ?? "sandbox",
       }));
 
