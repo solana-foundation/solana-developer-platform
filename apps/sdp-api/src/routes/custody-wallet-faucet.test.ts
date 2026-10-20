@@ -52,7 +52,7 @@ async function seedSandboxWalletAndApiKey(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     projectId: SANDBOX_PROJECT_ID,
     createdBy: USER_ID,
-    grants: ["wallets.execute"],
+    grants: ["wallets.read"],
   });
   await seedTestCustodyRows(env, {
     configs: [
@@ -88,7 +88,7 @@ describe("POST /internal/dashboard/wallets/:walletId/faucet", () => {
     await seedSandboxWalletAndApiKey();
   });
 
-  it("refuses an API key holding wallets.execute on its own sandbox wallet, before any RPC call", async () => {
+  it("refuses an API key holding wallets.read on its own sandbox wallet, before any RPC call", async () => {
     const response = await app.request(
       `/internal/dashboard/wallets/${CUSTODY_WALLET_ID}/faucet`,
       {
