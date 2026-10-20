@@ -184,8 +184,11 @@ stop_pid_file() {
   local pid
   pid="$(cat "${pid_file}")"
   # A pid file can outlive its process (reboot, hard-closed terminal), so only
-  # signal a pid that is still one of ours.
-  if [ -n "${pid}" ] && [[ "$(ps -o command= -p "${pid}" 2>/dev/null)" == *surfpool* ]]; then
+  # signal a pid that is still one of ours: one of the harness scripts, or the CLI fork.
+  # The embedded fork leads its own process group, so the match stays exact.
+  local command_line
+  command_line="$(ps -o command= -p "${pid}" 2>/dev/null || true)"
+  if [ -n "${pid}" ] && [[ "${command_line}" == *scripts/kora-surfpool-*.mjs* || "${command_line}" == *"surfpool start "* ]]; then
     kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
   fi
   rm -f "${pid_file}"
@@ -416,9 +419,11 @@ wait_for_kora 90
 
 FEE_PAYER="$(node - "${KORA_SURFPOOL_KORA_URL}" <<'NODE'
 const url = process.argv[2];
+const headers = { "Content-Type": "application/json" };
+if (process.env.KORA_API_KEY) headers["x-api-key"] = process.env.KORA_API_KEY;
 const response = await fetch(url, {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers,
   body: JSON.stringify({
     jsonrpc: "2.0",
     id: 1,

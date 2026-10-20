@@ -20,11 +20,13 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 # A pid file can outlive its process (reboot, hard-closed terminal), so only
-# signal a pid that is still one of ours.
+# signal a pid that is still one of ours: one of the harness scripts, or the CLI fork.
+# The embedded fork leads its own process group, so the match stays exact.
 for pid_file in "${KORA_RPC_PROXY_PID_FILE}" "${KORA_SHIM_PID_FILE}" "${SURFPOOL_PID_FILE}"; do
   if [ -f "${pid_file}" ]; then
     pid="$(cat "${pid_file}")"
-    if [ -n "${pid}" ] && [[ "$(ps -o command= -p "${pid}" 2>/dev/null)" == *surfpool* ]]; then
+    command_line="$(ps -o command= -p "${pid}" 2>/dev/null || true)"
+    if [ -n "${pid}" ] && [[ "${command_line}" == *scripts/kora-surfpool-*.mjs* || "${command_line}" == *"surfpool start "* ]]; then
       kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
     fi
     rm -f "${pid_file}"
