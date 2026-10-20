@@ -2093,7 +2093,6 @@ async function sendReplacementPlanCreation(input: {
   projectId: string;
   recurringRepo: PaymentRecurringPaymentsRepository;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   resolved: ResolvedRecurringPaymentUpdate;
@@ -2152,7 +2151,7 @@ async function sendReplacementPlanCreation(input: {
   const onChainPlan =
     settled.state === "landed"
       ? subscriptionsProgram.decodePlan(settled.accounts[0])
-      : await subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
+      : await subscriptionsProgram.fetchMaybePlan(createClusterRpc(), input.planPda, {
           commitment: "confirmed",
           minContextSlot: settled.confirmedSlot,
         });
@@ -2179,7 +2178,6 @@ async function sendReplacementAuthorization(input: {
   recurringRepo: PaymentRecurringPaymentsRepository;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   phase: UpdatePhase;
-  rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
@@ -2196,6 +2194,7 @@ async function sendReplacementAuthorization(input: {
   failureMessage: string;
   logContext: RecurringPaymentStepLogContext;
 }): Promise<{ attempt: PaymentRecurringPaymentUpdateAttemptRow; signature: Signature | null }> {
+  const rpc = createClusterRpc();
   const attempt = requireUpdatedAttempt(
     await input.recurringRepo.updateUpdateAttempt({
       attemptId: input.attempt.id,
@@ -2206,7 +2205,7 @@ async function sendReplacementAuthorization(input: {
     })
   );
   const fetchedSubscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-    input.rpc,
+    rpc,
     input.subscriptionAuthorityAddress,
     { commitment: "confirmed" }
   );
@@ -2228,7 +2227,7 @@ async function sendReplacementAuthorization(input: {
     phase: input.phase,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    rpc: input.rpc,
+    rpc,
     sourceWallet: input.sourceWallet,
     sourceSigner: input.sourceSigner,
     sourceTokenAccount: input.sourceTokenAccount,
@@ -2425,7 +2424,6 @@ async function runReplacementUpdate(input: {
         projectId: input.projectId,
         recurringRepo,
         attempt,
-        rpc,
         sourceWallet: input.resolved.sourceWallet,
         sourceSigner,
         resolved: input.resolved,
@@ -2517,7 +2515,6 @@ async function runReplacementUpdate(input: {
         recurringRepo,
         attempt,
         phase,
-        rpc,
         sourceWallet: input.resolved.sourceWallet,
         sourceSigner,
         sourceTokenAccount,
