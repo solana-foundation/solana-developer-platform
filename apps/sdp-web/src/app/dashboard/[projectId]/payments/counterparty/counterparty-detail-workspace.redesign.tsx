@@ -23,6 +23,7 @@ import {
   formatDate,
   formatDateTime,
   formatDecimalAmount,
+  isInboundTransfer,
   PAYMENT_STATUS_TONE,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
@@ -33,7 +34,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { SETTLED_PAYOUT_STATUSES } from "./counterparty-detail.data";
 import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts.redesign";
-import { isInboundTransfer, TransferDetailModal } from "./counterparty-transactions";
+import { TransferDetailModal } from "./counterparty-transactions";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyProviderAccounts } from "./use-counterparty-provider-accounts";
 

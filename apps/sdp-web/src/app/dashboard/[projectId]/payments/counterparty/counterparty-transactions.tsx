@@ -27,6 +27,7 @@ import {
   statusMessageKey,
   statusVariant,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { isInboundTransfer } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
 import { rampPhaseCopy } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { MemoJsonView } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
@@ -34,10 +35,6 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-
-export function isInboundTransfer(transfer: PaymentTransferSummary): boolean {
-  return transfer.type === "onramp" || transfer.direction === "inbound";
-}
 
 function TransferStatusBadge({ status }: { status: PaymentTransferSummary["status"] }) {
   const t = useTranslations();

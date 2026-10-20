@@ -8,6 +8,11 @@ import type { StatusTone } from "@sdp/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 
+/** Whether a transfer brought value into the wallet: a buy, or anything inbound. */
+export function isInboundTransfer(transfer: PaymentTransferSummary): boolean {
+  return transfer.type === "onramp" || transfer.direction === "inbound";
+}
+
 /**
  * How each transfer status reads in a refresh list. Finer than the shared success / pending /
  * danger / neutral tone: a transfer the rails are moving ("processing", "settling") is
