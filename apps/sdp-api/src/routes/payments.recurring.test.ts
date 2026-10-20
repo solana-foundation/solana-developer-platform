@@ -208,7 +208,7 @@ const _TEST_COUNTERPARTY_IDENTITY = {
 async function seedCryptoWalletCounterpartyAccount(params: {
   counterpartyId: string;
   address: string;
-  projectId?: string;
+  projectId: string;
 }): Promise<string> {
   const id = `counterparty_account_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -232,7 +232,7 @@ async function seedCryptoWalletCounterpartyAccount(params: {
     .bind(
       id,
       TEST_ORG.id,
-      params.projectId ?? TEST_PROJECT.id,
+      params.projectId,
       params.counterpartyId,
       "crypto_wallet",
       "Recurring payment wallet",
@@ -912,6 +912,7 @@ describe("Payments routes — recurring", () => {
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
       counterpartyId,
       address: TEST_SOLANA_ADDRESSES.wallet2,
+      projectId: TEST_PROJECT.id,
     });
 
     const createRecurring = (token: string) =>

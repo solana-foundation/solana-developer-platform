@@ -969,20 +969,36 @@ describe("payment transfer batches", () => {
           .prepare(`INSERT INTO payment_transfer_batches
             (id, organization_id, project_id, source_custody_wallet_id,
              source_wallet_id, source_address, token, created_at)
-            VALUES ('xbatch_legacy_same_reference', ?, ?, NULL, ?, ?, 'SOL', '2026-10-12T00:00:01.000Z')`)
-          .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
+            VALUES ('xbatch_legacy_same_reference', ?, ?, NULL, ?, ?, ?, '2026-10-12T00:00:01.000Z')`)
+          .bind(
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            TEST_WALLET_ID,
+            TEST_SOLANA_ADDRESSES.wallet1,
+            WELL_KNOWN_TOKENS.SOL.symbol
+          ),
         getDb(env)
           .prepare(`INSERT INTO payment_transfer_batches
             (id, organization_id, project_id, source_custody_wallet_id,
              source_wallet_id, source_address, token, created_at)
-            VALUES ('xbatch_legacy_other_reference', ?, ?, NULL, 'wal_batch_legacy_other', ?, 'SOL', '2026-10-12T00:00:02.000Z')`)
-          .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_SOLANA_ADDRESSES.wallet2),
+            VALUES ('xbatch_legacy_other_reference', ?, ?, NULL, 'wal_batch_legacy_other', ?, ?, '2026-10-12T00:00:02.000Z')`)
+          .bind(
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            TEST_SOLANA_ADDRESSES.wallet2,
+            WELL_KNOWN_TOKENS.SOL.symbol
+          ),
         getDb(env)
           .prepare(`INSERT INTO payment_transfer_batches
             (id, organization_id, project_id, source_custody_wallet_id,
              source_wallet_id, source_address, token)
-            VALUES ('xbatch_foreign_project', ?, ?, NULL, 'wal_batch_foreign', ?, 'SOL')`)
-          .bind(TEST_ORG.id, `${TEST_PROJECT.id}_production`, TEST_SOLANA_ADDRESSES.wallet2),
+            VALUES ('xbatch_foreign_project', ?, ?, NULL, 'wal_batch_foreign', ?, ?)`)
+          .bind(
+            TEST_ORG.id,
+            `${TEST_PROJECT.id}_production`,
+            TEST_SOLANA_ADDRESSES.wallet2,
+            WELL_KNOWN_TOKENS.SOL.symbol
+          ),
       ]);
       const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
       await seedApiKeyRow(env, keyHash, {

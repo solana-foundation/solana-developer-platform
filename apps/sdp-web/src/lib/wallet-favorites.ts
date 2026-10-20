@@ -147,9 +147,9 @@ export function syncWalletFavorites(
     next.length !== current.length ||
     next.some(
       (entry, index) =>
-        entry.walletId !== current[index]?.walletId ||
-        entry.name !== current[index]?.name ||
-        entry.provider !== current[index]?.provider
+        entry.walletId !== current[index].walletId ||
+        entry.name !== current[index].name ||
+        entry.provider !== current[index].provider
     );
   if (changed) writeFavorites(key, next);
 }

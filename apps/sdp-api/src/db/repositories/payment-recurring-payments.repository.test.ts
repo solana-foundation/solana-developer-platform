@@ -129,7 +129,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         counterpartyAccountId: account.id,
         destinationAddress: "Destination111111111111111111111111111111",
-        token: "USDC",
+        token: WELL_KNOWN_TOKENS.USDC.symbol,
         amount: "10.00",
         periodHours: 24,
         firstCollectionAt: null,
