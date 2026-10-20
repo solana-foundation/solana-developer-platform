@@ -67,7 +67,7 @@ function operationKey(endpoint: ApiPlaygroundEndpointConfig): string {
   return `${endpoint.method} ${endpoint.path.split("?", 1)[0]}`;
 }
 
-/** A published operation, as the playground's execute route and forms match it. */
+/** A published operation, as the playground's proxy route and forms match it. */
 export interface PlaygroundCatalogOperation {
   method: ApiPlaygroundMethod;
   /** The OpenAPI path template, without its query (`/v1/x/{id}`). */
@@ -123,7 +123,7 @@ const VALUE_GATES = new Map(
 
 /**
  * The published playground operation `method pathname` is on `releaseChannel`,
- * or undefined. This is the playground's allowlist: the execute route refuses
+ * or undefined. This is the playground's allowlist: the proxy route refuses
  * anything it does not return and the forms offer nothing it does not return,
  * so the two cannot disagree. The catalog holds the public OpenAPI document's
  * API-key operations (Earn held out), so an internal, admin or undocumented
@@ -244,7 +244,7 @@ function pruneFields(
  * Drops every endpoint that is not a published catalog operation on the
  * deployment's release channel ({@link findPublishedPlaygroundOperation}), the
  * catalog's operations and the hand-authored forms alike, so the playground
- * never offers a request the execute route or the API refuses. Inside the endpoints it
+ * never offers a request the proxy route or the API refuses. Inside the endpoints it
  * keeps, select options, defaults and example responses lose the values of
  * modules and ramp providers the channel does not run. The catalog holds every
  * channel's operations; this is where a deployment narrows it.

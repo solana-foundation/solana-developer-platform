@@ -225,7 +225,6 @@
     "ready": "Ready",
     "completeRequiredFields": "Complete required fields: {fields}",
     "invalidJsonField": "{field} must contain valid JSON.",
-    "playgroundExecutionFailed": "Playground execution failed.",
     "requestExecutionFailed": "Request execution failed.",
     "unknownToken": "Unknown",
     "sdpMintedToken": "SDP-Minted",

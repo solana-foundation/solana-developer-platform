@@ -131,7 +131,6 @@
     "completeRequiredFields": "Completa los campos obligatorios: {fields}",
     "invalidJsonField": "{field} debe contener un JSON válido.",
     "invalidApiKeyFormat": "Formato de clave de API inválido. Usa un valor de clave sin procesar como sk_test_... o sk_live_... con un sufijo válido.",
-    "playgroundExecutionFailed": "La ejecución en el Playground falló.",
     "requestExecutionFailed": "La ejecución de la solicitud falló.",
     "copyOrganizationId": "Copiar ID de la organización",
     "organizationId": "ID de la organización",

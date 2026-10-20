@@ -455,7 +455,7 @@ function generateCatalog(): string {
           Object.entries(modules).map(([module, endpoints]) => [module, endpoints.length])
         ),
       },
-      // Also the dashboard playground's allowlist: its execute route runs only
+      // Also the dashboard playground's allowlist: its proxy route runs only
       // these operations, and a hand-authored form outside them is not offered.
       modules,
       // Which module or ramp provider owns a field value, so the dashboard drops
