@@ -251,7 +251,8 @@
     "running": "Running…",
     "openCalendarFor": "Open the calendar for {field}",
     "noPublishedPlaygroundOperations": "None of these operations are in the public API reference yet, so the playground has nothing to run here.",
-    "earlierPlaygroundWriteUnsettled": "A request sent before the dashboard was updated never got an answer and may have gone through. Check its result (a transfer shows under Transactions) before sending it again; Run sends it as a new request."
+    "earlierPlaygroundWriteUnsettled": "Not sent. A request sent before the dashboard was updated never got an answer and may have gone through. Check its result (a transfer shows under Transactions), then run again and confirm.",
+    "earlierPlaygroundWriteConfirm": "A request sent before the dashboard was updated never got an answer and may have gone through. Have you checked its result (a transfer shows under Transactions)? OK sends this request as a new one."
   },
   "dashboardShell": {
     "workspace": "Workspace",

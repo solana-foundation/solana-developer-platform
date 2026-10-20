@@ -522,13 +522,15 @@ async function executePlaygroundRequest({
   // the browser would not keep is not sent, as the dashboard's own forms
   // refuse it: a reload would lose the key and the retry could pay twice.
   // A write the previous build sent and never heard back about may have landed,
-  // and no Send here can retry it under its key: stop once so the user checks it
-  // first, then forget it so the next Send goes out.
+  // and no Send here can retry it under its key. Every write waits until the
+  // user confirms they checked its outcome; only then is it forgotten.
   if (hasRequestBody(activeEndpoint.method) && playgroundRetryKeys.has(KEY_BUILD_UNSETTLED_SEND)) {
+    if (!window.confirm(t("Shared.SharedComponents.earlierPlaygroundWriteConfirm"))) {
+      onExecutionError(t("Shared.SharedComponents.earlierPlaygroundWriteUnsettled"));
+      return;
+    }
     const unsettled = playgroundRetryKeys.claim(KEY_BUILD_UNSETTLED_SEND);
     playgroundRetryKeys.release(KEY_BUILD_UNSETTLED_SEND, unsettled.key);
-    onExecutionError(t("Shared.SharedComponents.earlierPlaygroundWriteUnsettled"));
-    return;
   }
 
   // The request runs as the signed-in member against the tab's Project, so the

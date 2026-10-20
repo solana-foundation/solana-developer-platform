@@ -96,7 +96,7 @@ describe("ApiPlaygroundShell", () => {
   // Greptile (#2433): the previous build kept a lost write's key under a digest
   // that named the pasted key, so no Send here retries it; it must not go out
   // again unchecked under a new key.
-  it("stops the first write after an update left an earlier write unanswered, once", async () => {
+  it("holds writes after an update left an earlier write unanswered, until the user confirms", async () => {
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
     createIdempotencyKeyStore("sdp:playground:retry:idempotency:v1").claim("unsettled-send", () =>
       JSON.stringify({ request: "digest-from-the-key-build", key: "key-from-the-key-build" })
@@ -118,16 +118,30 @@ describe("ApiPlaygroundShell", () => {
       </I18nProvider>
     );
 
-    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    const run = () => fireEvent.click(view.getByRole("button", { name: "Run request" }));
+
+    // Declined, twice: nothing goes out and the earlier write stays held.
+    run();
+    await waitFor(() => expect(view.container.textContent).toContain("Not sent."));
     await waitFor(() =>
-      expect(view.container.textContent).toContain(
-        "A request sent before the dashboard was updated never got an answer"
-      )
+      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
     );
+    run();
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
     expect(fetchMock).not.toHaveBeenCalled();
 
-    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    // Confirmed: this write goes out, and the next one is not asked about again.
+    confirm.mockReturnValue(true);
+    run();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+    );
+    run();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(confirm).toHaveBeenCalledTimes(3);
   });
 
   it("sends a new Idempotency-Key with each Send of a POST, and none with a GET", async () => {
