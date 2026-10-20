@@ -1,4 +1,5 @@
 import * as feePaymentAdapters from "@sdp/fee-payment";
+import * as feePaymentChainReads from "@sdp/fee-payment/chain-reads";
 import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
@@ -57,6 +58,10 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 );
 
 export const createKoraAdapterMock = vi.spyOn(feePaymentAdapters, "createKoraAdapter");
+
+export const sponsoredNetworkFeeMock = vi.spyOn(feePaymentChainReads, "sponsoredNetworkFee");
+
+export const TEST_SPONSORED_NETWORK_FEE_LAMPORTS = 5000n;
 
 export function testKoraAdapter(
   methods: Pick<KoraAdapter, "getFeePayer" | "getSponsorshipConfiguration" | "signAsFeePayer">
@@ -518,10 +523,8 @@ export function installPaymentsRouteTestHooks(): void {
       getTokenSupply: () => ({
         send: async () => ({ value: { decimals: 6 } }),
       }),
-      getFeeForMessage: () => ({
-        send: async () => ({ value: 5000n }),
-      }),
     } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

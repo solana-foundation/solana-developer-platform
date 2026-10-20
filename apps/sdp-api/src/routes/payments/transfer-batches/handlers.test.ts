@@ -40,6 +40,8 @@ import {
   seedProjectPrivyWallet,
   sendTransactionMock,
   sendTransactionPreflightError,
+  sponsoredNetworkFeeMock,
+  TEST_SPONSORED_NETWORK_FEE_LAMPORTS,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   testKoraAdapter,
 } from "@/test/helpers/payments-routes";
@@ -49,7 +51,6 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
@@ -404,11 +405,7 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
 
-    createRpcMock.mockReturnValue({
-      getFeeForMessage: () => ({
-        send: async () => ({ value: 5000n }),
-      }),
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

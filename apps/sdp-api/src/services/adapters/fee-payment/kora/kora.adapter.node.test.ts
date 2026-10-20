@@ -3,6 +3,7 @@ import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { KoraClient } from "@solana/kora";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const signTransaction = vi.fn();
 const getPayerSigner = vi.fn();
@@ -67,7 +68,7 @@ const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
 
 beforeEach(() => {
   signTransaction.mockReset().mockResolvedValue({ signed_transaction: "AQIDBA==" });
-  getPayerSigner.mockReset().mockResolvedValue({ signer_address: "FeePayer111" });
+  getPayerSigner.mockReset().mockResolvedValue({ signer_address: TEST_MOCK_FEE_PAYER });
   getConfig.mockReset().mockResolvedValue({
     validation_config: {
       max_allowed_lamports: 1_000_000,
@@ -84,7 +85,7 @@ describe("KoraAdapter user_id forwarding", () => {
   it("uses Kora config instead of free-pricing fee estimates", async () => {
     const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toEqual({
-      signerAddress: "FeePayer111",
+      signerAddress: TEST_MOCK_FEE_PAYER,
       maxAllowedLamports: 1_000_000n,
       feePayerMayTransferLamports: false,
       feePayerPolicy: ZERO_OUTFLOW_FEE_PAYER_POLICY,
@@ -361,7 +362,7 @@ describe("KoraAdapter user_id forwarding", () => {
         Response.json({
           id: 1,
           jsonrpc: "2.0",
-          result: { signer_address: "FeePayer111" },
+          result: { signer_address: TEST_MOCK_FEE_PAYER },
         })
       )
       .mockResolvedValueOnce(
