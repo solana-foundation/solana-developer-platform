@@ -11,10 +11,13 @@ import {
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { assertIsSignature, type Signature } from "@solana/kit";
-import { z } from "zod";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
+import {
+  currentProviderSettlement,
+  type ProviderSettlement,
+} from "@/services/payments/ramp-provider-settlement";
 import type { Env } from "@/types/env";
 
 // One status request covers every off-ramp on this page. On-ramps need one
@@ -35,32 +38,6 @@ function createRampChainReader(rpc: SolanaRpc = createClusterRpc()): RampChainRe
     getSignatureStatuses: (signatures) =>
       getSignatureStatuses(rpc, signatures, { searchTransactionHistory: true }),
   };
-}
-
-const providerSettlementSchema = z
-  .object({
-    reference: z.string(),
-    observedAt: z.string().optional(),
-    onchain: z
-      .object({
-        signature: z.string(),
-        sourceAddress: z.string().optional(),
-        destinationAddress: z.string().optional(),
-        amount: z.string().optional(),
-      })
-      .passthrough()
-      .optional(),
-    receivedAmount: z.string().optional(),
-    refundAddress: z.string().optional(),
-  })
-  .passthrough();
-type ProviderSettlement = z.infer<typeof providerSettlementSchema>;
-
-function providerSettlement(transfer: PaymentTransferRow): ProviderSettlement | null {
-  const parsed = providerSettlementSchema.safeParse(transfer.provider_data.providerSettlement);
-  return parsed.success && parsed.data.reference === transfer.provider_reference
-    ? parsed.data
-    : null;
 }
 
 function signature(value: unknown): Signature | null {
@@ -235,7 +212,7 @@ async function verifyOfframps(
   transfers: PaymentTransferRow[]
 ): Promise<string[]> {
   const eligible = transfers.flatMap((transfer) => {
-    const settled = providerSettlement(transfer);
+    const settled = currentProviderSettlement(transfer);
     const submittedSignature = signature(transfer.signature);
     return settled &&
       submittedSignature &&
@@ -311,7 +288,7 @@ export async function verifyRampDeliveries(
       );
     }
     for (const transfer of onramps) {
-      const settled = providerSettlement(transfer);
+      const settled = currentProviderSettlement(transfer);
       if (!settled) continue;
       try {
         if (await verifyOnramp(repo, chain, transfer, settled)) completed.add(transfer.id);

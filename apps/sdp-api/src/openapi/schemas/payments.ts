@@ -233,6 +233,27 @@ export const transferInitiatorSchema = z
   })
   .openapi({ description: "Initiator metadata for the transfer." });
 
+const rampFiatPayoutSchema = z
+  .object({
+    amount: z.string().openapi({
+      description:
+        "Fiat paid out, in display units. Differs from the quoted `fiatAmount` when the provider re-prices the sale at receipt.",
+      example: "20.82",
+    }),
+    currency: z.string().openapi({
+      description: "ISO currency of the payout, as the provider reports it.",
+      example: "USD",
+    }),
+    reportedAt: isoDateTimeSchema.optional().openapi({
+      description: "When the provider reported the payout.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
+  })
+  .openapi({
+    description:
+      "What the provider reports paying out once it settles an off-ramp sale. Provider-reported: SDP cannot verify a bank payout.",
+  });
+
 /** Provider-reported settlement economics for live ramp providers. */
 const moonpayRampSettlementSchema = z
   .object({
@@ -295,6 +316,11 @@ export const transferSchema = z
     blockTime: isoDateTimeSchema
       .nullable()
       .openapi({ description: "Block time, if confirmed.", example: "2025-01-01T00:00:00.000Z" }),
+    confirmedAt: isoDateTimeSchema.optional().openapi({
+      description:
+        "When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
     fee: z
       .number()
       .int()
@@ -360,6 +386,7 @@ export const transferSchema = z
     settlement: rampTransferSettlementSchema.optional().openapi({
       description: "Provider-reported ramp settlement economics for live providers.",
     }),
+    fiatPayout: rampFiatPayoutSchema.optional(),
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),

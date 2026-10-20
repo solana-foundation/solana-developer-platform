@@ -208,6 +208,8 @@ export const moonpaySellTransactionSchema = z.object({
   refundWalletAddress: z.string().nullish(),
   depositHash: z.string().nullish(),
   depositWallet: z.object({ walletAddress: z.string() }).nullish(),
+  // The payout currency is display-only, so a malformed one never fails the event.
+  quoteCurrency: z.object({ code: z.string() }).nullish().catch(undefined),
 });
 export type MoonpaySellTransactionData = z.infer<typeof moonpaySellTransactionSchema>;
 
@@ -306,6 +308,7 @@ export function moonpaySellTransactionSettlementEvent(
       if (data.refundWalletAddress) event.refundAddress = data.refundWalletAddress;
       if (data.quoteCurrencyAmount !== undefined) {
         event.receivedAmount = decimalStringFromNumber(data.quoteCurrencyAmount);
+        if (data.quoteCurrency) event.receivedCurrency = data.quoteCurrency.code.toUpperCase();
       }
       return event;
     }

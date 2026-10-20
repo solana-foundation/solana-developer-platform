@@ -454,6 +454,16 @@ export interface RampCryptoDeposit {
   amount: string;
 }
 
+/** What an off-ramp's provider reports paying out once it settles the sale. SDP cannot verify a bank payout. */
+export interface RampFiatPayout {
+  /** Fiat paid out, in display units. Differs from the quoted `fiatAmount` when the provider re-prices. */
+  amount: string;
+  /** ISO currency of `amount`, as the provider reports it. */
+  currency: string;
+  /** When the provider reported the payout. */
+  reportedAt?: string;
+}
+
 export interface PaymentTransferSummary {
   id: string;
   custodyWalletId: string | null;
@@ -480,6 +490,9 @@ export interface PaymentTransferSummary {
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
   cryptoDeposit?: RampCryptoDeposit;
+  fiatPayout?: RampFiatPayout;
+  /** When SDP confirmed the transfer; a ramp is confirmed once its delivery is verified onchain. */
+  confirmedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }

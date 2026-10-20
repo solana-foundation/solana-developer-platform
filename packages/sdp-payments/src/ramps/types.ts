@@ -161,6 +161,8 @@ export type RampSettlementEvent =
       kind: "settled";
       /** Amount the receiving side settled for, in display units — fiat for off-ramp, crypto for on-ramp. */
       receivedAmount?: string;
+      /** Off-ramp only: the ISO currency of `receivedAmount`, when the provider names it. */
+      receivedCurrency?: string;
       settlement?: RampTransferSettlement;
       /**
        * The crypto rail the provider reports: delivered on-ramp, sold off-ramp.

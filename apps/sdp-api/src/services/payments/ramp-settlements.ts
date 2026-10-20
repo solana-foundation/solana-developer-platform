@@ -63,6 +63,7 @@ function settlementObservationFields(
 > {
   const providerData: Record<string, unknown> = {};
   const receivedAmount = "receivedAmount" in event ? event.receivedAmount : undefined;
+  const receivedCurrency = "receivedCurrency" in event ? event.receivedCurrency : undefined;
   const observation: Record<string, unknown> = {
     kind: event.kind,
     reference: event.reference,
@@ -70,6 +71,7 @@ function settlementObservationFields(
   if (event.providerObservedAt) observation.observedAt = event.providerObservedAt;
   if (event.onchain) observation.onchain = event.onchain;
   if (receivedAmount !== undefined) observation.receivedAmount = receivedAmount;
+  if (receivedCurrency !== undefined) observation.receivedCurrency = receivedCurrency;
   if (event.refundAddress !== undefined) observation.refundAddress = event.refundAddress;
   providerData.observedDelivery = observation;
   if (event.kind === "settled") {
@@ -77,6 +79,7 @@ function settlementObservationFields(
     if (event.providerObservedAt) settlement.observedAt = event.providerObservedAt;
     if (event.onchain) settlement.onchain = event.onchain;
     if (event.receivedAmount !== undefined) settlement.receivedAmount = event.receivedAmount;
+    if (event.receivedCurrency !== undefined) settlement.receivedCurrency = event.receivedCurrency;
     if (event.refundAddress !== undefined) settlement.refundAddress = event.refundAddress;
     providerData.providerSettlement = settlement;
     if (event.providerObservedAt !== undefined) return { providerData };

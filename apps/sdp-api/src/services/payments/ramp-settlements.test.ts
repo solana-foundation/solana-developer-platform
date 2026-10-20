@@ -323,6 +323,33 @@ describe("applyRampSettlementEvent", () => {
     });
   });
 
+  it("stores the payout currency beside the off-ramp's provider-reported payout", async () => {
+    await seedTransfer({
+      id: "xfr_payout_currency",
+      reference: "order_payout_currency",
+      status: "settling",
+      type: "offramp",
+      signature: "sdp-submitted-signature",
+    });
+
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "order_payout_currency",
+      receivedAmount: "20.82",
+      receivedCurrency: "USD",
+    });
+
+    expect(await readTransfer("xfr_payout_currency")).toMatchObject({
+      status: "settling",
+      fiat_amount: "10",
+      provider_data: {
+        providerSettlement: { receivedAmount: "20.82", receivedCurrency: "USD" },
+        observedDelivery: { receivedAmount: "20.82", receivedCurrency: "USD" },
+      },
+    });
+  });
+
   it("settles an off-ramp while its on-chain deposit is processing", async () => {
     await seedTransfer({
       id: "xfr_processing_deposit",
