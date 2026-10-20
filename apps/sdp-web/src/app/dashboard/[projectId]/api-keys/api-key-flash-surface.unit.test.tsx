@@ -37,7 +37,6 @@ const accountAKey: ApiKeyFlash = {
   level: "success",
   message: "API key created",
   key: "sk_test_account_a_bearer",
-  apiKeyId: "key_account_a",
   keyPrefix: "sk_test_acc",
 };
 

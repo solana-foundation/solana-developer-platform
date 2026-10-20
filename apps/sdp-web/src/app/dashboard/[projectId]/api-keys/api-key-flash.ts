@@ -18,7 +18,6 @@ export interface ApiKeyFlash {
   level: FlashLevel;
   message: string;
   key?: string;
-  apiKeyId?: string;
   keyPrefix?: string;
 }
 
