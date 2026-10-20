@@ -21,6 +21,8 @@ import {
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
+  lamports,
+  removeNullCharacters,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   signature,
@@ -104,6 +106,7 @@ import {
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
+import { planAccount } from "@/test/helpers/subscription-accounts";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
@@ -6795,6 +6798,63 @@ describe("Payments routes — recurring", () => {
         });
       });
 
+      it("expects the recorded plan pre-image when the plan as read shows another metadata URI", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const recordedMetadataUri = "https://example.com/recurring/recorded.json";
+        const update = (metadataUri: string) =>
+          app.request(
+            actionPath(activated.id),
+            {
+              method: "PATCH",
+              headers: keyed(crypto.randomUUID()),
+              body: JSON.stringify({ metadataUri }),
+            },
+            env
+          );
+        expect((await update(recordedMetadataUri)).status).toBe(200);
+        const recorded = required(
+          await getDb(env)
+            .prepare(
+              "SELECT metadata_uri, plan_created_at FROM payment_recurring_payments WHERE id = ?"
+            )
+            .bind(activated.id)
+            .first<{ metadata_uri: string | null; plan_created_at: string | null }>()
+        );
+        expect(recorded.metadata_uri).toBe(recordedMetadataUri);
+        // The plan was changed outside SDP: another URI and creation time than the schedule recorded.
+        const outsidePlan = planAccount({
+          createdAt: 1_770_000_777n,
+          metadataUri: "https://example.com/recurring/outside.json",
+        });
+        vi.spyOn(subscriptionsProgram, "fetchMaybePlan").mockResolvedValue(
+          subscriptionsProgram.decodePlan({
+            exists: true,
+            address: address(required(activated.planPda)),
+            data: outsidePlan.data,
+            executable: false,
+            lamports: lamports(1n),
+            programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+            space: BigInt(outsidePlan.data.length),
+          })
+        );
+        const sent = sends();
+
+        await update("https://example.com/recurring/target.json");
+
+        expect(sent).toHaveBeenCalledTimes(1);
+        const [instruction] = required(sent.mock.calls[0])[0].instructions;
+        const { updatePlanData } = subscriptionsProgram
+          .getUpdatePlanInstructionDataDecoder()
+          .decode(required(required(instruction).data));
+        expect({
+          expectedCreatedAt: updatePlanData.expectedCreatedAt,
+          expectedMetadataUri: removeNullCharacters(updatePlanData.expectedMetadataUri),
+        }).toEqual({
+          expectedCreatedAt: BigInt(required(recorded.plan_created_at)),
+          expectedMetadataUri: recordedMetadataUri,
+        });
+      });
+
       it("sends a cancel the chain does not show", async () => {
         mockDistinctRecentBlockhashes();
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
@@ -7588,6 +7648,81 @@ describe("Payments routes — recurring", () => {
           authorization_signature: authorizationSignature,
         });
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+      });
+
+      it("keeps a resumed replacement in flight when its unwind finds the new delegation on chain", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        // The subscribe is refused as already subscribed and the chain shows the new delegation,
+        // so its slot stays empty; the old subscription's cancel is then refused.
+        rejectPoolSendAfter(
+          1,
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__ALREADY_SUBSCRIBED
+          )
+        );
+        sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
+        delegationsBesideActiveOld(
+          required(activated.subscriptionPda),
+          0n,
+          DEFAULT_RECURRING_CHAIN
+        );
+        const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+        onTestFinished(() => errorLog.mockRestore());
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await update()).status).toBe(400);
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "cancel_old_subscription",
+          authorization_signature: null,
+        });
+        await leaveUpdateCrashedAt(activated.id, key);
+        vi.spyOn(subscriptionsProgram, "fetchMaybeSubscriptionAuthority").mockRejectedValue(
+          new Error("subscription authority read failed")
+        );
+        const sent = sends();
+
+        const retry = await update();
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          authorization_signature: null,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+        const newSubscription = required(
+          await getDb(env)
+            .prepare(
+              `SELECT s.subscription_pda FROM payment_subscriptions s
+                 JOIN payment_recurring_payment_update_attempts a ON a.new_subscription_id = s.id
+                WHERE a.recurring_payment_id = ?`
+            )
+            .bind(activated.id)
+            .first<{ subscription_pda: string | null }>()
+        );
+        const refused = errorLog.mock.calls.filter(([payload]) => {
+          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+          return (
+            parsed.success &&
+            parsed.data.event === "sdp_api_recurring_payment_unwind_refused_delegation_live"
+          );
+        });
+        expect(refused).toHaveLength(1);
+        expect(required(refused[0])[0]).toEqual(
+          expect.objectContaining({
+            recurring_payment_id: activated.id,
+            step: "authorize_subscription",
+            delegation_state: "landed",
+            subscription_pda: newSubscription.subscription_pda,
+          })
+        );
       });
 
       it("keeps a stalled update's saved authorization in flight while it can still land", async () => {
