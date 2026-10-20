@@ -28,6 +28,7 @@ import {
 import {
   authorizationSetupEffect,
   delegationCanceledEffect,
+  delegationCreatedEffect,
   planCreatedEffect,
   planMetadataUpdatedEffect,
   type RecurringPaymentStepEffect,
@@ -55,6 +56,11 @@ const PLAN_CREATED_AT = 1_770_000_000n;
 const PRE_IMAGE_URI = "https://example.com/recurring/before.json";
 const TARGET_URI = "https://example.com/recurring/after.json";
 const logEventSchema = z.object({ event: z.string() });
+const UNDECODABLE_ACCOUNT = {
+  owner: SUBSCRIPTIONS_PROGRAM_ADDRESS,
+  data: new Uint8Array(8),
+} satisfies StubEncodedAccount;
+const STEP_UNREADABLE_MESSAGE = "Recurring payment step could not be read on chain";
 
 describe("readRecurringPaymentStep", () => {
   const rpc = installClusterRpcResponder();
@@ -165,14 +171,39 @@ describe("readRecurringPaymentStep", () => {
         answerChain({
           blockHeight: 4_000,
           accountsSlot: TIP_SLOT,
-          accounts: [{ owner: SUBSCRIPTIONS_PROGRAM_ADDRESS, data: new Uint8Array(8) }],
+          accounts: [UNDECODABLE_ACCOUNT],
         }),
       effect: delegationCanceledEffect(STEP_ACCOUNT),
     },
+    {
+      failure: "an existing plan account does not decode",
+      answer: () =>
+        answerChain({
+          blockHeight: 4_000,
+          accountsSlot: TIP_SLOT,
+          accounts: [UNDECODABLE_ACCOUNT],
+        }),
+      effect: planCreatedEffect(STEP_ACCOUNT),
+    },
+    {
+      failure: "an existing delegation account does not decode",
+      answer: () =>
+        answerChain({
+          blockHeight: 4_000,
+          accountsSlot: TIP_SLOT,
+          accounts: [UNDECODABLE_ACCOUNT],
+        }),
+      effect: delegationCreatedEffect(STEP_ACCOUNT),
+    },
   ])("keeps an unsaved step pending, never unsent, when $failure", async ({ answer, effect }) => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    onTestFinished(() => warn.mockRestore());
     answer();
 
     expect(await readUnsavedStep(effect)).toEqual({ state: "pending" });
+    expect(warn.mock.calls.filter(([, message]) => message === STEP_UNREADABLE_MESSAGE)).toEqual([
+      [{ ...LOG_CONTEXT, err: expect.any(Error) }, STEP_UNREADABLE_MESSAGE],
+    ]);
   });
 
   it("drops a saved send once the confirmed block height passes its stored expiry", async () => {

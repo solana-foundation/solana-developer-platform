@@ -9,7 +9,6 @@ import {
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
-import { runWithDatabaseIdentity } from "@/db/identity";
 import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -98,17 +97,15 @@ export const DEFAULT_RECURRING_CHAIN: RecurringChainView = {
 async function recordedSubscriptionAccountKind(
   address: string
 ): Promise<"plan" | "delegation" | null> {
-  // The stub runs inside the request's tenant identity; the chain sees every tenant's rows.
+  // A step reads under its request's tenant identity, which owns every address it asks about.
   const recorded = required(
-    await runWithDatabaseIdentity({ kind: "system", component: "vitest-chain" }, () =>
-      getDb(env)
-        .prepare(
-          `SELECT EXISTS (SELECT 1 FROM payment_subscription_plans WHERE plan_pda = ?) AS plan,
-                  EXISTS (SELECT 1 FROM payment_subscriptions WHERE subscription_pda = ?) AS delegation`
-        )
-        .bind(address, address)
-        .first<{ plan: boolean; delegation: boolean }>()
-    )
+    await getDb(env)
+      .prepare(
+        `SELECT EXISTS (SELECT 1 FROM payment_subscription_plans WHERE plan_pda = ?) AS plan,
+                EXISTS (SELECT 1 FROM payment_subscriptions WHERE subscription_pda = ?) AS delegation`
+      )
+      .bind(address, address)
+      .first<{ plan: boolean; delegation: boolean }>()
   );
   if (recorded.plan) return "plan";
   if (recorded.delegation) return "delegation";
