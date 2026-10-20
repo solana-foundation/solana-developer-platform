@@ -83,7 +83,7 @@
     "@solana/subscriptions": "0.5.0",
     "@solana/sysvars": "catalog:",
     "@solana/token-acl-sdk": "catalog:",
-    "hono": "4.13.9",
+    "hono": "4.13.11",
     "ioredis": "6.0.0",
     "jose": "6.2.12",
     "nanoid": "6.0.1",
