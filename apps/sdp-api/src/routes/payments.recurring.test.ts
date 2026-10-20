@@ -4014,7 +4014,7 @@ describe("Payments routes — recurring", () => {
       }
     );
 
-    it("answers 409 and leaves a dropped pull's confirmed transfer and processing attempt untouched when its signature failed on chain", async () => {
+    it("answers 409 for a dropped pull whose signature failed on chain over a confirmed transfer, bumping only the processing attempt's updated_at", async () => {
       const errors = logEvents("error");
       const started = await seedStartedCollection({
         attemptedAt: staleAt(),
@@ -4038,7 +4038,14 @@ describe("Payments routes — recurring", () => {
       expect(response.status).toBe(409);
       expect(errorResponseSchema.parse(await response.json()).error.code).toBe("CONFLICT");
       expect(before.attempt.status).toBe("processing");
-      expect(await startedCollectionRows(started)).toEqual(before);
+      const after = await startedCollectionRows(started);
+      expect(after).toEqual({
+        attempt: { ...before.attempt, updated_at: after.attempt.updated_at },
+        transfer: before.transfer,
+      });
+      expect(new Date(after.attempt.updated_at).getTime()).toBeGreaterThan(
+        new Date(before.attempt.updated_at).getTime()
+      );
       expect(errors(FAILED_ON_CHAIN_PULL.event)).toEqual([
         [
           {
