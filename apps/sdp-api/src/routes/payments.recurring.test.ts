@@ -7394,6 +7394,40 @@ describe("Payments routes — recurring", () => {
         });
       });
 
+      it("keeps a resumed replacement in flight when it fails before reading its saved authorization", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(
+          required(activated.subscriptionPda),
+          null,
+          DEFAULT_RECURRING_CHAIN
+        );
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await update()).status).toBe(409);
+        const authorizationSignature = poolSentSignatures()[3];
+        await leaveUpdateCrashedAt(activated.id, key);
+        createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(new Error("signer unavailable"));
+        const sent = sends();
+
+        const retry = await update();
+
+        expect(retry.status).toBe(500);
+        expect(sent).not.toHaveBeenCalled();
+        // The saved authorization may still land, so the failure never unwinds the update.
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: authorizationSignature,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+      });
+
       it("keeps a stalled update's saved authorization in flight while it can still land", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const oldSubscriptionPda = required(activated.subscriptionPda);
