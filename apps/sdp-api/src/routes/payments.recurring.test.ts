@@ -1839,7 +1839,7 @@ describe("Payments routes — recurring", () => {
     expect(event?.after_values.nextCollectionDueAt).toBe(expectedClampedDueAt);
   });
 
-  it("creates the source token account during recurring payment activation when it is missing", async () => {
+  it("creates the source token account beside the authority init during recurring payment activation when it is missing", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const recurringPaymentId = (
       await createRecurringPaymentFixture({
@@ -1860,6 +1860,8 @@ describe("Payments routes — recurring", () => {
             owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
           } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
     );
+    const sent = vi.spyOn(recurringShared, "sendSubscriptionInstructions");
+    onTestFinished(() => sent.mockRestore());
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
@@ -1875,6 +1877,27 @@ describe("Payments routes — recurring", () => {
     const activateBody = await parseRecurringResponse(activateRes);
     expect(activateBody.data.recurringPayment.status).toBe("active");
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+    const sentInstructions = sent.mock.calls.map(([input]) => input.instructions);
+    expect(
+      sentInstructions.map((instructions) =>
+        instructions.map(({ programAddress }) => programAddress)
+      )
+    ).toEqual([
+      [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+      [ASSOCIATED_TOKEN_PROGRAM_ADDRESS, subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+      [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+    ]);
+    const init = required(required(sentInstructions[1])[1]);
+    expect(
+      subscriptionsProgram.parseSubscriptionsInstruction({ ...init, data: required(init.data) })
+    ).toMatchObject({
+      instructionType: subscriptionsProgram.SubscriptionsInstruction.InitSubscriptionAuthority,
+      accounts: {
+        owner: { address: sourceSigner.address },
+        tokenMint: { address: DEVNET_USDC_MINT },
+        userAta: { address: expectedSourceAta },
+      },
+    });
     const subscriptionRow = await getDb(env)
       .prepare("SELECT subscriber_token_account FROM payment_subscriptions WHERE id = ?")
       .bind(activateBody.data.recurringPayment.subscriptionId)
@@ -7798,6 +7821,36 @@ describe("Payments routes — recurring", () => {
           "canceled"
         );
         expect(sent).not.toHaveBeenCalled();
+      });
+
+      it("fails an activation whose setup send expired without landing back to pending_activation, clearing its setup signature", async () => {
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        // No subscription authority yet, so the setup goes out between the plan and subscribe.
+        vi.spyOn(subscriptionsProgram, "fetchMaybeSubscriptionAuthority").mockResolvedValueOnce({
+          exists: false,
+          address: address(TEST_SOLANA_ADDRESSES.wallet3),
+        });
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          absoluteSlot: 2_900,
+          blockHeight: 1_001,
+          delegation: () => null,
+        });
+
+        const activation = await activate(created.id, crypto.randomUUID());
+
+        expect(activation.status).toBe(400);
+        expect(await errorCode(activation)).toBe("TRANSACTION_FAILED");
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "failed",
+          stage: "authorize_subscription",
+          plan_creation_signature: poolSentSignatures()[0],
+          authorization_setup_signature: null,
+          authorization_signature: null,
+        });
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("pending_activation");
+        expect(sendTransactionMock).toHaveBeenCalledTimes(2);
       });
 
       it("finishes an activation whose subscribe is refused as already subscribed once the chain shows the delegation", async () => {
