@@ -405,17 +405,34 @@ A request must clear every layer that is configured on its key:
 
 ## Errors
 
-Authentication and authorization failures are always machine-distinguishable:
+Authentication and authorization failures are always machine-distinguishable: the code says what kind of refusal it is, and a 403 names what it is missing in `error.details`.
 
-| Condition | Status | Code |
-| --- | --- | --- |
-| No API key on a keyed-only request | 401 | `UNAUTHORIZED` |
-| Malformed or unknown key | 401 | `INVALID_API_KEY` |
-| Key has been revoked, its organization was deleted or suspended, or its project was archived | 401 | `REVOKED_API_KEY` |
-| Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
-| Request origin not in the key's or the organization's IP allowlist | 403 | `FORBIDDEN` |
-| Key lacks the route's action (`error.details.action` names it) | 403 | `INSUFFICIENT_PERMISSIONS` |
-| Per-key rate limit exceeded | 429 | `RATE_LIMITED` |
+| Condition | Status | Code | `error.details` |
+| --- | --- | --- | --- |
+| No API key on a keyed-only request | 401 | `UNAUTHORIZED` | |
+| Malformed or unknown key | 401 | `INVALID_API_KEY` | |
+| Key has been revoked, its organization was deleted or suspended, or its project was archived | 401 | `REVOKED_API_KEY` | |
+| Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` | |
+| Request origin not in the key's or the organization's IP allowlist | 403 | `FORBIDDEN` | `reason: "ip_not_allowed"` |
+| Route only a signed-in dashboard member may use, such as managing keys, members or the organization | 403 | `FORBIDDEN` | `reason: "human_session_required"` |
+| Key lacks the route's action, or the action a signature it asks for needs | 403 | `INSUFFICIENT_PERMISSIONS` | `action` names the missing action |
+| SDP refused to sign for the request (see below) | 403 | `FORBIDDEN` | `reason` names why |
+| Per-key rate limit exceeded | 429 | `RATE_LIMITED` | |
+
+### Signing refusals
+
+SDP decides again each time it signs on a key's behalf, so a change to the key or the organization applies to the next signature, including one later in the same request. Nothing is signed or sent on refusal. `error.details.reason` is one of:
+
+| `reason` | Why |
+| --- | --- |
+| `wallet_out_of_scope` | The custody wallet is outside the key's wallet scope |
+| `principal_not_live` | The key was revoked, expired, or passed its rotation deadline during the request |
+| `organization_inactive` | The organization is suspended or deleted |
+| `production_not_enabled` | The project is a production project and the organization does not have production access |
+| `project_not_found` | The project no longer exists |
+| `principal_missing` | No credential is attached to the movement |
+
+A key without the action a signature needs is refused with `INSUFFICIENT_PERMISSIONS` and `error.details.action`, exactly as at the route.
 
 Requests are rate limited per key; the standard tier allows 100 requests per minute.
 
@@ -430,7 +447,7 @@ Source: https://platform.solana.com/docs/developing-with-sdp/manage-api-keys
 
 Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and holds an explicit list of grants plus optional controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
 
-Keys are credentials, not administrators: they are created, changed, rotated, and revoked by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever it is granted.
+Keys are credentials, not administrators: they are created, changed, rotated, and revoked only by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever it is granted; it is refused with `403 FORBIDDEN` and `error.details.reason` set to `human_session_required`.
 
 The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
@@ -487,7 +504,7 @@ A key's wallet scope decides which custody wallets SDP may sign with on its beha
 | `walletScope` | Signs with |
 | --- | --- |
 | `all` | Every custody wallet in the key's project |
-| `selected` | Only the wallets listed in `walletIds`. With none listed, the key signs nothing |
+| `selected` | Only the wallets listed in `walletIds`. With none listed, the key signs with no custody wallet; SDP's fee sponsor is outside wallet scope |
 
 `walletIds` are custody wallet ids, the `id` (`cwlt_…`) that `GET /v1/wallets` returns, not a provider's wallet id. A key keeps the exact wallets you listed: a wallet created later, even one reusing a provider id, is never added.
 
@@ -496,18 +513,6 @@ SDP checks the scope each time it signs, together with the key's grants and whet
 The scope narrows what a key may sign with, not what it may read. A `selected` key's wallet list (`GET /v1/wallets`) and wallet detail reads show only its wallets; every other read, such as transfers, batches and recurring payments, covers the whole project. Give a separate project to an integration that must not see another's records.
 
 The dashboard starts a key that holds any `execute` action on **Selected wallets**, so it can sign with nothing you did not give it; choose **All wallets** to widen it.
-
-```bash title="Create a key that may only pay from one wallet"
-curl -X POST https://api.solana.com/v1/api-keys \
-  -H "Authorization: Bearer $DASHBOARD_SESSION" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Payouts worker",
-    "grants": ["transfers.execute"],
-    "walletScope": "selected",
-    "walletIds": ["cwlt_0f2c8c1e"]
-  }'
-```
 
 ## Recurring payments outlive the key
 
