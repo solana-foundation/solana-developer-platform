@@ -1,31 +1,26 @@
-/**
- * Rings indexing-poll entrypoint. Scheduled unconditionally: the job itself
- * early-returns unless the rings flag is on, and gates Photon reconciliation on
- * the upstreams internally.
- */
-
-import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
+import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
-import type { Env } from "@/types/env";
+import { defineCron } from "./define-cron";
 
-export const RINGS_INDEXING_MONITOR = "sdp-api-poll-rings-indexing";
-export const RINGS_INDEXING_CRON = "* * * * *";
-
-export interface RingsIndexingPollDeps {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}
-
-export function runRingsIndexingPoll(deps: RingsIndexingPollDeps): void {
-  const work = () => pollRingsIndexing(deps.env);
-
-  const promise = deps.observability
-    ? deps.observability.withMonitor(RINGS_INDEXING_MONITOR, work, {
-        schedule: { type: "crontab", value: RINGS_INDEXING_CRON },
-      })
-    : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
-}
+// NOTE: Helius Rings is EXPERIMENTAL and still being worked on. This definition is `global` on
+// purpose for now: it reads through the Helius Rings gateway configured from env (devnet only),
+// not the shared cluster pool, so it is not cluster-scoped yet. Do not copy this shape for a
+// chain-touching cron; use `scope: "cluster"`.
+//
+// NOTE: classified `observes` for now, while Helius Rings is experimental, knowing it is all
+// three: it observes (asks Photon and the chain whether broadcast operations landed), finishes
+// (rebroadcasts recorded bytes and completes operations Photon has indexed), and starts (its
+// in-flight pass calls `executeOperation`, which rebuilds an operation that died in `proving`,
+// has custody sign it and broadcasts a new transaction). One effect cannot say that. Revisit
+// before promoting `helius_rings` to the stable release channel: split the starting pass out,
+// or classify the cron `starts` (admitted where it signs) or `finishes` (a Money Exit, which
+// needs a named security reviewer).
+/** Rings indexing poll: settles broadcast Rings operations and resumes in-flight ones. */
+export const ringsIndexingCron = defineCron({
+  name: "poll-rings-indexing",
+  schedule: "* * * * *",
+  scope: "global",
+  effect: "observes",
+  enabled: isHeliusRingsEnabled,
+  run: pollRingsIndexing,
+});

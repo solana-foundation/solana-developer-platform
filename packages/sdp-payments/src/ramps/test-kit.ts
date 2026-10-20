@@ -5,10 +5,17 @@ import type {
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
+  RampSettlementEvent,
+  RampTransferLookup,
 } from "./types";
 
 // biome-ignore lint/security/noSecrets: the public wallet every kit quotes to, not a credential.
 export const CONTRACT_WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
+
+/** The public signature of the chain transaction a kit's provider reports delivering. */
+export const CONTRACT_DELIVERY_SIGNATURE =
+  // biome-ignore lint/security/noSecrets: a public transaction signature, not a credential.
+  "4gYf6JwRXvV9LhJqR6CjvhgpqpNrp41cYwHC1PJNBJdk6FHaaBxTkZQHUnwNi1trGf31FyHg6pQJfUmK4D3kVQnG";
 
 /** A recorded request field: one exact value, or every value in order. */
 export type RecordedValue = string | readonly string[];
@@ -23,7 +30,7 @@ export interface RecordedExchange {
   /** Form-encoded body fields the request must carry. */
   form?: Readonly<Record<string, RecordedValue>>;
   status: number;
-  body: Record<string, unknown>;
+  body: Record<string, unknown> | readonly unknown[];
 }
 
 /** A request an adapter made while a kit was replaying. */
@@ -37,6 +44,11 @@ export interface ReplayedRequest {
 export interface RampKitCase<TInput> {
   input: TInput;
   exchanges: readonly RecordedExchange[];
+}
+
+/** One status lookup: the transfer it asks about, its exchanges, and the events it answers. */
+export interface RampTransferStatusCase extends RampKitCase<RampTransferLookup> {
+  events: readonly RampSettlementEvent[];
 }
 
 /**
@@ -56,6 +68,8 @@ export interface RampProviderTestKit {
     estimate: RampKitCase<RampEstimateOfframpInput>;
     quote: RampKitCase<RampOfframpQuoteInput>;
   };
+  /** Status lookups by name, present exactly when the provider has `fetchTransferStatus`. */
+  transferStatus?: Readonly<Record<string, RampTransferStatusCase>>;
   /** Whether a request carries the credential the adapter must use for `mode`. */
   usesModeCredential: (request: ReplayedRequest, mode: SdpEnvironment) => boolean;
   /**

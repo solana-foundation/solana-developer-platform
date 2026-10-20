@@ -1,16 +1,17 @@
-import { hashString } from "@sdp/payments/hash";
-import type { Permission } from "@sdp/types/permissions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_ORG } from "@/test/fixtures/organizations";
+import { clerkHeaders } from "@/test/helpers/clerk";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const CLERK_API_URL = "https://clerk.example.test/v1";
 const CLERK_ORG_ID = "org_clerk_member_directory";
-const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
+const ORGANIZATION_ID = TEST_ORG.id;
 const INVITER_USER_ID = "usr_directory_inviter";
 
 interface DirectoryResponse {
@@ -25,9 +26,14 @@ interface DirectoryResponse {
  */
 function stubClerk(): { listCalls: number } {
   const calls = { listCalls: 0 };
+  const realFetch = globalThis.fetch;
 
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = typeof input === "string" ? input : String(input);
+    // The caller's session token verifies against the local test issuer.
+    if (env.CLERK_JWKS_URL && url.startsWith(env.CLERK_JWKS_URL)) {
+      return realFetch(input, init);
+    }
 
     if (url.includes("/invitations?status=pending")) {
       calls.listCalls += 1;
@@ -122,22 +128,34 @@ async function seedDirectory(memberCount: number): Promise<void> {
   await db.batch(statements);
 }
 
-/** Authenticates every request as an API key holding exactly `permissions`. */
-async function authenticateAs(permissions: Permission[]): Promise<void> {
-  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
+/** The signed-in caller, one of the seeded members; API keys cannot list members (HOO-2099). */
+const CALLER_USER_ID = "usr_directory_0";
+const CALLER_PROJECT_ID = "prj_member_directory";
+let callerToken: string;
+
+/**
+ * Authenticates every request as the first seeded member with `role`: a
+ * member holds org:read, an admin org:read and org:write.
+ */
+async function authenticateAs(role: "member" | "admin"): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE organization_members SET role = ? WHERE organization_id = ? AND user_id = ?")
+    .bind(role, ORGANIZATION_ID, CALLER_USER_ID)
+    .run();
+  await seedDefaultProjects(getDb(env), {
     organizationId: ORGANIZATION_ID,
-    role: "api_developer",
-    permissions,
+    createdBy: CALLER_USER_ID,
+    members: [CALLER_USER_ID],
+    ids: { sandbox: CALLER_PROJECT_ID, production: `${CALLER_PROJECT_ID}_production` },
   });
+  callerToken = await signSeededClerkMember(env, getDb(env), CALLER_USER_ID, ORGANIZATION_ID);
 }
 
 async function listMembers(page?: number): Promise<DirectoryResponse> {
   const query = page === undefined ? "" : `?page=${page}`;
   const response = await app.request(
     `/v1/members${query}`,
-    { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+    { headers: clerkHeaders(callerToken, CALLER_PROJECT_ID) },
     env
   );
 
@@ -169,46 +187,50 @@ describe("member directory", () => {
      * not consider an email.
      */
     it("prefers the identity address over a stored value that is not an address", async () => {
-      await seedDirectory(1);
+      await seedDirectory(2);
       await getDb(env).batch([
         getDb(env)
-          .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_0'")
+          .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_1'")
           .bind(),
         getDb(env)
           .prepare(
             `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-               VALUES ('aui_directory_0', 'clerk', 'clerk_directory_0', 'usr_directory_0', ?)`
+               VALUES ('aui_directory_1', 'clerk', 'clerk_directory_1', 'usr_directory_1', ?)`
           )
-          .bind("member0@example.com"),
+          .bind("member1@example.com"),
       ]);
-      await authenticateAs(["org:read"]);
+      await authenticateAs("member");
       stubClerk();
 
       const directory = await listMembers();
 
-      expect(directory.members[0]?.user.email).toBe("member0@example.com");
+      expect(directory.members.find((member) => member.id === "mem_directory_1")?.user.email).toBe(
+        "member1@example.com"
+      );
     });
 
     it("falls back to the stored value when no copy is an address", async () => {
-      await seedDirectory(1);
+      await seedDirectory(2);
       await getDb(env)
-        .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_0'")
+        .prepare("UPDATE users SET email = 'unknown' WHERE id = 'usr_directory_1'")
         .run();
-      await authenticateAs(["org:read"]);
+      await authenticateAs("member");
       stubClerk();
 
       const directory = await listMembers();
 
       // Returning the stored value rather than NULL keeps the row renderable; the
       // web side decides how to present something that is not an address.
-      expect(directory.members[0]?.user.email).toBe("unknown");
+      expect(directory.members.find((member) => member.id === "mem_directory_1")?.user.email).toBe(
+        "unknown"
+      );
     });
   });
 
   describe("invitation visibility", () => {
     it("withholds pending invitations from a caller that cannot act on them", async () => {
       await seedDirectory(2);
-      await authenticateAs(["org:read"]);
+      await authenticateAs("member");
       const clerk = stubClerk();
 
       const directory = await listMembers();
@@ -225,7 +247,7 @@ describe("member directory", () => {
 
     it("does not leak invitee addresses to a caller without org:write", async () => {
       await seedDirectory(2);
-      await authenticateAs(["org:read"]);
+      await authenticateAs("member");
       stubClerk();
 
       const directory = await listMembers();
@@ -237,7 +259,7 @@ describe("member directory", () => {
 
     it("returns invitations with their accept links to a caller holding org:write", async () => {
       await seedDirectory(2);
-      await authenticateAs(["org:read", "org:write"]);
+      await authenticateAs("admin");
       stubClerk();
 
       const directory = await listMembers();
@@ -249,11 +271,11 @@ describe("member directory", () => {
     it("counts only what the caller can see in meta.total", async () => {
       await seedDirectory(2);
 
-      await authenticateAs(["org:read"]);
+      await authenticateAs("member");
       // 2 members, no visible invitations.
       expect((await listMembers()).meta.total).toBe(2);
 
-      await authenticateAs(["org:read", "org:write"]);
+      await authenticateAs("admin");
       stubClerk();
       // 2 members plus 4 pending invitations.
       expect((await listMembers()).meta.total).toBe(6);
@@ -265,7 +287,7 @@ describe("member directory", () => {
     // second page while leaving room there for invitations.
     it("continues invitations after the members rather than repeating them", async () => {
       await seedDirectory(26);
-      await authenticateAs(["org:read", "org:write"]);
+      await authenticateAs("admin");
       stubClerk();
 
       const first = await listMembers(1);
@@ -284,7 +306,7 @@ describe("member directory", () => {
 
     it("never returns the same invitation on two pages", async () => {
       await seedDirectory(24);
-      await authenticateAs(["org:read", "org:write"]);
+      await authenticateAs("admin");
       stubClerk();
 
       const first = await listMembers(1);
@@ -302,7 +324,7 @@ describe("member directory", () => {
 
     it("does not call Clerk for a page that carries no invitations", async () => {
       await seedDirectory(26);
-      await authenticateAs(["org:read", "org:write"]);
+      await authenticateAs("admin");
       const clerk = stubClerk();
 
       await listMembers(1);

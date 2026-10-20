@@ -3,7 +3,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction/credentials";
 import type { InitializeSigningResponse } from "@sdp/types/custody";
 import { getDb } from "@/db/client";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -11,7 +11,6 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, resolveActor } from "@/routes/custody/context";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import type { InitializeSigningRequest, initializeSigningSchema } from "@/routes/custody/schemas";
-import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import {
@@ -33,10 +32,6 @@ export const initializeSigning = async (
 ) => {
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
-
-  // Connecting a provider creates a config and its root wallet — outside any
-  // wallet-scoped key's bindings by definition.
-  assertApiKeyNotWalletScoped(getAuth(c), "initialize custody providers");
 
   const body = c.req.valid("json");
 

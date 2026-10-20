@@ -1,17 +1,9 @@
 /**
- * Earn strategy-catalogue sync entrypoint.
+ * Earn strategy-catalogue sync, a Cron Definition (ADR 0011).
  *
- * Two execution paths, both gated on the Earn feature flags by their callers:
- *
- * - **In-process cron** (`runEarnCatalogueSync`, self-hosted runtimes and
- *   explicitly opted-in services): mirrors `pending-transfers` — wraps the
- *   sync with a Sentry cron monitor when observability is supplied, and hands
- *   the resulting promise to the BackgroundRunner so it survives past the
- *   initiating tick and drains during graceful shutdown.
- * - **Managed Cloud Run Job** (`runEarnCatalogueSyncIfDue`, `src/job.ts`):
- *   each deployment-scheduled tick claims an hourly Redis slot first and skips
- *   quietly when the slot is held — the catalogue cadence stays
- *   `EARN_CATALOGUE_SYNC_CRON` no matter how often the job runs.
+ * Every run, scheduled or on Worker start, goes through `runEarnCatalogueSyncIfDue`: it claims
+ * an hourly Redis slot first and skips when the slot is held, so a boot run and the same hour's
+ * scheduled run never both sync, and neither do two Workers overlapping during a deploy.
  *
  * The sync iterates every registered vault-infra provider, pulls each of its
  * live strategy catalogues, and upserts them into `earn_strategies` keyed on
@@ -31,8 +23,7 @@
  * set tearing down the other lane's shelf. It degrades
  * provider-by-provider: one provider failing (or still being a NOT_IMPLEMENTED
  * stub) must never sink the others' pass. Adding a provider is a registry
- * change only (`EARN_PROVIDER_CLIENTS`) — neither execution path names
- * providers.
+ * change only (`EARN_PROVIDER_CLIENTS`); the sync never names providers.
  */
 
 import { randomUUID } from "node:crypto";
@@ -48,11 +39,11 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { EarnRepository } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";
-import type { BackgroundRunner } from "@/runtime/background";
+import { isEarnEnabled } from "@/lib/feature-flags";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
-import type { Observability } from "@/runtime/observability";
+import { logEvent } from "@/runtime/money-path-events";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import {
   reportFigureAnomalies,
@@ -60,40 +51,34 @@ import {
   type StoredStrategyFigures,
 } from "@/services/earn/catalogue-anomaly";
 import type { Env } from "@/types/env";
+import { defineCron } from "./define-cron";
 
-export const EARN_CATALOGUE_SYNC_MONITOR = "sdp-api-sync-earn-catalogue";
-// Catalogue drift is slow (a provider onboarding or delisting a vault), so
-// hourly keeps rows fresh without hammering provider APIs.
-export const EARN_CATALOGUE_SYNC_CRON = "0 * * * *";
-
-// The managed Cloud Run Job ticks at its deployment-provided cadence, more
-// often than the hourly cadence above. Each tick claims this Redis slot first,
-// so exactly one tick per window syncs and overlapping executions lose cleanly.
+// Every run claims this Redis slot first, so exactly one run per hourly window
+// syncs (a Worker boot run, the scheduled run, two Workers overlapping during a
+// deploy) and the rest lose cleanly. The claim itself runs before the sync
+// deadline starts, so it is bounded only by the Redis client.
 //
 // The slot value is a unique claim token that embeds its own expiry
 // (`<expiresAtEpochMs>:<uuid>`), and every transition is atomic on the exact
 // prior value: an empty slot is claimed with compareAndSet(null → token), an
 // expired one is taken over with compareAndSet(staleValue → token), and a
 // failed sync releases with compareAndDelete(token) — which is a server-side
-// no-op unless the claim still belongs to this execution, so a sync that
-// outlives its slot can never delete a newer tick's claim. The expiry sits
-// just under the hour so the next managed tick after expiry claims a fresh
-// slot; a job that dies mid-sync self-heals once the token expires (worst case:
-// one skipped window).
+// no-op unless the claim still belongs to this run, so a sync that outlives
+// its slot can never delete a newer run's claim. The expiry sits just under
+// the hour so the next hourly run after expiry claims a fresh slot; a Worker
+// that dies mid-sync self-heals once the token expires (worst case: one
+// skipped window).
 export const EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS = 3540;
 const EARN_CATALOGUE_SYNC_SLOT_KEY = "cron:earn-catalogue-sync:slot";
-const EARN_CATALOGUE_DISABLED_MONITOR_SLOT_KEY = "cron:earn-catalogue-sync:disabled-monitor-slot";
 
 // Lease validity: a claim only guarantees mutual exclusion while the holder's
 // work is bounded well below the claim's expiry, so the sync itself carries a
 // deadline. A pass is a handful of catalogue GETs (seconds today), so ten
-// minutes is generous headroom while staying far under the slot TTL — an
-// execution can therefore never still be syncing when its token expires and a
-// newer tick takes over. On the deadline the tick fails loudly and releases
-// its (provably still owned) claim; the job process exits, reaping any hung
-// I/O. Managed Cloud Run additionally caps the whole execution at the job
-// timeout (120s in sdp-infra), far under this — the deadline exists so the
-// invariant holds on every runtime, not just managed.
+// minutes is generous headroom while staying far under the slot TTL — a run
+// can therefore never still be syncing when its token expires and a newer run
+// takes over. On the deadline the run fails loudly but keeps its claim: nothing
+// can cancel the sync still running underneath, so the claim is released only
+// once that sync settles (and only if it failed).
 export const EARN_CATALOGUE_SYNC_DEADLINE_SECONDS = 600;
 
 // The catalogue is platform-global but environment-scoped (sandbox rows carry
@@ -639,118 +624,118 @@ async function deprecateUnlistedFromCatalogue(
   }
 }
 
-export interface EarnCatalogueSyncDeps {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}
-
-export function runEarnCatalogueSync(deps: EarnCatalogueSyncDeps): void {
-  const work = () => syncEarnCatalogue(deps.env);
-
-  // Never invoke `work` eagerly — a sync throw before the first await must become
-  // a rejected promise the BackgroundRunner can track, not propagate to the
-  // runtime entrypoint.
-  const promise = deps.observability
-    ? deps.observability.withMonitor(EARN_CATALOGUE_SYNC_MONITOR, work, {
-        schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON },
-      })
-    : Promise.resolve().then(work);
-
-  deps.bg.run(promise);
-}
-
-export type EarnCatalogueSyncTickOutcome = "synced" | "skipped" | "disabled";
-
-export interface EarnCatalogueSyncTickOptions {
-  /**
-   * False keeps an already-created managed monitor healthy while its feature
-   * is disabled, without touching provider APIs or catalogue rows.
-   */
-  workEnabled?: boolean;
-}
+export type EarnCatalogueSyncOutcome = "synced" | "skipped";
 
 /**
- * One tick of the managed Cloud Run Job (`src/job.ts`): claim the hourly slot,
- * then sync under this task's own Sentry monitor. Ticks that lose the claim
- * skip without a monitor check-in. The in-process reporter uses
- * EARN_CATALOGUE_SYNC_CRON; the managed adapter represents this rolling hourly
- * lease as an interval because its phase is whichever scheduler tick first
- * wins the slot, not necessarily minute zero.
+ * One catalogue sync if this hourly window has not had one: claim the slot, then sync. A run
+ * that loses the claim skips.
  *
- * A failed or deadline-exceeded sync releases the slot — the next managed tick
- * retries instead of waiting out the hour — and rethrows:
- * syncEarnCatalogue already degrades per provider and per row, so anything
- * escaping it is infrastructure-level and must fail the job loudly. The
- * release is compareAndDelete on this execution's claim token, so it
- * atomically no-ops if a newer tick has taken the slot over in the meantime;
- * the sync deadline (far under the claim expiry) guarantees that never
- * happens while a sync is still running.
+ * A failed sync releases the slot before rethrowing, so the next run retries instead of waiting
+ * out the hour: syncEarnCatalogue already degrades per provider and per row, so anything escaping
+ * it is infrastructure-level. A sync past its deadline rethrows WITHOUT releasing: the deadline
+ * only stops waiting, the sync itself keeps running in this long-lived Worker, and freeing the
+ * slot would let the next run sync beside it and delist rows from a newer snapshot. Its claim is
+ * released once the sync settles with a failure, or expires with the token. The release is
+ * compareAndDelete on this run's claim token, so it atomically no-ops if a newer run has taken
+ * the slot over.
  *
- * Managed callers can set workEnabled=false to keep an existing monitor alive
- * while Earn is disabled. That heartbeat claims a separate monitoring-only
- * lease and cannot delay later business work.
+ * @param env - Process environment.
+ * @returns Whether this run synced or found the window's slot already claimed.
  */
-export async function runEarnCatalogueSyncIfDue(
-  env: Env,
-  observability?: Observability,
-  { workEnabled = true }: EarnCatalogueSyncTickOptions = {}
-): Promise<EarnCatalogueSyncTickOutcome> {
+export async function runEarnCatalogueSyncIfDue(env: Env): Promise<EarnCatalogueSyncOutcome> {
   const cache = createKVStoreSet(env).cache;
-  // A disabled-feature heartbeat has its own lease. Reusing the work lease
-  // would make observability mutate admission: enabling Earn just after a
-  // no-op check-in would delay the real catalogue sync for almost an hour.
-  const slotKey = workEnabled
-    ? EARN_CATALOGUE_SYNC_SLOT_KEY
-    : EARN_CATALOGUE_DISABLED_MONITOR_SLOT_KEY;
-  const claimToken = await claimEarnCatalogueSyncSlot(cache, slotKey);
+  const claimToken = await claimEarnCatalogueSyncSlot(cache, EARN_CATALOGUE_SYNC_SLOT_KEY);
   if (claimToken === null) {
-    getLogger().info("syncEarnCatalogue: hourly slot already claimed, skipping this tick");
     return "skipped";
   }
 
-  // The deadline sits inside the monitor wrapper so Sentry records an
-  // exceeded run as a failed check-in rather than a forever-pending one.
-  const work = workEnabled ? () => withSyncDeadline(syncEarnCatalogue(env)) : async () => undefined;
+  const sync = syncEarnCatalogue(env);
+  const releasedAfterFailure = sync.then(
+    () => undefined,
+    () => releaseEarnCatalogueSyncSlot(cache, claimToken)
+  );
   try {
-    await (observability
-      ? observability.withMonitor(EARN_CATALOGUE_SYNC_MONITOR, work, {
-          schedule: { type: "crontab", value: EARN_CATALOGUE_SYNC_CRON },
-        })
-      : work());
+    await withSyncDeadline(sync);
   } catch (err) {
-    try {
-      // Atomic owner check and delete in one step: no-ops unless the slot
-      // still holds this execution's token, so a newer tick's takeover can
-      // never be cancelled from here.
-      await cache.compareAndDelete(slotKey, claimToken);
-    } catch (releaseErr) {
-      // Log-and-continue: a release failure must never mask the sync error,
-      // and the token's embedded expiry bounds the damage to one skipped
-      // window.
-      getLogger().error(
-        { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
-        "syncEarnCatalogue: failed to release hourly slot after sync failure"
-      );
+    if (!(err instanceof EarnCatalogueSyncDeadlineError)) {
+      await releasedAfterFailure;
     }
     throw err;
   }
-  return workEnabled ? "synced" : "disabled";
+  return "synced";
+}
+
+/**
+ * Release this run's claim on the hourly slot.
+ *
+ * Atomic owner check and delete in one step: no-ops unless the slot still holds this run's
+ * token, so a newer run's takeover can never be cancelled from here. Log-and-continue: a release
+ * failure must never mask the sync error, and the token's embedded expiry bounds the damage to
+ * one skipped window.
+ *
+ * @param cache - The KV store holding the slot.
+ * @param claimToken - The token this run claimed the slot with.
+ * @returns Resolves once the release was attempted; never rejects.
+ */
+async function releaseEarnCatalogueSyncSlot(cache: KVStore, claimToken: string): Promise<void> {
+  try {
+    await cache.compareAndDelete(EARN_CATALOGUE_SYNC_SLOT_KEY, claimToken);
+  } catch (releaseErr) {
+    getLogger().error(
+      { error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr) },
+      "syncEarnCatalogue: failed to release hourly slot after sync failure"
+    );
+  }
+}
+
+/**
+ * The Cron Definition's work: a slotted sync, logging whether it synced so a run that lost the
+ * hourly slot is visible next to its `sdp_cron_run` event.
+ *
+ * @param env - Process environment.
+ * @returns Resolves once the run has synced or skipped.
+ */
+async function syncEarnCatalogueIfDue(env: Env): Promise<void> {
+  const outcome = await runEarnCatalogueSyncIfDue(env);
+  logEvent("info", { event: "sdp_earn_catalogue_sync", outcome });
+}
+
+/**
+ * Hourly in effect: catalogue drift is slow (a provider onboarding or delisting a vault). The
+ * schedule is every five minutes and the Redis slot keeps it to one sync per window, because the
+ * window starts at whichever run first claims it: a Worker booting at 12:05 holds the slot until
+ * 13:04, so a top-of-hour schedule would skip 13:00 and leave the shelf unsynced until 14:00.
+ * Runs on Worker start too, so a fresh database never serves an empty shelf until the next slot.
+ */
+export const earnCatalogueSyncCron = defineCron({
+  name: "sync-earn-catalogue",
+  schedule: "*/5 * * * *",
+  scope: "global",
+  effect: "observes",
+  enabled: isEarnEnabled,
+  run: syncEarnCatalogueIfDue,
+  runOnStart: true,
+});
+
+/** A sync that outlived `EARN_CATALOGUE_SYNC_DEADLINE_SECONDS`; it is still running underneath. */
+export class EarnCatalogueSyncDeadlineError extends Error {
+  readonly code = "EARN_CATALOGUE_SYNC_DEADLINE_EXCEEDED";
+
+  constructor() {
+    super(`earn catalogue sync exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`);
+    this.name = "EarnCatalogueSyncDeadlineError";
+  }
 }
 
 // Rejects when the sync outlives its deadline, enforcing the lease-validity
-// invariant above. The losing promise is not cancelled — the tick's failure
-// exits the one-shot job process, which reaps any hung I/O — and the timer is
-// unref'd/cleared so a fast pass neither leaks it nor holds the process open.
+// invariant above. The losing promise is not cancelled, which is why the
+// caller keeps the claim until it settles. The timer is unref'd/cleared so a
+// fast pass neither leaks it nor holds the process open.
 async function withSyncDeadline<T>(sync: Promise<T>): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(
-        new Error(
-          `earn catalogue sync exceeded its ${EARN_CATALOGUE_SYNC_DEADLINE_SECONDS}s deadline`
-        )
-      );
+      reject(new EarnCatalogueSyncDeadlineError());
     }, EARN_CATALOGUE_SYNC_DEADLINE_SECONDS * 1000);
     timer.unref();
   });
@@ -762,7 +747,7 @@ async function withSyncDeadline<T>(sync: Promise<T>): Promise<T> {
 }
 
 // Claim token wire format: `<expiresAtEpochMs>:<uuid>`. Wall-clock epoch is
-// deliberate — expiry must be comparable across job executions (a monotonic
+// deliberate — expiry must be comparable across Worker processes (a monotonic
 // reading is process-local); NTP keeps cross-instance skew far below the
 // minute granularity that matters here.
 function makeSlotToken(): string {
@@ -782,10 +767,10 @@ function slotExpiresAtMs(value: string): number {
 }
 
 /**
- * Claim the hourly slot, returning this execution's token, or null when the
+ * Claim the hourly slot, returning this run's token, or null when the
  * slot is held by a live claim (or a racer wins the same transition). Both
  * claim shapes are single compareAndSet transitions on the exact observed
- * value, so two ticks can never both win: null → token for an empty slot,
+ * value, so two runs can never both win: null → token for an empty slot,
  * staleValue → token for an expired one.
  */
 async function claimEarnCatalogueSyncSlot(cache: KVStore, slotKey: string): Promise<string | null> {

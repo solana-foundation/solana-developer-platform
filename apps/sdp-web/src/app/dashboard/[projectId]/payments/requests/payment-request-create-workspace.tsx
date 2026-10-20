@@ -1,7 +1,7 @@
 "use client";
 
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
-import type { PaymentRequest, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { CreatedPaymentRequest, PaymentsDashboardWallet } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
@@ -435,7 +435,7 @@ function PaymentRequestCreateForm({
       return;
     }
     setSubmitting(true);
-    let created: PaymentRequest | undefined;
+    let created: CreatedPaymentRequest | undefined;
     try {
       const input = JSON.stringify([
         wallet.walletId,
@@ -453,7 +453,7 @@ function PaymentRequestCreateForm({
         router.push(projectHref(PAYMENT_REQUESTS_HREF));
         return;
       }
-      const res = await dashboardFetch<{ data: PaymentRequest }>(
+      const res = await dashboardFetch<{ data: CreatedPaymentRequest }>(
         "/api/dashboard/payments/requests",
         {
           method: "POST",

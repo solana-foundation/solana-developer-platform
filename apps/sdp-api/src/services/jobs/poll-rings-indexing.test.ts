@@ -98,7 +98,6 @@ describe("pollRingsIndexing", () => {
     await seedTestDatabase(env);
     jobEnv = {
       ...env,
-      HELIUS_RINGS_ENABLED: "true",
       CUSTODY_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
     };
     const db = getDb(env);
@@ -185,29 +184,6 @@ describe("pollRingsIndexing", () => {
       materialTag: "simulated",
       expectedStatus: "pending",
     });
-  });
-
-  it("stays dormant unless the feature flag is set", async () => {
-    const gateway = ringsGateway({ indexingDelayMs: 0 });
-    const operation = await serviceWith(gateway).prepareOperation({
-      walletId,
-      opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-      clientNonce: "job-dormant",
-    });
-    expect(operation.state).toBe("indexing");
-    gateway.recordSubmission(OUTER_TX.signature);
-
-    await pollRingsIndexing(
-      { ...env, HELIUS_RINGS_ENABLED: undefined },
-      { createService: () => serviceWith(gateway), readBlockHeight: NO_HEIGHT }
-    );
-
-    const row = await createHeliusRingsOperationRepository(env).getOperationById({
-      ...tenant,
-      id: operation.id,
-    });
-    expect(row?.state).toBe("indexing");
   });
 
   it("completes an indexing operation once Photon reports it", async () => {

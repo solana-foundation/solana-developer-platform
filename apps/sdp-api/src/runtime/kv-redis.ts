@@ -1,6 +1,6 @@
 /**
  * Redis-backed KVStore implementation. One ioredis client per REDIS_URL is shared
- * across the three logical stores (apiKeys / rateLimits / cache);
+ * across the logical stores (rateLimits / cache);
  * each store prefixes its keys so list() doesn't bleed across domains.
  *
  * ioredis is loaded lazily — the top-level `import type` is erased at emit
@@ -27,13 +27,12 @@ const ADMIT_SLIDING_WINDOW_LUA = `
 local max = tonumber(ARGV[1])
 local weight = tonumber(ARGV[2])
 local ttl = tonumber(ARGV[3])
-local cost = tonumber(ARGV[4] or '1')
 local current = tonumber(redis.call('GET', KEYS[1]) or '0')
 local previous = tonumber(redis.call('GET', KEYS[2]) or '0')
-if current + previous * weight + cost - 1 >= max then
+if current + previous * weight >= max then
   return {0, current, previous}
 end
-current = redis.call('INCRBY', KEYS[1], cost)
+current = redis.call('INCR', KEYS[1])
 redis.call('PEXPIRE', KEYS[1], ttl)
 return {1, current, previous}
 `;
@@ -216,7 +215,6 @@ export class RedisKVStore implements KVStore {
       options.maxRequests,
       options.previousWeight,
       Math.ceil(options.expirationTtl * 1000),
-      Math.max(1, Math.floor(options.cost ?? 1)),
     ];
     let raw: unknown;
     try {
@@ -253,14 +251,13 @@ export class RedisKVStore implements KVStore {
 }
 
 const STORE_PREFIXES = {
-  apiKeys: "apiKeys",
   rateLimits: "rateLimits",
   cache: "cache",
 } as const;
 
 /**
  * Prefix stores with the vitest pool id so parallel workers cannot clobber
- * API-key cache or the audit-ledger checkpoint if Redis SELECT-by-pathname
+ * rate-limit counters or the audit-ledger checkpoint if Redis SELECT-by-pathname
  * is ignored. Empty in production.
  */
 function testWorkerStorePrefix(): string {
@@ -283,7 +280,6 @@ export function createKVStoreSet(env: Env): KVStoreSet {
   const clientPromise = ensureClient(url);
   const namespace = testWorkerStorePrefix();
   return {
-    apiKeys: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.apiKeys}`),
     rateLimits: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.rateLimits}`),
     cache: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.cache}`),
   };

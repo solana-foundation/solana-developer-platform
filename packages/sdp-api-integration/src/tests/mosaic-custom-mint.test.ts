@@ -1,6 +1,7 @@
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
+  asOrganizationAdmin,
   cleanupIntegrationSuite,
   createMosaicService,
   type IntegrationCustodyWallet,
@@ -51,18 +52,20 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
       movement: "issuance.authority",
     });
 
-    const result = await mosaic.createToken({
-      template: "custom",
-      feePayer: signer,
-      metadata: {
-        name: "Mosaic Custom Mint",
-        symbol: "MCM",
-        uri: "https://example.com/mosaic-custom-mint.json",
-      },
-      decimals: 6,
-      mintAuthority: signer,
-      freezeAuthority: signer.address,
-    });
+    const result = await asOrganizationAdmin(() =>
+      mosaic.createToken({
+        template: "custom",
+        feePayer: signer,
+        metadata: {
+          name: "Mosaic Custom Mint",
+          symbol: "MCM",
+          uri: "https://example.com/mosaic-custom-mint.json",
+        },
+        decimals: 6,
+        mintAuthority: signer,
+        freezeAuthority: signer.address,
+      })
+    );
 
     expect(result.mint).toBeTruthy();
     expect(result.signature).toBeTruthy();

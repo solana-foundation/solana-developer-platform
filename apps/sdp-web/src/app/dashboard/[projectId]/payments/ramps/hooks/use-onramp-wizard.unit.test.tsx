@@ -10,6 +10,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
@@ -127,6 +128,9 @@ function transferStatusCalls(): number {
 }
 
 beforeEach(() => {
+  // A failed quote keeps its key (APE-689), so each spec starts clean.
+  window.sessionStorage.clear();
+  resetIdempotencyKeyStoresForTests();
   currentTransfer = transferFixture("awaiting_payment", {});
   fetchMock.mockReset().mockImplementation((input, init) => {
     const url = String(input);
@@ -273,6 +277,7 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
 
   interface QuoteCall {
     body: unknown;
+    idempotencyKey: string | null;
     respond: (response: Response) => void;
   }
   /** One render of the wizard: whether it waits on a quote, and whether Previous is held. */
@@ -297,7 +302,11 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
       }
       if (url === "/api/dashboard/payments/ramps/onramp/quote" && init?.method === "POST") {
         return new Promise<Response>((resolve) => {
-          quoteCalls.push({ body: JSON.parse(String(init.body)), respond: resolve });
+          quoteCalls.push({
+            body: JSON.parse(String(init.body)),
+            idempotencyKey: new Headers(init.headers).get("Idempotency-Key"),
+            respond: resolve,
+          });
         });
       }
       return base(input, init);
@@ -383,6 +392,22 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
     expect(rendered.result.current.quoteInFlight).toBe(false);
   });
 
+  // APE-689: the quote creates the transfer, so Try Again must reach the API as
+  // the failed attempt's request, under its key.
+  it("sends Try Again under the failed quote's Idempotency-Key", async () => {
+    const rendered = await renderWithQuoteInFlight();
+    await respondToQuote(0, quoteFailed());
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+
+    act(() => rendered.result.current.retryQuoteCreation());
+    await waitFor(() => expect(quoteCalls).toHaveLength(2));
+
+    expect(quoteCalls[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(quoteCalls[1].idempotencyKey).toBe(quoteCalls[0].idempotencyKey);
+    await respondToQuote(1, quoteCreated());
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+  });
+
   it("quotes the edited selection after a failed quote and Previous", async () => {
     const rendered = await renderWithQuoteInFlight();
     await respondToQuote(0, quoteFailed());
@@ -400,6 +425,7 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
       destinationCustodyWalletId: WALLET_B.id,
       fiatAmount: "200",
     });
+    expect(quoteCalls[1].idempotencyKey).not.toBe(quoteCalls[0].idempotencyKey);
     await respondToQuote(1, quoteCreated());
     await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
     expect(rendered.result.current.selectedWallet?.id).toBe(WALLET_B.id);

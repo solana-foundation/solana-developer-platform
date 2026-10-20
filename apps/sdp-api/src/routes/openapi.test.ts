@@ -1,15 +1,8 @@
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
-import type { MonitorOptions, Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import { createWeakEtag, openapi } from "./openapi";
-
-const observability: Observability = {
-  captureException: () => {},
-  withScope: () => {},
-  withMonitor: <T>(_slug: string, fn: () => Promise<T>, _opts: MonitorOptions) => fn(),
-};
 
 const appEnv = {
   ENVIRONMENT: "development",
@@ -55,7 +48,7 @@ describe("OpenAPI response delivery", () => {
   });
 
   it("lets the real app pretty-print /openapi.json without a stale body length", async () => {
-    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability });
+    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
     const response = await app.request("http://local.test/openapi.json?pretty", {}, appEnv);
 
     expect(response.status).toBe(200);

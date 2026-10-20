@@ -1,49 +1,30 @@
-import { SigningError } from "@sdp/custody/signing";
 import type { CreateApiKeyResponse } from "@sdp/types/api-keys";
-import type { ApiKeyRole } from "@sdp/types/permissions";
 import type { Context } from "hono";
-import { asTransactionalClient, getDb } from "@/db/client";
-import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { getDb } from "@/db/client";
+import { notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
-import { assertApiKeyProjectAccess } from "@/routes/projects/project-access";
+import { resolveCreateWalletScope, walletScopeAuditMetadata } from "@/routes/api-keys/wallet-scope";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
-  assertBindingsWithinActorWalletScope,
-  assertGrantableAllowedOperations,
-  isWalletScopedActor,
-  resolveCreateWalletScope,
-  resolveWalletBindingsInScope,
+  assertApiKeyGrantsInReleaseChannel,
+  assertGrantableApiKeyGrants,
+  requestApiKeyGrantChannel,
 } from "@/services/api-key-scope.service";
-import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
-import {
-  type ExactApiKeyWalletBinding,
-  replaceApiKeyWalletBindings,
-} from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+/** The signed-in person must be a member of the active project. */
 async function assertProjectAccess(
   c: AppContext,
-  auth: ReturnType<typeof getAuth>,
+  actor: { userId: string; organizationId: string },
   projectId: string
 ): Promise<void> {
-  assertApiKeyProjectAccess(auth, projectId);
-
-  if (auth.authType === "api_key") {
-    return;
-  }
-
-  if (!auth.userId) {
-    throw notFound("Project");
-  }
-
   const row = await getDb(c.env)
     .prepare(
       `SELECT 1 FROM project_members pm
@@ -51,7 +32,7 @@ async function assertProjectAccess(
        WHERE pm.project_id = ? AND pm.user_id = ? AND p.organization_id = ? AND p.status = 'active'
        LIMIT 1`
     )
-    .bind(projectId, auth.userId, auth.organizationId)
+    .bind(projectId, actor.userId, actor.organizationId)
     .first();
 
   if (!row) {
@@ -61,191 +42,92 @@ async function assertProjectAccess(
 
 export const listProjectApiKeys = async (c: AppContext) => {
   const { projectId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = requireHumanActor(c);
 
-  await assertProjectAccess(c, auth, projectId);
+  await assertProjectAccess(c, actor, projectId);
 
-  const db = getDb(c.env);
   const apiKeyService = new ApiKeyService(
-    db,
+    getDb(c.env),
     createTenantScope({
-      organizationId: auth.organizationId,
+      organizationId: actor.organizationId,
       projectId,
     })
   );
   const apiKeys = await apiKeyService.listForProject(projectId);
-  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
-    db,
-    apiKeys.map((key) => key.id)
-  );
 
   return success(c, {
-    apiKeys: apiKeys.map((key) => {
-      const accessSummary = accessSummaryByKeyId.get(key.id);
-      const walletBindings = accessSummary?.walletBindings ?? [];
-
-      return {
-        id: key.id,
-        name: key.name,
-        description: key.description,
-        keyPrefix: key.keyPrefix,
-        role: key.role as ApiKeyRole,
-        environment: key.environment as "sandbox" | "production",
-        status: key.status,
-        walletScope: key.walletScope,
-        signingWalletId: key.signingWalletId,
-        signingWalletIds: walletBindings.map((binding) => binding.walletId),
-        walletBindings,
-        allowedOperations: key.allowedOperations,
-        lastUsedAt: key.lastUsedAt,
-        expiresAt: key.expiresAt,
-        createdAt: key.createdAt,
-      };
-    }),
+    apiKeys: apiKeys.map((key) => ({
+      id: key.id,
+      name: key.name,
+      description: key.description,
+      keyPrefix: key.keyPrefix,
+      grants: key.grants,
+      environment: key.environment,
+      status: key.status,
+      walletScope: key.walletScope,
+      walletIds: key.walletIds,
+      lastUsedAt: key.lastUsedAt,
+      expiresAt: key.expiresAt,
+      rotationDeadline: key.rotationDeadline,
+      createdAt: key.createdAt,
+    })),
   });
 };
 
 export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSchema>) => {
   const { projectId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = requireHumanActor(c);
 
   const body = c.req.valid("json");
 
-  await assertProjectAccess(c, auth, projectId);
+  await assertProjectAccess(c, actor, projectId);
 
-  const {
-    name,
-    description,
-    role = "api_developer",
-    permissions,
-    walletScope,
-    allowedIps,
-    allowedOperations,
-    expiresAt,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    provisionWallet,
-    walletLabel,
-    walletPurpose,
-  } = body;
+  // Refused before anything is written; the service refuses them again.
+  assertGrantableApiKeyGrants(actor.role, body.grants);
+  assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), body.grants);
 
-  const provisionWalletRequested = provisionWallet !== undefined;
-
-  const walletSelection = resolveCreateWalletScope({
-    walletScope,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    provisionWallet: provisionWalletRequested,
-  });
-
-  const actorApiKey = c.get("apiKey");
-  if (actorApiKey) {
-    assertBindingsWithinActorWalletScope(
-      actorApiKey,
-      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
-      walletScope
-    );
-  }
-
-  // Judge the requested Allowed Operations before any wallet is provisioned,
-  // so a refused request leaves nothing behind. The service judges again
-  // inside the key transaction.
-  assertGrantableAllowedOperations(actorApiKey?.allowedOperations ?? null, allowedOperations);
-
-  let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
-  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
-
-  if (provisionWalletRequested) {
-    if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
-    }
-    if (actorApiKey && isWalletScopedActor(actorApiKey)) {
-      throw new AppError(
-        "INSUFFICIENT_PERMISSIONS",
-        "Cannot provision a wallet from an API key with a selected wallet scope"
-      );
-    }
-
-    try {
-      const wallet = await provisionApiKeyWallet(getDb(c.env), c.env, {
-        auditContext: c,
-        creationReason: "api_key",
-        organizationId: auth.organizationId,
-        projectId,
-        owner: provisionWallet,
-        label: walletLabel,
-        purpose: walletPurpose,
-      });
-      resolvedSigningWalletId = wallet.walletId;
-      resolvedWalletBindings = [
-        { walletId: wallet.walletId, custodyWalletId: wallet.id, permissions: ["*"] },
-      ];
-    } catch (error) {
-      if (error instanceof SigningError) {
-        if (error.code === "NOT_FOUND") {
-          throw new AppError("CONFLICT", error.message);
-        }
-        throw badRequest(error.message);
-      }
-      throw error;
-    }
-  } else {
-    resolvedWalletBindings = await resolveWalletBindingsInScope(
-      getDb(c.env),
-      auth.organizationId,
-      projectId,
-      walletSelection.bindings
-    );
-  }
+  const walletScope = await resolveCreateWalletScope(
+    c,
+    { organizationId: actor.organizationId, projectId },
+    body
+  );
 
   const tenantScope = createTenantScope({
-    organizationId: auth.organizationId,
+    organizationId: actor.organizationId,
     projectId,
   });
-  const createdKey = await getDb(c.env).transaction(async (tx) => {
-    const txDb = asTransactionalClient(tx);
+  // The key, its wallet list and its audit record commit together: if the audit
+  // write fails nothing commits, and the secret is never returned.
+  const createdKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     const key = await new ApiKeyService(txDb, tenantScope).createApiKey({
-      organizationId: auth.organizationId,
+      organizationId: actor.organizationId,
       projectId,
-      createdByKeyId: auth.apiKeyId ?? undefined,
-      createdByUserId: auth.userId ?? undefined,
-      actorPermissions: auth.permissions,
-      actorApiKeyRole: c.get("apiKey")?.role ?? null,
-      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
-      name,
-      description,
-      role,
-      permissions,
-      allowedIps,
-      allowedOperations,
-      expiresAt,
-      signingWalletId: resolvedSigningWalletId,
+      createdByUserId: actor.userId,
+      actorRole: actor.role,
+      grantChannel: requestApiKeyGrantChannel(c),
+      name: body.name,
+      description: body.description,
+      grants: body.grants,
+      allowedIps: body.allowedIps,
+      expiresAt: body.expiresAt,
+      walletScope,
       pepper: c.env.API_KEY_PEPPER,
     });
-    if (resolvedWalletBindings.length > 0) {
-      await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
-    }
-    return key;
-  });
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "create",
-    resourceType: "api_key",
-    resourceId: createdKey.id,
-    metadata: {
-      projectId,
-      name,
-      role,
-      environment: createdKey.environment,
-      walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
-      signingWalletId: resolvedSigningWalletId,
-      signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-      provisionedWallet: provisionWalletRequested,
-    },
+    return {
+      result: key,
+      entry: {
+        action: "create",
+        resourceType: "api_key",
+        resourceId: key.id,
+        metadata: {
+          projectId,
+          name: body.name,
+          grants: key.grants,
+          environment: key.environment,
+          ...walletScopeAuditMetadata(walletScope),
+        },
+      },
+    };
   });
 
   const response: CreateApiKeyResponse = {
@@ -254,7 +136,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       name: createdKey.name,
       key: createdKey.key, // Full key - only shown once!
       keyPrefix: createdKey.keyPrefix,
-      role: createdKey.role,
+      grants: createdKey.grants,
       environment: createdKey.environment,
       expiresAt: createdKey.expiresAt,
       createdAt: createdKey.createdAt,

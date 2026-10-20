@@ -26,6 +26,7 @@ import type {
 } from "@/db/repositories/sponsorship-budget.repository";
 import { type MoneyAdmissionFacts, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { env as testEnv } from "@/test/helpers/env";
+import { admittedMoneyFacts } from "@/test/helpers/money-admission";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
@@ -59,17 +60,12 @@ const SCOPE: SponsorshipMovementScope = {
   movement: "payments.transfer",
 };
 
-const ACTIVE_SANDBOX: MoneyAdmissionFacts = {
-  organizationStatus: "active",
-  projectEnvironment: "sandbox",
-  rawSettings: null,
-};
+const ACTIVE_SANDBOX: MoneyAdmissionFacts = admittedMoneyFacts();
 
-const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = {
-  organizationStatus: "active",
+const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = admittedMoneyFacts({
   projectEnvironment: "production",
   rawSettings: JSON.stringify({ enableProductionProject: true }),
-};
+});
 
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
   const message = pipe(
@@ -251,6 +247,24 @@ describe("BudgetedFeePayment", () => {
     expect(repository.createReservation).not.toHaveBeenCalled();
     expect(scope.continuity.persistAccountingIdentity).not.toHaveBeenCalled();
     expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+  });
+
+  it("refuses a new continuity-backed signature when the API key is no longer live", async () => {
+    const scope = continuationScope();
+    scope.continuity.admission = "after_writer_retirement";
+    const { feePayment, provider, repository, readAdmissionFacts } = harness(scope);
+    readAdmissionFacts.mockResolvedValue(
+      admittedMoneyFacts({ principal: { kind: "api_key", key: null } })
+    );
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "principal_not_live",
+    });
+    expect(repository.createReservation).not.toHaveBeenCalled();
+    expect(scope.continuity.persistAccountingIdentity).not.toHaveBeenCalled();
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(provider.signAndSend).not.toHaveBeenCalled();
   });
 
   it("keeps a legacy unknown outcome fenced when the same message adopts an exact wallet actor", async () => {
@@ -1196,10 +1210,12 @@ describe("BudgetedFeePayment", () => {
 
       expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
       expect(refusal).toMatchObject({ reason: "organization_inactive" });
-      expect(readAdmissionFacts).toHaveBeenCalledWith(expect.anything(), {
-        organizationId: "org_1",
-        projectId: "project_1",
-      });
+      // A sponsor signs for no custody wallet.
+      expect(readAdmissionFacts).toHaveBeenCalledWith(
+        expect.anything(),
+        { organizationId: "org_1", projectId: "project_1" },
+        { custodyWalletId: null }
+      );
       expect(repository.createReservation).not.toHaveBeenCalled();
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();
     });

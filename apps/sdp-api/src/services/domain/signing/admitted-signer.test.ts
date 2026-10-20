@@ -23,14 +23,25 @@ const REFUSED: MoneyAdmissionDecision = { admitted: false, reason: "organization
 type PartialSigner = Extract<TransactionSigner, { signTransactions: unknown }>;
 
 describe("admittedSigner", () => {
-  it("hands back the provider's signer unchanged for an exit, and never decides", async () => {
+  // An exit is decided too (HOO-2099): never by the organization, but a
+  // credential that may no longer sign with the wallet is refused.
+  it("decides an exit each time it signs, and refuses a credential out of scope", async () => {
     const signer = await generateKeyPairSigner();
-    const decide = vi.fn();
+    const decide = vi
+      .fn<() => Promise<MoneyAdmissionDecision>>()
+      .mockResolvedValueOnce(ADMITTED)
+      .mockResolvedValueOnce({ admitted: false, reason: "wallet_out_of_scope" });
+    const exit = admittedSigner(signer, decide, {
+      ...CONTEXT,
+      movement: "recurring.cancel",
+    });
+    if (!isTransactionPartialSigner(exit)) throw new Error("a key pair signer signs partially");
 
-    expect(admittedSigner(signer, decide, { ...CONTEXT, movement: "recurring.cancel" })).toBe(
-      signer
-    );
-    expect(decide).not.toHaveBeenCalled();
+    await expect(exit.signTransactions([])).resolves.toEqual([]);
+    await expect(exit.signTransactions([])).rejects.toMatchObject({
+      reason: "wallet_out_of_scope",
+    });
+    expect(decide).toHaveBeenCalledTimes(2);
   });
 
   it("keeps exactly the real signer's signing kinds, so the kit guards classify it the same", async () => {
@@ -68,6 +79,8 @@ describe("admittedSigner", () => {
       subject_id: "cwlt_admitted_signer",
       organization_id: "org_admitted_signer",
       project_id: "prj_admitted_signer",
+      principal_kind: null,
+      principal: null,
       reason: "organization_inactive",
     });
     events.mockRestore();

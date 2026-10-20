@@ -185,6 +185,10 @@
       "persistent": true,
       "passThroughEnv": ["PORT"]
     },
+    "dev:worker": {
+      "cache": false,
+      "persistent": true
+    },
     "dev:db": {
       "cache": false,
       "persistent": true

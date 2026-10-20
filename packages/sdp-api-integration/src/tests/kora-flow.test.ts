@@ -4,6 +4,7 @@ import type { SignerCheckApiResponse } from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationApiSuite,
+  requestAsOrganizationAdmin,
   requestWithApiKey,
 } from "#/helpers/integration";
 import { KORA_URL_ENV_KEY, koraEndpoint } from "#/helpers/kora";
@@ -207,22 +208,25 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     }
 
     const createWalletBody = JSON.parse(createWalletPayload) as {
-      data: { wallet: { walletId: string; publicKey: string } };
+      data: { wallet: { id: string; walletId: string; publicKey: string } };
     };
 
     const walletId = createWalletBody.data.wallet.walletId;
+    const custodyWalletId = createWalletBody.data.wallet.id;
     const walletAddress = createWalletBody.data.wallet.publicKey;
 
-    const createKeyRes = await request("/v1/api-keys", {
+    // Keys are managed by a signed-in organization admin, never a key (HOO-2099).
+    const keyManager = await requestAsOrganizationAdmin();
+    const createKeyRes = await keyManager("/v1/api-keys", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         name: "Signer check integration key",
-        permissions: ["wallets:write"],
+        grants: ["wallets.execute"],
         walletScope: "selected",
-        signingWalletId: walletId,
+        walletIds: [custodyWalletId],
       }),
     });
 
@@ -243,7 +247,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ walletId }),
       });
 
       const signerCheckPayload = await signerCheckRes.text();
@@ -276,7 +280,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       expect(onChain).toBeNull();
       signerCheckPassed = true;
     } finally {
-      const deleteScopedKeyRes = await request(`/v1/api-keys/${scopedApiKeyId}`, {
+      const deleteScopedKeyRes = await keyManager(`/v1/api-keys/${scopedApiKeyId}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",

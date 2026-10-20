@@ -1,21 +1,20 @@
-import type { BackgroundRunner } from "@/runtime/background";
-import type { Observability } from "@/runtime/observability";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
-import type { Env } from "@/types/env";
+import { alwaysEnabled, defineCron } from "./define-cron";
 
-export const EARN_VAULT_MOVEMENTS_MONITOR = "sdp-api-reconcile-earn-vault-movements";
-export const EARN_VAULT_MOVEMENTS_CRON = "* * * * *";
-
-export function runEarnVaultMovementsReconciliation(deps: {
-  env: Env;
-  bg: BackgroundRunner;
-  observability?: Observability;
-}): void {
-  const work = () => reconcileEarnVaultMovements(deps.env);
-  const promise = deps.observability
-    ? deps.observability.withMonitor(EARN_VAULT_MOVEMENTS_MONITOR, work, {
-        schedule: { type: "crontab", value: EARN_VAULT_MOVEMENTS_CRON },
-      })
-    : Promise.resolve().then(work);
-  deps.bg.run(promise);
-}
+// NOTE: `global` for now, on purpose. This sweep reads every Environment's rows and picks each
+// row's cluster from the row itself (`row.environment`), which is correct, but it is not yet
+// split into one registration per Environment like the other chain-touching crons. Moving it
+// to `scope: "cluster"` is tracked in HOO-2148. New chain-touching crons use `scope: "cluster"`.
+/**
+ * Earn vault movements: rebroadcast, confirm and settle signed deposits and withdrawals. Always
+ * on: durable signed intents outlive the flag that admitted them, so their outbox keeps draining
+ * even when Earn is disabled during an incident (ADR 0002).
+ */
+export const earnVaultMovementsCron = defineCron({
+  name: "reconcile-earn-vault-movements",
+  schedule: "* * * * *",
+  scope: "global",
+  effect: "finishes",
+  enabled: alwaysEnabled,
+  run: reconcileEarnVaultMovements,
+});

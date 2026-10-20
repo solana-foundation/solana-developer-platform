@@ -52,7 +52,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
       section: 'transferBatches.post(\n  "/",',
       before:
-        'requireAllowedOperation("payment_transfer_batch_execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
+        'requireAction("transfer_batches.execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
       through: "replayFromRecord(findTransferBatchRecordReplay),\n  admit(",
       after: "\n  createTransferBatch\n",
     },
@@ -104,7 +104,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/authority",',
-      before: 'requireAllowedOperation("issuance_update_authority_execute")',
+      before: 'requireAction("issuance.authority")',
       through: "requestGate(",
       after: "executeUpdateAuthority",
     },
@@ -125,7 +125,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/freeze",',
-      before: 'requireAllowedOperation("issuance_freeze_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "freezeAccount",
     },
     replay: [
@@ -146,7 +146,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/unfreeze",',
-      before: 'requireAllowedOperation("issuance_unfreeze_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "unfreezeAccount",
     },
     replay: [
@@ -166,7 +166,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/pause",',
-      before: 'requireAllowedOperation("issuance_pause_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "  pauseToken",
     },
     replay: [
@@ -186,7 +186,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/unpause",',
-      before: 'requireAllowedOperation("issuance_unpause_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "unpauseToken",
     },
     replay: [
@@ -206,7 +206,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/seize",',
-      before: 'requireAllowedOperation("issuance_seize_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "executeSeize",
     },
     replay: [
@@ -226,7 +226,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/force-burn",',
-      before: 'requireAllowedOperation("issuance_force_burn_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "executeForceBurn",
     },
     replay: [
@@ -246,7 +246,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/burn",',
-      before: 'requireAllowedOperation("issuance_burn_execute")',
+      before: 'requireAction("issuance.execute")',
       after: "executeBurn",
     },
     replay: [
@@ -267,7 +267,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",
       section: "transfers.post(",
       before:
-        'requireAllowedOperation("payment_transfer_execute"),\n  validateBody(createTransferSchema),\n  authorize(authorizeTransfer)',
+        'requireAction("transfers.execute"),\n  validateBody(createTransferSchema),\n  authorize(authorizeTransfer)',
       through: "replayFromRecord(findTransferRecordReplay),\n  admit(",
       after: "\n  createTransfer\n",
     },
@@ -293,7 +293,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId",',
-      before: 'requireAllowedOperation("issuance_metadata_update_execute")',
+      before: 'requireAction("issuance.execute")',
       after: "  updateToken",
     },
     replay: [
@@ -313,7 +313,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/deploy",',
-      before: 'requireAllowedOperation("issuance_deploy_execute")',
+      before: 'requireAction("issuance.execute")',
       after: "  deployToken",
     },
     replay: [
@@ -333,7 +333,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/allowlist",',
-      before: 'requireAllowedOperation("issuance_allowlist_add_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "addAllowlistEntry",
     },
     replay: [
@@ -353,7 +353,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/allowlist/:entryId",',
-      before: 'requireAllowedOperation("issuance_allowlist_remove_execute")',
+      before: 'requireAction("issuance.enforce")',
       after: "removeAllowlistEntry",
     },
     replay: [
@@ -373,7 +373,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
       section: '"/quote",',
-      before: 'requireAllowedOperation("ramp_onramp_quote")',
+      before: 'requireAction("onramp.execute")',
       through: "requestGate(",
       after: "\n  createOnrampQuote\n",
     },
@@ -391,7 +391,7 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /** DvP settle: Allowed Operations run before the settlement authority signs. */
+    /** DvP settle: the route's action is checked before the settlement authority signs. */
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/action-context.ts",
@@ -400,7 +400,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/dvp/index.ts",
       section: '"/trades/:tradeId/settle",',
-      before: 'requireAllowedOperation("dvp_settle")',
+      before: 'requireAction("dvp.execute")',
       after: "settleTrade",
     },
     replay: [
@@ -422,7 +422,7 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /** DvP fund: Allowed Operations run before a custody wallet's tokens leave. */
+    /** DvP fund: the route's action is checked before a custody wallet's tokens leave. */
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/action-context.ts",
@@ -431,7 +431,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/dvp/index.ts",
       section: '"/trades/:tradeId/fund",',
-      before: 'requireAllowedOperation("dvp_fund")',
+      before: 'requireAction("dvp.execute")',
       after: "fundTrade",
     },
     replay: [
@@ -717,11 +717,11 @@ describe("value-moving authorization and replay conformance", () => {
     }
   });
 
-  it("declares an allowed operation on every value-moving issuance route", () => {
+  it("declares an action on every value-moving issuance route", () => {
     const issuanceContracts = contracts.filter((contract) => contract.family === "issuance");
     expect(issuanceContracts).toHaveLength(12);
     for (const contract of issuanceContracts) {
-      expect(contract.authorization.before).toContain("requireAllowedOperation(");
+      expect(contract.authorization.before).toContain("requireAction(");
     }
   });
 
@@ -733,10 +733,10 @@ describe("value-moving authorization and replay conformance", () => {
     expect(gated).toHaveLength(2);
   });
 
-  it("pins the allowed operation and the gate on payments, batch and ramp routes", () => {
+  it("pins the action and the gate on payments, batch and ramp routes", () => {
     for (const family of ["payments", "batch", "ramps"] as const) {
       for (const contract of contracts.filter((candidate) => candidate.family === family)) {
-        expect(contract.authorization.before).toContain("requireAllowedOperation(");
+        expect(contract.authorization.before).toContain("requireAction(");
       }
     }
     // Ramps still admit through the request gate. Transfers and batches run

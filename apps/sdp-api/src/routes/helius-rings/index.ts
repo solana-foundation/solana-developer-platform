@@ -1,8 +1,9 @@
 import { type Context, Hono, type Next } from "hono";
 import { AppError } from "@/lib/errors";
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import type { Env } from "@/types/env";
 import {
   createRingsProjectRing,
@@ -39,53 +40,54 @@ heliusRings.use("*", requireHeliusRingsFeature);
 heliusRings.use("*", unifiedAuthMiddleware());
 heliusRings.use("*", projectContextMiddleware());
 
-heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
-heliusRings.get("/setup-status", requirePermissions("payments:read"), getRingsSetup);
+heliusRings.get("/health", requireAction("helius_rings.read"), getRingsHealth);
+heliusRings.get("/setup-status", requireAction("helius_rings.read"), getRingsSetup);
 
-heliusRings.get("/rings", requirePermissions("payments:read"), listRingsProjectRings);
+heliusRings.get("/rings", requireAction("helius_rings.read"), listRingsProjectRings);
 // Recording a ring runs bring-up (signed transactions through custody), so it
-// carries write.
-heliusRings.post("/rings", requirePermissions("payments:write"), createRingsProjectRing);
+// carries execute.
+heliusRings.post("/rings", requireAction("helius_rings.execute"), createRingsProjectRing);
 
-heliusRings.get("/wallets", requirePermissions("payments:read"), listRingsWallets);
-heliusRings.post("/wallets", requirePermissions("payments:write"), createRingsWallet);
-heliusRings.get("/wallets/:walletId", requirePermissions("payments:read"), getRingsWallet);
-heliusRings.post("/wallets/:walletId/sync", requirePermissions("payments:write"), syncRingsWallet);
+heliusRings.get("/wallets", requireAction("helius_rings.read"), listRingsWallets);
+heliusRings.post("/wallets", requireAction("helius_rings.manage"), createRingsWallet);
+heliusRings.get("/wallets/:walletId", requireAction("helius_rings.read"), getRingsWallet);
+heliusRings.post("/wallets/:walletId/sync", requireAction("helius_rings.manage"), syncRingsWallet);
 heliusRings.post(
   "/wallets/:walletId/rekey",
-  requirePermissions("payments:write"),
+  requireAction("helius_rings.execute"),
   rekeyRingsWallet
 );
 heliusRings.get(
   "/wallets/:walletId/identity",
-  requirePermissions("payments:read"),
+  requireAction("helius_rings.read"),
   getRingsWalletIdentity
 );
-heliusRings.get("/wallets/:walletId/zones", requirePermissions("payments:read"), listRingsZones);
-heliusRings.post("/wallets/:walletId/zones", requirePermissions("payments:write"), createRingsZone);
+heliusRings.get("/wallets/:walletId/zones", requireAction("helius_rings.read"), listRingsZones);
+// A zone is an SDP row; nothing signs.
+heliusRings.post("/wallets/:walletId/zones", requireAction("helius_rings.manage"), createRingsZone);
 
-heliusRings.get("/operations", requirePermissions("payments:read"), listRingsOperations);
-heliusRings.post("/operations", requirePermissions("payments:write"), prepareRingsOperation);
-heliusRings.get("/operations/:operationId", requirePermissions("payments:read"), getRingsOperation);
+heliusRings.get("/operations", requireAction("helius_rings.read"), listRingsOperations);
+heliusRings.post("/operations", requireAction("helius_rings.execute"), prepareRingsOperation);
+heliusRings.get("/operations/:operationId", requireAction("helius_rings.read"), getRingsOperation);
 heliusRings.post(
   "/operations/:operationId/execute",
-  requirePermissions("payments:write"),
+  requireAction("helius_rings.execute"),
   executeRingsOperation
 );
 heliusRings.post(
   "/operations/:operationId/retry",
-  requirePermissions("payments:write"),
+  requireAction("helius_rings.execute"),
   retryRingsOperation
 );
 // Write, not read: a recheck only observes the indexer, but a hit completes the
 // operation and advances the wallet's indexed slot.
 heliusRings.post(
   "/operations/:operationId/recheck",
-  requirePermissions("payments:write"),
+  requireAction("helius_rings.manage"),
   recheckRingsOperation
 );
 heliusRings.post(
   "/operations/:operationId/void",
-  requirePermissions("payments:write"),
+  requireAction("helius_rings.manage"),
   voidRingsOperation
 );

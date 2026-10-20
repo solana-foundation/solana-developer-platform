@@ -50,7 +50,6 @@ env:
   PROJECT_ID: solana-developer-platform
   REGION: us-central1
   SERVICE: sdp-prod-api-public
-  JOB: sdp-prod-api-public-cron
   WORKER_SERVICE: sdp-prod-worker
   MIGRATE_JOB: sdp-prod-api-public-migrate
 
@@ -100,7 +99,6 @@ jobs:
       canary_passed: ${{ steps.canary.outcome == 'success' }}
       candidate_tag: ${{ steps.candidate.outputs.tag }}
       previous_traffic: ${{ steps.capture.outputs.traffic }}
-      previous_cron_image: ${{ steps.capture.outputs.cron_image }}
       previous_worker_image: ${{ steps.capture.outputs.worker_image }}
       breaking_migrations: ${{ steps.breaking.outputs.migrations }}
     name: Deploy production image
@@ -412,25 +410,6 @@ jobs:
           ORIGIN_IMAGE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api@${IMAGE##*@}"
           cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
-      - name: Run database migrations
-        if: ${{ env.BUILD_IMAGE == 'true' }}
-        timeout-minutes: 15
-        env:
-          BREAKING_MIGRATIONS: ${{ steps.breaking.outputs.migrations }}
-        run: |
-          set -euo pipefail
-          # The previous build cannot run on the schema a breaking migration leaves.
-          if [[ -n "${BREAKING_MIGRATIONS}" ]]; then
-            gcloud run jobs update "${MIGRATE_JOB}" \
-              --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision
-          fi
-          gcloud run jobs update "${MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          gcloud run jobs execute "${MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --wait
-          gcloud run jobs update "${MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --update-labels "sdp_schema_sha=${DEPLOY_IMAGE_SHA}"
-
       - name: Capture rollback state
         id: capture
         run: |
@@ -449,31 +428,36 @@ jobs:
               | if length > 0 then join(",") else error("service has no active traffic targets") end
             ' <<<"${service_json}"
           )"
-          previous_cron_image="$(
-            gcloud run jobs describe "${JOB}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --format='value(spec.template.spec.template.spec.containers[0].image)'
-          )"
-          if [[ -z "${previous_cron_image}" ]]; then
-            echo "Could not resolve the current cron job image." >&2
-            exit 1
-          fi
           echo "traffic=${previous_traffic}" >> "${GITHUB_OUTPUT}"
-          echo "cron_image=${previous_cron_image}" >> "${GITHUB_OUTPUT}"
-          worker_describe_err="$(mktemp)"
           previous_worker_image="$(
             gcloud run services describe "${WORKER_SERVICE}" \
               --region "${REGION}" --project "${PROJECT_ID}" \
-              --format='value(spec.template.spec.containers[0].image)' 2>"${worker_describe_err}"
-          )" || {
-            if grep -qiE "NOT_FOUND|could not be found" "${worker_describe_err}"; then
-              previous_worker_image=""
-            else
-              cat "${worker_describe_err}" >&2
-              exit 1
-            fi
-          }
+              --format='value(spec.template.spec.containers[0].image)'
+          )"
+          if [[ -z "${previous_worker_image}" ]]; then
+            echo "Could not resolve the current worker image." >&2
+            exit 1
+          fi
           echo "worker_image=${previous_worker_image}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run database migrations
+        if: ${{ env.BUILD_IMAGE == 'true' }}
+        timeout-minutes: 15
+        env:
+          BREAKING_MIGRATIONS: ${{ steps.breaking.outputs.migrations }}
+        run: |
+          set -euo pipefail
+          # The previous build cannot run on the schema a breaking migration leaves.
+          if [[ -n "${BREAKING_MIGRATIONS}" ]]; then
+            gcloud run jobs update "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision
+          fi
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+          gcloud run jobs execute "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --wait
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --update-labels "sdp_schema_sha=${DEPLOY_IMAGE_SHA}"
 
       - name: Hold prod for a manual deploy
         if: ${{ env.BUILD_IMAGE != 'true' && !inputs.clear_hold }}
@@ -564,7 +548,7 @@ jobs:
             sleep 10
           done
 
-      - name: Promote service and cron with rollback
+      - name: Promote service and worker with rollback
         id: promote
         timeout-minutes: 10
         env:
@@ -572,9 +556,6 @@ jobs:
           BREAKING_MIGRATIONS: ${{ steps.breaking.outputs.migrations }}
         run: |
           set -euo pipefail
-
-          node .github/scripts/verify-managed-reconciliation-cadence.mjs \
-            "${JOB}" "${REGION}" "${PROJECT_ID}"
 
           # The quick rollback returns to the build this one replaces, unless a
           # breaking migration means that build can no longer run on the schema.
@@ -612,20 +593,10 @@ jobs:
             sleep 10
           done
 
-          gcloud run jobs update "${JOB}" \
+          # The Worker is the only scheduler (ADR 0011): a missing service means no Money Exit
+          # runs, so this fails the deploy instead of skipping.
+          gcloud run services update "${WORKER_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-
-          describe_err="$(mktemp)"
-          if gcloud run services describe "${WORKER_SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
-            gcloud run services update "${WORKER_SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          elif grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
-            echo "worker service ${WORKER_SERVICE} not created yet; skipping image update"
-          else
-            cat "${describe_err}" >&2
-            exit 1
-          fi
           echo "revision=${CANDIDATE_REVISION}" >> "${GITHUB_OUTPUT}"
 
       # Three failed runs in a row hold prod on this revision for a deliberate
@@ -648,17 +619,6 @@ jobs:
           done
           echo "::error::The canary failed 3 runs in a row against the promoted revision."
           exit 1
-
-      - name: Record managed monitor migration gate
-        if: ${{ steps.canary.outcome == 'success' }}
-        run: |
-          {
-            echo "### Managed reconciliation monitor follow-up"
-            echo
-            echo "Do not close SDP-API-5/H/J/P/X yet. Observe two successful managed cadences, then retire the superseded monitors using:"
-            echo
-            echo 'docs/ops/managed-reconciliation-monitor-migration.md'
-          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Lift the prod hold
         if: ${{ steps.canary.outcome == 'success' && inputs.clear_hold }}
@@ -687,7 +647,6 @@ jobs:
       CANARY_PASSED: ${{ needs.deploy.outputs.canary_passed }}
       BREAKING_MIGRATIONS: ${{ needs.deploy.outputs.breaking_migrations }}
       PREVIOUS_TRAFFIC: ${{ needs.deploy.outputs.previous_traffic }}
-      PREVIOUS_CRON_IMAGE: ${{ needs.deploy.outputs.previous_cron_image }}
       PREVIOUS_WORKER_IMAGE: ${{ needs.deploy.outputs.previous_worker_image }}
       CANDIDATE_TAG: ${{ needs.deploy.outputs.candidate_tag }}
     steps:
@@ -732,11 +691,11 @@ jobs:
 
           if [[ -n "${BREAKING_MIGRATIONS:-}" ]]; then
             "${hold[@]}"
-            echo "::error::This run applied breaking migrations (${BREAKING_MIGRATIONS}) that the previous image cannot run on, so it does not restore it. Production keeps its current traffic, cron and worker images and is held; fix forward."
+            echo "::error::This run applied breaking migrations (${BREAKING_MIGRATIONS}) that the previous image cannot run on, so it does not restore it. Production keeps its current traffic and worker image and is held; fix forward."
             exit 1
           fi
 
-          echo "Rollout did not complete; restoring service traffic, cron and worker images and holding prod." >&2
+          echo "Rollout did not complete; restoring service traffic and the worker image and holding prod." >&2
           rollback_failed=0
           # Traffic first: users are on the failed revision until it moves, and
           # the hold only has to land before this run ends.
@@ -744,14 +703,9 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${PREVIOUS_TRAFFIC}" || rollback_failed=1
           "${hold[@]}" || rollback_failed=1
-          gcloud run jobs update "${JOB}" \
+          gcloud run services update "${WORKER_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
-            --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
-          if [[ -n "${PREVIOUS_WORKER_IMAGE:-}" ]]; then
-            gcloud run services update "${WORKER_SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
-          fi
+            --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
           if [[ "${rollback_failed}" -ne 0 ]]; then
             echo "Automatic restore was incomplete; escalate immediately. The quick rollback can finish it." >&2
             exit 1

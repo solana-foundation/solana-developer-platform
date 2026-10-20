@@ -10,7 +10,6 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import * as tokenLabels from "@/routes/payments/token-labels";
-import { noopObservability } from "@/runtime/observability";
 import * as jupiterPriceService from "@/services/jupiter-price.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -134,7 +133,6 @@ async function seedActiveConnectionWallet(params: {
 // Today every ramp provider is `experimental`; these stages put only MoonPay in
 // `beta`, so a `beta` deployment runs Ramps with MoonPay alone.
 const moonpayOnlyBetaApp = createApp({
-  observability: noopObservability,
   rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
 });
 const betaEnv = () => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
@@ -169,7 +167,7 @@ describe("Payments routes — ramps", () => {
   });
 
   it("refuses ramp quotes from a key without counterparties:read", async () => {
-    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    await seedCachedKey({ grants: ["transfers.execute", "wallets.read"] });
 
     for (const direction of ["onramp", "offramp"]) {
       const response = await app.request(
@@ -401,9 +399,7 @@ describe("Payments routes — ramps", () => {
         walletId: TEST_CONNECTION_WALLET_ID,
         publicKey: TEST_SOLANA_ADDRESSES.wallet2,
       });
-      await seedCachedKey({
-        walletBindings: [{ walletId: TEST_CONNECTION_WALLET_ID, permissions: ["wallets:read"] }],
-      });
+      await seedCachedKey({ walletIds: [TEST_CONNECTION_CUSTODY_WALLET_ID] });
 
       const res = await requestBalances(TEST_CONNECTION_WALLET_ID, "");
 
@@ -422,12 +418,11 @@ describe("Payments routes — ramps", () => {
         TEST_SOLANA_ADDRESSES.wallet2,
       ]);
 
-      await seedCachedKey({
-        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:read"] }],
-      });
+      await seedCachedKey({ walletIds: [TEST_CUSTODY_WALLET_ID] });
       const forbiddenRes = await requestBalances(TEST_CONNECTION_WALLET_ID, "");
 
-      expect(forbiddenRes.status).toBe(403);
+      // A wallet outside the key's scope reads as absent (HOO-2099).
+      expect(forbiddenRes.status).toBe(404);
     });
 
     it.for(ENVIRONMENT_CLUSTER_CASES)(
@@ -1156,12 +1151,9 @@ describe("Payments routes — ramps", () => {
           .bind(transferId)
           .first<{ status: string }>()
       ).status;
-    const scopeKeyToTestWallet = () =>
-      seedCachedKey({
-        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
-      });
+    const scopeKeyToTestWallet = () => seedCachedKey({ walletIds: [TEST_CUSTODY_WALLET_ID] });
 
-    it("denies a wallet-scoped key canceling MoonPay and Stripe transfers in another wallet", async () => {
+    it("lets a wallet-scoped key cancel MoonPay and Stripe transfers in another wallet", async () => {
       await getDb(env)
         .prepare(
           `INSERT INTO custody_wallets
@@ -1189,8 +1181,8 @@ describe("Payments routes — ramps", () => {
 
         const res = await cancelRampTransfer(transferId);
 
-        expect(res.status).toBe(403);
-        expect(await transferStatus(transferId)).toBe("awaiting_payment");
+        expect(res.status).toBe(200);
+        expect(await transferStatus(transferId)).toBe("canceled");
       }
     });
 
@@ -1210,7 +1202,7 @@ describe("Payments routes — ramps", () => {
       expect(await transferStatus("xfr_cancel_own_wallet")).toBe("canceled");
     });
 
-    it("denies a wallet-scoped key canceling a transfer bound to no wallet", async () => {
+    it("lets a wallet-scoped key cancel a transfer bound to no wallet", async () => {
       await scopeKeyToTestWallet();
       await seedRampTransfer({
         id: "xfr_cancel_unbound_scoped",
@@ -1221,8 +1213,8 @@ describe("Payments routes — ramps", () => {
 
       const res = await cancelRampTransfer("xfr_cancel_unbound_scoped");
 
-      expect(res.status).toBe(403);
-      expect(await transferStatus("xfr_cancel_unbound_scoped")).toBe("awaiting_payment");
+      expect(res.status).toBe(200);
+      expect(await transferStatus("xfr_cancel_unbound_scoped")).toBe("canceled");
     });
 
     it("lets a key without wallet scope cancel a transfer bound to no wallet", async () => {

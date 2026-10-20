@@ -1,8 +1,8 @@
 /**
- * A fresh Cloud Run job instance can spend its first minutes with no working
+ * A fresh Cloud Run instance can spend its first minutes with no working
  * external egress while Cloud NAT programs ports for it; every outbound call
  * silently times out until then. Waiting for one probe to succeed before the
- * reconciliation ticks start lets a single check bridge the window for every
+ * Worker's Cron Definitions start lets a single check bridge the window for every
  * downstream call instead of each call site retrying through it.
  */
 export async function waitForEgress(params: {

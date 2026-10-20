@@ -72,7 +72,8 @@ already names the Private Channels module.
 - When Issuance is excluded, token metadata (`metadata.json`) is not served,
   including for tokens issued earlier.
 - The Policies module existed when this decision was written and was removed by
-  ADR 0006: a key's Allowed Operations ship in every channel and are not a
+  ADR 0006. A key's grants (HOO-2099) name actions of every channel's modules,
+  and the dashboard offers only the channel's; they are not a
   module.
 - Compliance integrations in the dashboard show whenever the channel runs the
   Compliance module (ADR 0006). The screening API is available in every

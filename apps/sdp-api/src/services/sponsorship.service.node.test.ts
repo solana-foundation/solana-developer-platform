@@ -29,9 +29,11 @@ import {
   resolveRequestSponsorshipScope,
   type SponsorshipAccountingIdentity,
 } from "@/services/sponsorship.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
 import { env as testEnv } from "@/test/helpers/env";
+import { admittedMoneyFacts } from "@/test/helpers/money-admission";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import {
   garbageSignTestTransaction,
@@ -110,11 +112,7 @@ async function seedSponsorshipProject(): Promise<void> {
 
 describe("sponsorship identity boundary", () => {
   beforeEach(() => {
-    readMoneyAdmissionFacts.mockResolvedValue({
-      organizationStatus: "active",
-      projectEnvironment: "sandbox",
-      rawSettings: null,
-    });
+    readMoneyAdmissionFacts.mockResolvedValue(admittedMoneyFacts({ organizationStatus: "active" }));
     vi.spyOn(feePayment, "createFeePaymentAdapter").mockReturnValue({
       providerId: "kora",
       getFeePayer: vi.fn(),
@@ -216,12 +214,13 @@ describe("sponsorship identity boundary", () => {
         operator: "test-seed",
         reason: "Enable project-network continuity fixture",
       });
-      readMoneyAdmissionFacts.mockResolvedValue({
-        organizationStatus: "active",
-        projectEnvironment: environment,
-        rawSettings:
-          environment === "production" ? JSON.stringify({ enableProductionProject: true }) : null,
-      });
+      readMoneyAdmissionFacts.mockResolvedValue(
+        admittedMoneyFacts({
+          projectEnvironment: environment,
+          rawSettings:
+            environment === "production" ? JSON.stringify({ enableProductionProject: true }) : null,
+        })
+      );
       projectMocks.getProject.mockResolvedValue({
         id: projectId,
         organizationId: "org_test_sponsorship",
@@ -373,11 +372,9 @@ describe("sponsorship identity boundary", () => {
     "refuses self-hosted continuity %s after organization revocation",
     async (operation) => {
       await seedTestDatabase(testEnv);
-      readMoneyAdmissionFacts.mockResolvedValue({
-        organizationStatus: "deleted",
-        projectEnvironment: "sandbox",
-        rawSettings: null,
-      });
+      readMoneyAdmissionFacts.mockResolvedValue(
+        admittedMoneyFacts({ organizationStatus: "deleted" })
+      );
       const provider: FeePaymentPort = {
         providerId: "kora",
         getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
@@ -639,11 +636,9 @@ describe("sponsorship identity boundary", () => {
     );
   }
   it("refuses a self-hosted sponsor signature for a start the organization may not make", async () => {
-    readMoneyAdmissionFacts.mockResolvedValue({
-      organizationStatus: "deleted",
-      projectEnvironment: "sandbox",
-      rawSettings: null,
-    });
+    readMoneyAdmissionFacts.mockResolvedValue(
+      admittedMoneyFacts({ organizationStatus: "deleted" })
+    );
     const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
     const feePayment = selfHostedFeePayment(signAsFeePayer);
 
@@ -723,10 +718,9 @@ describe("sponsorship identity boundary", () => {
         id: "key_trusted",
         organizationId: "org_trusted",
         projectId: "project_stale",
-        role: "api_admin",
-        permissions: ["*"],
+        grants: ALL_API_KEY_GRANTS,
         environment: "sandbox",
-        signingWalletId: null,
+        walletAccess: { scope: "all" } as const,
       });
       await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
     });

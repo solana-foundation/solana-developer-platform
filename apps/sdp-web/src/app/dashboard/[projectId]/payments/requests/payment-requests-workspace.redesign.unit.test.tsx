@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import type { PaymentRequest } from "@sdp/types/payments";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -38,7 +39,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const paymentRequest = {
   id: "preq_1",
-  publicToken: "tok_1",
   counterpartyId: null,
   destinationAddress: "11111111111111111111111111111111",
   token: "So11111111111111111111111111111111111111112",
@@ -80,7 +80,6 @@ afterEach(() => {
 const otherRequest = {
   ...paymentRequest,
   id: "preq_2",
-  publicToken: "tok_2",
   counterpartyId: "cp_jane",
   amount: "80",
   reference: "ref_2",
@@ -165,5 +164,56 @@ describe("PaymentRequestsWorkspace pager", () => {
       listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: null },
     });
     expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty("disabled", true);
+  });
+});
+
+// APE-849 moved the pay link behind a read on Copy; Safari only lets a
+// clipboard write start inside the click, so the write must not wait for it.
+describe("PaymentRequestsWorkspace copy link", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("starts the clipboard write in the click, with the link read as its contents", async () => {
+    let answerLink: (response: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        () =>
+          new Promise((resolve) => {
+            answerLink = resolve;
+          })
+      )
+    );
+    const copied = vi.spyOn(toast, "success");
+    const written: Promise<Blob>[] = [];
+    class StubClipboardItem {
+      constructor(readonly items: Record<string, Promise<Blob>>) {}
+    }
+    vi.stubGlobal("ClipboardItem", StubClipboardItem);
+    const write = vi.fn(async (items: StubClipboardItem[]) => {
+      const [item] = items;
+      if (!item) throw new Error("nothing to write");
+      const text = item.items["text/plain"];
+      if (!text) throw new Error("no text/plain");
+      written.push(text);
+      await text;
+    });
+    renderWorkspace();
+    // user-event installs its own clipboard on setup; this one goes in after it.
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { value: { write }, configurable: true });
+
+    const [copy] = screen.getAllByRole("button", { name: "Copy link" });
+    if (!copy) throw new Error("no Copy link button");
+    await user.click(copy);
+
+    // Called before the link read has answered.
+    expect(write).toHaveBeenCalledTimes(1);
+    answerLink(Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }));
+    const [pending] = written;
+    if (!pending) throw new Error("no clipboard contents");
+    await expect((await pending).text()).resolves.toBe(`${window.location.origin}/pay/tok_1`);
+    await waitFor(() => expect(copied).toHaveBeenCalledWith("Payment link copied"));
   });
 });

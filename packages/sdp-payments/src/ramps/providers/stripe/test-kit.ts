@@ -1,8 +1,14 @@
 import { basicAuthHeader } from "#/ramps/shared";
-import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "#/ramps/test-kit";
+import {
+  CONTRACT_DELIVERY_SIGNATURE,
+  CONTRACT_WALLET,
+  type RampProviderTestKit,
+  type RecordedExchange,
+} from "#/ramps/test-kit";
 
 const SECRET_KEY = "sk_test_contract";
 const FIAT_AMOUNT = "100";
+const STRIPE_TRANSFER_ID = "xfr_5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e";
 const CUSTOMER_ID = "cpty_contract_onramp";
 const CUSTOMER_IP = "203.0.113.7";
 
@@ -86,6 +92,35 @@ export function stripeSessionExchange(terms: typeof STRIPE_SESSION_TERMS): Recor
   };
 }
 
+/** The kit's session once Stripe delivered it, as the sandbox reports a completed one. */
+export const STRIPE_COMPLETED_SESSION = {
+  id: "cos_contract",
+  object: "crypto.onramp_session",
+  client_secret: "cos_contract_secret_abc",
+  livemode: false,
+  status: "fulfillment_complete",
+  redirect_url: null,
+  transaction_details: {
+    ...STRIPE_SESSION_TERMS,
+    destination_amount: "96.500000",
+    transaction_id: CONTRACT_DELIVERY_SIGNATURE,
+    wallet_address: CONTRACT_WALLET,
+  },
+};
+
+/** The kit's session lookup answered with `session`, as `GET /v1/crypto/onramp_sessions/{id}`. */
+export function stripeSessionLookupExchange(
+  status: number,
+  session: Record<string, unknown>
+): RecordedExchange {
+  return {
+    method: "GET",
+    url: /^https:\/\/api\.stripe\.com\/v1\/crypto\/onramp_sessions\/cos_contract$/,
+    status,
+    body: session,
+  };
+}
+
 /**
  * Stripe's contract kit. Stripe runs onramp only, and SDP holds sandbox keys
  * only: production projects bring their own, so production fails closed.
@@ -111,6 +146,41 @@ export const STRIPE_TEST_KIT: RampProviderTestKit = {
         customerIpAddress: CUSTOMER_IP,
       },
       exchanges: [stripeSessionExchange(STRIPE_SESSION_TERMS)],
+    },
+  },
+  transferStatus: {
+    "a completed session": {
+      input: {
+        transferId: STRIPE_TRANSFER_ID,
+        rampType: "onramp",
+        providerReference: "cos_contract",
+      },
+      exchanges: [stripeSessionLookupExchange(200, STRIPE_COMPLETED_SESSION)],
+      events: [
+        {
+          provider: "stripe",
+          kind: "settled",
+          reference: "cos_contract",
+          deliveredAssetRail: "usdc.solana",
+          receivedAmount: "96.500000",
+          onchain: { signature: CONTRACT_DELIVERY_SIGNATURE, destinationAddress: CONTRACT_WALLET },
+        },
+      ],
+    },
+    "a session awaiting payment": {
+      input: {
+        transferId: STRIPE_TRANSFER_ID,
+        rampType: "onramp",
+        providerReference: "cos_contract",
+      },
+      exchanges: [
+        stripeSessionLookupExchange(200, {
+          ...STRIPE_COMPLETED_SESSION,
+          status: "requires_payment",
+          transaction_details: STRIPE_SESSION_TERMS,
+        }),
+      ],
+      events: [{ provider: "stripe", kind: "awaiting_payment", reference: "cos_contract" }],
     },
   },
   usesModeCredential: (request) =>

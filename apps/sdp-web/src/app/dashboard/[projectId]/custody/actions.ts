@@ -1,15 +1,9 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import type { WalletFaucetResponse } from "@sdp/types/custody";
 import { isIdempotencyErrorCode } from "@sdp/types/idempotency";
-import {
-  commitmentComparator,
-  decimalFixedPointToNumber,
-  type GetSignatureStatusesApi,
-  isAddress,
-  sol,
-  solToLamports,
-} from "@solana/kit";
+import { decimalFixedPointToNumber, lamports, lamportsToSol } from "@solana/kit";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import {
@@ -17,15 +11,8 @@ import {
   actionIdempotencyHeaders,
   isOutcomeUnknownAnswer,
 } from "@/lib/idempotency";
-import {
-  createSdpApiClient,
-  requestProjectHref,
-  type SdpApiClient,
-  sdpApiAnswer,
-} from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref, sdpApiAnswer } from "@/lib/sdp-api";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "./provider-catalog";
-
-const DEVNET_FAUCET_SOL = sol("1");
 
 function getString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -309,90 +296,6 @@ interface WalletSignerCheckResponse {
   signature: string;
 }
 
-interface SolanaRpcAirdropResponse {
-  result?: string;
-  error?: {
-    code?: number;
-    message?: string;
-    data?: unknown;
-  };
-}
-
-interface SolanaRpcSignatureStatusesResponse {
-  result?: ReturnType<GetSignatureStatusesApi["getSignatureStatuses"]>;
-}
-
-const FAUCET_CONFIRMATION_TIMEOUT_MS = 15_000;
-const FAUCET_CONFIRMATION_POLL_MS = 1_000;
-
-/**
- * Poll the transaction's status through the RPC relay until it is confirmed or
- * failed, or the timeout passes. On timeout the caller still revalidates, and the
- * page's balance polling picks up the result later.
- */
-async function waitForSignatureConfirmation(
-  client: SdpApiClient,
-  signature: string
-): Promise<"confirmed" | "failed" | "timeout"> {
-  const deadline = Date.now() + FAUCET_CONFIRMATION_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    let relay: RpcRelayResponse<SolanaRpcSignatureStatusesResponse>;
-    try {
-      relay = await client.fetch<RpcRelayResponse<SolanaRpcSignatureStatusesResponse>>(
-        "/v1/rpc/proxy",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: `wallet-faucet-status-${signature}`,
-            method: "getSignatureStatuses",
-            params: [[signature]],
-          }),
-          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
-        }
-      );
-    } catch (error) {
-      // The deadline abort ends the wait; any other failure may be transient, so keep checking.
-      if (error instanceof DOMException && error.name === "TimeoutError") {
-        return "timeout";
-      }
-      console.warn(
-        JSON.stringify({
-          event: "wallet_faucet_confirmation_check_failed",
-          name: error instanceof Error ? error.name : "non-error",
-        })
-      );
-      await new Promise((resolve) => setTimeout(resolve, FAUCET_CONFIRMATION_POLL_MS));
-      continue;
-    }
-    const status = relay.response?.result?.value[0];
-    if (status?.err) {
-      return "failed";
-    }
-    if (
-      status?.confirmationStatus &&
-      commitmentComparator(status.confirmationStatus, "confirmed") >= 0
-    ) {
-      return "confirmed";
-    }
-    await new Promise((resolve) => setTimeout(resolve, FAUCET_CONFIRMATION_POLL_MS));
-  }
-  return "timeout";
-}
-
-interface RpcRelayResponse<TResponse> {
-  provider: {
-    id: string;
-    endpoint: string;
-  };
-  upstream: {
-    ok: boolean;
-    status: number;
-    statusText: string;
-  };
-  response: TResponse | null;
-}
-
 export type WalletSignerCheckActionResult =
   | {
       status: "success";
@@ -451,18 +354,14 @@ export async function checkWalletSignerMemoAction(
   }
 }
 
+/** Airdrops devnet SOL to the wallet. */
 export async function requestDevnetSolanaFaucetAction(
-  walletId: string,
-  walletAddress: string
+  walletId: string
 ): Promise<WalletFaucetActionResult> {
   const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
-  const resolvedWalletAddress = walletAddress.trim();
   if (!resolvedWalletId) {
     return { status: "error", message: t("DashboardCustody.walletIdRequired") };
-  }
-  if (!isAddress(resolvedWalletAddress)) {
-    return { status: "error", message: t("DashboardCustody.validWalletAddressRequired") };
   }
 
   try {
@@ -472,59 +371,13 @@ export async function requestDevnetSolanaFaucetAction(
     }
 
     const client = await createSdpApiClient();
-    const relay = await client.fetch<RpcRelayResponse<SolanaRpcAirdropResponse>>("/v1/rpc/proxy", {
-      method: "POST",
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: `wallet-faucet-${resolvedWalletId}`,
-        method: "requestAirdrop",
-        params: [resolvedWalletAddress, Number(solToLamports(DEVNET_FAUCET_SOL))],
-      }),
-    });
-
-    if (!relay.upstream.ok) {
-      return {
-        status: "error",
-        message: t("DashboardCustody.devnetFaucetHttpError", {
-          provider: relay.provider.id,
-          status: relay.upstream.status,
-        }),
-      };
-    }
-
-    const payload = relay.response;
-    if (!payload) {
-      return { status: "error", message: t("DashboardCustody.devnetFaucetEmptyResponse") };
-    }
-
-    if (payload.error) {
-      const rpcMessage = payload.error.message?.trim();
-      return {
-        status: "error",
-        message:
-          rpcMessage && rpcMessage.length > 0
-            ? t("DashboardCustody.devnetFaucetProviderError", {
-                provider: relay.provider.id,
-                error: rpcMessage,
-              })
-            : t("DashboardCustody.devnetFaucetProviderGenericError", {
-                provider: relay.provider.id,
-              }),
-      };
-    }
-    if (!payload.result) {
-      return { status: "error", message: t("DashboardCustody.devnetFaucetNoSignature") };
-    }
-
-    // requestAirdrop returns once the transaction is submitted. Revalidating now would
-    // re-read the pre-airdrop balance, so wait (bounded) for confirmation first.
-    if ((await waitForSignatureConfirmation(client, payload.result)) === "failed") {
-      return {
-        status: "error",
-        message: t("DashboardCustody.devnetFaucetProviderGenericError", {
-          provider: relay.provider.id,
-        }),
-      };
+    // The API waits (bounded) for the airdrop to confirm, so revalidating next reads the funded balance.
+    const airdrop = await client.fetch<WalletFaucetResponse>(
+      `/internal/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}/faucet`,
+      { method: "POST" }
+    );
+    if (airdrop.status === "failed") {
+      return { status: "error", message: t("DashboardCustody.devnetFaucetTransactionFailed") };
     }
 
     revalidatePath(await requestProjectHref("/dashboard/custody"));
@@ -539,8 +392,8 @@ export async function requestDevnetSolanaFaucetAction(
     return {
       status: "success",
       walletId: resolvedWalletId,
-      signature: payload.result,
-      amountSol: decimalFixedPointToNumber(DEVNET_FAUCET_SOL),
+      signature: airdrop.signature,
+      amountSol: decimalFixedPointToNumber(lamportsToSol(lamports(BigInt(airdrop.lamports)))),
     };
   } catch (error) {
     return {

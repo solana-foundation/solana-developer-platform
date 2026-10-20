@@ -60,6 +60,7 @@ Useful local URLs:
 
 - API: http://localhost:8787
 - API docs: http://localhost:8787/docs
+- Cron worker (logs under `@sdp/api:dev:worker`): http://localhost:8789/health
 - Dashboard: http://localhost:3000
 
 Local runs every module (`SDP_RELEASE_CHANNEL=experimental` in `apps/sdp-api/.env.local`). To see what production runs, set it to `stable` and restart; see [Release Channel](apps/sdp-api/README.md#release-channel-which-modules-run).

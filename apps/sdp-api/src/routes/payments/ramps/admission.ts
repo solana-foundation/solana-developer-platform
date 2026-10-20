@@ -2,15 +2,12 @@ import type { MovementOf } from "@sdp/types/movements";
 import type { PaymentTransferType, RampDirection } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import {
   assertRampProviderInChannel,
   assertTransferRampProviderInChannel,
 } from "@/middleware/require-module";
 import type { AppContext } from "@/routes/payments/context";
-import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
-import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import {
   assertProviderAvailable,
   loadProjectProviderVerdict,
@@ -25,8 +22,9 @@ export type RampAdmission =
       provider: RampProviderId;
       direction: RampDirection;
       /**
-       * The custody wallet the request names for the quote's crypto leg, for
-       * the refusal event. The quote resolves and scope-checks it afterwards.
+       * The custody wallet the request names for the quote's crypto leg. The
+       * money admission checks the principal may use it (HOO-2099): a quote
+       * signs nothing, so no custody signer decides it later.
        */
       custodyWalletId: string;
     }
@@ -50,14 +48,14 @@ const RAMP_QUOTE_MOVEMENT = {
  * any provider call; `read` first refuses an out-of-channel provider before
  * any database read, as reads always have. `quote` then admits the money
  * start (HOO-1955): a provider quote or session never reaches the custody
- * signer, so it is admitted here instead. `cancel` keeps a stored transfer's
- * provider in the release channel and its wallet inside the key's wallet
- * scope, for every provider.
+ * signer, so it is admitted here instead, with the same decision the custody
+ * signer makes: the principal holds the quote's action and may use the named
+ * wallet. `cancel` keeps a stored transfer's provider in the release channel,
+ * for every provider; cancelling is an exit.
  */
 export async function admitRamp(c: AppContext, admission: RampAdmission): Promise<void> {
   if (admission.need === "cancel") {
     assertTransferRampProviderInChannel(c, admission.transfer);
-    assertRampTransferWalletAccess(c, admission.transfer.custody_wallet_id);
     return;
   }
   if (admission.need === "read") {
@@ -72,7 +70,8 @@ export async function admitRamp(c: AppContext, admission: RampAdmission): Promis
         surface: "http",
         movement: RAMP_QUOTE_MOVEMENT[admission.direction],
         subjectId: admission.custodyWalletId,
-      }
+      },
+      { custodyWalletId: admission.custodyWalletId }
     );
   }
 }
@@ -103,15 +102,4 @@ export async function loadRampListingAdmission(
     }
   }
   return (provider) => listable(decide(provider));
-}
-
-function assertRampTransferWalletAccess(c: AppContext, custodyWalletId: string | null): void {
-  if (custodyWalletId !== null) {
-    assertPaymentWalletExactAccess(c, custodyWalletId, ["payments:write"]);
-    return;
-  }
-  // A transfer bound to no wallet is outside every wallet-scoped key's scope.
-  if (getAllowedApiKeyCustodyWalletIdsForPermissions(getAuth(c), ["payments:write"]) !== null) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-  }
 }
