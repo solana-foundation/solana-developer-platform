@@ -1423,10 +1423,6 @@ export interface RampProviderEstimateRefusal {
 export const RAMP_AMOUNT_LIMIT_REASONS = ["amount_below_minimum", "amount_above_maximum"] as const;
 export type RampAmountLimitReason = (typeof RAMP_AMOUNT_LIMIT_REASONS)[number];
 
-export function isRampAmountLimitReason(value: unknown): value is RampAmountLimitReason {
-  return RAMP_AMOUNT_LIMIT_REASONS.some((reason) => reason === value);
-}
-
 /** The bound an amount crossed, in the currency the amount was given in. */
 export interface RampAmountLimit {
   amount: string;

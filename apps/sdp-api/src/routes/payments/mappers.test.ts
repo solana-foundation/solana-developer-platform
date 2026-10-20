@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { mapTransferRow } from "./mappers";
 
 const SALE_REFERENCE = "826ca171-dd61-46e8-bfa1-8a22c7372f64";
 
+const wireObjectSchema = z.record(z.string(), z.unknown());
+
 /** The transfer as the API sends it: JSON drops the fields a row doesn't have. */
-function onTheWire(row: PaymentTransferRow): unknown {
-  return JSON.parse(JSON.stringify(mapTransferRow(row)));
+function onTheWire(row: PaymentTransferRow): Record<string, unknown> {
+  return wireObjectSchema.parse(JSON.parse(JSON.stringify(mapTransferRow(row))));
 }
 
 function offrampRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransferRow {

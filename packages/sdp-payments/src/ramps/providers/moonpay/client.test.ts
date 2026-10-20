@@ -178,7 +178,7 @@ describe("MoonpayRampClient currency codes", () => {
 });
 
 describe("MoonpayRampClient on-ramp total", () => {
-  function answerBuyQuote(body: unknown): void {
+  function answerBuyQuote(body: typeof QUOTE_RESPONSE & { totalAmount?: number }): void {
     globalThis.fetch = async () => Response.json(body);
   }
 
@@ -247,7 +247,7 @@ describe("MoonpayRampClient off-ramp limits", () => {
     baseCurrency: { code: "usdc_sol", minSellAmount: 19.92405, maxSellAmount: 10000 },
   };
 
-  function answer(status: number, body: unknown): void {
+  function answer(status: number, body: Record<string, unknown>): void {
     globalThis.fetch = async () =>
       new Response(JSON.stringify(body), {
         status,
@@ -266,13 +266,13 @@ describe("MoonpayRampClient off-ramp limits", () => {
   it("names MoonPay's minimum when it refuses a sale under it", async () => {
     answer(400, UNDER_MINIMUM);
 
-    await assert.rejects(estimateUsdc("5"), (error: unknown) => {
-      assert.deepEqual(rampAmountLimitOf(error), {
+    await assert.rejects(estimateUsdc("5"), (cause: unknown) => {
+      assert.deepEqual(rampAmountLimitOf(cause), {
         reason: "amount_below_minimum",
         limit: { amount: "19.92405", currency: "USDC" },
       });
-      assert.ok(error instanceof SdpPaymentsError);
-      assert.doesNotMatch(error.message, /USDC_SOL/);
+      assert.ok(cause instanceof SdpPaymentsError);
+      assert.doesNotMatch(cause.message, /USDC_SOL/);
       return true;
     });
   });
@@ -280,8 +280,8 @@ describe("MoonpayRampClient off-ramp limits", () => {
   it("refuses a sale over the maximum MoonPay would still quote", async () => {
     answer(200, { ...SELL_QUOTE, baseCurrencyAmount: 10001 });
 
-    await assert.rejects(estimateUsdc("10001"), (error: unknown) => {
-      assert.deepEqual(rampAmountLimitOf(error), {
+    await assert.rejects(estimateUsdc("10001"), (cause: unknown) => {
+      assert.deepEqual(rampAmountLimitOf(cause), {
         reason: "amount_above_maximum",
         limit: { amount: "10000", currency: "USDC" },
       });
@@ -301,10 +301,10 @@ describe("MoonpayRampClient off-ramp limits", () => {
   it("keeps any other refusal a plain provider error", async () => {
     answer(400, { message: "Invalid currency", type: "BadRequestError" });
 
-    await assert.rejects(estimateUsdc("25"), (error: unknown) => {
-      assert.equal(rampAmountLimitOf(error), null);
-      assert.ok(error instanceof SdpPaymentsError);
-      assert.equal(error.code, "BAD_REQUEST");
+    await assert.rejects(estimateUsdc("25"), (cause: unknown) => {
+      assert.equal(rampAmountLimitOf(cause), null);
+      assert.ok(cause instanceof SdpPaymentsError);
+      assert.equal(cause.code, "BAD_REQUEST");
       return true;
     });
   });
@@ -360,9 +360,9 @@ describe("MoonpayRampClient sale cancel", () => {
 
     await assert.rejects(
       RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(runtimeContext, TRANSFER_ID),
-      (error: unknown) => {
-        assert.ok(error instanceof SdpPaymentsError);
-        assert.equal(error.code, "PROVIDER_NOT_CONFIGURED");
+      (cause: unknown) => {
+        assert.ok(cause instanceof SdpPaymentsError);
+        assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
         return true;
       }
     );

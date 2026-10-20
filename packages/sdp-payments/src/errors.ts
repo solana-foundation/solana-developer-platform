@@ -1,11 +1,12 @@
 import {
-  isRampAmountLimitReason,
+  RAMP_AMOUNT_LIMIT_REASONS,
   type RampAmountLimit,
   type RampAmountLimitReason,
   type RampDirection,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
 
 export type SdpPaymentsErrorCode =
   | "BAD_REQUEST"
@@ -125,25 +126,19 @@ export function rampAmountOutOfRange(
   );
 }
 
+/** The details a `rampAmountOutOfRange` error carries. */
+const rampAmountLimitDetailsSchema = z.object({
+  reason: z.enum(RAMP_AMOUNT_LIMIT_REASONS),
+  limit: z.object({ amount: z.string(), currency: z.string() }),
+});
+
 /** The bound a `rampAmountOutOfRange` error carries, or null for any other error. */
 export function rampAmountLimitOf(
-  error: unknown
+  cause: unknown
 ): { reason: RampAmountLimitReason; limit: RampAmountLimit } | null {
-  if (!(error instanceof SdpPaymentsError) || error.code !== "BAD_REQUEST") return null;
-  const reason = error.details?.reason;
-  const limit = error.details?.limit;
-  if (
-    !isRampAmountLimitReason(reason) ||
-    typeof limit !== "object" ||
-    limit === null ||
-    !("amount" in limit) ||
-    !("currency" in limit) ||
-    typeof limit.amount !== "string" ||
-    typeof limit.currency !== "string"
-  ) {
-    return null;
-  }
-  return { reason, limit: { amount: limit.amount, currency: limit.currency } };
+  if (!(cause instanceof SdpPaymentsError) || cause.code !== "BAD_REQUEST") return null;
+  const details = rampAmountLimitDetailsSchema.safeParse(cause.details);
+  return details.success ? details.data : null;
 }
 
 export function estimateNotAvailable(

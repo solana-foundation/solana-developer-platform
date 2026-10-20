@@ -10,6 +10,7 @@ import {
   type RampWebhookProcessResult,
 } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { z } from "zod";
 import { asTransactionalClient, type DatabaseClient, getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
@@ -153,10 +154,12 @@ function buildRampSettlementUpdate(
   return update;
 }
 
-/** The provider customer references a counterparty link has displaced. */
-function displacedReferences(metadata: Record<string, unknown>): readonly unknown[] {
-  const references = metadata.mismatchedReferences;
-  return Array.isArray(references) ? references : [];
+const displacedReferencesSchema = z.array(z.string());
+
+/** The provider customer references a counterparty link has displaced; none when it lists none. */
+function displacedReferences(metadata: Record<string, unknown>): readonly string[] {
+  const references = displacedReferencesSchema.safeParse(metadata.mismatchedReferences);
+  return references.success ? references.data : [];
 }
 
 /** Whether the rail a provider reports delivering is the transfer's own asset. */
