@@ -391,12 +391,25 @@ function routeSegments(template: string): (string | null)[] {
  * has a parameter. Taken from every route the app mounts (`route-actions.generated.json`),
  * published or not, since an unpublished one is exactly what must not run.
  */
+/** A `route-actions.generated.json` key, `METHOD /path`; any other shape fails the build. */
+function parseRouteOperation(operation: string): { method: string; path: string } {
+  const match = /^([A-Z]+) (\/\S*)$/.exec(operation);
+  if (match === null) {
+    throw new Error(`route-actions.generated.json has a malformed operation: ${operation}`);
+  }
+  const [, method, path] = match;
+  if (method === undefined || path === undefined) {
+    throw new Error(`route-actions.generated.json has a malformed operation: ${operation}`);
+  }
+  return { method, path };
+}
+
 function shadowingRoutes(method: PlaygroundMethod, template: string): string[] {
   const own = routeSegments(template);
   return Object.keys(routeActionsJson)
-    .map((operation) => operation.split(" "))
-    .filter(([routeMethod]) => routeMethod === method)
-    .map(([, routePath]) => routePath ?? "")
+    .map(parseRouteOperation)
+    .filter((route) => route.method === method)
+    .map((route) => route.path)
     .filter((routePath) => {
       const theirs = routeSegments(routePath);
       if (theirs.length !== own.length) return false;
