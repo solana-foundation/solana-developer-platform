@@ -1,10 +1,11 @@
 import { MOVEMENTS, type MovementId } from "@sdp/types/movements";
 import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import type { ProjectEnvironment } from "@sdp/types/projects";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
+  assertCallerWalletInScope,
   assertMoneyStartAdmitted,
   decideMoneyStart,
   decideMovement,
@@ -16,6 +17,7 @@ import {
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
 import { type MoneyPrincipal, runAsMoneyPrincipal } from "@/lib/money-principal";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -598,5 +600,50 @@ describe("money admission reads the principal in the same statement", () => {
       )
     );
     expect(read?.principal).toEqual({ kind: "api_key", key: null });
+  });
+});
+
+describe("assertCallerWalletInScope", () => {
+  const caller = {
+    organizationId: "org_early",
+    projectId: "prj_early",
+    walletAccess: { scope: "selected", custodyWalletIds: ["cwlt_listed"] },
+  } as const;
+
+  it("admits a listed wallet and logs nothing", () => {
+    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+    expect(() => assertCallerWalletInScope(caller, "cwlt_listed")).not.toThrow();
+    expect(events).not.toHaveBeenCalled();
+    events.mockRestore();
+  });
+
+  // Zach (#2434): early refusals skipped the waist's event.
+  it("logs the waist's refusal event when it refuses early", () => {
+    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+    const refusal = (() => {
+      try {
+        runAsMoneyPrincipal({ kind: "api_key", apiKeyId: "key_early" }, () =>
+          assertCallerWalletInScope(caller, "cwlt_other")
+        );
+      } catch (error) {
+        return error;
+      }
+      return null;
+    })();
+
+    expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+    expect(events).toHaveBeenCalledWith("warn", {
+      event: "sdp_money_refused",
+      surface: "early",
+      movement: null,
+      module: null,
+      subject_id: "cwlt_other",
+      organization_id: "org_early",
+      project_id: "prj_early",
+      principal_kind: "api_key",
+      principal: "api_key:key_early",
+      reason: "wallet_out_of_scope",
+    });
+    events.mockRestore();
   });
 });

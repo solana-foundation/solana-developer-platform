@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { API_KEY_FORBIDDEN_ACTIONS, actionVerbOf, isAction } from "@sdp/types/actions";
+import { actionVerbOf, isAction, isApiKeyGrantableAction } from "@sdp/types/actions";
 import { MOVEMENTS } from "@sdp/types/movements";
 import { SDP_RAMP_PROVIDER_STAGES, type SdpModule } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
@@ -188,9 +188,8 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel": {
     refusedEarly: {
       file: EARN_EXITS,
-      test: "refuses a withdrawal request with wallet_out_of_scope before recording it",
+      test: "refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged",
     },
-    via: "resolveCustodyQueueTarget(c, positionId, 'write'), which request and cancel share",
   },
   "POST /v1/earn/programs/:programId/withdrawals": {
     refusedEarly: {
@@ -333,7 +332,7 @@ function valueMovingRoutes(): string[] {
       const [declaration] = route.declarations;
       if (declaration?.kind !== "action" || !isAction(declaration.action)) return [];
       const action = declaration.action;
-      if (actionVerbOf(action) === "read" || API_KEY_FORBIDDEN_ACTIONS.includes(action)) return [];
+      if (actionVerbOf(action) === "read" || !isApiKeyGrantableAction(action)) return [];
       return [`${route.method} ${route.path}`];
     })
     .sort();

@@ -1,7 +1,7 @@
 import type { PrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
 import type { PrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
 import type { PrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";
-import { AppError, conflict } from "@/lib/errors";
+import { conflict, missingAction } from "@/lib/errors";
 import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelTransferFingerprint,
@@ -18,9 +18,7 @@ import type { AppContext } from "./context";
  */
 export async function requireMovementWrite(c: AppContext): Promise<void> {
   if (!callerMayPerform(c, "private_channels.execute")) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
-      action: "private_channels.execute",
-    });
+    throw missingAction("private_channels.execute");
   }
 }
 

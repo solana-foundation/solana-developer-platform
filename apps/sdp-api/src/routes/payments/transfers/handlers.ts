@@ -56,6 +56,7 @@ import {
   type ErrorCode,
   internalError,
   isErrorCode,
+  missingAction,
   notFound,
   solanaRpcError,
   transactionFailed,
@@ -330,7 +331,7 @@ export async function authorizeTransfer(
   // Refusing here as well, before the key is claimed, keeps a refused start
   // from writing a failed transfer row and an Idempotency-Key that would
   // replay that failure after the scope is fixed.
-  assertCallerWalletInScope(scope.auth.walletAccess, operation.sourceWallet.id);
+  assertCallerWalletInScope(scope.auth, operation.sourceWallet.id);
   // A ramp deposit the request funds is named by id: it must be in the
   // project before the key is claimed, so a wrong id is never stored as a 404.
   let rampTransfer: TransferRow | null = null;
@@ -995,7 +996,7 @@ function readableTransferTypes(
   );
   if (unreadable) {
     const action = TRANSFER_TYPE_READ_ACTIONS[unreadable];
-    throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+    throw missingAction(action);
   }
   return candidates.filter((type) => callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type]));
 }

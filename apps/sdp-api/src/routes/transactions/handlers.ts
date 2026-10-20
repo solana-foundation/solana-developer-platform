@@ -10,7 +10,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { missingAction } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { callerMayPerform } from "@/middleware/require-action";
 import {
@@ -41,7 +41,7 @@ export async function listUnifiedTransactions(
   );
   if (query.module !== undefined && !grantedModules.includes(query.module)) {
     const action = UNIFIED_TRANSACTION_MODULE_ACTIONS[query.module];
-    throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+    throw missingAction(action);
   }
   // Each kind of Payments row also needs the read of the module it comes
   // from, and that module in the release channel.
@@ -90,5 +90,5 @@ function assertPaymentKindPermitted(
   const requested = paymentTransactionKindSchema.parse(kind);
   if (paymentKinds.includes(requested)) return;
   const action = PAYMENT_TRANSACTION_KIND_ACTIONS[requested];
-  throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+  throw missingAction(action);
 }

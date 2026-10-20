@@ -7,6 +7,7 @@ import { errorResponseSchema } from "@/openapi/schemas/base";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
+  seedCachedKey,
   seedCounterparty,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
@@ -176,10 +177,7 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
       const counterpartyId = await seedCounterparty({
         externalId: `admission_${direction}_out_of_scope`,
       });
-      await getDb(env)
-        .prepare("UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?")
-        .bind(TEST_API_KEY.id)
-        .run();
+      await seedCachedKey({ walletScope: "selected", walletIds: [] });
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
         throw new Error("A refused quote reached the provider");
       });
