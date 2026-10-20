@@ -14,7 +14,11 @@ import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { CHECK_VIOLATION } from "@/test/helpers/migration-db";
-import { seedRecurringDatabaseTenant, testSignature } from "@/test/helpers/recurring-payments";
+import {
+  seedRecurringCollectionJournal,
+  seedRecurringDatabaseTenant,
+  testSignature,
+} from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
@@ -1420,5 +1424,79 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
         delegation_amount_pulled_before: "18446744073709551615",
       });
     });
+  });
+
+  it("reads the highest slot among a subscription's confirmed pulls, and null for a subscription or project with none", async () => {
+    const db = getDb(env);
+    const pulls = [
+      { stage: "submitted", dueAt: "2026-06-26T12:00:00.000Z", slot: 50_000 },
+      { stage: "confirmed", dueAt: "2026-06-27T12:00:00.000Z", slot: null },
+      { stage: "confirmed", dueAt: "2026-06-28T12:00:00.000Z", slot: 12_000 },
+      { stage: "confirmed", dueAt: "2026-06-29T12:00:00.000Z", slot: 9_000 },
+    ] as const;
+    for (const [index, pull] of pulls.entries()) {
+      const transferId = `xfr_recurring_repo_slot_${index}`;
+      await seedRecurringCollectionJournal({
+        stage: pull.stage,
+        attemptId: `psca_recurring_repo_slot_${index}`,
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID_BY_ENVIRONMENT.sandbox,
+        recurringPaymentId: recurringPaymentId("sandbox"),
+        subscriptionId: subscriptionId("sandbox"),
+        collectionDueAt: pull.dueAt,
+        token: usdcMint("sandbox"),
+        amount: "10.00",
+        attemptedAt: pull.dueAt,
+        transfer: {
+          id: transferId,
+          walletId: SOURCE_WALLET_BY_ENVIRONMENT.sandbox.walletId,
+          counterpartyId: "cpty_recurring_repo_job_sandbox",
+          sourceAddress: TEST_SOURCE_ADDRESS,
+          destinationAddress: "Destination111111111111111111111111111111",
+          signature: testSignature(20 + index),
+          lastValidBlockHeight: "1000",
+          submissionStartedAt: pull.dueAt,
+        },
+        preImage: null,
+      });
+      await db
+        .prepare("UPDATE payment_transfers SET slot = ? WHERE id = ?")
+        .bind(pull.slot, transferId)
+        .run();
+    }
+    await db
+      .prepare("UPDATE payment_subscription_collection_attempts SET status = 'failed' WHERE id = ?")
+      .bind("psca_recurring_repo_slot_0")
+      .run();
+    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(db);
+
+    expect(
+      await subscriptionsRepo.getLastConfirmedCollectionSlot({
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID_BY_ENVIRONMENT.sandbox,
+        subscriptionId: subscriptionId("sandbox"),
+      })
+    ).toBe(12_000n);
+    expect(
+      await subscriptionsRepo.getLastConfirmedCollectionSlot({
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID_BY_ENVIRONMENT.production,
+        subscriptionId: subscriptionId("production"),
+      })
+    ).toBeNull();
+    expect(
+      await subscriptionsRepo.getLastConfirmedCollectionSlot({
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID_BY_ENVIRONMENT.sandbox,
+        subscriptionId: subscriptionId("production"),
+      })
+    ).toBeNull();
+    expect(
+      await subscriptionsRepo.getLastConfirmedCollectionSlot({
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID_BY_ENVIRONMENT.production,
+        subscriptionId: subscriptionId("sandbox"),
+      })
+    ).toBeNull();
   });
 });
