@@ -1,4 +1,5 @@
 import type { PaymentTransferSummary } from "@sdp/types/payments";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
 import { type TranslationValues, translate } from "@/i18n/translate";
@@ -96,7 +97,7 @@ describe("rampPhaseCopy", () => {
       transfer({
         status: "settling",
         signature: "sig",
-        token: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        token: wellKnownMint("USDC", "devnet") ?? "",
         deliveryMismatch: {
           reason: "amount_mismatch",
           checkedAt: "2026-10-20T01:14:00.000Z",

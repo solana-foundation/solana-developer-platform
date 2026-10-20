@@ -1,3 +1,4 @@
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type { MoonpayRampSettlement, PaymentTransferSummary } from "@sdp/types/payments";
 import type { PersistedRampProviderId } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
@@ -173,8 +174,12 @@ function quotedPayoutRows(
   if (transfer.type !== "offramp" || !payout || !transfer.fiatAmount || !transfer.fiatCurrency) {
     return [];
   }
-  const sameCurrency = payout.currency.toUpperCase() === transfer.fiatCurrency.toUpperCase();
-  if (sameCurrency && Number(payout.amount) === Number(transfer.fiatAmount)) return [];
+  const samePayout =
+    payout.currency.toUpperCase() === transfer.fiatCurrency.toUpperCase() &&
+    isDecimalString(payout.amount) &&
+    isDecimalString(transfer.fiatAmount) &&
+    compareDecimalAmounts(payout.amount, transfer.fiatAmount) === 0;
+  if (samePayout) return [];
   return [
     {
       key: "DashboardPayments.transferDetails.quotedPayout",

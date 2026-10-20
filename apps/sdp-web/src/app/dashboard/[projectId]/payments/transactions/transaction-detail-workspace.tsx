@@ -16,6 +16,7 @@ import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/paym
 import {
   formatDateTime,
   formatDecimalAmount,
+  saleFiatLabel,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import {
   RecordAmount,
@@ -136,16 +137,6 @@ function transactionAmountLabel(
       ? null
       : `${formatDecimalAmount(transaction.amount, locale)}${token ? ` ${token}` : ""}`;
   return { amount, token };
-}
-
-/** The fiat a sale pays its contact: the provider's reported payout, else the quote. */
-function saleFiatLabel(transfer: PaymentTransferDetail, locale: string): string | null {
-  if (transfer.fiatPayout) {
-    return `${formatDecimalAmount(transfer.fiatPayout.amount, locale)} ${transfer.fiatPayout.currency.toUpperCase()}`;
-  }
-  return transfer.fiatAmount && transfer.fiatCurrency
-    ? `${formatDecimalAmount(transfer.fiatAmount, locale)} ${transfer.fiatCurrency.toUpperCase()}`
-    : null;
 }
 
 /**

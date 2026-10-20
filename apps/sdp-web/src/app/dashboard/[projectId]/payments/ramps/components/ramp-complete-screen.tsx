@@ -11,10 +11,11 @@ import {
   resolveTransferTokenLabel,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { saleFiatLabel } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
 import { EntityLink } from "@/components/entity-link";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
@@ -221,16 +222,13 @@ export function RampCompleteScreen({
   transfer: PaymentTransferSummary;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const cluster = useSolanaCluster();
   const onramp = direction === "onramp";
   const tokenLabel = resolveTransferTokenLabel(transfer.token);
   const cryptoAmount = transfer.amount && tokenLabel ? `${transfer.amount} ${tokenLabel}` : null;
   // A completed sale leads with what the provider paid out; the quote stays among the rows.
-  const fiatAmount = transfer.fiatPayout
-    ? formatDisplayAmount(transfer.fiatPayout.amount, transfer.fiatPayout.currency.toUpperCase())
-    : transfer.fiatAmount && transfer.fiatCurrency
-      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
-      : null;
+  const fiatAmount = saleFiatLabel(transfer, locale);
 
   const primaryAmount = onramp ? cryptoAmount : fiatAmount;
   const secondaryAmount = onramp ? fiatAmount : cryptoAmount;

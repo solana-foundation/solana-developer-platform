@@ -95,6 +95,20 @@ export function formatDecimalAmount(value: string, locale?: string): string {
 }
 
 /**
+ * What a sale paid out, for display: the provider's reported payout once it
+ * pays, else the quote, and null while neither is known.
+ */
+export function saleFiatLabel(transfer: PaymentTransferSummary, locale?: string): string | null {
+  if (transfer.fiatPayout) {
+    return `${formatDecimalAmount(transfer.fiatPayout.amount, locale)} ${transfer.fiatPayout.currency.toUpperCase()}`;
+  }
+  if (transfer.fiatAmount && transfer.fiatCurrency) {
+    return `${formatDecimalAmount(transfer.fiatAmount, locale)} ${transfer.fiatCurrency.toUpperCase()}`;
+  }
+  return null;
+}
+
+/**
  * An amount with the sign of its direction and its asset: "+18.40 SOL", "−2,400.00 USDC".
  * Uses the typographic minus so signed columns align.
  *
