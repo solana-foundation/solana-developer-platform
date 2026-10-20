@@ -4,6 +4,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isCollectableRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
+  type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentAttemptStatus,
   type PaymentRecurringPaymentLifecycleAttemptStage,
   type PaymentRecurringPaymentLifecycleOperation,
@@ -4622,103 +4623,6 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
   });
 
-  it("saves an ambiguous plan send's signature and expiry only on its attempt, and writes it to the schedule once a resume finds the plan landed", async () => {
-    getRecentBlockhashMock.mockResolvedValue({
-      blockhash: blockhash("EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"),
-      lastValidBlockHeight: 4242n,
-    });
-    const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
-    // The run dies before it journals the failure, so the attempt stays in flight for the cron.
-    const createRepository =
-      paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
-    const repositorySpy = vi
-      .spyOn(
-        paymentRecurringPaymentsRepositoryPostgres,
-        "createPostgresPaymentRecurringPaymentsRepository"
-      )
-      .mockImplementation((db) => {
-        const repository = createRepository(db);
-        return {
-          ...repository,
-          updateActivationAttempt: async (input) => {
-            if (input.status === "failed") {
-              throw new Error("activation journal unavailable");
-            }
-            return repository.updateActivationAttempt(input);
-          },
-        };
-      });
-
-    const ambiguous = await app.request(
-      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
-      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-      env
-    );
-    repositorySpy.mockRestore();
-
-    expect(ambiguous.status).toBe(500);
-    const [planSignature] = poolSentSignatures();
-    expect(
-      await getDb(env)
-        .prepare(
-          `SELECT plan_creation_signature, authorization_signature
-             FROM payment_recurring_payments
-            WHERE id = ?`
-        )
-        .bind(recurringPayment.id)
-        .first<{ plan_creation_signature: string | null; authorization_signature: string | null }>()
-    ).toEqual({ plan_creation_signature: null, authorization_signature: null });
-    const afterAmbiguous = await app.request(
-      `/v1/payments/recurring-payments/${recurringPayment.id}`,
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    expect((await parseRecurringResponse(afterAmbiguous)).data.recurringPayment).toMatchObject({
-      status: "activating",
-      planCreationSignature: null,
-      authorizationSignature: null,
-    });
-    expect(
-      await getDb(env)
-        .prepare(
-          `SELECT status, plan_creation_signature,
-                  last_valid_block_height::text AS last_valid_block_height
-             FROM payment_recurring_payment_activation_attempts
-            WHERE recurring_payment_id = ?`
-        )
-        .bind(recurringPayment.id)
-        .first<{
-          status: PaymentRecurringPaymentAttemptStatus;
-          plan_creation_signature: string | null;
-          last_valid_block_height: string | null;
-        }>()
-    ).toEqual({
-      status: "processing",
-      plan_creation_signature: planSignature,
-      last_valid_block_height: "4242",
-    });
-    await getDb(env)
-      .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
-      .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), recurringPayment.id)
-      .run();
-
-    expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
-      recovered: 1,
-      refused: 0,
-    });
-
-    expect(
-      await getDb(env)
-        .prepare(
-          "SELECT status, plan_creation_signature FROM payment_recurring_payments WHERE id = ?"
-        )
-        .bind(recurringPayment.id)
-        .first<{ status: string; plan_creation_signature: string | null }>()
-    ).toEqual({ status: "active", plan_creation_signature: planSignature });
-    expect(sendTransactionMock).toHaveBeenCalledTimes(2);
-  });
-
   // A key's wallet scope applies when SDP signs (HOO-2099): writes that sign
   // nothing succeed on any project wallet, and every start is refused before
   // its attempt is claimed.
@@ -7751,6 +7655,105 @@ describe("Payments routes — recurring", () => {
           error: null,
         });
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+      });
+
+      const activate = (recurringPaymentId: string, key: string) =>
+        app.request(
+          actionPath(recurringPaymentId, "activate"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+
+      /** The schedule's only activation attempt, with its step slots and saved expiry. */
+      async function onlyActivationAttempt(recurringPaymentId: string) {
+        const { results } = await getDb(env)
+          .prepare(
+            `SELECT status, stage, plan_creation_signature, authorization_setup_signature,
+                    authorization_signature,
+                    last_valid_block_height::text AS last_valid_block_height
+               FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?`
+          )
+          .bind(recurringPaymentId)
+          .all<{
+            status: PaymentRecurringPaymentAttemptStatus;
+            stage: PaymentRecurringPaymentActivationAttemptStage;
+            plan_creation_signature: string | null;
+            authorization_setup_signature: string | null;
+            authorization_signature: string | null;
+            last_valid_block_height: string | null;
+          }>();
+        expect(results).toHaveLength(1);
+        return required(results[0]);
+      }
+
+      /** The step signatures the schedule records once each step landed. */
+      const scheduleSignatures = (recurringPaymentId: string) =>
+        getDb(env)
+          .prepare(
+            `SELECT status, plan_creation_signature, authorization_signature
+               FROM payment_recurring_payments WHERE id = ?`
+          )
+          .bind(recurringPaymentId)
+          .first<{
+            status: PaymentRecurringPaymentStatus;
+            plan_creation_signature: string | null;
+            authorization_signature: string | null;
+          }>();
+
+      /**
+       * Activates a new schedule under `key` whose subscribe send gets no answer while the chain
+       * shows no delegation below the send's expiry (1000), then leaves the run crashed long
+       * enough ago to recover: the schedule `activating` with its plan landed, and the attempt
+       * in flight with the subscribe's signature saved. The chain view stays as the run saw it.
+       */
+      async function leaveSubscribeInFlight(key: string) {
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
+        const ambiguous = await activate(created.id, key);
+        expect(ambiguous.status).toBe(409);
+        expect(await errorCode(ambiguous)).toBe("CONFLICT");
+        const [planSignature, subscribeSignature] = poolSentSignatures();
+        await getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+          .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), created.id)
+          .run();
+        await crashIdempotencyKey(key);
+        return {
+          created,
+          planSignature: required(planSignature),
+          subscribeSignature: required(subscribeSignature),
+        };
+      }
+
+      it("keeps an activation whose subscribe send got no answer in flight while it can still land, and the cron finishes it once the delegation shows", async () => {
+        const { created, planSignature, subscribeSignature } = await leaveSubscribeInFlight(
+          crypto.randomUUID()
+        );
+        expect(await scheduleSignatures(created.id)).toEqual({
+          status: "activating",
+          plan_creation_signature: planSignature,
+          authorization_signature: null,
+        });
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: subscribeSignature,
+          last_valid_block_height: "1000",
+        });
+        recurringExecution.showChain(DEFAULT_RECURRING_CHAIN);
+
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
+          recovered: 1,
+          refused: 0,
+        });
+
+        expect(await scheduleSignatures(created.id)).toEqual({
+          status: "active",
+          plan_creation_signature: planSignature,
+          authorization_signature: subscribeSignature,
+        });
+        expect(sendTransactionMock).toHaveBeenCalledTimes(2);
       });
 
       it("finishes a stale activation whose subscription landed without sending it again", async () => {
