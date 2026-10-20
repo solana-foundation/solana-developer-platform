@@ -47,7 +47,7 @@ export function ProviderCardEstimate({
 
     return (
       <div className="shrink-0 text-right leading-none">
-        <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.1em] text-tertiary">
+        <p className="mb-1 text-xs font-medium uppercase tracking-widest text-tertiary">
           {t("DashboardPayments.ramps.estimatedReceived")}
         </p>
         <div className="flex items-center justify-end gap-2 whitespace-nowrap">

@@ -139,7 +139,7 @@ describe("home and payments route loading states", () => {
       },
     ];
 
-    for (const { layout, markup, columns, minWidth = "min-w-[760px]" } of listCases) {
+    for (const { layout, markup, columns, minWidth = "min-w-[47.5rem]" } of listCases) {
       expect(markup).toContain(`data-loading-layout="${layout}"`);
       expect(markup).toContain(`data-loading-table-variant="${layout}"`);
       expect(markup.match(/data-loading-list-toolbar=/g)).toHaveLength(1);
@@ -226,7 +226,7 @@ describe("home and payments route loading states", () => {
     // The Schedules list scrolls sideways inside its column, like the other refresh lists.
     expect(markup).toContain('data-loading-layout="recurring-payments"');
     expect(markup).toContain("overflow-x-auto");
-    expect(markup).toContain("min-w-[760px]");
+    expect(markup).toContain("min-w-[47.5rem]");
   });
 
   it("uses theme-aware surfaces for every authenticated loading state", () => {
