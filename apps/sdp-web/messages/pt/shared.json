@@ -98,6 +98,7 @@
     "selectValue": "Selecionar valor",
     "noRequestBody": "Este endpoint não requer um corpo de requisição JSON.",
     "status": "Status:",
+    "apiKeyRequired": "Crie uma chave de API primeiro para ativar requisições reais no API Playground.",
     "runRequest": "Executar requisição",
     "reset": "Redefinir",
     "retry": "Tentar novamente",
@@ -129,6 +130,7 @@
     "ready": "Pronto",
     "completeRequiredFields": "Preencha os campos obrigatórios: {fields}",
     "invalidJsonField": "{field} deve conter um JSON válido.",
+    "invalidApiKeyFormat": "Formato de chave de API inválido. Use um valor de chave bruto como sk_test_... ou sk_live_... com um sufixo válido.",
     "playgroundExecutionFailed": "Falha na execução do Playground.",
     "requestExecutionFailed": "Falha na execução da requisição.",
     "sdpMintedToken": "Mint pela SDP",
@@ -144,9 +146,14 @@
     "unknownToken": "Desconhecido",
     "selectExistingOrganizationDescription": "Escolha uma organização existente para continuar.",
     "loadMore": "Carregar mais",
+    "apiKeyValue": "Valor da chave de API",
+    "apiKeyChecking": "Verificando chave",
+    "apiKeyInUse": "Em uso",
+    "apiKeyNotAvailable": "Essa chave não está disponível para este projeto",
+    "apiKeySecretPlaceholder": "Cole a chave completa para esta sessão",
+    "apiKeySecretRequired": "Cole o valor completo da chave de API selecionada antes de executar uma requisição.",
     "rowsCount": "{count} linhas",
-    "openCalendarFor": "Abrir o calendário para {field}",
-    "noPublishedPlaygroundOperations": "Nenhuma destas operações está ainda na referência pública da API, então o playground não tem nada para executar aqui."
+    "openCalendarFor": "Abrir o calendário para {field}"
   },
   "dashboardShell": {
     "workspace": "Espaço de trabalho",

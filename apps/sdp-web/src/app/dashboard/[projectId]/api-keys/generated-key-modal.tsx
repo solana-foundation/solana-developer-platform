@@ -4,7 +4,7 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { GeneratedApiKeyInput } from "./generated-key-input";
 
