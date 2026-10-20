@@ -4,6 +4,7 @@ import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { getBurnCheckedInstruction } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
 
 const env = { SOLANA_RPC_URL: "http://localhost:8899", SOLANA_NETWORK: "devnet" } as const;
 const lifetime = {
@@ -20,6 +21,12 @@ describe("Token2022Service burn", () => {
   let sponsor: Kit.Address;
   let feePayment: FeePaymentPort;
   const send = vi.fn().mockResolvedValue(signature);
+  const sendTransaction = vi.fn<
+    (
+      wireTransaction: Kit.Base64EncodedWireTransaction,
+      config: { skipPreflight: boolean; encoding: "base64" }
+    ) => { send: typeof send }
+  >(() => ({ send }));
 
   beforeEach(async () => {
     authority = await Kit.generateKeyPairSigner();
@@ -29,13 +36,12 @@ describe("Token2022Service burn", () => {
     feePayment = {
       providerId: "test-sponsor",
       getFeePayer: vi.fn().mockResolvedValue(sponsor),
-      signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn().mockResolvedValue(signature),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
     };
     // Keep real Kit compilation/signing and stub only the RPC boundary and
     // Mosaic's network-dependent mint/account lookup.
     vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue({
-      sendTransaction: () => ({ send }),
+      sendTransaction,
     } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
     vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
       signature,
@@ -80,6 +86,7 @@ describe("Token2022Service burn", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     send.mockClear();
+    sendTransaction.mockClear();
   });
 
   it.each(["wallet", "token account"])("burns from the authority's %s", async (source) => {
@@ -110,20 +117,24 @@ describe("Token2022Service burn", () => {
       "Burn source must be"
     );
     expect(MosaicSdk.createBurnTransaction).not.toHaveBeenCalled();
-    expect(feePayment.signAndSend).not.toHaveBeenCalled();
+    expect(feePayment.signAsFeePayer).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("keeps the authority signature when handing a sponsored burn to the relay", async () => {
+  it("sends the sponsor-signed burn, keeping the authority signature it asked the sponsor to add to", async () => {
     const service = new Token2022Service(env, authority, feePayment);
     await expect(
       service.burn({ mint, source: authority.address, amount: 1.25, authority })
     ).resolves.toEqual({ signature, slot: 42n });
-    const [bytes] = vi.mocked(feePayment.signAndSend).mock.calls[0];
+    const [bytes] = vi.mocked(feePayment.signAsFeePayer).mock.calls[0];
     const transaction = Kit.getTransactionDecoder().decode(bytes);
     expect(transaction.signatures[authority.address]).toBeInstanceOf(Uint8Array);
     expect(transaction.signatures[sponsor]).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    const sponsorSigned = Kit.getTransactionDecoder().decode(await fullySignTestTransaction(bytes));
+    expect(sendTransaction).toHaveBeenCalledExactlyOnceWith(
+      Kit.getBase64EncodedWireTransaction(sponsorSigned),
+      { skipPreflight: false, encoding: "base64" }
+    );
     expect(RpcModule.confirmTransaction).toHaveBeenCalledWith(expect.anything(), signature);
   });
 
@@ -143,8 +154,8 @@ describe("Token2022Service burn", () => {
     await expect(
       service.burn({ mint, source: authority.address, amount: 1.25, authority })
     ).rejects.toThrow(new Error('Burn failed: {"InstructionError":[0,{"Custom":"6000"}]}'));
-    expect(feePayment.signAndSend).toHaveBeenCalledTimes(mode === "sponsored" ? 1 : 0);
-    expect(send).toHaveBeenCalledTimes(mode === "direct" ? 1 : 0);
+    expect(feePayment.signAsFeePayer).toHaveBeenCalledTimes(mode === "sponsored" ? 1 : 0);
+    expect(send).toHaveBeenCalledOnce();
   });
 
   it.each([false, true])("prepares unsigned burns with simulation=%s", async (simulate) => {
@@ -162,7 +173,7 @@ describe("Token2022Service burn", () => {
     expect(prepared).toMatchObject(lifetime);
     expect(prepared.simulation).toEqual(simulate ? simulation : undefined);
     expect(RpcModule.simulateTransaction).toHaveBeenCalledTimes(simulate ? 1 : 0);
-    expect(feePayment.signAndSend).not.toHaveBeenCalled();
+    expect(feePayment.signAsFeePayer).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 });

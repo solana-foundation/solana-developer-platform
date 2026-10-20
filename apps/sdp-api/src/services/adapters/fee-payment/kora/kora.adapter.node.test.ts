@@ -1,15 +1,14 @@
 import { createKoraAdapter } from "@sdp/fee-payment";
 import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { KoraClient } from "@solana/kora";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const signTransaction = vi.fn();
-const signAndSendTransaction = vi.fn();
 const getPayerSigner = vi.fn();
 const getConfig = vi.fn();
 const fakeClient = {
   signTransaction,
-  signAndSendTransaction,
   getPayerSigner,
   getConfig,
 } as unknown as KoraClient;
@@ -75,10 +74,6 @@ beforeEach(() => {
       fee_payer_policy: ZERO_OUTFLOW_FEE_PAYER_POLICY,
     },
   });
-  signAndSendTransaction.mockReset().mockResolvedValue({
-    signature: "TEST_SIGNATURE",
-    signed_transaction: "AQIDBA==",
-  });
 });
 
 afterEach(() => {
@@ -86,22 +81,6 @@ afterEach(() => {
 });
 
 describe("KoraAdapter user_id forwarding", () => {
-  it("forwards user_id on signAndSend when configured", async () => {
-    const adapter = new KoraAdapter({
-      rpcUrl: "http://kora",
-      userId: "usr_abc123",
-      client: fakeClient,
-    });
-    await adapter.signAndSend(TX);
-    expect(signAndSendTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        user_id: "usr_abc123",
-        signer_key: "FeePayer111",
-        respond_after: "sent",
-      })
-    );
-  });
-
   it("uses Kora config instead of free-pricing fee estimates", async () => {
     const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toEqual({
@@ -392,15 +371,15 @@ describe("KoraAdapter user_id forwarding", () => {
           result: { signed_transaction: "AQIDBA==" },
         })
       );
-    const adapter = createKoraAdapter(
-      {
-        FEE_PAYMENT_PROVIDER: "kora",
-        KORA_DEVNET_URL: "https://private-kora.example",
-        KORA_DEVNET_API_KEY: "kora-api-key",
-        KORA_DEVNET_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
-      },
-      "sdp:v1:production:org:project:user:actor",
-      "devnet"
+    const adapter = runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      createKoraAdapter(
+        {
+          KORA_DEVNET_URL: "https://private-kora.example",
+          KORA_DEVNET_API_KEY: "kora-api-key",
+          KORA_DEVNET_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
+        },
+        "sdp:v1:production:org:project:user:actor"
+      )
     );
 
     await adapter.signAsFeePayer(TX);
@@ -421,14 +400,14 @@ describe("KoraAdapter user_id forwarding", () => {
 
   it("rejects a Cloud Run identity audience that does not match the Kora origin", () => {
     expect(() =>
-      createKoraAdapter(
-        {
-          FEE_PAYMENT_PROVIDER: "kora",
-          KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
-          KORA_DEVNET_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
-        },
-        "sdp:v1:production:org:project:prj:api_key:key",
-        "devnet"
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        createKoraAdapter(
+          {
+            KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
+            KORA_DEVNET_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
+          },
+          "sdp:v1:production:org:project:prj:api_key:key"
+        )
       )
     ).toThrow(
       "KORA_<CLUSTER>_URL must use HTTPS and match the KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE origin"

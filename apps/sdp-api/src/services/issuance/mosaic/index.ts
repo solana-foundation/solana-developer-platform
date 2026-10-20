@@ -42,7 +42,7 @@ export function createMosaicService(
   fee: MosaicFee
 ): MosaicService {
   const sponsor =
-    fee.mode === "sponsored" && isKoraSponsorshipConfigured(env, fee.scope)
+    fee.mode === "sponsored" && isKoraSponsorshipConfigured(env)
       ? createSponsorshipFeePayment(env, fee.scope, fee.movement)
       : undefined;
   return new MosaicService(env, signer, sponsor, {

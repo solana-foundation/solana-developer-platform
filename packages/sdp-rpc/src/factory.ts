@@ -56,7 +56,7 @@ const ENDPOINT_COOLDOWN_MS = 30_000;
 const clusterRpcs = new Map<string, SolanaRpc>();
 
 /** Each cluster's Kora upstream: the Solana RPC that cluster's Kora simulates against. */
-const KORA_UPSTREAM_RPC_ENV_KEYS = {
+export const KORA_UPSTREAM_RPC_ENV_KEYS = {
   devnet: "KORA_DEVNET_RPC_URL",
   "mainnet-beta": "KORA_MAINNET_RPC_URL",
 } as const satisfies Record<SolanaCluster, string>;
@@ -361,7 +361,7 @@ function managedEndpointUrls(cluster: SolanaCluster): string[] {
  */
 export function createClusterRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
-  return pooledClusterRpc(cluster, managedEndpointUrls(cluster));
+  return pooledClusterRpc(cluster, managedEndpointUrls(cluster), clusterRpcs);
 }
 
 /**
@@ -382,7 +382,8 @@ export function createClusterHistoryRpc(): SolanaRpc {
     cluster,
     heliusUrl
       ? [heliusUrl, ...endpointUrls.filter((endpointUrl) => endpointUrl !== heliusUrl)]
-      : endpointUrls
+      : endpointUrls,
+    clusterRpcs
   );
 }
 
@@ -423,7 +424,7 @@ export function createKoraUpstreamRpc(): SolanaRpc {
 function pooledClusterRpc(
   cluster: SolanaCluster,
   endpointUrls: string[],
-  memoizedRpcs = clusterRpcs
+  memoizedRpcs: Map<string, SolanaRpc>
 ): SolanaRpc {
   const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
   const memoizedRpc = memoizedRpcs.get(poolKey);

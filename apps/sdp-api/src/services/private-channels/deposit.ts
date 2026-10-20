@@ -14,7 +14,7 @@
  * Kora's allowed-program list. Today the hosted Kora relay rejects the deposit
  * ("Program 9tgHa1… is not in the allowed list") because it only sponsors
  * transactions that touch allow-listed programs, so the depositor pays their own
- * fee for now. See `createFeePaymentAdapter` in `@/services/adapters/fee-payment`.
+ * fee for now. See `createSponsorshipFeePayment` in `@/services/sponsorship.service`.
  *
  * Lifecycle here: pending (persist) → submitted (broadcast) → confirmed (on
  * devnet). `settled` (operator credit on SPC) is unreachable under the current

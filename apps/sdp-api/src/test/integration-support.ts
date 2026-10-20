@@ -5,7 +5,7 @@
 
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
-import { createFeePaymentAdapter, resolveKoraEndpoint } from "@sdp/fee-payment";
+import { createKoraAdapter, resolveKoraEndpoint } from "@sdp/fee-payment";
 import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import { hashString } from "@sdp/payments/hash";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
@@ -56,7 +56,7 @@ export const apiTestSupport = {
   buildExternalWalletWithdrawalTransaction,
   closeAllRedisClients,
   closeDatabasePools,
-  createFeePaymentAdapter,
+  createKoraAdapter,
   createKVStoreSet,
   createMosaicService,
   createOrgSignerForCustodyWallet,

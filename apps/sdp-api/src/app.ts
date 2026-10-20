@@ -194,9 +194,8 @@ function mapFeePaymentError(err: FeePaymentError): {
       // The provider returned a structured refusal of these exact bytes
       // (policy, allowlist, malformed request). Nothing was signed and a
       // retry cannot succeed, so do not tell the caller to try again.
-      // SIGNING_FAILED stays on the ambiguous 502 path below: the native
-      // adapter uses it for any signing exception, including post-sign
-      // timeouts, where a retry may be valid.
+      // SIGNING_FAILED stays on the ambiguous 502 path below: Kora answers it
+      // for a malformed JSON-RPC request, which says nothing about these bytes.
       return {
         status: 422,
         code: "SIGNING_REJECTED",

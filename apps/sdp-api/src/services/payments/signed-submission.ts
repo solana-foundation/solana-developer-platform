@@ -53,6 +53,8 @@ export function createTransferSignedSubmissionStore(
       startState = started ? "started" : "not_started";
       return started;
     },
+    // The caller marks the transfer failed on a definite refusal.
+    clearSigned: async () => {},
     submittedRow: async () => (startState === "not_started" ? null : row),
   };
 }

@@ -1,4 +1,5 @@
 import * as feePaymentAdapters from "@sdp/fee-payment";
+import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -55,7 +56,16 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
   "getSplTokenAccountAddresses"
 );
 
-export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
+export const createKoraAdapterMock = vi.spyOn(feePaymentAdapters, "createKoraAdapter");
+
+export function testKoraAdapter(
+  methods: Pick<KoraAdapter, "getFeePayer" | "getSponsorshipConfiguration" | "signAsFeePayer">
+): KoraAdapter {
+  return Object.assign(
+    new KoraAdapter({ rpcUrl: "https://kora.payments.test", userId: "sdp:v1:test" }),
+    methods
+  );
+}
 
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaSigner,
@@ -571,20 +581,13 @@ export function installPaymentsRouteTestHooks(): void {
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
       data: { expiresAtTs: 1_800_000_000n },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: vi
-        .fn()
-        .mockResolvedValue(
-          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-        ),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValue(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      })
+    );
     createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );

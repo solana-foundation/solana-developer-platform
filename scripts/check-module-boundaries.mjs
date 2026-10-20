@@ -125,7 +125,8 @@ const MODULE_METADATA = [
   {
     name: "@sdp/fee-payment",
     directory: "packages/sdp-fee-payment",
-    purpose: "Fee-payment port, Kora and native fee-payer adapters, and Kora endpoint selection.",
+    purpose:
+      "Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads.",
     allowedDependencies: ["@sdp/rpc", "@sdp/types"],
   },
   {

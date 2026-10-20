@@ -1,10 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as feePayment from "@sdp/fee-payment";
-import { createFeePaymentAdapter } from "@sdp/fee-payment";
-import type { FeePaymentPort } from "@sdp/fee-payment/port";
+import { createKoraAdapter } from "@sdp/fee-payment";
+import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import {
+  type Address,
+  address,
   type Blockhash,
   compileTransaction,
   createTransactionMessage,
@@ -22,6 +24,7 @@ import {
   isKoraSponsorshipConfigured,
   resolveProjectSponsorshipScope,
   resolveRequestSponsorshipScope,
+  type SponsorshipScope,
 } from "@/services/sponsorship.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -47,6 +50,26 @@ vi.mock("@/lib/money-admission", async (importOriginal) => ({
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
+
+const SANDBOX = { projectId: "project_1", environment: "sandbox" } as const;
+const PRODUCTION = { projectId: "project_1", environment: "production" } as const;
+
+const SPONSORED_WALLET: SponsorshipScope = {
+  organizationId: "org_test_sponsorship",
+  projectId: "project_1",
+  actor: { type: "wallet", id: "cwlt_1" },
+};
+
+const KORA_URLS = {
+  devnet: "https://kora-devnet.sponsorship.sdp.test",
+  mainnet: "https://kora-mainnet.sponsorship.sdp.test",
+} as const;
+
+const BOTH_CLUSTERS_ENV: Env = {
+  ...testEnv,
+  KORA_DEVNET_URL: KORA_URLS.devnet,
+  KORA_MAINNET_URL: KORA_URLS.mainnet,
+};
 
 function buildTransaction(): Uint8Array {
   const message = pipe(
@@ -77,134 +100,102 @@ function otherTransaction(): Uint8Array {
 describe("sponsorship identity boundary", () => {
   beforeEach(() => {
     readMoneyAdmissionFacts.mockResolvedValue(admittedMoneyFacts({ organizationStatus: "active" }));
-    vi.spyOn(feePayment, "createFeePaymentAdapter").mockReturnValue({
-      providerId: "kora",
-      getFeePayer: vi.fn(),
-      signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn(),
-    });
-    vi.spyOn(feePayment, "resolveFeePaymentProvider").mockReturnValue("kora");
+    vi.spyOn(feePayment, "createKoraAdapter");
     vi.spyOn(ProjectService.prototype, "getProject").mockImplementation(projectMocks.getProject);
     projectMocks.getProject.mockReset();
   });
   afterEach(() => vi.restoreAllMocks());
   it("builds a versioned tenant and actor scoped Kora user_id", () => {
-    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    createSponsorshipFeePayment(
-      env,
-      {
-        environment: "production",
-        organizationId: "org:alpha",
-        projectId: "project/one",
-        actor: { type: "api_key", id: "key:primary" },
-      },
-      "payments.transfer"
+    runInClusterScope({ projectId: "project/one", environment: "production" }, () =>
+      createSponsorshipFeePayment(
+        BOTH_CLUSTERS_ENV,
+        {
+          organizationId: "org:alpha",
+          projectId: "project/one",
+          actor: { type: "api_key", id: "key:primary" },
+        },
+        "payments.transfer"
+      )
     );
-    expect(createFeePaymentAdapter).toHaveBeenCalledWith(
-      env,
-      "sdp:v1:production:org%3Aalpha:project:project%2Fone:api_key:key%3Aprimary",
-      "mainnet-beta"
+    expect(createKoraAdapter).toHaveBeenCalledWith(
+      BOTH_CLUSTERS_ENV,
+      "sdp:v1:production:org%3Aalpha:project:project%2Fone:api_key:key%3Aprimary"
     );
   });
   it("rejects an incomplete scope instead of emitting an unscoped identity", () => {
     expect(() =>
-      createSponsorshipFeePayment(
-        { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" },
-        {
-          environment: "sandbox",
-          organizationId: "org_test_sponsorship",
-          projectId: "project_1",
-          actor: { type: "user", id: " " },
-        },
-        "payments.transfer"
+      runInClusterScope(SANDBOX, () =>
+        createSponsorshipFeePayment(
+          testEnv,
+          {
+            organizationId: "org_test_sponsorship",
+            projectId: "project_1",
+            actor: { type: "user", id: " " },
+          },
+          "payments.transfer"
+        )
       )
     ).toThrow("Sponsorship actor id is required");
-    expect(createFeePaymentAdapter).not.toHaveBeenCalled();
+    expect(createKoraAdapter).not.toHaveBeenCalled();
   });
-  it("is the owned boundary that forwards the trusted scope to Kora", () => {
-    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    createSponsorshipFeePayment(
-      env,
-      {
-        environment: "sandbox",
-        organizationId: "org_test_sponsorship",
-        projectId: "project_1",
-        actor: { type: "user", id: "usr_test_sponsorship" },
-      },
-      "payments.transfer"
+  it("reaches each concurrent scope's own cluster's Kora", async () => {
+    const devnetSigner = address(getBase58Codec().decode(new Uint8Array(32).fill(1)));
+    const mainnetSigner = address(getBase58Codec().decode(new Uint8Array(32).fill(2)));
+    const signerByKoraUrl = new Map<string, Address>([
+      [KORA_URLS.devnet, devnetSigner],
+      [KORA_URLS.mainnet, mainnetSigner],
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      Response.json({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { signer_address: signerByKoraUrl.get(String(input)) },
+      })
     );
-    expect(createFeePaymentAdapter).toHaveBeenCalledWith(
-      env,
-      "sdp:v1:sandbox:org_test_sponsorship:project:project_1:user:usr_test_sponsorship",
-      "devnet"
-    );
-  });
-  it("selects the mainnet paymaster for a production project's sponsorship", () => {
-    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    createSponsorshipFeePayment(
-      env,
-      {
-        environment: "production",
-        organizationId: "org_test_sponsorship",
-        projectId: "project_1",
-        actor: { type: "wallet", id: "cwlt_1" },
-      },
-      "payments.transfer"
-    );
-    expect(createFeePaymentAdapter).toHaveBeenCalledWith(
-      env,
-      "sdp:v1:production:org_test_sponsorship:project:project_1:wallet:cwlt_1",
-      "mainnet-beta"
-    );
+    const sponsorFor = (clusterScope: typeof SANDBOX | typeof PRODUCTION) =>
+      runInClusterScope(clusterScope, () =>
+        createSponsorshipFeePayment(
+          BOTH_CLUSTERS_ENV,
+          SPONSORED_WALLET,
+          "payments.transfer"
+        ).getFeePayer()
+      );
+
+    await expect(Promise.all([sponsorFor(SANDBOX), sponsorFor(PRODUCTION)])).resolves.toEqual([
+      devnetSigner,
+      mainnetSigner,
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
   it("refuses a production scope before signing when the mainnet paymaster is not wired", () => {
-    vi.mocked(createFeePaymentAdapter).mockRestore();
     expect(() =>
-      createSponsorshipFeePayment(
-        { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" },
-        {
-          environment: "production",
-          organizationId: "org_test_sponsorship",
-          projectId: "project_1",
-          actor: { type: "wallet", id: "cwlt_1" },
-        },
-        "payments.transfer"
+      runInClusterScope(PRODUCTION, () =>
+        createSponsorshipFeePayment(testEnv, SPONSORED_WALLET, "payments.transfer")
       )
     ).toThrow(expect.objectContaining({ code: "PROVIDER_NOT_AVAILABLE" }));
   });
   it.each([
-    { environment: "sandbox", configured: true },
-    { environment: "production", configured: false },
-  ] as const)(
-    "reports a $environment scope's paymaster as configured: $configured",
-    ({ environment, configured }) => {
-      expect(
-        isKoraSponsorshipConfigured(testEnv, {
-          environment,
-          organizationId: "org_test_sponsorship",
-          projectId: "project_1",
-          actor: { type: "wallet", id: "cwlt_1" },
-        })
-      ).toBe(configured);
+    { scope: SANDBOX, configured: true },
+    { scope: PRODUCTION, configured: false },
+  ])(
+    "reports a $scope.environment scope's paymaster as configured: $configured",
+    ({ scope, configured }) => {
+      expect(runInClusterScope(scope, () => isKoraSponsorshipConfigured(testEnv))).toBe(configured);
     }
   );
   function selfHostedFeePayment(signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>) {
-    const provider: FeePaymentPort = {
-      providerId: "kora",
-      getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
-      signAsFeePayer: vi.fn().mockImplementation(signAsFeePayer),
-      signAndSend: vi.fn(),
-    };
-    vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
-    return createSponsorshipFeePayment(
-      { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
-      {
-        environment: "sandbox",
-        organizationId: "org_test_sponsorship",
-        projectId: "project_1",
-        actor: { type: "user", id: "usr_test_sponsorship" },
-      },
-      "payments.transfer"
+    vi.spyOn(KoraAdapter.prototype, "getFeePayer").mockResolvedValue(FEE_PAYER);
+    vi.spyOn(KoraAdapter.prototype, "signAsFeePayer").mockImplementation(signAsFeePayer);
+    return runInClusterScope(SANDBOX, () =>
+      createSponsorshipFeePayment(
+        { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
+        {
+          organizationId: "org_test_sponsorship",
+          projectId: "project_1",
+          actor: { type: "user", id: "usr_test_sponsorship" },
+        },
+        "payments.transfer"
+      )
     );
   }
   it("refuses a self-hosted sponsor signature for a start the organization may not make", async () => {
@@ -248,28 +239,12 @@ describe("sponsorship identity boundary", () => {
   });
   it("adapts self-hosted providers to the owned persist-before-marker lifecycle", async () => {
     const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
-    const provider: FeePaymentPort = {
-      providerId: "kora",
-      getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
-      signAsFeePayer: vi.fn().mockResolvedValue(signedTransaction),
-      signAndSend: vi.fn(),
-    };
-    vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
+    const feePayment = selfHostedFeePayment(async () => signedTransaction);
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
       markStarted: vi.fn().mockResolvedValue(undefined),
       hasStarted: vi.fn(),
     };
-    const feePayment = createSponsorshipFeePayment(
-      { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
-      {
-        environment: "sandbox",
-        organizationId: "org_test_sponsorship",
-        projectId: "project_1",
-        actor: { type: "user", id: "usr_test_sponsorship" },
-      },
-      "payments.transfer"
-    );
     const submission = await feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle);
     expect(submission.signedTransaction).toStrictEqual(signedTransaction);
     expect(lifecycle.persistSigned).toHaveBeenCalledWith(submission);
@@ -303,7 +278,6 @@ describe("sponsorship identity boundary", () => {
       testEnv
     );
     expect(await response.json()).toEqual({
-      environment: "production",
       organizationId: "org_trusted",
       projectId: "project_trusted",
       actor: { type: "api_key", id: "key_trusted" },
@@ -322,7 +296,6 @@ describe("sponsorship identity boundary", () => {
     app.get("/probe", (c) => c.json(resolveRequestSponsorshipScope(c)));
     const response = await app.request("/probe", {}, testEnv);
     expect(await response.json()).toEqual({
-      environment: "sandbox",
       organizationId: TEST_ORG.id,
       projectId: "project_trusted",
       actor: { type: "user", id: TEST_USER.id },
@@ -352,24 +325,37 @@ describe("sponsorship identity boundary", () => {
       environment: "production",
       status: "active",
     });
-    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    const scope = await resolveProjectSponsorshipScope(env, {
-      organizationId: "org_stored",
-      projectId: "project_stored",
-      actor: { type: "wallet", id: "wallet_stored" },
-    });
-    expect(scope).toEqual({
-      environment: "production",
-      organizationId: "org_stored",
-      projectId: "project_stored",
-      actor: { type: "wallet", id: "wallet_stored" },
-    });
-    createSponsorshipFeePayment(env, scope, "recurring.collect");
-    expect(createFeePaymentAdapter).toHaveBeenCalledWith(
-      env,
-      "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
-      "mainnet-beta"
+    const scope = await runInClusterScope(
+      { projectId: "project_stored", environment: "production" },
+      () =>
+        resolveProjectSponsorshipScope(testEnv, {
+          organizationId: "org_stored",
+          projectId: "project_stored",
+          actor: { type: "wallet", id: "wallet_stored" },
+        })
     );
+    expect(scope).toEqual({
+      organizationId: "org_stored",
+      projectId: "project_stored",
+      actor: { type: "wallet", id: "wallet_stored" },
+    });
+  });
+  it("refuses a persisted project from another environment than the open scope", async () => {
+    projectMocks.getProject.mockResolvedValue({
+      id: "project_stored",
+      organizationId: "org_stored",
+      environment: "production",
+      status: "active",
+    });
+    await expect(
+      runInClusterScope({ projectId: "project_stored", environment: "sandbox" }, () =>
+        resolveProjectSponsorshipScope(testEnv, {
+          organizationId: "org_stored",
+          projectId: "project_stored",
+          actor: { type: "wallet", id: "wallet_stored" },
+        })
+      )
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
   it.each([
     { label: "is missing", project: null },
@@ -404,11 +390,7 @@ describe("sponsorship identity boundary", () => {
 });
 
 describe("sponsorship construction guard", () => {
-  const FEE_PAYMENT_CONSTRUCTORS = new Set([
-    "createFeePaymentAdapter",
-    "createKoraAdapter",
-    "KoraAdapter",
-  ]);
+  const FEE_PAYMENT_CONSTRUCTORS = new Set(["createKoraAdapter", "KoraAdapter"]);
   const FEE_PAYMENT_SPECIFIER = `@sdp/fee-payment(?:/[^"']*)?`;
   const OPAQUE_IMPORT_PATTERNS = [
     new RegExp(String.raw`import\s+\*\s+as\s+[\w$]+\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`),

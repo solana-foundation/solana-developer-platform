@@ -30,6 +30,7 @@ import {
   fetchEncodedAccount,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
+  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   type Rpc,
@@ -1210,13 +1211,21 @@ export class MosaicService {
   ): Promise<MosaicTransactionResult> {
     const feePayment = this.feePayment;
     if (feePayment) {
-      // Two-signer flow: custody signs locally, Kora adds fee payer + submits
+      // Two-signer flow: custody signs locally, Kora adds the fee payer signature
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
       await onBeforeSubmit?.();
-      const signature = await feePayment.signAndSend(txBytes);
+      const sponsorSigned = getTransactionDecoder().decode(
+        await feePayment.signAsFeePayer(txBytes)
+      );
+      const signature = await this.rpc
+        .sendTransaction(getBase64EncodedWireTransaction(sponsorSigned), {
+          skipPreflight: false,
+          encoding: "base64",
+        })
+        .send();
       return this.confirmSubmitted(signature);
     }
 

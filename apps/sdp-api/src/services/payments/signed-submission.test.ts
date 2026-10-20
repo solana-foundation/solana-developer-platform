@@ -57,6 +57,7 @@ describe("submitSponsoredTransaction", () => {
         order.push("started");
       }),
       hasStarted: vi.fn().mockResolvedValue(true),
+      clearSigned: vi.fn(),
     };
     const send = vi.spyOn(solanaRpc, "sendTransaction").mockImplementation(async (_rpc, bytes) => {
       order.push("sent");
@@ -97,6 +98,7 @@ describe("submitSponsoredTransaction", () => {
       persistSigned: vi.fn().mockResolvedValue(undefined),
       markStarted: vi.fn().mockResolvedValue(undefined),
       hasStarted: vi.fn().mockResolvedValue(true),
+      clearSigned: vi.fn(),
     };
     const send = vi
       .spyOn(solanaRpc, "sendTransaction")
@@ -135,6 +137,7 @@ describe("submitSponsoredTransaction", () => {
       persistSigned: vi.fn(),
       markStarted: vi.fn(),
       hasStarted: vi.fn(),
+      clearSigned: vi.fn(),
     };
     const cause = new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
       code: 42,
@@ -154,6 +157,36 @@ describe("submitSponsoredTransaction", () => {
     ).rejects.toMatchObject({ code: "TRANSACTION_FAILED", message: cause.message });
 
     expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledWith(error);
+    expect(store.clearSigned).toHaveBeenCalledOnce();
+  });
+
+  it("forgets the signed transaction when releasing a preflight rejection fails", async () => {
+    const feePayment = {
+      prepareOwnedSubmission: vi.fn(async () => ({
+        signedTransaction: new Uint8Array([1, 2, 3]),
+        signature: SIGNATURE,
+        releaseDefinitelyUnbroadcast: vi.fn().mockRejectedValue(new Error("release failed")),
+      })),
+    } as unknown as SponsorshipFeePayment;
+    const store = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+      clearSigned: vi.fn(),
+    };
+    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(preflightError());
+
+    await expect(
+      submitSponsoredTransaction({
+        feePayment,
+        rpc: {} as solanaRpc.SolanaRpc,
+        transaction: new Uint8Array([9]),
+        lastValidBlockHeight: 123n,
+        store,
+      })
+    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
+
+    expect(store.clearSigned).toHaveBeenCalledOnce();
   });
 
   it("maps an account-frozen preflight rejection without losing definiteness", async () => {
@@ -170,6 +203,7 @@ describe("submitSponsoredTransaction", () => {
       persistSigned: vi.fn(),
       markStarted: vi.fn(),
       hasStarted: vi.fn(),
+      clearSigned: vi.fn(),
     };
     vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(
       preflightError(
@@ -204,6 +238,7 @@ describe("submitSponsoredTransaction", () => {
       persistSigned: vi.fn().mockResolvedValue(undefined),
       markStarted: vi.fn().mockResolvedValue(undefined),
       hasStarted: vi.fn().mockResolvedValue(true),
+      clearSigned: vi.fn(),
     };
     vi.spyOn(solanaRpc, "sendTransaction")
       .mockRejectedValueOnce(new Error("RPC timed out"))
@@ -225,6 +260,7 @@ describe("submitSponsoredTransaction", () => {
 
     await result;
     expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
+    expect(store.clearSigned).not.toHaveBeenCalled();
   });
 
   it("returns the final transient error after retry exhaustion", async () => {
@@ -241,6 +277,7 @@ describe("submitSponsoredTransaction", () => {
       persistSigned: vi.fn(),
       markStarted: vi.fn(),
       hasStarted: vi.fn(),
+      clearSigned: vi.fn(),
     };
     const send = vi
       .spyOn(solanaRpc, "sendTransaction")
@@ -263,6 +300,7 @@ describe("submitSponsoredTransaction", () => {
     await result;
     expect(send).toHaveBeenCalledTimes(4);
     expect(send.mock.calls.every(([, bytes]) => bytes === signedTransaction)).toBe(true);
+    expect(store.clearSigned).not.toHaveBeenCalled();
   });
 });
 

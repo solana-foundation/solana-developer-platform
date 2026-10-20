@@ -34,7 +34,7 @@ export function createToken2022Service(
   signer: TransactionSigner,
   sponsorship: { scope: SponsorshipScope; movement: MovementId }
 ): Token2022Service {
-  const feePayment = isKoraSponsorshipConfigured(env, sponsorship.scope)
+  const feePayment = isKoraSponsorshipConfigured(env)
     ? createSponsorshipFeePayment(env, sponsorship.scope, sponsorship.movement)
     : undefined;
 

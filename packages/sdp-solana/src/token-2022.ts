@@ -18,6 +18,7 @@ import {
   createNoopSigner,
   getBase64EncodedWireTransaction,
   getBase64Encoder,
+  getTransactionDecoder,
   getTransactionEncoder,
   type Rpc,
   type Signature,
@@ -57,8 +58,6 @@ export interface FeePaymentPort {
   getFeePayer(): Promise<Address>;
   /** Sign a transaction with the fee payer key without sending. */
   signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array>;
-  /** Sign a transaction with the fee payer and submit to Solana. */
-  signAndSend(transaction: Uint8Array): Promise<Signature>;
 }
 
 export interface PreparedTransaction {
@@ -123,7 +122,15 @@ export class Token2022Service {
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-      const signature = await this.feePayment.signAndSend(txBytes);
+      const sponsorSigned = getTransactionDecoder().decode(
+        await this.feePayment.signAsFeePayer(txBytes)
+      );
+      const signature = await rpc
+        .sendTransaction(getBase64EncodedWireTransaction(sponsorSigned), {
+          skipPreflight: false,
+          encoding: "base64",
+        })
+        .send();
       const confirmation = await confirmTransaction(rpc, signature);
 
       if (confirmation.err) {

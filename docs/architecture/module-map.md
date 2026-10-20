@@ -21,7 +21,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/dvp` | Generated @solana/kit client for the DvP atomic swap program. | None |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
-| `@sdp/fee-payment` | Fee-payment port, Kora and native fee-payer adapters, and Kora endpoint selection. | `@sdp/rpc`, `@sdp/types` |
+| `@sdp/fee-payment` | Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/hastra` | Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | `@sdp/types` |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` |

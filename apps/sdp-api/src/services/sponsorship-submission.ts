@@ -22,6 +22,12 @@ export interface SignedSubmissionStore {
   }): Promise<void>;
   markStarted(): Promise<void>;
   hasStarted(): Promise<boolean>;
+  /**
+   * Forget the signature `persistSigned` saved, after the send was provably refused, so recovery
+   * does not wait on a transaction that never left. A store whose row is marked failed anyway
+   * does nothing.
+   */
+  clearSigned(): Promise<void>;
 }
 
 /**
@@ -92,30 +98,44 @@ export async function submitSponsoredTransaction(input: {
   });
 
   let sawTransientFailure = false;
-  const submittedSignature = await withTransientRpcRetry(async () => {
-    try {
-      return await sendTransaction(input.rpc, submission.signedTransaction);
-    } catch (error) {
-      const preflightError = sawTransientFailure ? null : mapPreflightError(error);
-      if (preflightError) {
-        try {
-          await submission.releaseDefinitelyUnbroadcast(error);
-        } catch {
-          // Managed sponsorship logs and trips its breaker; preserve the
-          // definitive chain verdict so the payment cannot remain processing.
+  const definite: { refusal: { cause: unknown; mapped: AppError } | null } = { refusal: null };
+  let submittedSignature: Signature;
+  try {
+    submittedSignature = await withTransientRpcRetry(async () => {
+      try {
+        return await sendTransaction(input.rpc, submission.signedTransaction);
+      } catch (error) {
+        const preflightError = sawTransientFailure ? null : mapPreflightError(error);
+        if (preflightError) {
+          definite.refusal = { cause: error, mapped: preflightError };
+          throw preflightError;
         }
-        throw preflightError;
+        const transient = isTransientRpcError(error);
+        if (sawTransientFailure && !transient) {
+          throw new Error("Solana RPC submission outcome is ambiguous after a transient failure", {
+            cause: error,
+          });
+        }
+        sawTransientFailure ||= transient;
+        throw error;
       }
-      const transient = isTransientRpcError(error);
-      if (sawTransientFailure && !transient) {
-        throw new Error("Solana RPC submission outcome is ambiguous after a transient failure", {
-          cause: error,
-        });
-      }
-      sawTransientFailure ||= transient;
-      throw error;
+    });
+  } catch (error) {
+    const { refusal } = definite;
+    if (refusal === null) throw error;
+    // Outside the retry: once the reservation is released nothing may send these bytes again.
+    // Agave answers a preflight failure before it forwards the transaction (rpc/src/rpc.rs
+    // @ b1912476ed: SendTransactionPreflightFailure at :4046, ahead of _send_transaction at
+    // :4069), so nothing was broadcast.
+    try {
+      await submission.releaseDefinitelyUnbroadcast(refusal.cause);
+    } catch {
+      // Managed sponsorship logs and trips its breaker; preserve the
+      // definitive chain verdict so the payment cannot remain processing.
     }
-  });
+    await input.store.clearSigned();
+    throw refusal.mapped;
+  }
   if (submittedSignature !== submission.signature) {
     throw solanaRpcError("Solana RPC returned a different transaction signature");
   }

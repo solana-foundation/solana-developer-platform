@@ -20,6 +20,7 @@ import { AppError } from "@/lib/errors";
 import type {
   ClaimPaymentRecurringPaymentLifecycleInput,
   ClaimPaymentRecurringPaymentUpdateInput,
+  ClearPaymentRecurringPaymentStepSignatureInput,
   CollectibleRecurringPaymentRow,
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
@@ -39,6 +40,7 @@ import type {
   PaymentRecurringPaymentUpdateEventRow,
   RecoverableCollectionRecurringPaymentRow,
   RecurringPaymentActivator,
+  RecurringPaymentStepSignatureSlot,
   StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
@@ -325,6 +327,13 @@ async function getUpdateEventByIdInternal(
 
   return row ? mapUpdateEventRow(row) : null;
 }
+
+const STEP_SIGNATURE_TABLES = {
+  recurring_payment: "payment_recurring_payments",
+  activation_attempt: "payment_recurring_payment_activation_attempts",
+  update_attempt: "payment_recurring_payment_update_attempts",
+  lifecycle_attempt: "payment_recurring_payment_lifecycle_attempts",
+} as const satisfies Record<RecurringPaymentStepSignatureSlot["row"], string>;
 
 export function createPostgresPaymentRecurringPaymentsRepository(
   db: DatabaseExecutor
@@ -1219,6 +1228,32 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput) {
+      const table = STEP_SIGNATURE_TABLES[input.slot.row];
+      const { column } = input.slot;
+      // Table and column come from the typed slot, never from caller text.
+      const [assignment, match] =
+        column === "metadata.authorizationSetupSignature"
+          ? [
+              "metadata = metadata - 'authorizationSetupSignature'",
+              "metadata ->> 'authorizationSetupSignature' = ?",
+            ]
+          : [`${column} = NULL`, `${column} = ?`];
+      const rowsAffected = await db
+        .prepare(
+          `UPDATE ${table}
+              SET ${assignment},
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND ${match}`
+        )
+        .bind(input.updatedAt, input.id, input.organizationId, input.projectId, input.signature)
+        .run();
+      return rowsAffected > 0;
     },
 
     async updateUpdateAttempt(input: UpdatePaymentRecurringPaymentUpdateAttemptInput) {

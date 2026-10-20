@@ -7962,7 +7962,7 @@ describe("Issuance Routes", () => {
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockResolvedValueOnce(mockDeployResult as never);
-        const feePaymentAdapterSpy = vi.spyOn(FeePaymentAdapters, "createFeePaymentAdapter");
+        const koraAdapterSpy = vi.spyOn(FeePaymentAdapters, "createKoraAdapter");
 
         try {
           const res = await app.request(
@@ -7981,11 +7981,11 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(200);
           expect(getAccountInfoSpy).toHaveBeenCalled();
           expect(createTokenSpy).toHaveBeenCalled();
-          expect(feePaymentAdapterSpy).not.toHaveBeenCalled();
+          expect(koraAdapterSpy).not.toHaveBeenCalled();
         } finally {
           getAccountInfoSpy.mockRestore();
           createTokenSpy.mockRestore();
-          feePaymentAdapterSpy.mockRestore();
+          koraAdapterSpy.mockRestore();
         }
       });
 
@@ -8001,7 +8001,7 @@ describe("Issuance Routes", () => {
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockResolvedValueOnce(mockDeployResult as never);
-        const feePaymentAdapterSpy = vi.spyOn(FeePaymentAdapters, "createFeePaymentAdapter");
+        const koraAdapterSpy = vi.spyOn(FeePaymentAdapters, "createKoraAdapter");
 
         try {
           const res = await app.request(
@@ -8018,10 +8018,10 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(200);
-          expect(feePaymentAdapterSpy).toHaveBeenCalled();
+          expect(koraAdapterSpy).toHaveBeenCalled();
         } finally {
           createTokenSpy.mockRestore();
-          feePaymentAdapterSpy.mockRestore();
+          koraAdapterSpy.mockRestore();
         }
       });
 

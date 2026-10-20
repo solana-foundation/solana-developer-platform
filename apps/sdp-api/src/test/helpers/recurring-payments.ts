@@ -1,6 +1,11 @@
-import type { createFeePaymentAdapter } from "@sdp/fee-payment";
 import { getBase58Decoder } from "@solana/codecs";
-import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
+import {
+  generateKeyPairSigner,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  type Signature,
+  signature,
+} from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
@@ -14,15 +19,18 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   seedCounterparty,
+  sendTransactionMock,
   TEST_CUSTODY_WALLET_ID,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
+  testKoraAdapter,
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { withIdempotencyKeys } from "./idempotency-keys";
 
@@ -49,7 +57,6 @@ export function installRecurringExecutionHooks() {
   let signAsFeePayerMock: ReturnType<
     typeof vi.fn<(transaction: Uint8Array) => Promise<Uint8Array>>
   >;
-  let signAndSendMock: ReturnType<typeof vi.fn<(transaction: Uint8Array) => Promise<Signature>>>;
 
   beforeEach(async () => {
     sourceSigner = await generateKeyPairSigner();
@@ -59,25 +66,41 @@ export function installRecurringExecutionHooks() {
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
       .mockImplementation(async (transaction) => fullySignTestTransaction(transaction));
-    signAndSendMock = vi
-      .fn<(transaction: Uint8Array) => Promise<Signature>>()
-      .mockResolvedValueOnce(testSignature(1))
-      .mockResolvedValueOnce(testSignature(2));
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: signAsFeePayerMock,
-      signAndSend: signAndSendMock,
-    } satisfies ReturnType<typeof createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValue(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: signAsFeePayerMock,
+      })
+    );
   });
 
   return {
     rpc,
     sourceSigner: () => sourceSigner,
     signAsFeePayerMock: () => signAsFeePayerMock,
-    signAndSendMock: () => signAndSendMock,
   };
+}
+
+/** The signature of each transaction the managed pool was asked to send, in order. */
+export function poolSentSignatures(): Signature[] {
+  return sendTransactionMock.mock.calls.map(([, transactionBytes]) =>
+    getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
+  );
+}
+
+/**
+ * Let the managed pool deliver the next `deliveredSends` sends as usual, then fail the one after.
+ *
+ * @param deliveredSends - How many sends succeed first.
+ * @param error - What the failing send rejects with.
+ */
+export function rejectPoolSendAfter(deliveredSends: number, error: Error): void {
+  const deliver = required(sendTransactionMock.getMockImplementation());
+  for (let send = 0; send < deliveredSends; send += 1) {
+    sendTransactionMock.mockImplementationOnce(deliver);
+  }
+  sendTransactionMock.mockRejectedValueOnce(error);
 }
 
 export async function parseRecurringResponse(

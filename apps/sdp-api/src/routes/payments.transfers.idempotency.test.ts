@@ -1,4 +1,3 @@
-import type { createFeePaymentAdapter } from "@sdp/fee-payment";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
@@ -9,7 +8,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
@@ -20,6 +19,7 @@ import {
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
+  testKoraAdapter,
 } from "@/test/helpers/payments-routes";
 import {
   countTransferRows,
@@ -27,28 +27,12 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
-import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — transfer idempotency", () => {
   installPaymentsRouteTestHooks();
   installClusterRpcStub();
   it("replays a transfer when the same Idempotency-Key + body is retried", async () => {
-    const signAndSendMock = vi
-      .fn()
-      .mockResolvedValue(
-        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-      );
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: signAndSendMock,
-    } as ReturnType<typeof createFeePaymentAdapter>);
-
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -81,21 +65,10 @@ describe("Payments routes — transfer idempotency", () => {
       .bind("xfer-key-1")
       .first<{ fingerprint: string }>();
     expect(stored.idempotency_fingerprint).toBe(keyRecord?.fingerprint);
-    expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
   });
 
   it("binds the domain row to its credential: past the key record, the same credential replays and another runs as new", async () => {
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: vi.fn(),
-    } as ReturnType<typeof createFeePaymentAdapter>);
     const otherKey = {
       id: "key_payments_other",
       raw: "sk_test_payments_other",
@@ -151,17 +124,13 @@ describe("Payments routes — transfer idempotency", () => {
     const signAsFeePayerMock = vi
       .fn()
       .mockRejectedValue(new FeePaymentError("insufficient balance", "INSUFFICIENT_BALANCE"));
-    const signAndSendMock = vi.fn();
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: signAsFeePayerMock,
-      signAndSend: signAndSendMock,
-    } as ReturnType<typeof createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValue(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: signAsFeePayerMock,
+      })
+    );
 
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -191,7 +160,6 @@ describe("Payments routes — transfer idempotency", () => {
     }[];
     expect(secondError?.error.code).toBe(firstError?.error.code);
     expect(signAsFeePayerMock).toHaveBeenCalledOnce();
-    expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();
   });
 
@@ -324,25 +292,6 @@ describe("Payments routes — transfer idempotency", () => {
   });
 
   it("does not dedup two requests under different Idempotency-Keys", async () => {
-    const signAndSendMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
-      )
-      .mockResolvedValueOnce(
-        "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV"
-      );
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: signAndSendMock,
-    } as ReturnType<typeof createFeePaymentAdapter>);
-
     const _headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -380,20 +329,6 @@ describe("Payments routes — transfer idempotency", () => {
   // refusal writes no transfer row and no Idempotency-Key, and the same key
   // runs once the scope allows the wallet.
   it("refuses a transfer from a wallet outside the key's scope before writing anything", async () => {
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: vi
-        .fn()
-        .mockResolvedValue(
-          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-        ),
-    } as ReturnType<typeof createFeePaymentAdapter>);
     await seedCachedKey({ walletScope: "selected", walletIds: [] });
     const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
