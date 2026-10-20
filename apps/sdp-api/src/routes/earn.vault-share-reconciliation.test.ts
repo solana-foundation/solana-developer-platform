@@ -214,6 +214,8 @@ async function finalizeMovement(movementId: string): Promise<void> {
  * solver queue escrows the claim's shares, a Hastra operator redemption burns
  * them for delegated wYLDS. Terminal rows stamp the metadata 0113 requires.
  */
+let lastWithdrawalTimestamp = 0;
+
 async function seedCustodyWithdrawalRequest(params: {
   position: {
     id: string;
@@ -230,6 +232,10 @@ async function seedCustodyWithdrawalRequest(params: {
 }): Promise<string> {
   const requestId = generateEarnVaultWithdrawalRequestId();
   const solverQueue = params.mechanism === "solver_queue";
+  // These fixtures describe successive lifecycle events. Equal millisecond
+  // timestamps fall back to random IDs and can reverse a cancellation/fulfillment.
+  lastWithdrawalTimestamp = Math.max(Date.now(), lastWithdrawalTimestamp + 1);
+  const timestamp = new Date(lastWithdrawalTimestamp).toISOString();
   await getDb(env)
     .prepare(
       `INSERT INTO earn_vault_withdrawal_requests (
@@ -264,10 +270,10 @@ async function seedCustodyWithdrawalRequest(params: {
       solverQueue ? null : (params.intermediateAmount ?? "1.01"),
       crypto.randomUUID(),
       `fingerprint_${crypto.randomUUID()}`,
-      params.status === "cancelled" ? (params.closedAt ?? new Date().toISOString()) : null,
+      params.status === "cancelled" ? (params.closedAt ?? timestamp) : null,
       params.status === "failed" ? "request never landed" : null,
-      params.status === "fulfilled" ? (params.closedAt ?? new Date().toISOString()) : null,
-      params.createdAt ?? new Date().toISOString()
+      params.status === "fulfilled" ? (params.closedAt ?? timestamp) : null,
+      params.createdAt ?? timestamp
     )
     .run();
   return requestId;
@@ -295,6 +301,7 @@ interface ReportBody {
 }
 
 beforeEach(async () => {
+  lastWithdrawalTimestamp = 0;
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   await seedTestDatabase(env);

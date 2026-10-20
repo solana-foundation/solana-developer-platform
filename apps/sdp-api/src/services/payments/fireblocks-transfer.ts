@@ -1,19 +1,20 @@
+import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
 import {
-  type CustodyProvisioningRuntime,
   createFireblocksTransfer,
-  FireblocksApiError,
   type FireblocksTransferResult,
   readFireblocksTransfer,
   resolveFireblocksTransferAsset,
-} from "@sdp/custody/provisioning";
-import { getSolanaConfig } from "@sdp/rpc";
+} from "@sdp/custody/provisioning/fireblocks-transfers";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
-import { wellKnownMint } from "@sdp/types";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { assertIsSignature } from "@solana/kit";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { badRequest, conflict } from "@/lib/errors";
+import { assertMoneyStartAdmitted, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
@@ -69,7 +70,7 @@ export async function prepareFireblocksTransfer(
   if (!access) return null;
   if (access.publicKey !== operation.sourceAddress)
     throw conflict("Fireblocks source wallet changed");
-  const network = getSolanaConfig(env).network;
+  const network = currentClusterScope().cluster;
   const expectedAsset =
     network === "mainnet-beta" ? "SOL" : network === "devnet" ? "SOL_TEST" : null;
   if (!expectedAsset || access.assetId !== expectedAsset)
@@ -203,24 +204,28 @@ async function currentRow(repo: PaymentsRepository, row: PaymentTransferRow) {
 
 /** Exactly one create attempt per durable intent. Recovery never sends funds. */
 export async function submitFireblocksTransfer(
+  env: Env,
   repo: PaymentsRepository,
   row: PaymentTransferRow,
   prepared: PreparedFireblocksTransfer
 ): Promise<PaymentTransferRow> {
-  if (!row.destination_address || !row.amount) throw badRequest("Incomplete payment intent");
+  if (!row.destination_address || !row.amount || !row.project_id || !row.custody_wallet_id)
+    throw badRequest("Incomplete payment intent");
   const startedAt = new Date().toISOString();
-  const claimed = await repo.claimTransferProviderData({
+  const claimed = await repo.claimFireblocksTransferSubmission({
     transferId: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    expectedStatus: "processing",
-    // biome-ignore lint/security/noSecrets: Durable database field name.
-    claimPath: ["fireblocksSubmissionStartedAt"],
-    providerData: { fireblocksSubmissionStartedAt: startedAt },
-    updatedAt: startedAt,
+    now: startedAt,
   });
   if (!claimed) return currentRow(repo, row);
   try {
+    await assertMoneyStartAdmitted(
+      env,
+      { organizationId: row.organization_id, projectId: row.project_id },
+      { surface: "http", movement: "payments.transfer", subjectId: row.id },
+      { custodyWalletId: row.custody_wallet_id }
+    );
     const result = await createFireblocksTransfer(runtime, prepared.access, {
       operation: "TRANSFER",
       externalTxId: row.id,
@@ -237,6 +242,18 @@ export async function submitFireblocksTransfer(
     });
     return await persistResult(repo, claimed, result, false);
   } catch (error) {
+    if (error instanceof MoneyMovementRefusedError) {
+      await repo.updateTransfer({
+        transferId: row.id,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        expectedStatus: "processing",
+        status: "failed",
+        error: error.message,
+        updatedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
     // A timeout, duplicate-ID conflict, invalid response, or DB failure may follow acceptance.
     // Keep the claim and recover by externalTxId; never turn uncertainty into permission to resend.
     if (error instanceof FireblocksApiError && [400, 401, 403, 422].includes(error.status)) {

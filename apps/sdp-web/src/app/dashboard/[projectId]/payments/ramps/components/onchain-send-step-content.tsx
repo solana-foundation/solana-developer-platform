@@ -13,6 +13,7 @@ import {
   UserRoundIcon,
   WalletIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
@@ -20,6 +21,7 @@ import type { OnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ram
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
@@ -286,6 +288,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 }
 
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
+  const href = useProjectHref();
   const t = useTranslations();
   const cluster = useSolanaCluster();
   const { transferResult } = wizard;

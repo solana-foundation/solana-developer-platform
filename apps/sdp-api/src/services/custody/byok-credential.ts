@@ -1,8 +1,8 @@
 import { createPrivateKey } from "node:crypto";
+import { checkFireblocksCredential } from "@sdp/custody/provisioning/fireblocks-credential";
 import { hashString } from "@sdp/payments/hash";
-import type { ByokCustodyProvider, SdpEnvironment } from "@sdp/types";
-import { SignerError, SignerErrorCode } from "@solana/keychain-core";
-import { FireblocksSigner } from "@solana/keychain-fireblocks";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { ByokCustodyProvider } from "@sdp/types/custody";
 import { z } from "zod";
 import { badRequest, internalError } from "@/lib/errors";
 import {
@@ -118,30 +118,19 @@ export async function checkByokCredential(
       ? { status, fingerprint: await getPrivyProviderAccountFingerprint(credential.appId) }
       : { status };
   }
-  try {
-    const signer = await FireblocksSigner.create({
-      apiKey: credential.apiKey,
-      privateKeyPem: credential.apiSecretPem,
-      vaultAccountId: credential.vaultAccountId,
-      assetId: credential.assetId,
-      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
-    });
-    // Vault numbers repeat across workspaces. Bind continuity to the actual
-    // Solana address as well, never the API user ID (which changes on rotation).
-    const fingerprint = `sha256:${await hashString(JSON.stringify(["fireblocks", credential.assetId, credential.vaultAccountId, signer.address]))}`;
-    return {
-      status: "success",
-      fingerprint,
-      wallet: { walletId: `fb_${credential.vaultAccountId}`, address: signer.address },
-    };
-  } catch (error) {
-    if (
-      error instanceof SignerError &&
-      (error.code === SignerErrorCode.INVALID_PRIVATE_KEY ||
-        (error.code === SignerErrorCode.REMOTE_API_ERROR &&
-          [401, 403, 404].includes(Number(error.context?.status))))
-    )
-      return { status: "failed" };
-    return { status: "retry_unknown" };
-  }
+  const result = await checkFireblocksCredential({
+    apiKey: credential.apiKey,
+    privateKeyPem: credential.apiSecretPem,
+    vaultAccountId: credential.vaultAccountId,
+    assetId: credential.assetId,
+    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
+  });
+  if (result.status !== "success") return result;
+  // Vault numbers repeat across workspaces; bind rotation to the actual address.
+  const fingerprint = `sha256:${await hashString(JSON.stringify(["fireblocks", credential.assetId, credential.vaultAccountId, result.address]))}`;
+  return {
+    status: "success",
+    fingerprint,
+    wallet: { walletId: `fb_${credential.vaultAccountId}`, address: result.address },
+  };
 }

@@ -1,4 +1,3 @@
-import { getFireblocksVault as getFireblocksVaultInCustody, listFireblocksVaults as listFireblocksVaultsInCustody } from "@sdp/custody/provisioning/fireblocks-vaults";
 import {
   type ProvisionCoinbaseCdpOptions as CustodyProvisionCoinbaseCdpOptions,
   type ProvisionFireblocksOptions as CustodyProvisionFireblocksOptions,
@@ -27,6 +26,10 @@ import {
   type ProvisionAnchorageResult,
   provisionAnchorageWallet as provisionAnchorageWalletInCustody,
 } from "@sdp/custody/provisioning/anchorage";
+import {
+  getFireblocksVault as getFireblocksVaultInCustody,
+  listFireblocksVaults as listFireblocksVaultsInCustody,
+} from "@sdp/custody/provisioning/fireblocks-vaults";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import type { FireblocksPolicyRule } from "./fireblocks-policy";
 import { evaluateFireblocksTransferPolicy } from "./fireblocks-policy-match";
 
@@ -109,4 +109,11 @@ test("inconsistent precedence and unknown rule types require review", () => {
     evaluateFireblocksTransferPolicy([rule({ type: undefined }), rule()], transfer).state,
     "unknown"
   );
+});
+
+test("out-of-range native amounts remain unknown instead of widening a policy", () => {
+  const bounded = rule({
+    amount: { currency: "NATIVE", range: { min: "0", max: "9".repeat(90) } },
+  });
+  assert.equal(evaluateFireblocksTransferPolicy([bounded, rule()], transfer).state, "unknown");
 });

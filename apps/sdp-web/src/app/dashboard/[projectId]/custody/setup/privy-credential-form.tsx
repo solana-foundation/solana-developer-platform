@@ -1,9 +1,9 @@
 "use client";
 
+import type { ByokCustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import type { ByokCustodyProvider } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState, useTransition } from "react";
 import {

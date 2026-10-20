@@ -220,6 +220,7 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   // Human approvals have no five-minute signing timeout. This path only reads
   // the provider; a missing/ambiguous create response can never trigger a POST.
   const fireblocks = await repo.listTransfersByStatus({
+    environment: currentClusterScope().environment,
     statuses: ["processing"],
     fireblocks: true,
     limit: 50,

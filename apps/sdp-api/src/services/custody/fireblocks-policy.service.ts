@@ -1,10 +1,11 @@
-import {
-  evaluateFireblocksTransferPolicy,
-  FireblocksApiError,
-  readFireblocksAddressBook,
-  readFireblocksPolicy,
-} from "@sdp/custody/provisioning";
-import type { FireblocksPolicyCheck, FireblocksPolicySelection } from "@sdp/types";
+import { readFireblocksAddressBook } from "@sdp/custody/provisioning/fireblocks-address-book";
+import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
+import { readFireblocksPolicy } from "@sdp/custody/provisioning/fireblocks-policy";
+import { evaluateFireblocksTransferPolicy } from "@sdp/custody/provisioning/fireblocks-policy-match";
+import type {
+  FireblocksPolicyCheck,
+  FireblocksPolicySelection,
+} from "@sdp/types/fireblocks-policy";
 import { AppError, serviceUnavailable } from "@/lib/errors";
 import type { AppContext } from "@/routes/payments/context";
 import {

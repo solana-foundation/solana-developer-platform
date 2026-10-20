@@ -1,22 +1,20 @@
 import {
-  type CustodyProvisioningRuntime,
   type FireblocksAddressEntry,
   readFireblocksAddressBook,
-  resolveFireblocksTransferAsset,
-} from "@sdp/custody/provisioning";
-import { isAddress } from "@sdp/solana/address";
-import { SOL_MINT, wellKnownMint } from "@sdp/types";
-import { getDb } from "@/db";
+} from "@sdp/custody/provisioning/fireblocks-address-book";
+import { resolveFireblocksTransferAsset } from "@sdp/custody/provisioning/fireblocks-transfers";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { isAddress } from "@solana/addresses";
+import { getDb } from "@/db/client";
 import {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
-} from "@/db/repositories";
-import { getAuth, requireProjectId } from "@/lib/auth";
+} from "@/db/repositories/repository-factory";
+import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { badRequest, conflict, notFound, serviceUnavailable } from "@/lib/errors";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { AppContext } from "@/routes/payments/context";
-import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
-import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 
 export const fireblocksRuntime: CustodyProvisioningRuntime = {
@@ -73,9 +71,9 @@ export async function resolveFireblocksDestinationContext(
 ) {
   const { organizationId } = getAuth(c);
   const projectId = requireProjectId(c);
-  assertPaymentWalletExactAccess(c, input.walletId, ["wallets:read"]);
+  if (!walletAccessAllows(getAuth(c).walletAccess, input.walletId))
+    throw notFound("Custody wallet");
   const db = getDb(c.env);
-  await assertFreshApiKeyCustodyWalletAccess(db, getAuth(c), input.walletId, ["wallets:read"]);
   const access = await new CustodyRuntimeTargets(db, c.env, new Map()).getFireblocksTransferAccess({
     organizationId,
     projectId,

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { verify } from "node:crypto";
 import { type Context, Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
@@ -17,7 +17,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import internalCustody from "./index";
+import { internalCustody } from "./index";
 
 const ORGANIZATION_ID = "org_fireblocks_byok";
 const USER_ID = "usr_fireblocks_byok";
@@ -329,6 +329,7 @@ describe("Fireblocks BYOK lifecycle", () => {
       ORGANIZATION_ID,
       PROJECT_ID,
       wallet.id,
+      "payments.transfer",
       managedAdapter
     );
     expect(signer.address).toBe(ADDRESS);
@@ -338,6 +339,7 @@ describe("Fireblocks BYOK lifecycle", () => {
       ORGANIZATION_ID,
       PROJECT_ID,
       wallet.id,
+      "payments.transfer",
       managedAdapter
     );
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -346,6 +348,7 @@ describe("Fireblocks BYOK lifecycle", () => {
         ORGANIZATION_ID,
         `${PROJECT_ID}_production`,
         wallet.id,
+        "payments.transfer",
         managedAdapter
       )
     ).rejects.toThrow();
@@ -359,6 +362,7 @@ describe("Fireblocks BYOK lifecycle", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         wallet.id,
+        "payments.transfer",
         managedAdapter
       )
     ).rejects.toThrow();
@@ -465,10 +469,17 @@ describe("Fireblocks CSR security", () => {
       request("/fireblocks/csr", {}, PROJECT_ID, key),
       request("/fireblocks/csr", {}, PROJECT_ID, key),
     ]);
-    expect(responses.map((r) => r.status)).toEqual([201, 201]);
-    const first = (await responses[0].json()).data.csr;
-    const second = (await responses[1].json()).data.csr;
-    expect(first).toEqual(second);
+    const successful = responses.find((response) => response.status === 201);
+    if (!successful) throw new Error("Expected a successful CSR request");
+    for (const response of responses) {
+      if (response.status === 409) {
+        expect((await response.json()).error.code).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+      } else expect(response.status).toBe(201);
+    }
+    const first = (await successful.json()).data.csr;
+    const csrReplay = await request("/fireblocks/csr", {}, PROJECT_ID, key);
+    expect(csrReplay.status).toBe(201);
+    expect((await csrReplay.json()).data.csr).toEqual(first);
     expect(first.id).not.toBe(fields.signingKeyId);
     const previous = (await (await request("/fireblocks/csr", undefined)).json()).data.csr;
     expect(previous.id).toBe(first.id);

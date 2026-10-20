@@ -1,14 +1,14 @@
-import { invalidateFireblocksAddressBook } from "@sdp/custody/provisioning";
-import { SDP_RAMP_PROVIDER_STAGES, wellKnownMint } from "@sdp/types";
+import { invalidateFireblocksAddressBook } from "@sdp/custody/provisioning/fireblocks-address-book";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import internalCustody from "@/routes/internal-custody";
-import { noopObservability } from "@/runtime/observability";
+import { internalCustody } from "@/routes/internal-custody";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
@@ -139,7 +139,6 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 const api = createApp({
-  observability: noopObservability,
   rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
 });
 const contactId = "cpty_book";
@@ -292,8 +291,7 @@ describe("Fireblocks read-only address book", () => {
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
       createdBy: USER_ID,
-      role: "api_readonly",
-      permissions: ["wallets:read", "counterparties:read"],
+      grants: ["wallets.read", "counterparties.read"],
     });
     token = raw;
     expect((await bookRequest()).status).toBe(200);

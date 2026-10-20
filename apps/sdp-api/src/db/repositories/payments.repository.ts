@@ -219,6 +219,13 @@ export interface PaymentsRepositoryContext {
 }
 
 export interface PaymentsRepository {
+  /** Exactly one provider submission attempt per durable Fireblocks intent. */
+  claimFireblocksTransferSubmission(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    now: string;
+  }): Promise<PaymentTransferRow | null>;
   /** Throttle and serialize provider reads across dashboard requests and cron workers. */
   claimFireblocksTransferPoll(input: {
     transferId: string;

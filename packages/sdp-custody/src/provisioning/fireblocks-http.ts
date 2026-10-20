@@ -1,5 +1,5 @@
 import { importPKCS8, SignJWT } from "jose";
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import { parseJsonResponse, sha256Hex } from "./common";
 import type { CustodyProvisioningRuntime } from "./runtime";
 

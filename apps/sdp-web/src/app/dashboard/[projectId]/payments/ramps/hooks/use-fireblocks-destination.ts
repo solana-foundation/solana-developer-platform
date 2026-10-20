@@ -1,6 +1,6 @@
 "use client";
 
-import { SOL_MINT } from "@sdp/types";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";

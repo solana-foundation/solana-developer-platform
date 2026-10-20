@@ -1,4 +1,4 @@
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl, sha256Hex, sortJsonKeys } from "./common";
 import { fireblocksRequest } from "./fireblocks-http";
 import type { FireblocksTransferAccess } from "./fireblocks-transfers";

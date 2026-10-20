@@ -1,8 +1,11 @@
 "use client";
-import type { FireblocksPolicyCheck, FireblocksPolicySelection } from "@sdp/types";
+import type {
+  FireblocksPolicyCheck,
+  FireblocksPolicySelection,
+} from "@sdp/types/fireblocks-policy";
+import { Button } from "@sdp/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectId } from "@/lib/use-dashboard-project";

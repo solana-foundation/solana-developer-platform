@@ -1,4 +1,4 @@
-import { SigningError } from "../signing";
+import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl } from "./common";
 import { fireblocksRequest } from "./fireblocks-http";
 import type { CustodyProvisioningRuntime } from "./runtime";

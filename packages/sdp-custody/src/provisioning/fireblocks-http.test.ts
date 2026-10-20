@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, webcrypto } from "node:crypto";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { FireblocksApiError, fireblocksRequest } from "./fireblocks-http";
 import type { CustodyProvisioningRuntime } from "./runtime";
 

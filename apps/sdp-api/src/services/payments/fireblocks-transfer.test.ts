@@ -1,15 +1,17 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
-import { getDb } from "@/db";
-import { createSystemPaymentsRepository } from "@/db/repositories";
+import { getDb } from "@/db/client";
+import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import internalCustody from "@/routes/internal-custody";
-import { noopObservability } from "@/runtime/observability";
+import { internalCustody } from "@/routes/internal-custody";
+import { AuditService } from "@/services/audit.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -93,6 +95,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 
 beforeEach(async () => {
   testEnv.SDP_RELEASE_CHANNEL = "beta";
+  testEnv.SOLANA_NETWORK = "devnet";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -141,19 +144,18 @@ const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const paymentApp = createApp({
-  observability: noopObservability,
   rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
 });
 let walletId: string;
-let createBody: import("@sdp/custody/provisioning").FireblocksTransferRequest;
+let createBody: import("@sdp/custody/provisioning/fireblocks-transfers").FireblocksTransferRequest;
 let providerStatus: string;
 let lostResponse = false;
 let readMissing = false;
 let createStatus = 200;
 let settlementPatch: Record<string, unknown> = {};
-async function ready() {
+async function ready(projectId = PROJECT_ID) {
   const mock = providerResponse();
-  const connection = await connect();
+  const connection = await connect(projectId);
   const wallet = await getDb(env).queryOne<{ id: string }>(
     "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
     [connection.connectionId]
@@ -217,14 +219,18 @@ async function ready() {
   mock.mockClear();
   return mock;
 }
-async function send(key = "fireblocks-test", patch: Record<string, unknown> = {}) {
+async function send(
+  key = "fireblocks-test",
+  patch: Record<string, unknown> = {},
+  projectId = PROJECT_ID
+) {
   return paymentApp.request(
     "/v1/payments/transfers",
     {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Project-ID": PROJECT_ID,
+        "X-Project-ID": projectId,
         "Content-Type": "application/json",
         "Idempotency-Key": key,
       },
@@ -366,7 +372,9 @@ describe("native Fireblocks BYOK payment routes", () => {
       new Date(Date.now() - 3600000).toISOString(),
       transfer.id,
     ]);
-    await trackPendingTransfers(testEnv);
+    await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      trackPendingTransfers(testEnv)
+    );
     expect(
       (
         await createSystemPaymentsRepository(testEnv).getTransferById({
@@ -415,11 +423,19 @@ describe("native Fireblocks BYOK payment routes", () => {
   it("joins concurrent sends under one intent and throttles concurrent status reads", async () => {
     const mock = await ready();
     const responses = await Promise.all([send(), send()]);
-    for (const response of responses)
-      expect(response.status, await response.clone().text()).toBe(200);
-    const ids = await Promise.all(
-      responses.map(async (response) => (await response.json()).data.transfer.id)
-    );
+    const successful = responses.find((response) => response.status === 200);
+    if (!successful) throw new Error("Expected one concurrent request to succeed");
+    for (const response of responses) {
+      if (response.status === 409) {
+        expect((await response.json()).error.code).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+      } else expect(response.status).toBe(200);
+    }
+    const replay = await send();
+    expect(replay.status).toBe(200);
+    const ids = [
+      (await successful.json()).data.transfer.id,
+      (await replay.json()).data.transfer.id,
+    ];
     expect(ids[0]).toBe(ids[1]);
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     const read = () =>
@@ -431,6 +447,87 @@ describe("native Fireblocks BYOK payment routes", () => {
     await Promise.all([read(), read(), read()]);
     expect(mock.mock.calls.filter(([, init]) => init?.method === "GET")).toHaveLength(1);
   });
+  it.each([
+    { projectId: `${PROJECT_ID}_production`, defaultNetwork: "devnet", assetId: "SOL" },
+    { projectId: PROJECT_ID, defaultNetwork: "mainnet-beta", assetId: "SOL_TEST" },
+  ] as const)(
+    "uses the project's $assetId despite deployment default $defaultNetwork",
+    async ({ projectId, defaultNetwork, assetId }) => {
+      testEnv.SOLANA_NETWORK = defaultNetwork;
+      const mock = await ready(projectId);
+      const response = await send("project-network", {}, projectId);
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(createBody.assetId).toBe(assetId);
+      expect(mock).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("only polls Fireblocks intents in the cron's current environment", async () => {
+    const projectId = `${PROJECT_ID}_production`;
+    const mock = await ready(projectId);
+    expect((await send("cron-production", {}, projectId)).status).toBe(200);
+    mock.mockClear();
+    await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      trackPendingTransfers(testEnv)
+    );
+    expect(mock).not.toHaveBeenCalled();
+    await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      trackPendingTransfers(testEnv)
+    );
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
+
+  it.each(["suspended organization", "revoked key", "removed grant", "removed wallet"])(
+    "refuses %s changed after route authorization, before the provider POST",
+    async (change) => {
+      const mock = await ready();
+      const db = getDb(env);
+      const raw = `sk_test_${crypto.randomUUID().replaceAll("-", "")}`;
+      await seedProjectApiKey(db, testEnv, {
+        key: { id: "key_fireblocks_send", raw, prefix: raw.slice(0, 16) },
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        createdBy: USER_ID,
+        grants: ["transfers.execute"],
+      });
+      token = raw;
+      const original = AuditService.prototype.beginCritical;
+      vi.spyOn(AuditService.prototype, "beginCritical").mockImplementation(async function (
+        this: AuditService,
+        ...args
+      ) {
+        const intent = await original.apply(this, args);
+        if (change === "suspended organization")
+          await db.execute("UPDATE organizations SET status = 'suspended' WHERE id = ?", [
+            ORGANIZATION_ID,
+          ]);
+        else if (change === "revoked key")
+          await db.execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [
+            "key_fireblocks_send",
+          ]);
+        else if (change === "removed grant")
+          await db.execute(
+            "UPDATE api_keys SET grants = ARRAY['transfers.read']::text[] WHERE id = ?",
+            ["key_fireblocks_send"]
+          );
+        else
+          await db.execute("UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?", [
+            "key_fireblocks_send",
+          ]);
+        return intent;
+      });
+      const response = await send();
+      expect(response.status, await response.clone().text()).toBe(403);
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+      const row = await db.queryOne<{ status: string }>(
+        "SELECT status FROM payment_transfers WHERE organization_id = ?",
+        [ORGANIZATION_ID]
+      );
+      expect(row?.status).toBe("failed");
+    }
+  );
+
   it("refuses a disabled connection before contacting Fireblocks", async () => {
     const mock = await ready();
     await getDb(env).execute(

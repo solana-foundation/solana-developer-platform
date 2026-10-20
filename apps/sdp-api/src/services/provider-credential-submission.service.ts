@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { ByokCustodyProvider } from "@sdp/types";
+import type { ByokCustodyProvider } from "@sdp/types/custody";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";

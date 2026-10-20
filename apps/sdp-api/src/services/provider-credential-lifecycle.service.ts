@@ -232,7 +232,8 @@ async function submitRotationCandidate(
         secretStore,
         candidateId,
         current.credential.provider,
-        fields
+        fields,
+        idempotencyKey
       );
     }
   } catch (error) {
@@ -390,12 +391,14 @@ async function finishGcpRotationCreation(
   }
   let written: StoredCredentialSecret | undefined;
   try {
+    if (!candidate.idempotency_key) throw internalError();
     written = await writeRotationSecret(
       context,
       secretStore,
       candidateId,
       current.credential.provider,
       fields,
+      candidate.idempotency_key,
       existingSecretRef
     );
     const { secretRef, secretVersionRef } = written;
@@ -1631,6 +1634,7 @@ async function writeRotationSecret(
   candidateId: string,
   provider: "privy" | "fireblocks",
   fields: ByokCredentialFields,
+  idempotencyKey: string,
   existingSecretRef?: string
 ): Promise<StoredCredentialSecret> {
   try {
@@ -1638,12 +1642,7 @@ async function writeRotationSecret(
       orgId: context.organizationId,
       provider,
       providerCredentialId: candidateId,
-      payload: await resolveRegistrationPayload(
-        context.c,
-        provider,
-        fields,
-        context.c.req.header("Idempotency-Key") ?? ""
-      ),
+      payload: await resolveRegistrationPayload(context.c, provider, fields, idempotencyKey),
       existingSecretRef,
     });
   } catch (error) {

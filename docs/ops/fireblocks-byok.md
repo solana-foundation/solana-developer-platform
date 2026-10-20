@@ -5,13 +5,13 @@ API deployment to offer it. The dashboard consumes the API's provider availabili
 stable refuses new registrations, installation, credential rotation, wallet creation,
 signing, and payment submission. Existing payments still reconcile through read-only
 provider requests, and cancellation/deactivation remain available. Managed Fireblocks
-custody retains its stable stage. Release channel and Solana network are independent:
+custody is also beta on current main. Release channel and Solana network are independent:
 a beta deployment can connect to mainnet.
 
 Fireblocks connections use the same project-scoped encrypted credential lifecycle as Privy:
 installation, credential checks, replacement, rotation, rollback, deactivation, and secret
 retirement. Organization entitlement to Fireblocks is still required. Deploy migration
-`0127_fireblocks_byok.sql` and `0128_fireblocks_csr_requests.sql` before the API. They extend
+migrations `0152_fireblocks_byok.sql` through `0157_fireblocks_credential_checks.sql` before the API. They extend
 the GCP reservation and cleanup constraints, enforce one unfinished Fireblocks installation,
 and add tenant-isolated, encrypted CSR registration storage.
 
@@ -212,8 +212,9 @@ The minimal integration retains server-generated RSA-4096 keys, CSR download, AP
 connection, named vault selection and native SOL/USDC transfers. SDP does not create whitelist
 entries, edit or publish Fireblocks policies, or automatically import Fireblocks contacts.
 Customers manage their address books and transfer policies in Fireblocks. Previously imported
-SDP contacts remain intact. Historical migrations 0129 and 0130 are retained for compatibility
-with existing databases; their proposal/import tables have no runtime readers or writers here.
+SDP contacts remain intact. The original address-book and proposal schemas are retained in
+migrations 0154 and 0155; their tables have no runtime readers or writers here. These migrations
+were renumbered from the unreleased branch to avoid collisions with main.
 
 Selecting a destination checks its exact address, asset and network against internal and external
 Fireblocks wallets. Only a successful lookup confirming absence shows the whitelist warning.
@@ -304,3 +305,90 @@ existing RAW adapter and are outside native SOL/USDC transfer coverage.
 The audit fixes add **zero** Fireblocks or Solana RPC requests: they validate fields already
 returned by the existing status GET. Tests used isolated PostgreSQL/Redis, generated fixture
 keys and mocked provider HTTP; no customer credentials or mainnet funds were used.
+
+## Rebase security review — 2026-10-20
+
+Rebased the minimal branch onto local main `ea94a44cf83a44db52eaaeb989e2e630d32323d2`.
+The earlier review above describes the pre-rebase implementation. This pass reviewed the final
+combined diff, including main's action grants, live money-admission checks, project cluster
+scope, shared idempotency middleware, package boundaries and credential lifecycle changes.
+
+Rebase findings addressed:
+
+- Native Fireblocks submission now rechecks organization status and the initiating principal's
+  current grants, revocation and wallet access immediately before the provider POST. A failed
+  check closes the intent as failed without contacting Fireblocks; audit completion records failure.
+  The static value-movement check now fences the native provider submission capability as well
+  as credential-backed signer construction.
+- Payment network selection uses the current project's cluster, and the pending-transfer cron
+  filters by its current environment. Tests deliberately give the deployment an opposing default
+  network and verify that sandbox polling never reads a production payment.
+- Every Fireblocks route declares an action and module owner. Read-only destination/policy checks
+  require both wallet and contact read grants and respect the authenticated wallet scope.
+- CSR generation uses the shared required-key idempotency step after authorization, including
+  beta/entitlement admission on replay. Vault discovery remains a read-only POST with a documented
+  inventory exemption so credential references stay out of URLs. Rotation passes its durable key
+  into credential storage instead of reading a request header deep in the lifecycle.
+- Migrations have unique numbers after main; the unfinished-connection index is built concurrently
+  in its own migration, and widened constraints are added NOT VALID then validated separately.
+  Fresh installation was exercised against isolated PostgreSQL.
+- Fireblocks credential verification stays inside the custody package. Privy keeps its current
+  idempotent wallet-provisioning behavior. Policy amounts use Solana fixed-point primitives, respecting custody's package boundary.
+- The current redesigned setup flow uses the shared BYOK form. No address-book mutation,
+  automatic contact import, policy proposal or policy publication has been restored.
+
+One unrelated test fixture on main used wall-clock milliseconds for successive Earn withdrawal
+states; same-millisecond events could sort by random IDs and fail nondeterministically. Its
+fixture now supplies monotonic timestamps without changing production Earn behavior.
+
+The full tracked-file Biome sweep also reports 26 SVG accessibility errors (missing titles) and
+63 warnings already present on main. All 26 error files were compared byte-for-byte with main.
+These are outside this change; the CI changed-file, script-import and dependency lint checks
+are the relevant clean gates for this branch.
+
+The native payment path still makes zero Solana RPC calls at submission. These rebase fixes add
+zero Fireblocks or Solana RPC requests; the additional admission checks are database reads.
+No live customer credentials, transaction proposals or mainnet funds were used in this review.
+Fireblocks approval behavior and deployed GCP KMS/Secret Manager access remain live-test limits.
+
+Verification for this rebase:
+
+- Full API suite: **471 files, 7,537 passing tests, one existing skip**. Coverage thresholds
+  passed: 84.08% statements, 74.95% branches, 89.86% functions and 84.93% lines.
+- Full dashboard suite: **387 files, 3,576 passing tests**. All 24 remaining workspace unit-test
+  tasks and all 237 repository script tests passed; existing opt-in provider smoke tests remain
+  skipped. Final custody policy tests also cover out-of-range fixed-point values conservatively.
+- Full workspace typechecking, changed-file Biome, CI script/dependency lint, module boundaries,
+  value-movement fences, secret-reference serialization, pinned dependencies, UI-flow coverage,
+  migration compatibility, route inventory, API playground drift and docs link integrity passed.
+  API/docs artifacts were regenerated with their owning scripts.
+- The temporary signing helper was exercised against a disposable local bare repository with a
+  fixture signing key. It preserves trees/messages/authors, signs all four post-main commits,
+  rejects a newer remote tip with its explicit lease, supports retry after signing, refuses dirty
+  checkouts/wrong branches and leaves the original branch unchanged. No real push was performed.
+
+No unresolved critical/high-severity issue was identified in this scoped source review. The
+repository-wide SVG lint findings and live-provider limitations above remain explicit exceptions.
+
+### Existing local databases from the unreleased branch
+
+The old branch used migration names 0127–0130, now occupied by main. A fresh database needs no
+manual work. For a local database that already applied those **Fireblocks** migrations, verify
+its schema, then rename only those four ledger entries before running the normal migrations:
+
+```sql
+BEGIN;
+UPDATE schema_migrations SET version = '0152_fireblocks_byok.sql'
+WHERE version = '0127_fireblocks_byok.sql';
+UPDATE schema_migrations SET version = '0153_fireblocks_csr_requests.sql'
+WHERE version = '0128_fireblocks_csr_requests.sql';
+UPDATE schema_migrations SET version = '0154_fireblocks_address_book.sql'
+WHERE version = '0129_fireblocks_address_book.sql';
+UPDATE schema_migrations SET version = '0155_fireblocks_policy_proposals.sql'
+WHERE version = '0130_fireblocks_policy_proposals.sql';
+COMMIT;
+```
+
+This preserves the already-created tables and keys. Main's migrations and the new concurrent
+index/constraint-validation migrations still run normally. This review did not modify the
+existing local mainnet database.

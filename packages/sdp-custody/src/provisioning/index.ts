@@ -994,9 +994,3 @@ function findSolanaAddress(
 
   return addresses.find((entry) => Boolean(entry.address))?.address;
 }
-
-export {
-  type FireblocksAddressEntry,
-  invalidateFireblocksAddressBook,
-  readFireblocksAddressBook,
-} from "./fireblocks-address-book";

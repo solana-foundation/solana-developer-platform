@@ -1,8 +1,8 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { DownloadIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import {
   type FireblocksCsr,

@@ -2,7 +2,6 @@ import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
 import {
   CUSTODY_PROVIDERS,
-  isByokCustodyProvider,
   type CustodyConfigStatus,
   type CustodyConnectionCheckStatus,
   type CustodyConnectionLifecycle,
@@ -10,6 +9,7 @@ import {
   type CustodyProvider,
   type CustodyWalletPurpose,
   type CustodyWalletStatus,
+  isByokCustodyProvider,
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
@@ -45,7 +45,10 @@ import {
 } from "@/services/custody/provisioning";
 import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
-import { createPrivyAdapterFromCredential, createFireblocksAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
+import {
+  createFireblocksAdapterFromCredential,
+  createPrivyAdapterFromCredential,
+} from "@/services/domain/signing/provider-adapter-factory";
 import {
   assertCustodyProviderEntitled,
   assertManagedCustodyUseAllowed,
@@ -585,29 +588,28 @@ export class CustodyRuntimeTargets {
     try {
       if (authentication.provider === "fireblocks") {
         provisioned = await provisionFireblocksVaultAccount(this.env, {
-              orgId: target.organizationId,
-              orgSlug: target.projectId,
-              apiKey: authentication.apiKey,
-              apiSecretPem: authentication.apiSecretPem,
-              assetId: authentication.assetId,
-            }).then((wallet) => ({
-              walletId: `fb_${wallet.vaultAccountId}`,
-              address: wallet.publicKey,
-            }));
-
+          orgId: target.organizationId,
+          orgSlug: target.projectId,
+          apiKey: authentication.apiKey,
+          apiSecretPem: authentication.apiSecretPem,
+          assetId: authentication.assetId,
+        }).then((wallet) => ({
+          walletId: `fb_${wallet.vaultAccountId}`,
+          address: wallet.publicKey,
+        }));
       } else {
-      const requestId = params.idempotency?.requestId;
-      provisioned = await provisionPrivyWallet(
-        this.env,
-        requestId
-          ? {
-              credentialRequest: true,
-              externalId: privyWalletExternalId(requestId),
-              idempotencyKey: requestId,
-            }
-          : { credentialRequest: true },
-        authentication
-      );
+        const requestId = params.idempotency?.requestId;
+        provisioned = await provisionPrivyWallet(
+          this.env,
+          requestId
+            ? {
+                credentialRequest: true,
+                externalId: privyWalletExternalId(requestId),
+                idempotencyKey: requestId,
+              }
+            : { credentialRequest: true },
+          { appId: authentication.appId, appSecret: authentication.appSecret }
+        );
       }
     } catch (error) {
       if (!(error instanceof SigningError) || error.code === "NETWORK_ERROR") {

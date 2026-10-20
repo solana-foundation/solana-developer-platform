@@ -1,3 +1,4 @@
+import { cmpDecimalFixedPoint, decimalFixedPoint } from "@solana/fixed-points";
 import type { FireblocksAddressEntry } from "./fireblocks-address-book";
 import type { FireblocksPolicyRule } from "./fireblocks-policy";
 
@@ -97,12 +98,13 @@ function assetMatch(value: unknown, id: string): Match {
 function compare(a: string, b: string): number | null {
   if (!/^\d+(\.\d+)?$/.test(a) || !/^\d+(\.\d+)?$/.test(b) || a.length > 100 || b.length > 100)
     return null;
-  const [ai, af = ""] = a.split(".");
-  const [bi, bf = ""] = b.split(".");
-  const digits = Math.max(af.length, bf.length);
-  const av = BigInt(ai + af.padEnd(digits, "0"));
-  const bv = BigInt(bi + bf.padEnd(digits, "0"));
-  return av === bv ? 0 : av > bv ? 1 : -1;
+  try {
+    const scale = Math.max(a.split(".")[1]?.length ?? 0, b.split(".")[1]?.length ?? 0);
+    const amount = decimalFixedPoint("unsigned", 256, scale);
+    return cmpDecimalFixedPoint(amount(a), amount(b));
+  } catch {
+    return null;
+  }
 }
 function amountMatch(value: unknown, amount: string): Match {
   if (value === undefined) return true;

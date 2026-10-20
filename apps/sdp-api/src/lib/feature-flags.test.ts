@@ -299,11 +299,13 @@ describe("release channels", () => {
     expect(SDP_BYOK_CUSTODY_PROVIDER_STAGES).toEqual({ privy: "stable", fireblocks: "beta" });
   });
 
-  it.each(SDP_RELEASE_CHANNEL_NAMES)("gates only Fireblocks BYOK on %s", (channel) => {
+  it.each(SDP_RELEASE_CHANNEL_NAMES)("gates Fireblocks custody modes on %s", (channel) => {
     expect(isCustodyProviderInReleaseChannel(channel, "fireblocks", "byok")).toBe(
       channel !== "stable"
     );
-    expect(isCustodyProviderInReleaseChannel(channel, "fireblocks", "managed")).toBe(true);
+    expect(isCustodyProviderInReleaseChannel(channel, "fireblocks", "managed")).toBe(
+      channel !== "stable"
+    );
   });
 
   it.each(SDP_RELEASE_CHANNEL_NAMES)(

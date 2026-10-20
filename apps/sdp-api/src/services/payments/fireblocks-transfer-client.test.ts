@@ -1,11 +1,11 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import {
-  type CustodyProvisioningRuntime,
   createFireblocksTransfer,
   type FireblocksTransferRequest,
   readFireblocksTransfer,
   resolveFireblocksTransferAsset,
-} from "@sdp/custody/provisioning";
+} from "@sdp/custody/provisioning/fireblocks-transfers";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { jwtVerify } from "jose";
 import { describe, expect, it, vi } from "vitest";
 

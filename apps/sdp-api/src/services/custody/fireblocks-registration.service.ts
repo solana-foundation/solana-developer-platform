@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
-import { FireblocksApiError } from "@sdp/custody/provisioning";
-import { type ByokCustodyProvider, isProviderCredentialCreationInProgress } from "@sdp/types";
+import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
+import {
+  type ByokCustodyProvider,
+  isProviderCredentialCreationInProgress,
+} from "@sdp/types/custody";
 import type { Context } from "hono";
-import { type DatabaseClient, getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   badRequest,
@@ -48,7 +51,7 @@ export interface FireblocksCsr {
 function publicCsr(row: CsrRow): FireblocksCsr {
   return { id: row.id, csrPem: row.csr_pem, expiresAt: row.expires_at };
 }
-async function admit(c: AppContext) {
+export async function admitFireblocksRegistration(c: AppContext) {
   const auth = getAuth(c);
   if (!auth.userId || !c.get("clerk"))
     throw forbidden("Credential administration requires a signed-in user");
@@ -60,7 +63,7 @@ async function admit(c: AppContext) {
 
 /** Reloads public onboarding material only; this endpoint never decrypts a key. */
 export async function getPendingFireblocksCsr(c: AppContext): Promise<FireblocksCsr | null> {
-  const scope = await admit(c);
+  const scope = await admitFireblocksRegistration(c);
   const row = await getDb(c.env).queryOne<CsrRow>(
     `SELECT id, csr_pem, expires_at FROM fireblocks_csr_requests
      WHERE organization_id = ? AND project_id = ? AND encrypted_private_key IS NOT NULL
@@ -76,7 +79,7 @@ export async function createFireblocksCsr(
   c: AppContext,
   idempotencyKey: string
 ): Promise<FireblocksCsr> {
-  const scope = await admit(c);
+  const scope = await admitFireblocksRegistration(c);
   assertCustodyEncryptionScheme(c.env);
   const db = getDb(c.env);
   const existing = await db.queryOne<CsrRow>(
@@ -175,7 +178,7 @@ export async function resolveRegistrationPayload(
   const cached = cache.get(fingerprint);
   if (cached) return cached;
   const payload = (async () => {
-    const scope = await admit(c);
+    const scope = await admitFireblocksRegistration(c);
     const row = await getDb(c.env).queryOne<CsrRow>(
       `UPDATE fireblocks_csr_requests SET claim_fingerprint = ?
        WHERE id = ? AND organization_id = ? AND project_id = ?
@@ -212,7 +215,7 @@ export async function resolveRegistrationPayload(
 export async function retireFireblocksCsr(
   c: AppContext,
   fields: ByokCredentialFields,
-  credential: { id: string; status: import("@sdp/types").ProviderCredentialStatus }
+  credential: { id: string; status: import("@sdp/types/custody").ProviderCredentialStatus }
 ): Promise<void> {
   if (!("signingKeyId" in fields) || isProviderCredentialCreationInProgress(credential.status))
     return;
@@ -250,7 +253,7 @@ export async function discoverFireblocksVaults(
     namePrefix?: string;
   }
 ) {
-  const scope = await admit(c);
+  const scope = await admitFireblocksRegistration(c);
   await enforceMeteredQuota(c, { name: "fireblocks-vault-discovery", actorMax: 30, orgMax: 100 });
   const row = await getDb(c.env).queryOne<CsrRow>(
     `SELECT id, encrypted_private_key FROM fireblocks_csr_requests
