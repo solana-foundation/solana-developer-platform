@@ -358,7 +358,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       .first<SavedActivationSlots>();
   }
 
-  it("clears a step's signature and expiry only while its slot still holds that signature", async () => {
+  it("clears a step's signature and expiry only while its slot still holds that signature and every later slot is empty", async () => {
     const attempt = await createUnsignedActivationAttempt("prpa_repo_clear_signature");
     const sibling = await createUnsignedActivationAttempt("prpa_repo_clear_signature_sibling");
     await fillActivationSlots(attempt.id, {
@@ -381,7 +381,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
     expect(
       await clear({
-        slot: PLAN_SLOT,
+        slot: SETUP_SLOT,
         recurringPaymentId: attempt.recurring_payment_id,
         projectId: TEST_PROJECT_ID,
         signature: testSignature(2),
@@ -397,16 +397,24 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     ).toBe(false);
     expect(
       await clear({
-        slot: PLAN_SLOT,
+        slot: SETUP_SLOT,
         recurringPaymentId: attempt.recurring_payment_id,
         projectId: SIBLING_PROJECT_ID,
-        signature: testSignature(1),
+        signature: testSignature(3),
+      })
+    ).toBe(false);
+    expect(
+      await clear({
+        slot: SETUP_SLOT,
+        recurringPaymentId: sibling.recurring_payment_id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(3),
       })
     ).toBe(false);
     expect(
       await clear({
         slot: PLAN_SLOT,
-        recurringPaymentId: sibling.recurring_payment_id,
+        recurringPaymentId: attempt.recurring_payment_id,
         projectId: TEST_PROJECT_ID,
         signature: testSignature(1),
       })
@@ -419,27 +427,64 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
     expect(
       await clear({
-        slot: PLAN_SLOT,
-        recurringPaymentId: attempt.recurring_payment_id,
-        projectId: TEST_PROJECT_ID,
-        signature: testSignature(1),
-      })
-    ).toBe(true);
-    expect(await savedActivationSlots(attempt.id)).toEqual({
-      plan_creation_signature: null,
-      authorization_setup_signature: testSignature(3),
-      last_valid_block_height: null,
-    });
-    expect(
-      await clear({
         slot: SETUP_SLOT,
         recurringPaymentId: attempt.recurring_payment_id,
         projectId: TEST_PROJECT_ID,
         signature: testSignature(3),
       })
     ).toBe(true);
+    expect(await savedActivationSlots(attempt.id)).toEqual({
+      plan_creation_signature: testSignature(1),
+      authorization_setup_signature: null,
+      last_valid_block_height: null,
+    });
+    expect(
+      await clear({
+        slot: PLAN_SLOT,
+        recurringPaymentId: attempt.recurring_payment_id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(1),
+      })
+    ).toBe(true);
     expect(await savedActivationSlots(attempt.id)).toEqual(UNSIGNED_SLOTS);
   });
+
+  it.each(
+    PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES.filter(
+      (status) => !isInFlightRecurringPaymentAttemptStatus(status)
+    )
+  )(
+    "refuses to clear a %s attempt's step signature and leaves the row unchanged",
+    async (status) => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_clear_signature_settled");
+      await fillActivationSlots(attempt.id, {
+        planCreationSignature: testSignature(1),
+        authorizationSetupSignature: null,
+        lastValidBlockHeight: "301",
+      });
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payment_activation_attempts SET status = ? WHERE id = ?")
+        .bind(status, attempt.id)
+        .run();
+
+      expect(
+        await repo.clearStepSignature({
+          slot: PLAN_SLOT,
+          id: attempt.id,
+          recurringPaymentId: attempt.recurring_payment_id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          signature: testSignature(1),
+          updatedAt: STEP_UPDATED_AT,
+        })
+      ).toBe(false);
+      expect(await savedActivationSlots(attempt.id)).toEqual({
+        plan_creation_signature: testSignature(1),
+        authorization_setup_signature: null,
+        last_valid_block_height: "301",
+      });
+    }
+  );
 
   describe("setStepSignature", () => {
     const setPlanSignature = (input: {
