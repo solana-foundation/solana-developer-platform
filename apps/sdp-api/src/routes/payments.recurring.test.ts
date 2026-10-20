@@ -25,7 +25,6 @@ import {
   lamports,
   removeNullCharacters,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
@@ -921,7 +920,7 @@ describe("Payments routes — recurring", () => {
     });
   });
 
-  it("rolls back subscription and recurring activation finalization together", async () => {
+  it("rolls back subscription and recurring activation finalization together, keeping the activation in flight", async () => {
     const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const createRepository =
       paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
@@ -980,13 +979,13 @@ describe("Payments routes — recurring", () => {
         attempt_stage: string;
       }>();
     expect(rows).toMatchObject({
-      recurring_status: "pending_activation",
+      recurring_status: "activating",
       plan_id: expect.any(String),
       subscription_id: expect.any(String),
       subscription_status: "pending_authorization",
       authorization_signature: null,
-      attempt_status: "failed",
-      attempt_stage: "finalize",
+      attempt_status: "processing",
+      attempt_stage: "authorize_subscription",
     });
   });
 
@@ -1938,6 +1937,8 @@ describe("Payments routes — recurring", () => {
   it("keeps a cancel whose send outcome is unknown in flight with its signature saved", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+    // The re-read sees the delegation uncanceled while the send can still land.
+    recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
@@ -1945,7 +1946,7 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expect(cancelRes.status).toBe(500);
+    expect(cancelRes.status).toBe(409);
     expect(
       await getDb(env)
         .prepare(
@@ -4361,12 +4362,11 @@ describe("Payments routes — recurring", () => {
            plan_id,
            counterparty_id,
            subscriber_address,
-           authorization_signature,
            status,
            created_by,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           subscriptionId,
@@ -4375,7 +4375,6 @@ describe("Payments routes — recurring", () => {
           planId,
           recurringPayment.counterpartyId,
           sourceSigner.address,
-          authorizationSignature,
           "pending_authorization",
           TEST_USER.id,
           now,
@@ -4390,7 +4389,6 @@ describe("Payments routes — recurring", () => {
                 subscription_id = ?,
                 plan_created_at = ?,
                 plan_creation_signature = ?,
-                authorization_signature = ?,
                 updated_at = ?
           WHERE id = ?`
         )
@@ -4399,9 +4397,28 @@ describe("Payments routes — recurring", () => {
           subscriptionId,
           "1770000000",
           planCreationSignature,
-          authorizationSignature,
           staleUpdatedAt,
           recurringPayment.id
+        )
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_recurring_payment_activation_attempts (
+             id, organization_id, project_id, recurring_payment_id, status, stage,
+             plan_creation_signature, authorization_signature, error, metadata,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'processing', 'authorize_subscription', ?, ?, NULL,
+             '{}'::jsonb, ?, ?)`
+        )
+        .bind(
+          `prpa_${crypto.randomUUID()}`,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          recurringPayment.id,
+          planCreationSignature,
+          authorizationSignature,
+          staleUpdatedAt,
+          staleUpdatedAt
         )
         .run();
 
@@ -4431,8 +4448,7 @@ describe("Payments routes — recurring", () => {
     }
   );
 
-  it("journals failed on-chain activation attempts and retries with a fresh signature", async () => {
-    const _sourceSigner = recurringExecution.sourceSigner();
+  it("journals an activation whose plan failed on-chain and expired, and retries with a fresh signature", async () => {
     mockDistinctRecentBlockhashes();
     confirmTransactionMock
       .mockResolvedValueOnce({
@@ -4450,6 +4466,12 @@ describe("Payments routes — recurring", () => {
     const recurringPayment = await createRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
       headers: RECURRING_HEADERS,
+    });
+    // The re-read after the failure finds no plan, one block past the send's expiry.
+    recurringExecution.showChain({
+      ...DEFAULT_RECURRING_CHAIN,
+      blockHeight: 1_001,
+      plan: () => null,
     });
 
     const failedRes = await app.request(
@@ -4472,20 +4494,24 @@ describe("Payments routes — recurring", () => {
 
     const attempts = await getDb(env)
       .prepare(
-        `SELECT status, stage, error
+        `SELECT status, stage, plan_creation_signature, error
            FROM payment_recurring_payment_activation_attempts
           WHERE recurring_payment_id = ?
           ORDER BY created_at DESC`
       )
       .bind(recurringPayment.id)
-      .all<{ status: string; stage: string; error: string | null }>();
+      .all<{
+        status: string;
+        stage: string;
+        plan_creation_signature: string | null;
+        error: string | null;
+      }>();
     expect(attempts.results[0]).toMatchObject({
       status: "failed",
       stage: "create_plan",
+      plan_creation_signature: null,
       error: "Recurring payment activation failed on-chain",
     });
-    // The failed plan never landed, so the retry finds no plan.
-    recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, plan: () => null });
 
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -4553,7 +4579,7 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
   });
 
-  it("refuses an activation step whose attempt slot another run filled first, sending nothing", async () => {
+  it("continues an activation whose plan slot another run filled first once the chain shows that plan, sending only the subscription", async () => {
     const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const createRepository =
       paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
@@ -4587,18 +4613,13 @@ describe("Payments routes — recurring", () => {
     );
     repositorySpy.mockRestore();
 
-    expect(response.status).toBe(409);
-    expect(sendTransactionMock).not.toHaveBeenCalled();
-    expect(
-      await getDb(env)
-        .prepare(
-          `SELECT plan_creation_signature, last_valid_block_height::text AS last_valid_block_height
-             FROM payment_recurring_payment_activation_attempts
-            WHERE recurring_payment_id = ?`
-        )
-        .bind(recurringPayment.id)
-        .first<{ plan_creation_signature: string | null; last_valid_block_height: string | null }>()
-    ).toEqual({ plan_creation_signature: testSignature(9), last_valid_block_height: "77" });
+    expect(response.status).toBe(200);
+    expect((await parseRecurringResponse(response)).data.recurringPayment).toMatchObject({
+      status: "active",
+      planCreationSignature: testSignature(9),
+      authorizationSignature: poolSentSignatures()[0],
+    });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(1);
   });
 
   it("saves an ambiguous plan send's signature and expiry only on its attempt, and writes it to the schedule once a resume finds the plan landed", async () => {
@@ -4696,70 +4717,6 @@ describe("Payments routes — recurring", () => {
         .first<{ status: string; plan_creation_signature: string | null }>()
     ).toEqual({ status: "active", plan_creation_signature: planSignature });
     expect(sendTransactionMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps the landed plan's signature and no authorization signature on the schedule when finalization cannot find the subscription", async () => {
-    mockDistinctRecentBlockhashes();
-    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
-      exists: false,
-      address: address(TEST_SOLANA_ADDRESSES.wallet3),
-    });
-    const recurringPayment = await createRecurringPaymentFixture({
-      ...DEFAULT_RECURRING_FIXTURE,
-      headers: RECURRING_HEADERS,
-    });
-
-    const failedRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
-      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-      env
-    );
-
-    expect(failedRes.status).toBe(400);
-    const getAfterFailureRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPayment.id}`,
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    const getAfterFailureBody = await parseRecurringResponse(getAfterFailureRes);
-    const [planSignature] = poolSentSignatures();
-    expect(getAfterFailureBody.data.recurringPayment).toMatchObject({
-      status: "pending_activation",
-      planCreationSignature: planSignature,
-      authorizationSignature: null,
-    });
-
-    const attempts = await getDb(env)
-      .prepare(
-        `SELECT status, stage, error
-           FROM payment_recurring_payment_activation_attempts
-          WHERE recurring_payment_id = ?
-          ORDER BY created_at DESC`
-      )
-      .bind(recurringPayment.id)
-      .all<{ status: string; stage: string; error: string | null }>();
-    expect(attempts.results[0]).toMatchObject({
-      status: "failed",
-      stage: "finalize",
-      error: "Subscription authorization was not found on-chain",
-    });
-    // The subscription never landed, so the retry finds none.
-    recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
-
-    const retryRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
-      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-      env
-    );
-
-    expect(retryRes.status).toBe(200);
-    const retryBody = await parseRecurringResponse(retryRes);
-    expect(retryBody.data.recurringPayment).toMatchObject({
-      status: "active",
-      planCreationSignature: planSignature,
-      authorizationSignature: poolSentSignatures()[2],
-    });
-    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
   });
 
   // A key's wallet scope applies when SDP signs (HOO-2099): writes that sign
@@ -5604,12 +5561,7 @@ describe("Payments routes — recurring", () => {
     it("re-runs a failed keyed attempt under the same key", async () => {
       mockDistinctRecentBlockhashes();
       const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      confirmTransactionMock.mockResolvedValueOnce({
-        signature: testSignature(1),
-        slot: 100n,
-        confirmationStatus: "confirmed",
-        err: { InstructionError: [0, "Custom"] },
-      });
+      sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
       const key = crypto.randomUUID();
       const request = () =>
         app.request(
@@ -6609,9 +6561,9 @@ describe("Payments routes — recurring", () => {
       }
 
       /**
-       * Puts a finished lifecycle operation back to the moment after its send
-       * returned and before its signature was saved, long enough ago to recover.
-       * The attempt keeps no key, so a request under a new key adopts it.
+       * Puts a finished lifecycle operation back to the moment after its claim
+       * and before its send saved a signature, long enough ago to recover. The
+       * attempt keeps no key, so a request under a new key adopts it.
        */
       async function leaveUnsavedSend(input: {
         recurringPaymentId: string;
@@ -6640,6 +6592,35 @@ describe("Payments routes — recurring", () => {
         expect(updated).toBe(1);
       }
 
+      /** The expiry `leaveSavedSend` gives a lifecycle attempt's saved send. */
+      const SAVED_LIFECYCLE_SEND_EXPIRY = 2_400;
+
+      /**
+       * Puts a finished lifecycle operation back to the moment after its send saved
+       * `testSignature(7)` with `SAVED_LIFECYCLE_SEND_EXPIRY`, long enough ago to recover.
+       */
+      async function leaveSavedSend(input: {
+        recurringPaymentId: string;
+        operation: PaymentRecurringPaymentLifecycleOperation;
+        key: string;
+      }) {
+        await leaveUnsavedSend(input);
+        const saved = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_lifecycle_attempts
+                SET signature = ?, last_valid_block_height = ?
+              WHERE recurring_payment_id = ? AND operation = ? AND status = 'processing'`
+          )
+          .bind(
+            testSignature(7),
+            SAVED_LIFECYCLE_SEND_EXPIRY,
+            input.recurringPaymentId,
+            input.operation
+          )
+          .run();
+        expect(saved).toBe(1);
+      }
+
       const lifecycleAttempts = (
         recurringPaymentId: string,
         operation: PaymentRecurringPaymentLifecycleOperation
@@ -6657,37 +6638,30 @@ describe("Payments routes — recurring", () => {
             signature: string | null;
           }>();
 
-      it("finishes a cancel whose send landed without sending it again", async () => {
+      it("finishes a cancel refused as already canceled once the chain shows it canceled, sending nothing again", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        const key = crypto.randomUUID();
-        expect(
-          (
-            await app.request(
-              actionPath(activated.id, "cancel"),
-              { method: "POST", headers: keyed(key), body: "{}" },
-              env
-            )
-          ).status
-        ).toBe(200);
-        // A fresh attempt has sent nothing, so it reads nothing extra.
-        expect(stepReads()).toEqual([]);
-        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
-        // The chain shows the cancel at `confirmed`: the period's end is set.
+        sendTransactionMock.mockRejectedValueOnce(
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__SUBSCRIPTION_ALREADY_CANCELLED
+          )
+        );
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
           delegation: () => 1_800_000_000n,
         });
         const sent = sends();
 
-        const retry = await app.request(
+        const cancel = await app.request(
           actionPath(activated.id, "cancel"),
           { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
           env
         );
 
-        expect(retry.status).toBe(200);
-        expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("canceled");
-        expect(sent).not.toHaveBeenCalled();
+        expect(cancel.status).toBe(200);
+        expect((await parseRecurringResponse(cancel)).data.recurringPayment.status).toBe(
+          "canceled"
+        );
+        expect(sent).toHaveBeenCalledTimes(1);
         expect(stepReads().map(({ method }) => method)).toEqual([
           "getEpochInfo",
           "getMultipleAccounts",
@@ -6703,37 +6677,7 @@ describe("Payments routes — recurring", () => {
         ]);
       });
 
-      it("keeps a cancel recoverable when the chain read fails", async () => {
-        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        const key = crypto.randomUUID();
-        const cancel = (requestKey: string) =>
-          app.request(
-            actionPath(activated.id, "cancel"),
-            { method: "POST", headers: keyed(requestKey), body: "{}" },
-            env
-          );
-        expect((await cancel(key)).status).toBe(200);
-        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
-        recurringExecution.rpc.respond("getMultipleAccounts", () => ({
-          error: {
-            code: SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
-            message: "Minimum context slot has not been reached",
-          },
-        }));
-        const sent = sends();
-
-        const failed = await cancel(crypto.randomUUID());
-
-        expect(failed.status).toBe(409);
-        expect(sent).not.toHaveBeenCalled();
-        // Neither failed nor reset: the attempt waits at `submit` for the chain to answer.
-        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
-          { status: "processing", stage: "submit", signature: null },
-        ]);
-        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
-      });
-
-      it("never finishes a resume from a delegation that does not exist", async () => {
+      it("fails a resume whose saved send expired over a delegation that does not exist, back to canceled", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const lifecycle = (action: PaymentRecurringPaymentLifecycleOperation, key: string) =>
           app.request(
@@ -6744,16 +6688,24 @@ describe("Payments routes — recurring", () => {
         expect((await lifecycle("cancel", crypto.randomUUID())).status).toBe(200);
         const key = crypto.randomUUID();
         expect((await lifecycle("resume", key)).status).toBe(200);
-        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "resume", key });
-        // No delegation at all: nothing was resumed.
-        recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
+        await leaveSavedSend({ recurringPaymentId: activated.id, operation: "resume", key });
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          absoluteSlot: 2_900,
+          blockHeight: SAVED_LIFECYCLE_SEND_EXPIRY + 1,
+          delegation: () => null,
+        });
         const sent = sends();
 
         const retry = await lifecycle("resume", crypto.randomUUID());
 
-        expect(retry.status).toBe(409);
+        expect(retry.status).toBe(400);
+        expect(await errorCode(retry)).toBe("TRANSACTION_FAILED");
         expect(sent).not.toHaveBeenCalled();
-        expect((await recurringPaymentDueAt(activated.id)).status).not.toBe("active");
+        expect((await lifecycleAttempts(activated.id, "resume")).results).toEqual([
+          { status: "failed", stage: "submit", signature: null },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceled");
       });
 
       it("keeps a resumed metadata update in flight when the chain read fails", async () => {
@@ -6856,7 +6808,7 @@ describe("Payments routes — recurring", () => {
         });
       });
 
-      it("sends a cancel the chain does not show", async () => {
+      it("sends a resumed cancel that saved no signature without reading the chain first", async () => {
         mockDistinctRecentBlockhashes();
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
@@ -6870,7 +6822,6 @@ describe("Payments routes — recurring", () => {
           ).status
         ).toBe(200);
         await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
-        recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
         const sent = sends();
 
         const retry = await app.request(
@@ -6881,6 +6832,7 @@ describe("Payments routes — recurring", () => {
 
         expect(retry.status).toBe(200);
         expect(sent).toHaveBeenCalledTimes(1);
+        expect(stepReads()).toEqual([]);
         expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
           { status: "confirmed", stage: "finalize", signature: poolSentSignatures()[3] },
         ]);
@@ -6910,81 +6862,6 @@ describe("Payments routes — recurring", () => {
         expect((await lifecycleAttempts(activated.id, "resume")).results).toEqual([
           { status: "confirmed", stage: "finalize", signature: null },
         ]);
-      });
-
-      it("finishes an activation whose plan landed before its signature was saved, sending only the subscription", async () => {
-        const sourceSigner = recurringExecution.sourceSigner();
-        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        const planId = `psp_${crypto.randomUUID()}`;
-        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
-        await getDb(env)
-          .prepare(
-            `INSERT INTO payment_subscription_plans (
-               id, organization_id, project_id, owner_wallet_id, owner_address, token,
-               amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            planId,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            TEST_WALLET_ID,
-            sourceSigner.address,
-            DEVNET_USDC_MINT,
-            "25.00",
-            24,
-            "1001",
-            "draft",
-            TEST_USER.id,
-            staleAt,
-            staleAt
-          )
-          .run();
-        // The earlier run recorded the plan's address, sent the plan, and died
-        // before it saved the signature.
-        await getDb(env)
-          .prepare(
-            `UPDATE payment_recurring_payments
-                SET status = 'activating', plan_id = ?, plan_pda = ?, updated_at = ?
-              WHERE id = ?`
-          )
-          .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, staleAt, created.id)
-          .run();
-        await getDb(env)
-          .prepare(
-            `INSERT INTO payment_recurring_payment_activation_attempts (
-               id, organization_id, project_id, recurring_payment_id, status, stage,
-               plan_creation_signature, authorization_signature, error, metadata,
-               created_at, updated_at
-             ) VALUES (?, ?, ?, ?, 'processing', 'create_plan', NULL, NULL, NULL, '{}'::jsonb, ?, ?)`
-          )
-          .bind(
-            `prpa_${crypto.randomUUID()}`,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            created.id,
-            staleAt,
-            staleAt
-          )
-          .run();
-        const sent = sends();
-
-        const retry = await app.request(
-          actionPath(created.id, "activate"),
-          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
-          env
-        );
-
-        expect(retry.status).toBe(200);
-        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
-          status: "active",
-          planCreationSignature: null,
-        });
-        expect(stepReads().map(({ method }) => method)).toEqual([
-          "getEpochInfo",
-          "getMultipleAccounts",
-        ]);
-        expect(sent).toHaveBeenCalledTimes(1);
       });
 
       it("finishes an update whose old-subscription cancel went out with no answer, without sending it again", async () => {
@@ -7968,19 +7845,11 @@ describe("Payments routes — recurring", () => {
             )
           ).status
         ).toBe(200);
-        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
-        await getDb(env)
-          .prepare(
-            `UPDATE payment_recurring_payment_lifecycle_attempts
-                SET signature = ?, last_valid_block_height = 2400
-              WHERE recurring_payment_id = ? AND operation = 'cancel'`
-          )
-          .bind(testSignature(7), activated.id)
-          .run();
+        await leaveSavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
         // Not canceled on chain, one block past the saved send's last valid block height.
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
-          blockHeight: 2401,
+          blockHeight: SAVED_LIFECYCLE_SEND_EXPIRY + 1,
           absoluteSlot: 2_900,
           delegation: () => 0n,
         });
@@ -7999,9 +7868,9 @@ describe("Payments routes — recurring", () => {
         expect(recurringExecution.rpc.requests.map(({ method }) => method)).not.toContain(
           "getSignatureStatuses"
         );
-        // The attempt failed and the schedule is back to `active`, so a new cancel sends.
+        // Failed with its slot cleared and the schedule back to `active`, so a new cancel sends.
         expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
-          { status: "failed", stage: "submit", signature: testSignature(7) },
+          { status: "failed", stage: "submit", signature: null },
         ]);
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
       });
@@ -8018,19 +7887,11 @@ describe("Payments routes — recurring", () => {
             )
           ).status
         ).toBe(200);
-        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
-        await getDb(env)
-          .prepare(
-            `UPDATE payment_recurring_payment_lifecycle_attempts
-                SET signature = ?, last_valid_block_height = 2400
-              WHERE recurring_payment_id = ? AND operation = 'cancel'`
-          )
-          .bind(testSignature(7), activated.id)
-          .run();
+        await leaveSavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
         // Not canceled on chain yet, at the saved send's last valid block height.
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
-          blockHeight: 2400,
+          blockHeight: SAVED_LIFECYCLE_SEND_EXPIRY,
           absoluteSlot: 2_900,
           delegation: () => 0n,
         });
@@ -8050,13 +7911,18 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
       });
 
-      it("takes a reset activation retry's plan as landed once `confirmed` shows it, sending only the subscription", async () => {
+      it("continues a reset activation retry whose plan creation is refused as already existing once the chain shows the plan", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const planId = `psp_${crypto.randomUUID()}`;
         const now = new Date().toISOString();
         await seedPlanRow(planId, "draft", now);
-        // Seconds ago a run recorded the plan's address and sent it, its save
-        // failed, and the activation was reset: it can be retried at once.
+        // A reset run left the plan row and address, and the plan is on chain without a kept
+        // signature, so the retry's plan send is refused as already existing.
+        sendTransactionMock.mockRejectedValueOnce(
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__PLAN_ALREADY_EXISTS
+          )
+        );
         await getDb(env)
           .prepare(
             `UPDATE payment_recurring_payments
@@ -8077,8 +7943,10 @@ describe("Payments routes — recurring", () => {
         expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
           status: "active",
           planCreationSignature: null,
+          authorizationSignature: poolSentSignatures()[1],
         });
-        expect(sent).toHaveBeenCalledTimes(1);
+        // The refused plan, then subscribe.
+        expect(sent).toHaveBeenCalledTimes(2);
       });
 
       it("drops a pending schedule's landed plan and subscription when its terms change, and keeps them for a first-collection edit", async () => {
