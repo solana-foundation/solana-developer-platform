@@ -1,4 +1,4 @@
-import { RAMPS_MEMO_LIMITS } from "@sdp/types";
+import { RAMPS_MEMO_LIMITS } from "@sdp/types/payments";
 
 export interface MemoRow {
   key: string;

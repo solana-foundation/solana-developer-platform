@@ -1,16 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  clearKVStores,
-  readRateLimitCount,
-  seedCachedApiKey,
-  seedRateLimit,
-} from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_ORG_ID = "org_places_test";
 const TEST_API_KEY = {
@@ -21,25 +15,23 @@ const TEST_API_KEY = {
 const ACTOR_COUNTER = `metered:places:org:${TEST_ORG_ID}:key:${TEST_API_KEY.id}`;
 const ORG_COUNTER = `metered:places:org:${TEST_ORG_ID}`;
 
-function cachedKey(permissions: CachedApiKey["permissions"]): CachedApiKey {
+function cachedKey(grants: SeededApiKey["grants"]): SeededApiKey {
   return {
     id: TEST_API_KEY.id,
     organizationId: TEST_ORG_ID,
     projectId: "prj_places_test",
-    role: "api_developer",
-    permissions,
+    grants,
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
 }
 
-async function seedKey(permissions: CachedApiKey["permissions"]): Promise<void> {
+async function seedKey(grants: SeededApiKey["grants"]): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey(permissions));
+  await seedApiKeyRow(env, keyHash, cachedKey(grants));
 }
 
 async function requestAutocomplete(): Promise<Response> {
@@ -73,7 +65,7 @@ describe("Places routes — metered quota", () => {
   });
 
   it("does not charge quota counters for callers the permission gate rejects", async () => {
-    await seedKey(["payments:read"]);
+    await seedKey(["counterparties.read"]);
 
     const res = await requestAutocomplete();
 
@@ -83,7 +75,7 @@ describe("Places routes — metered quota", () => {
   });
 
   it("429s an authorized caller once the actor quota is exhausted", async () => {
-    await seedKey(["counterparties:write"]);
+    await seedKey(["counterparties.manage"]);
     await seedRateLimit(env, ACTOR_COUNTER, 120);
 
     const res = await requestAutocomplete();
@@ -94,7 +86,7 @@ describe("Places routes — metered quota", () => {
   });
 
   it("429s an authorized caller once the org-wide quota is exhausted", async () => {
-    await seedKey(["counterparties:write"]);
+    await seedKey(["counterparties.manage"]);
     await seedRateLimit(env, ORG_COUNTER, 600);
 
     const res = await requestAutocomplete();

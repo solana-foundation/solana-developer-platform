@@ -1,4 +1,4 @@
-import type { UnifiedTransaction } from "@sdp/types";
+import type { UnifiedTransaction } from "@sdp/types/unified-transactions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));

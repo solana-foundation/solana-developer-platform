@@ -1,9 +1,10 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
@@ -12,8 +13,8 @@ import {
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
 
@@ -25,23 +26,21 @@ const API_KEY = {
   raw: "sk_test_privy_byok_admission",
   prefix: "sk_test_priv",
 };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
 
 async function seedActor(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(
@@ -67,20 +66,34 @@ async function seedActor(): Promise<void> {
       .prepare(
         `INSERT INTO api_keys (
            id, organization_id, project_id, created_by, name, key_prefix,
-           key_hash, role, permissions, status
-         ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`
+           key_hash, grants, status
+         ) VALUES (?, ?, ?, ?, 'Test', ?, ?, ?, 'active')`
       )
-      .bind(API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash),
+      .bind(
+        API_KEY.id,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        USER_ID,
+        API_KEY.prefix,
+        keyHash,
+        ALL_API_KEY_GRANTS
+      ),
   ]);
 }
 
 async function requestInitialize(): Promise<Response> {
+  // Custody setup is `wallets.configure`: a signed-in admin, never an API key.
+  const admin = await clerkAdminHeaders(env, getDb(env), {
+    userId: USER_ID,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+  });
   return app.request(
     "/v1/wallets/initialize",
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${API_KEY.raw}`,
+        ...admin,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ provider: "privy" }),

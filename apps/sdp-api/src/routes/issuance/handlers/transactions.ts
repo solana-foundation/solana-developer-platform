@@ -1,29 +1,26 @@
-import { type Address, assertValidAddress } from "@sdp/solana/address";
+import { assertValidAddress } from "@sdp/solana/address";
 import {
   TOKEN_TRANSACTION_STATUSES,
   TOKEN_TRANSACTION_TYPES,
   type TokenTransactionStatus,
   type TokenTransactionType,
-} from "@sdp/types";
+} from "@sdp/types/tokens";
+import type { Address } from "@solana/addresses";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
-import {
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyCustodyWalletIdsForPermissions,
-} from "@/services/api-key-scope.service";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
+import { getTenantTokenService, requireProjectScope } from "@/routes/issuance/helpers";
 import {
   issuanceTransactionWalletFilterSchema,
   listTokenTransactionsQuerySchema,
-} from "../schemas";
+} from "@/routes/issuance/schemas";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import type { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
 import { resolveIssuanceWallet } from "./authority-resolution";
 import { toPublicTokenTransaction, toPublicTokenTransactionListItem } from "./public-response";
 
@@ -90,9 +87,6 @@ async function resolveWalletFilter(
   walletId: string
 ): Promise<{ publicKey: string }> {
   const auth = getAuth(c);
-
-  assertApiKeyWalletAccess(auth, walletId, ["tokens:read"]);
-
   const wallet = await new CustodyRuntimeTargets(
     getDb(c.env),
     c.env,
@@ -189,7 +183,6 @@ async function resolveWalletTransactionScope(
       env: c.env,
       auth,
       custodyWalletId,
-      requiredWalletPermissions: ["tokens:read"],
     });
     return buildWalletTransactionScope(tokenService, {
       organizationId: auth.organizationId,
@@ -207,30 +200,7 @@ async function resolveWalletTransactionScope(
     });
   }
 
-  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
-    "tokens:read",
-  ]);
-  if (allowedCustodyWalletIds === null) {
-    return undefined;
-  }
-  if (allowedCustodyWalletIds.length === 0) {
-    return { publicKeys: [], tokenAccounts: [] };
-  }
-
-  const allowedWalletIdSet = new Set(allowedCustodyWalletIds);
-  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
-    organizationId: auth.organizationId,
-    projectId: requireProjectId(c),
-  });
-  const publicKeys = wallets
-    .filter((wallet) => allowedWalletIdSet.has(wallet.id))
-    .map((wallet) => wallet.publicKey);
-
-  return buildWalletTransactionScope(tokenService, {
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
-    publicKeys,
-  });
+  return undefined;
 }
 
 export const listTokenTransactions = async (c: AppContext) => {

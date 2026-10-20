@@ -1,6 +1,6 @@
 import { readFloor, readStamp } from "@sdp/rpc/read-context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
@@ -16,8 +16,8 @@ const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const reconcileEarnVaultQueuedWithdrawals = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/kamino", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/kamino")>()),
+vi.mock("@sdp/kamino/deposit-receipt", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/kamino/deposit-receipt")>()),
   readKaminoDepositReceipt,
 }));
 
@@ -29,10 +29,13 @@ vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   getSignatureStatuses,
   getTransaction,
 }));
+vi.mock("@sdp/rpc/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
+  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+}));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   assertClusterEndpoint: vi.fn(async () => {}),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
   resolveVaultDirectClient: () => ({ readVaultPositions }),
 }));
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
@@ -45,12 +48,11 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 }));
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
-const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
 const {
   reconcileEarnVaultMovementReadThrough,
   repairUnvaluedWithdrawalPayouts,
   repairUnvaluedKaminoDeposits,
-} = await import("../earn/vault-movement-reconciliation.service");
+} = await import("@/services/earn/vault-movement-reconciliation.service");
 
 const ORG = "org_vault_reconcile";
 const PROJECT = "prj_vault_reconcile";
@@ -1592,28 +1594,5 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
 
     expect(stats.backlogWithdrawals).toBe(1);
     expect(stats.oldestWithdrawalCreatedAt).not.toBeNull();
-  });
-
-  it("makes the cron run itself report error, not ok (EARN-006 end to end)", async () => {
-    // The literal acceptance criterion, composed with the REAL wrapper both
-    // runners use: before this, the read failure returned cleanly and the tick
-    // event said `ok` while nothing settled.
-    await seedMovement();
-    getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
-
-    await expect(
-      runWithCronRunEvent("sdp-api-reconcile-earn-vault-movements", () =>
-        reconcileEarnVaultMovements(env)
-      )
-    ).rejects.toThrow(/Earn vault reconciliation failed/);
-
-    expect(logEvent).toHaveBeenCalledWith(
-      "error",
-      expect.objectContaining({ event: CRON_RUN_EVENT, status: "error" })
-    );
-    expect(logEvent).not.toHaveBeenCalledWith(
-      "info",
-      expect.objectContaining({ event: CRON_RUN_EVENT, status: "ok" })
-    );
   });
 });

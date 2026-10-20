@@ -1,5 +1,5 @@
-import type { EarnDeclaredStrategySupport } from "../../types";
-import { StubEarnClient } from "../stub";
+import { StubEarnClient } from "#/providers/stub";
+import type { EarnDeclaredStrategySupport } from "#/types";
 
 /** Perena vault-infra client — `StubEarnClient` scaffold until the integration lands. */
 export class PerenaEarnClient extends StubEarnClient {

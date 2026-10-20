@@ -1,12 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import type { SdpModule } from "@sdp/types";
-import { expandDocsBlocks } from "../src/lib/docs-blocks";
-import { DOCS_MODULES } from "../src/lib/docs-catalog";
-import { isModulePublished, isPageSourcePublished } from "../src/lib/release-channel";
-import { canonicalSite } from "../src/lib/site";
+import type { SdpModule } from "@sdp/types/release-channels";
+import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { DOCS_MODULES } from "@/lib/docs-catalog";
+import { isModulePublished, isPageSourcePublished } from "@/lib/release-channel";
+import { canonicalSite } from "@/lib/site";
 
 const {
   aiGuideUrl,
@@ -59,6 +58,7 @@ const FEATURE_SUMMARY = DOCS_MODULES.filter(
  * when the release channel runs its module.
  */
 const KEY_PAGE_MODULES: Record<string, SdpModule> = {
+  "reference/api/compliance": "compliance",
   "reference/api/issuance": "issuance",
   "reference/api/asset-profiles": "issuance",
 };
@@ -81,7 +81,6 @@ const KEY_PAGE_SLUGS = [
   "reference/postman-collection",
   "reference/api/index",
   "reference/api/health",
-  "reference/api/api-keys",
   "reference/api/wallets",
   "reference/api/projects",
   "reference/api/issuance",

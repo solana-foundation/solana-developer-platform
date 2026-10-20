@@ -1,8 +1,8 @@
 import { GcpMetadataTokenProvider } from "@/lib/gcp/access-token";
 import { KmsClient } from "@/lib/gcp/kms-client";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";
-import { createEncryptionService } from "../encryption.service";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
 
 const V2_PREFIX = "v2.";

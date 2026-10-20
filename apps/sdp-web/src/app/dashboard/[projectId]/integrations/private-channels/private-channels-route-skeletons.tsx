@@ -1,6 +1,6 @@
+import { Card, CardContent, CardHeader } from "@sdp/ui/card";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 
 // Stable ids rather than array indices: these lists never reorder, and biome's
 // noArrayIndexKey rule applies to skeleton rows the same as real ones.

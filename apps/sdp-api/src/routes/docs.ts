@@ -3,9 +3,10 @@
  */
 
 import { Hono } from "hono";
+import { publicRoute } from "@/middleware/require-action";
 import type { Env } from "@/types/env";
 
-const docs = new Hono<{ Bindings: Env }>();
+export const docs = new Hono<{ Bindings: Env }>();
 
 const html = `<!doctype html>
 <html lang="en">
@@ -37,9 +38,7 @@ const html = `<!doctype html>
 </html>
 `;
 
-docs.get("/", (c) => {
+docs.get("/", publicRoute("API reference page"), (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
   return c.body(html);
 });
-
-export default docs;

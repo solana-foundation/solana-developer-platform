@@ -1,20 +1,16 @@
 import assert from "node:assert/strict";
-import type { EarnPortfolioWalletProvider } from "@sdp/earn";
+import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
 import { hashString } from "@sdp/payments/hash";
-import type {
-  CachedApiKey,
-  EarnPortfolioWalletSnapshot,
-  EarnPortfolioWithdrawal,
-} from "@sdp/types";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import type { EarnPortfolioWalletSnapshot, EarnPortfolioWithdrawal } from "@sdp/types/earn";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: true }));
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/types")>();
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
   return {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>
@@ -52,23 +48,23 @@ vi.mock("@sdp/earn", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnProviderWalletRow,
-  type InsertEarnProviderWalletInput,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type {
+  EarnProviderWalletRow,
+  InsertEarnProviderWalletInput,
+  UpsertEarnStrategyInput,
+} from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
-import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_test_earn_program",
@@ -88,16 +84,14 @@ const TEST_API_KEY = {
   raw: "sk_test_earn_program",
   prefix: "sk_test_epr",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -161,7 +155,7 @@ let originalUpshiftApiKey: string | undefined;
 
 async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   const settings = entitleGround
     ? JSON.stringify({ providerOverrides: { earn: { upshift: true } } })
@@ -188,11 +182,10 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
     organizationId: TEST_ORG.id,
     projectId: TEST_PRODUCTION_PROJECT.id,
     createdBy: TEST_USER.id,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
-  await seedCachedApiKey(env, productionKeyHash, {
-    ...TEST_CACHED_API_KEY,
+  await seedApiKeyRow(env, productionKeyHash, {
+    ...TEST_SEEDED_API_KEY,
     id: TEST_PRODUCTION_API_KEY.id,
     projectId: TEST_PRODUCTION_PROJECT.id,
     environment: "production",
@@ -201,9 +194,9 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, grants = excluded.grants, status = excluded.status`
       )
       .bind(
         TEST_API_KEY.id,
@@ -213,8 +206,7 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
         "Earn Program Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -2176,19 +2168,17 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
 
   async function seedWalletScopedKey(): Promise<void> {
     const keyHash = await hashString(WALLET_SCOPED_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
-      ...TEST_CACHED_API_KEY,
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_SEEDED_API_KEY,
       id: WALLET_SCOPED_KEY.id,
       walletScope: "selected",
-      signingWalletId: "privy_low_value",
-      walletBindings: [{ walletId: "privy_low_value", permissions: ["*"] }],
     });
     await getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, grants = excluded.grants, status = excluded.status`
       )
       .bind(
         WALLET_SCOPED_KEY.id,
@@ -2198,8 +2188,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
         "Wallet-scoped key",
         WALLET_SCOPED_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       )
       .run();

@@ -1,5 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { parseIssuanceListQuery } from "@/app/dashboard/[projectId]/issuance/issuance-list-query";
+import {
+  attachIssuanceAssetProfiles,
+  fetchIssuanceTokenFacets,
+  fetchIssuanceTokensPage,
+} from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
+import { IssuanceWorkspace } from "@/app/dashboard/[projectId]/issuance/issuance-workspace";
+import {
+  fetchActiveApiKeys,
+  resolvePlaygroundApiBaseUrl,
+} from "@/app/dashboard/[projectId]/playground-api-data";
 import { assetProfiles } from "@/flags";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
@@ -7,15 +18,7 @@ import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
-import { parseIssuanceListQuery } from "../issuance-list-query";
-import {
-  attachIssuanceAssetProfiles,
-  fetchIssuanceTokenFacets,
-  fetchIssuanceTokensPage,
-} from "../issuance-tokens.data";
-import { IssuanceWorkspace } from "../issuance-workspace";
-import RedesignIssuancePage from "./page.redesign";
+import { IssuancePage as RedesignIssuancePage } from "./page.redesign";
 
 interface IssuanceTemplateView {
   id: string;

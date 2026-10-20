@@ -5,8 +5,8 @@ import {
   PRIVATE_CHANNEL_EVENT_STATUSES,
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelEventDto,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactElement, ReactNode } from "react";
@@ -26,10 +26,10 @@ vi.mock("sonner", () => ({
 vi.mock("@/lib/use-solana-cluster", () => ({
   useSolanaCluster: () => "devnet",
 }));
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@sdp/ui/button", () => ({
   Button: (props: ComponentProps<"button">) => <button {...props} />,
 }));
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@sdp/ui/select", () => ({
   Select: ({
     ariaLabel,
     children,

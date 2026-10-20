@@ -1,10 +1,10 @@
-import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types";
-
+import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "@sdp/types/tokens";
+import { z } from "zod";
 import {
   assetCategorySchema as assetCategorySchemaBase,
   assetTypeSchema as assetTypeSchemaBase,
   issuanceMetadataSchema as issuanceMetadataSchemaBase,
-} from "../../routes/asset-profiles/schemas";
+} from "@/routes/asset-profiles/schemas";
 import {
   addAllowlistSchema as addTokenAllowlistSchemaBase,
   burnSchema as burnSchemaBase,
@@ -22,7 +22,7 @@ import {
   unfreezeSchema as unfreezeSchemaBase,
   updateAuthoritySchema as updateAuthoritySchemaBase,
   updateTokenSchema as updateTokenSchemaBase,
-} from "../../routes/issuance/schemas";
+} from "@/routes/issuance/schemas";
 import { assetProfileSchema } from "./asset-profiles";
 import {
   apiKeyIdParamSchema,
@@ -37,7 +37,6 @@ import {
   tokenIdParamSchema,
   tokenTransactionIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const ISSUANCE_TOKEN_AMOUNT_DESCRIPTION =
@@ -1013,7 +1012,7 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
     }),
     signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
       description:
-        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare (or resolved from the API key), so the authority can't be changed at confirm time.",
+        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time.",
       example: "privy_wallet_123",
     }),
   })

@@ -1,26 +1,26 @@
 // @vitest-environment jsdom
 
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
-  CustodyWalletSummary,
   PrivateChannelMembershipChannelDto,
   PrivateChannelTokenEligibility,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  privateChannelTransferIdempotencyKeyStore,
+  privateChannelTransferRequestFingerprint,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/value-movement-tracking";
 import {
   MOVEMENT_POLL_INTERVAL_MS,
   MOVEMENT_READ_PATHS,
   resetMovementWatchesForTests,
 } from "@/lib/dashboard-fetch";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import {
-  privateChannelTransferIdempotencyKeyStore,
-  privateChannelTransferRequestFingerprint,
-} from "../value-movement-tracking";
 
 const mocks = vi.hoisted(() => ({
   createTransferAction: vi.fn(),
@@ -35,26 +35,26 @@ vi.mock("./actions", () => ({
   createTransferAction: mocks.createTransferAction,
   fetchTransferRecipientsAction: mocks.fetchTransferRecipientsAction,
 }));
-vi.mock("../wallet-balances", () => ({
+vi.mock("@/app/dashboard/[projectId]/integrations/private-channels/wallet-balances", () => ({
   fetchWalletBalancesAction: mocks.fetchWalletBalancesAction,
 }));
 vi.mock("sonner", () => ({
   toast: { success: mocks.toastSuccess, error: mocks.toastError, warning: mocks.toastWarning },
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@sdp/ui/button", () => ({
   Button: (props: ComponentProps<"button">) => <button {...props} />,
 }));
-vi.mock("@/components/ui/input", () => ({
+vi.mock("@sdp/ui/input", () => ({
   Input: (props: ComponentProps<"input">) => <input {...props} />,
 }));
-vi.mock("@/components/ui/label", () => ({
+vi.mock("@sdp/ui/label", () => ({
   Label: (props: ComponentProps<"label">) => (
     // biome-ignore lint/a11y/noLabelWithoutControl: This test double forwards associations supplied by the component.
     <label {...props} />
   ),
 }));
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@sdp/ui/select", () => ({
   Select: ({
     ariaLabel,
     children,

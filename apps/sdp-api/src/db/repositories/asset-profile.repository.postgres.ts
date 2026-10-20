@@ -3,8 +3,8 @@ import type {
   AssetProfileStatus,
   IssuanceMetadata,
   PublicTokenMetadata,
-} from "@sdp/types";
-import type { AppDb } from "@/db";
+} from "@sdp/types/asset-profiles";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import { buildInClause } from "@/db/postgres-utils";
 import type {
   ArchiveAssetProfileInput,

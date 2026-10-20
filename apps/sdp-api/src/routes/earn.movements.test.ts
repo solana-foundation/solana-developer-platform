@@ -1,16 +1,15 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
-import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 /**
  * GET /v1/earn/movements — the cross-provider feed (PRO-1705).
@@ -54,53 +53,23 @@ interface MovementJson {
   settledAt?: string;
 }
 
-/**
- * `walletScope` is resolved from the CACHED key, not from a DB row — so a test
- * that only inserts into `api_key_wallet_permissions` changes nothing. Seeding a
- * `selected` key is the only way to exercise the binding, and the ids it carries
- * are PROVIDER wallet ids (`privy_…`), not `custody_wallets` row ids (`cwlt_…`).
- */
-function cachedKey(
-  binding: { walletScope: "selected"; signingWalletIds: string[] } | null = null
-): CachedApiKey {
+function cachedKey(): SeededApiKey {
   return {
     id: API_KEY.id,
     organizationId: ORG,
     projectId: PROJECT_A,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
-    ...(binding ?? {}),
   };
-}
-
-/**
- * Bind the key to specific wallets, which takes BOTH halves.
- *
- * `hasSelectedWalletScope` reads the CACHED key, while the allowed set is built
- * from `walletBindings`, which the auth middleware loads from
- * `api_key_wallet_permissions`. Seeding only the cache leaves the allowed set
- * empty and hides every vault movement; seeding only the rows leaves the scope
- * `all` and hides nothing. Either half alone is a test that proves nothing.
- */
-async function bindKeyToWallets(providerWalletIds: string[]): Promise<void> {
-  const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  // seedCachedApiKey writes the binding rows authentication reads.
-  await seedCachedApiKey(
-    env,
-    keyHash,
-    cachedKey({ walletScope: "selected", signingWalletIds: providerWalletIds })
-  );
 }
 
 async function seedScope(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey());
+  await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -123,10 +92,9 @@ async function seedScope(): Promise<void> {
     organizationId: ORG,
     projectId: "prj_earn_feed_prod",
     createdBy: USER,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
-  await seedCachedApiKey(env, productionKeyHash, {
+  await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
     id: TEST_PRODUCTION_API_KEY.id,
     projectId: "prj_earn_feed_prod",
@@ -136,10 +104,19 @@ async function seedScope(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', '["*"]'::jsonb, 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`
       )
-      .bind(API_KEY.id, ORG, PROJECT_A, USER, "Feed key", "sk_test_ear", keyHash),
+      .bind(
+        API_KEY.id,
+        ORG,
+        PROJECT_A,
+        USER,
+        "Feed key",
+        "sk_test_ear",
+        keyHash,
+        ALL_API_KEY_GRANTS
+      ),
     ...[[CONFIG_A, PROJECT_A, WALLET_A, "privy_feed_a", PUBLIC_KEY_A]].flatMap(
       ([configId, projectId, walletId, providerWalletId, publicKey]) => [
         getDb(env)
@@ -627,25 +604,6 @@ describe("GET /v1/earn/movements", () => {
       const ids = (await movementsJson()).movements.map((m) => m.id);
       expect(ids).toContain(mine.movement.id);
       expect(ids).not.toContain(ownerMovementId);
-    });
-
-    it("excludes vault movements when the key has no in-scope signing wallet, and still shows custodial ones", async () => {
-      const { withdrawal } = await seedProgramWithdrawal();
-      const deposit = await seedVaultDeposit({ walletId: WALLET_A });
-
-      // A selected-scope key whose binding resolves to nothing has no readable
-      // signing wallet, which is the degenerate end of the wallet-binding rule the
-      // vault reads apply. It must not silently invert into "no filter": a vault
-      // movement is one project's signed transaction and stays hidden, while
-      // custodial movements remain visible because program wallets carry no such
-      // binding. That asymmetry IS the visibility union. (A selected key with no
-      // binding rows at all is an all-wallet key; the binding must exist and
-      // resolve to nothing.)
-      await bindKeyToWallets(["wallet_unresolvable"]);
-
-      const body = await movementsJson();
-      expect(body.movements.map((m) => m.id)).toEqual([withdrawal.id]);
-      expect(body.movements.map((m) => m.id)).not.toContain(deposit.movement.id);
     });
   });
 

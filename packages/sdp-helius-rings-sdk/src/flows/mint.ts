@@ -1,5 +1,5 @@
 import { SOL_MINT } from "@heliuslabs/zolana";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 
 /**
  * The two spellings of native SOL, translated at the one boundary that sees

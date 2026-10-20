@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import earnRoutes from "@/routes/earn";
+import { earnRoutes } from "@/routes/earn";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 describe("Earn API contract coverage", () => {

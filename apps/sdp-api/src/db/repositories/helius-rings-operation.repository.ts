@@ -4,8 +4,8 @@ import type {
   OpType,
   PrivateOperationSummary,
   TransferMode,
-} from "@sdp/helius-rings";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/helius-rings/types";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
 
 export function generateHeliusRingsOperationId(): string {
@@ -160,8 +160,6 @@ export interface ListHeliusRingsOperationsByWalletInput extends HeliusRingsProje
 
 export interface ListHeliusRingsOperationsByProjectInput extends HeliusRingsProjectScope {
   limit?: number;
-  /** Undefined is unrestricted; an explicit empty allowlist matches nothing. */
-  walletIds?: readonly string[];
 }
 
 export interface HeliusRingsExpiredSubmissionsInput {

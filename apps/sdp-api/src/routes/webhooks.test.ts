@@ -1,21 +1,18 @@
 import { createHmac } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
-import { type PaymentTransferStatus, wellKnownMint } from "@sdp/types";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
-
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
-});
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
@@ -188,7 +185,7 @@ describe("Clerk webhooks", () => {
       required(updatedOrg).settings ? JSON.parse(required(required(updatedOrg).settings)) : null
     ).toBeNull();
   });
-  it("invalidates cached API keys when Clerk deletes an organization", async () => {
+  it("refuses the organization's API keys once Clerk deletes it", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
     const orgId = "org_webhook_cache_invalidation";
     const projectId = "prj_webhook_cache_invalidation";
@@ -222,28 +219,28 @@ describe("Clerk webhooks", () => {
     await db.batch([
       db
         .prepare(`INSERT INTO api_keys
-             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, 'api_admin', ?, 'active')`)
-        .bind(keyId, orgId, projectId, userId, keyHash, JSON.stringify(["*"])),
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, ?, 'active')`)
+        .bind(keyId, orgId, projectId, userId, keyHash, ALL_API_KEY_GRANTS),
     ]);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       id: keyId,
       organizationId: orgId,
       projectId,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
       rateLimitTier: "standard",
       allowedIps: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
       status: "active",
       expiresAt: null,
       rotationDeadline: null,
     });
     const authedRequest = () =>
-      app.request("/v1/api-keys", { headers: { Authorization: `Bearer ${rawKey}` } }, env);
+      app.request(
+        `/v1/organizations/${orgId}`,
+        { headers: { Authorization: `Bearer ${rawKey}` } },
+        env
+      );
     expect((await authedRequest()).status).toBe(200);
     const res = await simulateClerkWebhook({
       type: "organization.deleted",
@@ -740,7 +737,7 @@ describe("Clerk webhooks", () => {
     assert(lifecycleProject, "Expected the Clerk organization sandbox project to exist");
     await getDb(env)
       .prepare(`INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
          SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?, ?, ?
          FROM auth_organization_identities aoi
          WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
@@ -751,7 +748,7 @@ describe("Clerk webhooks", () => {
         "Lifecycle Key",
         "sk_test_web",
         apiKeyHash,
-        "api_admin",
+        ALL_API_KEY_GRANTS,
         "active",
         "org_clerk_lifecycle"
       )
@@ -935,6 +932,7 @@ describe("MoonPay ramp webhook", () => {
     data: {
       id: MOONPAY_TRANSACTION_ID,
       status: "completed",
+      updatedAt: "2026-06-18T11:00:00.000Z",
       customerId: MOONPAY_CUSTOMER_ID,
       externalTransactionId: TRANSFER_ID,
       failureReason: null,
@@ -951,7 +949,7 @@ describe("MoonPay ramp webhook", () => {
       currency: { code: "sol" },
     },
   };
-  it("records the delivered crypto amount and per-provider economics on a completed webhook", async () => {
+  it("records provider economics without replacing quoted terms or claiming completion", async () => {
     const res = await sendMoonpayWebhook(completedPayload);
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
@@ -968,11 +966,11 @@ describe("MoonPay ramp webhook", () => {
           settlement?: Record<string, unknown>;
         };
       }>();
-    expect(required(transfer).status).toBe("completed");
-    expect(required(transfer).amount).toBe("0.649");
+    expect(required(transfer).status).toBe("settling");
+    expect(required(transfer).amount).toBeNull();
     expect(required(transfer).provider_reference).toBe(MOONPAY_TRANSACTION_ID);
     expect(required(transfer).destination_address).toBe(
-      "WebhookDestinationSolanaWallet111111111111111111"
+      "DestinationSolanaWallet111111111111111111111111"
     );
     expect(required(transfer).signature).toBe(
       "t11paHKpm79qTHVgSQ4rr9PAqE7ZT87MWpi1f5Nim8XzPyc7aPux"
@@ -1019,6 +1017,7 @@ describe("MoonPay ramp webhook", () => {
       data: {
         id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
         status: "completed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         externalTransactionId: TRANSFER_ID,
         quoteCurrencyAmount: 16.31,
       },
@@ -1040,6 +1039,7 @@ describe("MoonPay ramp webhook", () => {
       data: {
         id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
         status: "completed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         customerId: MOONPAY_CUSTOMER_ID,
         externalTransactionId: TRANSFER_ID,
         baseCurrencyAmount: 0.2,
@@ -1070,6 +1070,7 @@ describe("MoonPay ramp webhook", () => {
       data: {
         id: moonpayTransactionId,
         status: "completed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         customerId: MOONPAY_CUSTOMER_ID,
         externalTransactionId: TRANSFER_ID,
         baseCurrencyAmount: 0.2,
@@ -1096,11 +1097,11 @@ describe("MoonPay ramp webhook", () => {
         provider_reference: string | null;
       }>();
     expect(transfer).toEqual({
-      status: "completed",
+      status: "settling",
       amount: "0.2",
-      fiat_amount: "16.31",
+      fiat_amount: null,
       source_address: sourceAddress,
-      destination_address: destinationAddress,
+      destination_address: null,
       signature: submittedSignature,
       provider_reference: moonpayTransactionId,
     });
@@ -1138,31 +1139,41 @@ describe("MoonPay ramp webhook", () => {
     expect(rows.results).toHaveLength(1);
     expect(rows.results[0].id).toBe(required(link).id);
   });
-  it("still marks a transfer failed when an early-stage failure omits economics", async () => {
+  it("keeps an unfunded transfer retryable when a buy attempt fails without economics", async () => {
     const res = await sendMoonpayWebhook({
       type: "transaction_failed",
       externalCustomerId: "MOONPAY-ONRAMP-0001",
       data: {
         id: MOONPAY_TRANSACTION_ID,
         status: "failed",
+        updatedAt: "2026-06-18T11:00:00.000Z",
         externalTransactionId: TRANSFER_ID,
         failureReason: "kyc_rejected",
       },
     });
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
-      .prepare("SELECT status, error, provider_data FROM payment_transfers WHERE id = ?")
+      .prepare(
+        "SELECT status, error, provider_reference, provider_data FROM payment_transfers WHERE id = ?"
+      )
       .bind(TRANSFER_ID)
       .first<{
         status: string;
         error: string | null;
+        provider_reference: string | null;
         provider_data: {
           settlement?: unknown;
         };
       }>();
-    expect(required(transfer).status).toBe("failed");
-    expect(required(transfer).error).toBe("kyc_rejected");
+    expect(required(transfer).status).toBe("awaiting_payment");
+    expect(required(transfer).error).toBeNull();
+    expect(required(transfer).provider_reference).toBeNull();
     expect(required(transfer).provider_data.settlement).toBeUndefined();
+    const retired = await getDb(env)
+      .prepare("SELECT failure_reason FROM moonpay_failed_transactions WHERE transaction_id = ?")
+      .bind(MOONPAY_TRANSACTION_ID)
+      .first<{ failure_reason: string | null }>();
+    expect(retired).toEqual({ failure_reason: "kyc_rejected" });
   });
   it("rejects a moonpay webhook whose signed timestamp is outside the replay window", async () => {
     const body = JSON.stringify(completedPayload);

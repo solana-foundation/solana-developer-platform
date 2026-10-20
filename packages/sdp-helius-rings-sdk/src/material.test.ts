@@ -1,4 +1,4 @@
-import { isRingsIdentityMismatch } from "@sdp/helius-rings";
+import { isRingsIdentityMismatch } from "@sdp/helius-rings/errors";
 import { describe, expect, it } from "vitest";
 import {
   assertProvisionedIdentity,

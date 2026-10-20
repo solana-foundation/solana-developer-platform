@@ -4,10 +4,10 @@
 
 import { hashString } from "@sdp/payments/hash";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS_SQL, TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
@@ -91,8 +91,8 @@ describe("Projects Routes", () => {
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, ${ALL_API_KEY_GRANTS_SQL}, 'active')`
       )
       .bind(
         TEST_API_KEY.id,
@@ -103,13 +103,6 @@ describe("Projects Routes", () => {
         apiKeyHash
       )
       .run();
-
-    // Cache API key in KV — override projectId so the cached actor scope
-    // matches the project row we just seeded for this test suite.
-    await kv.apiKeys.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT.id })
-    );
   });
 
   describe("POST /v1/projects", () => {
@@ -186,7 +179,6 @@ describe("Projects Routes", () => {
 
     it("filters out the API key's own production project when the org is not enabled", async () => {
       const db = getDb(env);
-      const kv = createKVStoreSet(env);
       await db
         .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
         .bind(TEST_ORG.id)
@@ -195,14 +187,6 @@ describe("Projects Routes", () => {
         .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
         .bind(TEST_PRODUCTION_PROJECT.id, TEST_API_KEY.id)
         .run();
-      await kv.apiKeys.put(
-        `key:${apiKeyHash}`,
-        JSON.stringify({
-          ...TEST_CACHED_API_KEY,
-          projectId: TEST_PRODUCTION_PROJECT.id,
-          environment: "production",
-        })
-      );
       const res = await app.request(
         "/v1/projects",
         {
@@ -283,7 +267,7 @@ describe("Projects Routes", () => {
   });
 
   describe("PATCH /v1/projects/:projectId", () => {
-    it("updates the API key's project details", async () => {
+    it("refuses an API key, since project administration is `projects.manage`", async () => {
       const res = await app.request(
         `/v1/projects/${TEST_PROJECT.id}`,
         {
@@ -300,10 +284,10 @@ describe("Projects Routes", () => {
         env
       );
 
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.data.project.name).toBe("Updated Name");
-      expect(body.data.project.description).toBe("New description");
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "projects.manage" } },
+      });
     });
 
     it("returns 404 without modifying another project in the same organization", async () => {
@@ -332,6 +316,7 @@ describe("Projects Routes", () => {
     });
   });
 
+  // Project members are managed by a signed-in person only (HOO-2099).
   describe("Project Members", () => {
     const projectId = TEST_PROJECT.id;
     const projectMemberId = `pm_${TEST_PROJECT.id}_${TEST_USER.id}`;
@@ -340,7 +325,7 @@ describe("Projects Routes", () => {
       const res = await app.request(
         `/v1/projects/${projectId}/members`,
         {
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          headers: clerkHeaders(clerkToken, projectId),
         },
         env
       );
@@ -372,8 +357,7 @@ describe("Projects Routes", () => {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            ...clerkHeaders(clerkToken, projectId),
           },
           body: JSON.stringify({
             userId: "usr_test_member123",
@@ -403,8 +387,7 @@ describe("Projects Routes", () => {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            ...clerkHeaders(clerkToken, projectId),
           },
           body: JSON.stringify({ userId: "usr_test_outside123" }),
         },
@@ -416,7 +399,7 @@ describe("Projects Routes", () => {
       expect(body.error.message).toContain("not a member of this organization");
     });
 
-    it("updates and removes a member in the API key's project", async () => {
+    it("updates and removes a project member", async () => {
       const db = getDb(env);
 
       const updateRes = await app.request(
@@ -424,8 +407,7 @@ describe("Projects Routes", () => {
         {
           method: "PATCH",
           headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            ...clerkHeaders(clerkToken, projectId),
           },
           body: JSON.stringify({ role: "viewer" }),
         },
@@ -443,7 +425,7 @@ describe("Projects Routes", () => {
         `/v1/projects/${projectId}/members/${projectMemberId}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          headers: clerkHeaders(clerkToken, projectId),
         },
         env
       );
@@ -454,91 +436,6 @@ describe("Projects Routes", () => {
         .bind(`pm_${TEST_PROJECT.id}_${TEST_USER.id}`)
         .first();
       expect(removed).toBeNull();
-    });
-
-    it("returns 404 for cross-project member reads", async () => {
-      const res = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members`,
-        {
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 404 without adding an admin to another project", async () => {
-      const db = getDb(env);
-      await db
-        .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_test_cross_add', 'cross-add@example.com', 1, 'active')"
-        )
-        .run();
-      await db
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_cross_add', ?, 'usr_test_cross_add', 'member', 'active')`
-        )
-        .bind(TEST_ORG.id)
-        .run();
-
-      const res = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ userId: "usr_test_cross_add", role: "admin" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(404);
-      const membership = await db
-        .prepare(
-          "SELECT role FROM project_members WHERE project_id = ? AND user_id = 'usr_test_cross_add'"
-        )
-        .bind(TEST_PRODUCTION_PROJECT.id)
-        .first();
-      expect(membership).toBeNull();
-    });
-
-    it("returns 404 without changing or removing another project's member", async () => {
-      const db = getDb(env);
-      const memberId = `pm_${TEST_PRODUCTION_PROJECT.id}_${TEST_USER.id}`;
-
-      const updateRes = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members/${memberId}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ role: "viewer" }),
-        },
-        env
-      );
-      expect(updateRes.status).toBe(404);
-
-      const deleteRes = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members/${memberId}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(deleteRes.status).toBe(404);
-
-      const membership = await db
-        .prepare("SELECT role FROM project_members WHERE id = ?")
-        .bind(memberId)
-        .first<{ role: string }>();
-      expect(membership?.role).toBe("admin");
     });
   });
 

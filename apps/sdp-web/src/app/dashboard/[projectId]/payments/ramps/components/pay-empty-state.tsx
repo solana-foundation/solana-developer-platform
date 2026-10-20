@@ -1,8 +1,8 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import type { PayEmptyReason } from "./pay-readiness";

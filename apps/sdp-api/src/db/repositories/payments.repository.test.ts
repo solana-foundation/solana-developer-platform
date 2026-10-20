@@ -1,12 +1,7 @@
-import {
-  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
-  type PaymentTransferStatus,
-  SDP_ENVIRONMENTS,
-  type SdpEnvironment,
-  WALLET_TRANSFER_TYPES,
-} from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -24,7 +19,6 @@ import { createPostgresPaymentsRepository } from "./payments.repository.postgres
 const TEST_PROJECT_ID = "prj_payments_repo_test";
 const TEST_WALLET_ID = "wallet_payments_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
-const CANCELABLE = ["pending", "awaiting_payment"] as const;
 
 async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
   const db = getDb(env);
@@ -119,7 +113,7 @@ function transferInput(overrides: {
   };
 }
 
-describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
+describe("PaymentsRepository transfer writes (postgres)", () => {
   let projects: SeededDefaultProjects;
   let repo: PaymentsRepository;
 
@@ -198,15 +192,14 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     return row?.status ?? null;
   }
 
-  it("transitions the status when the current status is in fromStatuses", async () => {
+  it("applies a transition from one of its source statuses", async () => {
     await seedTransfer({ id: "xfr_guard_ok", status: "awaiting_payment" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_ok",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -301,272 +294,6 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     ).resolves.toBeNull();
   });
 
-  describe("claimTransferProviderData", () => {
-    const pending: PaymentTransferStatus = "pending";
-    const processing: PaymentTransferStatus = "processing";
-
-    it("claims an unset path and persists provider data and updated_at", async () => {
-      const transfer = await repo.createTransfer({
-        ...transferInput({ suffix: "provider-data-claim-unset" }),
-        status: pending,
-        provider: "moonpay",
-        providerData: { moonpay: { a: "1" } },
-      });
-      if (!transfer) throw new Error("Expected transfer creation to succeed");
-      const scope = {
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      };
-      const providerData = { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } };
-      const updatedAt = "2026-08-31T12:00:00.000Z";
-
-      const updated = await repo.claimTransferProviderData({
-        ...scope,
-        expectedStatus: pending,
-        claimPath: ["moonpay", "transactionId"],
-        providerData,
-        updatedAt,
-      });
-
-      expect(updated).toMatchObject({
-        id: transfer.id,
-        provider_data: providerData,
-        updated_at: updatedAt,
-      });
-      expect(transfer.updated_at).not.toBe(updatedAt);
-      await expect(repo.getTransferById(scope)).resolves.toEqual({
-        ...transfer,
-        provider_data: providerData,
-        updated_at: updatedAt,
-      });
-    });
-
-    it("returns null and leaves the row unchanged when the path is already set", async () => {
-      const transfer = await repo.createTransfer({
-        ...transferInput({ suffix: "provider-data-claim-occupied" }),
-        status: pending,
-        provider: "moonpay",
-        providerData: { moonpay: { a: "1", transactionId: "mp_tx_existing" } },
-      });
-      if (!transfer) throw new Error("Expected transfer creation to succeed");
-      const scope = {
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      };
-
-      await expect(
-        repo.claimTransferProviderData({
-          ...scope,
-          expectedStatus: pending,
-          claimPath: ["moonpay", "transactionId"],
-          providerData: { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } },
-          updatedAt: "2026-08-31T12:00:00.000Z",
-        })
-      ).resolves.toBeNull();
-      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
-    });
-
-    it("returns null and leaves the row unchanged when the status differs", async () => {
-      const transfer = await repo.createTransfer({
-        ...transferInput({ suffix: "provider-data-claim-status" }),
-        status: processing,
-        provider: "moonpay",
-        providerData: { moonpay: { a: "1" } },
-      });
-      if (!transfer) throw new Error("Expected transfer creation to succeed");
-      const scope = {
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      };
-
-      await expect(
-        repo.claimTransferProviderData({
-          ...scope,
-          expectedStatus: pending,
-          claimPath: ["moonpay", "transactionId"],
-          providerData: { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } },
-          updatedAt: "2026-08-31T12:00:00.000Z",
-        })
-      ).resolves.toBeNull();
-      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
-    });
-
-    it("returns null and leaves the row unchanged for a different organization", async () => {
-      const transfer = await repo.createTransfer({
-        ...transferInput({ suffix: "provider-data-claim-organization" }),
-        status: pending,
-        provider: "moonpay",
-        providerData: { moonpay: { a: "1" } },
-      });
-      if (!transfer) throw new Error("Expected transfer creation to succeed");
-      const scope = {
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      };
-
-      await expect(
-        repo.claimTransferProviderData({
-          ...scope,
-          organizationId: "org_someone_else",
-          expectedStatus: pending,
-          claimPath: ["moonpay", "transactionId"],
-          providerData: { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } },
-          updatedAt: "2026-08-31T12:00:00.000Z",
-        })
-      ).resolves.toBeNull();
-      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
-    });
-  });
-
-  describe("claimTransferProviderData and releaseTransferProviderDataClaim", () => {
-    const scope = {
-      transferId: "xfr_sandbox_simulation_claim",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-    };
-    const providerData = { moonpay: {} };
-    const claimValue = { requestedAt: "2026-09-01T12:00:00.000Z" };
-    const claimInput: Parameters<PaymentsRepository["claimTransferProviderData"]>[0] = {
-      ...scope,
-      expectedStatus: "awaiting_payment" satisfies PaymentTransferStatus,
-      claimPath: ["sandboxSimulation"],
-      providerData: { sandboxSimulation: claimValue },
-      updatedAt: claimValue.requestedAt,
-    };
-    const releaseInput: Parameters<PaymentsRepository["releaseTransferProviderDataClaim"]>[0] = {
-      ...scope,
-      expectedStatus: claimInput.expectedStatus,
-      claimPath: claimInput.claimPath,
-      claimValue,
-      updatedAt: "2026-09-01T12:01:00.000Z",
-    };
-
-    beforeEach(async () => {
-      await getDb(env)
-        .prepare(
-          `INSERT INTO counterparties
-             (id, organization_id, project_id, entity_type, display_name, created_by)
-           VALUES (?, ?, ?, 'individual', 'Simulation claim test', ?)
-           ON CONFLICT (id) DO NOTHING`
-        )
-        .bind("cpty_sandbox_simulation_claim", TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
-        .run();
-      const transfer = await repo.createTransfer({
-        ...transferInput({ suffix: "sandbox_simulation_claim" }),
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: "cpty_sandbox_simulation_claim",
-        sourceAddress: null,
-        token: "USDC",
-        amount: null,
-        type: "onramp",
-        direction: "inbound",
-        status: claimInput.expectedStatus,
-        provider: "moonpay",
-        providerReference: scope.transferId,
-        deliveryMode: "hosted",
-        fiatCurrency: "USD",
-        fiatAmount: "25.00",
-        providerData,
-      });
-      expect(transfer).not.toBeNull();
-    });
-
-    async function claimSimulation() {
-      const claimed = await repo.claimTransferProviderData(claimInput);
-      if (claimed === null) throw new Error("Expected simulation claim to succeed");
-      return claimed;
-    }
-
-    it("allows exactly one concurrent claim and stores the winner's value", async () => {
-      const competingValue = { requestedAt: "2026-09-01T12:00:01.000Z" };
-      const results = await Promise.all([
-        repo.claimTransferProviderData(claimInput),
-        repo.claimTransferProviderData({
-          ...claimInput,
-          providerData: { sandboxSimulation: competingValue },
-          updatedAt: competingValue.requestedAt,
-        }),
-      ]);
-
-      expect(results.filter((row) => row === null)).toHaveLength(1);
-      const winners = results.filter((row) => row !== null);
-      expect(winners).toHaveLength(1);
-      const winner = winners[0];
-      if (winner === undefined) throw new Error("Expected one winning simulation claim");
-      expect(winner.provider_data.sandboxSimulation).toEqual(
-        results[0] === null ? competingValue : claimValue
-      );
-      const stored = await repo.getTransferById(scope);
-      expect(stored?.provider_data.sandboxSimulation).toEqual(
-        winner.provider_data.sandboxSimulation
-      );
-      expect(stored).toEqual(winner);
-    });
-
-    it("retains the matching claim when the transfer status has advanced", async () => {
-      await claimSimulation();
-      const advanced = await repo.updateTransferStatusGuarded({
-        ...scope,
-        fromStatuses: NON_TERMINAL_RAMP_TRANSFER_STATUSES,
-        toStatus: "settling",
-        updatedAt: "2026-09-01T12:00:30.000Z",
-      });
-      expect(advanced).toMatchObject({
-        status: "settling",
-        provider_data: { ...providerData, sandboxSimulation: claimValue },
-      });
-
-      await expect(repo.releaseTransferProviderDataClaim(releaseInput)).resolves.toBeNull();
-      await expect(repo.getTransferById(scope)).resolves.toEqual(advanced);
-    });
-
-    it("retains the stored claim when the release value differs", async () => {
-      const claimed = await claimSimulation();
-
-      await expect(
-        repo.releaseTransferProviderDataClaim({
-          ...releaseInput,
-          claimValue: { requestedAt: "2026-09-01T12:00:01.000Z" },
-        })
-      ).resolves.toBeNull();
-      await expect(repo.getTransferById(scope)).resolves.toEqual(claimed);
-    });
-
-    it.each(["organization", "project"] as const)(
-      "retains the claim when released from a different %s scope",
-      async (parent) => {
-        const claimed = await claimSimulation();
-        const otherScope =
-          parent === "organization"
-            ? { organizationId: "org_other_simulation_claim" }
-            : { projectId: projects.production.id };
-
-        await expect(
-          repo.releaseTransferProviderDataClaim({ ...releaseInput, ...otherScope })
-        ).resolves.toBeNull();
-        await expect(repo.getTransferById(scope)).resolves.toEqual(claimed);
-      }
-    );
-
-    it("releases a matching claim while preserving all other provider data", async () => {
-      const claimed = await claimSimulation();
-
-      const released = await repo.releaseTransferProviderDataClaim(releaseInput);
-
-      expect(released).toEqual({
-        ...claimed,
-        provider_data: providerData,
-        updated_at: releaseInput.updatedAt,
-      });
-      expect(released?.provider_data).not.toHaveProperty("sandboxSimulation");
-      await expect(repo.getTransferById(scope)).resolves.toEqual(released);
-    });
-  });
-
   it("sets a provider reference once and permits only an exact replay", async () => {
     const transfer = await repo.createTransfer({
       ...transferInput({ suffix: "provider-reference-binding" }),
@@ -585,41 +312,40 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       updatedAt: "2026-08-31T11:00:00.000Z",
     };
     await expect(
-      repo.setProviderReferenceIfEmpty({ ...input, environment: "production" })
+      repo.claimProviderReference({ ...input, environment: "production" })
     ).resolves.toBeNull();
     await expect(
       repo.getTransferProjectEnvironment({ transferId: transfer.id, provider: "moonpay" })
     ).resolves.toBe("sandbox");
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    await expect(repo.claimProviderReference(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    await expect(repo.claimProviderReference(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
     await expect(
-      repo.setProviderReferenceIfEmpty({
+      repo.claimProviderReference({
         ...input,
         providerReference: "moonpay-transaction-2",
         updatedAt: "2026-08-31T11:01:00.000Z",
       })
     ).resolves.toBeNull();
     await expect(
-      repo.setProviderReferenceIfEmpty({
+      repo.claimProviderReference({
         ...input,
         provider: "stripe",
       })
     ).resolves.toBeNull();
   });
 
-  it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
+  it("is a no-op returning null when the status left the sources (the race)", async () => {
     await seedTransfer({ id: "xfr_guard_race", status: "settling" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_race",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -628,12 +354,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   });
 
   it("returns null for a transfer that does not exist", async () => {
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_missing",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -643,12 +368,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("does not transition a transfer owned by a different organization", async () => {
     await seedTransfer({ id: "xfr_guard_org", status: "awaiting_payment" });
 
-    const updated = await repo.updateTransferStatusGuarded({
+    const updated = await repo.transitionRampTransfer({
       transferId: "xfr_guard_org",
       organizationId: "org_someone_else",
       projectId: TEST_PROJECT_ID,
-      fromStatuses: CANCELABLE,
-      toStatus: "canceled",
+      transition: "canceled",
       updatedAt: new Date().toISOString(),
     });
 
@@ -659,12 +383,11 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("does not transition a transfer scoped to another project", async () => {
     await seedTransfer({ id: "xfr_guard_project", status: "awaiting_payment" });
     const transition = (projectId: string) =>
-      repo.updateTransferStatusGuarded({
+      repo.transitionRampTransfer({
         transferId: "xfr_guard_project",
         organizationId: TEST_ORG.id,
         projectId,
-        fromStatuses: CANCELABLE,
-        toStatus: "canceled",
+        transition: "canceled",
         updatedAt: new Date().toISOString(),
       });
     await expectProjectScoped(
@@ -1158,35 +881,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     offset: 0,
   };
 
-  it("matches nothing for an empty allowlist instead of dropping the filter", async () => {
-    const repo = await seedTwoWallets();
-
-    // walletIds carries an API key's authorized-wallet allowlist. An empty
-    // allowlist means "authorized for no wallet"; silently dropping the
-    // filter would hand that key every transfer in scope.
-    const denied = await repo.listTransfers({ ...listArgs, walletIds: [] });
-
-    expect(denied.rows).toHaveLength(0);
-    expect(denied.total).toBe(0);
-  });
-
-  it("scopes a non-empty allowlist to exactly its wallets", async () => {
-    const repo = await seedTwoWallets();
-
-    const scoped = await repo.listTransfers({ ...listArgs, walletIds: [WALLET_A] });
-
-    expect(scoped.rows).toHaveLength(2);
-    expect(scoped.rows.every((row) => row.wallet_id === WALLET_A)).toBe(true);
-  });
-
-  it("keeps an absent allowlist unfiltered", async () => {
-    const repo = await seedTwoWallets();
-
-    const all = await repo.listTransfers({ ...listArgs, walletIds: undefined });
-
-    expect(all.rows).toHaveLength(3);
-  });
-
   it("filters by one exact wallet", async () => {
     const repo = await seedTwoWallets();
 
@@ -1197,37 +891,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
 
     expect(selected.rows.map((row) => row.id)).toHaveLength(1);
     expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
-  });
-
-  it("authorizes exact rows by custody ID and legacy null rows by Provider ID", async () => {
-    const repo = await seedTwoWallets();
-
-    const authorized = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: {
-        custodyWalletIds: [CUSTODY_WALLET_B],
-        providerWalletIds: [WALLET_A],
-      },
-    });
-    const denied = await repo.listTransfers({
-      ...listArgs,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
-    });
-
-    expect(authorized.rows).toHaveLength(2);
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({
-        custody_wallet_id: CUSTODY_WALLET_B,
-        wallet_id: WALLET_B,
-      })
-    );
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({ custody_wallet_id: null, wallet_id: WALLET_A })
-    );
-    expect(authorized.rows).not.toContainEqual(
-      expect.objectContaining({ custody_wallet_id: CUSTODY_WALLET_A })
-    );
-    expect(denied).toEqual({ rows: [], total: 0 });
   });
 });
 

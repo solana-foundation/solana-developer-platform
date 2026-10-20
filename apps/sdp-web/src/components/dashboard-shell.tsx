@@ -1,6 +1,9 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
+import { cn } from "@sdp/ui/cn";
+import { type ThemeScope, themeScopeAttributes } from "@sdp/ui/theme-scope";
+import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -44,8 +47,6 @@ import { PaymentsDemoNotice } from "@/components/payments-demo-notice";
 import { PaymentsDemoToggle } from "@/components/payments-demo-toggle";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
-import { type ThemeScope, themeScopeAttributes } from "@/components/theme-scope";
-import { ThemeScopeProvider } from "@/components/theme-scope-provider";
 import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -69,7 +70,6 @@ import {
 } from "@/lib/payments-demo/payments-demo-context";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { useDashboardPathname, useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
 import { subscribeWalletFavoriteAdded } from "@/lib/wallet-favorites";
 
 // On NEW DESIGN the sidebar is the refresh design's on every route, whatever the page beside it

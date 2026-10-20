@@ -1,7 +1,7 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useTheme } from "@/contexts/theme-context";
 import { useTranslations } from "@/i18n/provider";
 

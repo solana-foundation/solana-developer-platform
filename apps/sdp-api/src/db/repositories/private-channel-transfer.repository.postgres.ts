@@ -1,5 +1,5 @@
-import type { PrivateChannelTransferRecipientDto } from "@sdp/types";
-import type { AppDb } from "@/db";
+import type { PrivateChannelTransferRecipientDto } from "@sdp/types/private-channels";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   type CreatePrivateChannelTransferInput,
   DEFAULT_TRANSFER_LIST_LIMIT,

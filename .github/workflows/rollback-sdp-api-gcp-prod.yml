@@ -1,6 +1,6 @@
 name: Roll back sdp-api prod to the previous build
 
-# A deliberate rollback in a couple of minutes: traffic, cron and worker go
+# A deliberate rollback in a couple of minutes: traffic and the worker go
 # back to the revision that served before the last promotion, with no rebuild
 # and no migrations. Prod stays held until a deploy dispatched with clear_hold
 # passes its canary.
@@ -19,7 +19,6 @@ env:
   PROJECT_ID: solana-developer-platform
   REGION: us-central1
   SERVICE: sdp-prod-api-public
-  JOB: sdp-prod-api-public-cron
   WORKER_SERVICE: sdp-prod-worker
   MIGRATE_JOB: sdp-prod-api-public-migrate
 
@@ -69,7 +68,7 @@ jobs:
               '
           )"
           # A re-run after a partial failure finds traffic already moved and
-          # finishes the cron and worker rollback; the label clears only at the end.
+          # finishes the worker rollback; the label clears only at the end.
           if [[ "${serving}" == "${previous}" ]]; then
             echo "Traffic is already on ${previous}; finishing the rollback."
           fi
@@ -92,17 +91,8 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${previous}=100"
-          gcloud run jobs update "${JOB}" \
+          gcloud run services update "${WORKER_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${image}"
-          describe_err="$(mktemp)"
-          if gcloud run services describe "${WORKER_SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
-            gcloud run services update "${WORKER_SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" --image "${image}"
-          elif ! grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
-            cat "${describe_err}" >&2
-            exit 1
-          fi
 
           for attempt in {1..12}; do
             if curl --fail --silent --show-error --max-time 10 "https://api.solana.com/health/ready" |

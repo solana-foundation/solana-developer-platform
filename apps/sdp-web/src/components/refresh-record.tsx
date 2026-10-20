@@ -1,6 +1,6 @@
+import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
 import type { ReactNode } from "react";
-import { InfoHint } from "@/components/ui/info-hint";
-import { cn } from "@/lib/utils";
 
 export type StateBandTone = "ok" | "warn" | "error" | "info" | "neutral";
 

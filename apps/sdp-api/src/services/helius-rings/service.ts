@@ -1,33 +1,62 @@
 import { createHash } from "node:crypto";
+import {
+  DEFAULT_RING_NAME,
+  RING_NAME_PATTERN,
+  RUNTIME_HEALTH_COMPONENTS,
+} from "@sdp/helius-rings/constants";
+import {
+  HeliusRingsError,
+  type HeliusRingsErrorCode,
+  isRingsIdentityMismatch,
+} from "@sdp/helius-rings/errors";
+import type {
+  KnownAsset,
+  ReadIdentityResult,
+  RingsGatewayPort,
+  SyncPhotonInput,
+  SyncPhotonResult,
+  VerifyIndexedResult,
+} from "@sdp/helius-rings/port";
+import { nextState, type TransitionGuard } from "@sdp/helius-rings/state-machine";
 import type {
   FailureCode,
-  KnownAsset,
   OperationEvent,
   OperationState,
   PrivateOperation,
   PrivateOperationInput,
   PrivateWallet,
   ProjectRing,
-  ReadIdentityResult,
   RuntimeHealth,
-  SyncPhotonInput,
-  SyncPhotonResult,
-  TransitionGuard,
-  VerifyIndexedResult,
-} from "@sdp/helius-rings";
+} from "@sdp/helius-rings/types";
+import { HELIUS_RINGS_OPERATION_TYPES as OP_TYPES } from "@sdp/types/helius-rings";
+import { HELIUS_RINGS_OPERATION_MOVEMENTS } from "@sdp/types/movements";
+import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db/client";
+import type { HeliusRingsAssetRepository } from "@/db/repositories/helius-rings-asset.repository";
 import {
-  DEFAULT_RING_NAME,
-  HeliusRingsError,
-  type HeliusRingsErrorCode,
-  isRingsIdentityMismatch,
-  nextState,
-  OP_TYPES,
-  RING_NAME_PATTERN,
-  type RingsGatewayPort,
-  RUNTIME_HEALTH_COMPONENTS,
-} from "@sdp/helius-rings";
-import { HELIUS_RINGS_OPERATION_MOVEMENTS } from "@sdp/types";
-import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
+  type HeliusRingsEventRepository,
+  mapHeliusRingsEventRow,
+} from "@/db/repositories/helius-rings-event.repository";
+import {
+  type HeliusRingsHealthRepository,
+  mapHeliusRingsHealthRows,
+} from "@/db/repositories/helius-rings-health.repository";
+import {
+  type HeliusRingsOperationRepository,
+  type HeliusRingsOperationRow,
+  RETIRED_APPROVAL_FAILURE,
+} from "@/db/repositories/helius-rings-operation.repository";
+import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
+import {
+  type HeliusRingsProjectRingRepository,
+  type HeliusRingsProjectRingRow,
+  mapHeliusRingsProjectRingRow,
+} from "@/db/repositories/helius-rings-project-ring.repository";
+import {
+  type HeliusRingsWalletRepository,
+  type HeliusRingsWalletRow,
+  mapHeliusRingsWalletRow,
+} from "@/db/repositories/helius-rings-wallet.repository";
+import { createPostgresHeliusRingsWalletRepository } from "@/db/repositories/helius-rings-wallet.repository.postgres";
 import {
   createHeliusRingsAssetRepository,
   createHeliusRingsEventRepository,
@@ -35,23 +64,7 @@ import {
   createHeliusRingsOperationRepository,
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
-  createPostgresHeliusRingsOperationRepository,
-  createPostgresHeliusRingsWalletRepository,
-  type HeliusRingsAssetRepository,
-  type HeliusRingsEventRepository,
-  type HeliusRingsHealthRepository,
-  type HeliusRingsOperationRepository,
-  type HeliusRingsOperationRow,
-  type HeliusRingsProjectRingRepository,
-  type HeliusRingsProjectRingRow,
-  type HeliusRingsWalletRepository,
-  type HeliusRingsWalletRow,
-  mapHeliusRingsEventRow,
-  mapHeliusRingsHealthRows,
-  mapHeliusRingsProjectRingRow,
-  mapHeliusRingsWalletRow,
-  RETIRED_APPROVAL_FAILURE,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { AppError } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
@@ -1317,6 +1330,7 @@ export class HeliusRingsService {
         organizationId: this.tenant.organizationId,
         projectId: this.tenant.projectId,
         owner,
+        custodyWalletId: wallet.custody_wallet_id,
         unsignedTxBase64: built.outerUnsignedTxBase64,
         movement: HELIUS_RINGS_OPERATION_MOVEMENTS[current.op_type],
       });
@@ -1409,12 +1423,14 @@ export class HeliusRingsService {
   ): Promise<HeliusRingsOperationRow> {
     if (error instanceof MoneyMovementRefusedError) {
       // Money admission refused the signature (HOO-1955): a decision, not an
-      // outage. Record it as final and surface the 403 rather than a
-      // retryable gateway failure.
+      // outage, surfaced as the 403. Final, except when no one asked: the
+      // poller resuming a build that died runs as no principal, which may not
+      // start money (HOO-2099). The caller's own retry rebuilds and signs as
+      // them, so that failure stays retryable.
       await this.fail(operation.id, operation.state, {
         code: "signer_failed",
         message: error.message,
-        retryable: false,
+        retryable: error.reason === "principal_missing",
       });
       throw error;
     }

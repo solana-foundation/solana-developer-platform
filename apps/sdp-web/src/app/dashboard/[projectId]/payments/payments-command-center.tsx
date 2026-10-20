@@ -1,4 +1,5 @@
-import type { PaymentTransferSummary } from "@sdp/types";
+import type { PaymentTransferSummary } from "@sdp/types/payments";
+import { Badge } from "@sdp/ui/badge";
 import {
   ArrowDownToLineIcon,
   ArrowRightIcon,
@@ -11,7 +12,6 @@ import {
 import Link from "next/link";
 import { Suspense } from "react";
 import { TokenMark } from "@/components/token-mark";
-import { Badge } from "@/components/ui/badge";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { projectHref } from "@/lib/dashboard-project-path";

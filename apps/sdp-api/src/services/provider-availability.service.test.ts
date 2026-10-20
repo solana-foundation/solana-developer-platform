@@ -1,14 +1,13 @@
+import { CUSTODY_PROVIDERS, type CustodyMode, type CustodyProvider } from "@sdp/types/custody";
 import {
-  CUSTODY_PROVIDERS,
-  type CustodyMode,
-  type CustodyProvider,
+  COMPLIANCE_PROVIDERS,
   EARN_PROVIDERS,
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
-  SDP_RAMP_PROVIDER_STAGES,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
 import {
   admitByokCustodySetup,
@@ -353,7 +352,12 @@ describe("provider-availability.service", () => {
         enabled: false,
       });
     }
-    expect(onStable.providers.compliance).toEqual(onExperimental.providers.compliance);
+    for (const provider of COMPLIANCE_PROVIDERS) {
+      expect(onStable.providers.compliance[provider]).toEqual({
+        ...onExperimental.providers.compliance[provider],
+        enabled: false,
+      });
+    }
   });
 
   it("follows injected ramp provider stages", async () => {

@@ -4,10 +4,25 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+    "./credentials": {
+      "types": "./src/credentials.ts",
+      "import": "./src/credentials.ts",
+      "default": "./src/credentials.ts"
+    },
+    "./scrub": {
+      "types": "./src/scrub.ts",
+      "import": "./src/scrub.ts",
+      "default": "./src/scrub.ts"
+    },
+    "./sentry": {
+      "types": "./src/sentry.ts",
+      "import": "./src/sentry.ts",
+      "default": "./src/sentry.ts"
+    },
+    "./upstream-error": {
+      "types": "./src/upstream-error.ts",
+      "import": "./src/upstream-error.ts",
+      "default": "./src/upstream-error.ts"
     }
   },
   "scripts": {

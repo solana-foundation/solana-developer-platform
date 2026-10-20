@@ -1,11 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { requireAction } from "@/middleware/require-action";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   authenticateTestClerkUser,
@@ -14,8 +15,8 @@ import {
   signTestClerkClaims,
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { credentialAdminAuthMiddleware } from "./credential-admin-auth";
 
@@ -24,7 +25,8 @@ function buildProbe() {
   let handlerReached = false;
   app.use("*", kvStoreMiddleware());
   app.use("*", credentialAdminAuthMiddleware());
-  app.get("/probe", (c) => {
+  // Each credential route declares `wallets.configure`, which only an admin holds.
+  app.get("/probe", requireAction("wallets.configure"), (c) => {
     handlerReached = true;
     return c.json({ authType: getAuth(c).authType });
   });
@@ -100,32 +102,28 @@ describe("credentialAdminAuthMiddleware", () => {
   });
 
   it.each([
-    ["standard", "api_developer", ["custody:admin"]],
-    ["wildcard admin", "api_admin", ["*"]],
-  ] as const)(
-    "rejects a valid %s API key before the handler",
-    async (_label, role, permissions) => {
-      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, keyHash, {
-        ...TEST_CACHED_API_KEY,
-        role,
-        permissions: [...permissions],
-      });
-      const { app, wasHandlerReached } = buildProbe();
-      const response = await app.request(
-        "/probe",
-        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-      expect(response.status).toBe(403);
-      expect(await response.json()).toMatchObject({
-        error: {
-          message: "Credential administration requires a signed-in user",
-        },
-      });
-      expect(wasHandlerReached()).toBe(false);
-    }
-  );
+    ["wallet-scoped", ["wallets.read"]],
+    ["every-grant", ALL_API_KEY_GRANTS],
+  ] as const)("rejects a valid %s API key before the handler", async (_label, grants) => {
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_SEEDED_API_KEY,
+      grants: [...grants],
+    });
+    const { app, wasHandlerReached } = buildProbe();
+    const response = await app.request(
+      "/probe",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: {
+        message: "Credential administration requires a signed-in user",
+      },
+    });
+    expect(wasHandlerReached()).toBe(false);
+  });
 
   it("returns unauthorized for missing authentication before the handler", async () => {
     const { app, wasHandlerReached } = buildProbe();

@@ -1,13 +1,30 @@
 "use client";
 
+import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
+import type {
+  CreatedPaymentRequest,
+  PaymentRequest,
+  PaymentRequestLink,
+  PaymentRequestStatus,
+  PaymentsDashboardWallet,
+} from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type Counterparty,
-  type CounterpartyAccount,
-  type PaymentRequest,
-  type PaymentRequestStatus,
-  type PaymentsDashboardWallet,
-} from "@sdp/types";
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@sdp/ui/card";
+import { cn } from "@sdp/ui/cn";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   BanknoteIcon,
   ChevronRightIcon,
@@ -27,38 +44,27 @@ import {
   type ReactNode,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
+import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
+import { CounterpartyPlaygroundLoading } from "@/app/dashboard/[projectId]/payments/counterparty-menu-loading";
+import {
+  formatDisplayAmount,
+  formatTimestamp,
+  shortenAddress,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { syncPlaygroundApiKeysForActiveTab } from "@/app/dashboard/[projectId]/payments/payments-playground-api-key-state";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
-import { Select, SelectItem } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   type DashboardPlaygroundApiKeyOption,
   useDashboardWorkspace,
@@ -70,12 +76,6 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm } from "@/lib/use-zod-form";
-import { cn } from "@/lib/utils";
-import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
-import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
-import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
-import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import {
   deriveTokenOptions,
@@ -212,7 +212,7 @@ function CreateRequestModal({
    * Receives the created request so its details can be shown without a round trip,
    * or `null` when the response carried no usable link.
    */
-  onCreated: (request: PaymentRequest | null) => void;
+  onCreated: (request: CreatedPaymentRequest | null) => void;
 }) {
   const t = useTranslations();
   const notice = useOutcomeUnknownNotice(null);
@@ -280,16 +280,19 @@ function CreateRequestModal({
       return;
     }
     setSubmitting(true);
-    const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
-      method: "POST",
-      body: {
-        walletId: result.data.wallet,
-        token: result.data.token,
-        amount: result.data.amount,
-        counterpartyId,
-        expiresAt,
-      },
-    });
+    const res = await dashboardFetch<{ data: CreatedPaymentRequest }>(
+      "/api/dashboard/payments/requests",
+      {
+        method: "POST",
+        body: {
+          walletId: result.data.wallet,
+          token: result.data.token,
+          amount: result.data.amount,
+          counterpartyId,
+          expiresAt,
+        },
+      }
+    );
     settleExpiresAt(input, expiresAt, res);
     setSubmitting(false);
     if (!res.ok) {
@@ -497,6 +500,10 @@ interface PaymentRequestsWorkspaceProps {
   counterparties: Counterparty[];
 }
 
+/** The hosted pay page for a token, on this origin. Call it from an event, never in render. */
+function payLinkFor(token: string): string {
+  return `${window.location.origin}/pay/${token}`;
+}
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
@@ -516,6 +523,16 @@ export function PaymentRequestsWorkspace({
   );
   const isPlaygroundTab = useDashboardTab() === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
+  // A request's pay link, from the create response or read on open, kept with
+  // the request it belongs to so it is never shown on another one. It is built
+  // in those events, never while rendering, where `window` does not exist.
+  const [selectedLink, setSelectedLink] = useState<{
+    requestId: string;
+    payLink: string | null;
+  } | null>(null);
+  // The request opened last: a link read that lands after the user opened
+  // another row, or closed the details, is dropped.
+  const openingRequestId = useRef<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const requests = initialPaymentRequests;
 
@@ -527,7 +544,27 @@ export function PaymentRequestsWorkspace({
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId),
     [apiKeys, selectedPlaygroundApiKeyId]
   );
-  const payLink = selected ? `${window.location.origin}/pay/${selected.publicToken}` : null;
+  // Reads never carry the pay link (APE-849): opening a row reads its token, which the
+  // API returns only to a member whose role may manage payment requests.
+  const payLink = selected && selectedLink?.requestId === selected.id ? selectedLink.payLink : null;
+  const openRequest = async (row: PaymentRequest) => {
+    openingRequestId.current = row.id;
+    const res = await dashboardFetch<{ data: PaymentRequestLink }>(
+      `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
+    );
+    if (openingRequestId.current !== row.id) {
+      return;
+    }
+    if (!res.ok && res.status !== 403) {
+      toast.error(res.error);
+      return;
+    }
+    setSelectedLink({
+      requestId: row.id,
+      payLink: res.ok ? payLinkFor(res.data.data.publicToken) : null,
+    });
+    setSelected(row);
+  };
 
   const walletNameById = useMemo(
     () => new Map(wallets.map((wallet) => [wallet.walletId, wallet.label])),
@@ -614,7 +651,7 @@ export function PaymentRequestsWorkspace({
                             <button
                               key={request.id}
                               type="button"
-                              onClick={() => setSelected(request)}
+                              onClick={() => void openRequest(request)}
                               className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
                             >
                               <span className="min-w-0 flex-1 space-y-1.5">
@@ -665,11 +702,11 @@ export function PaymentRequestsWorkspace({
                                 key={request.id}
                                 role="button"
                                 tabIndex={0}
-                                onClick={() => setSelected(request)}
+                                onClick={() => void openRequest(request)}
                                 onKeyDown={(event: KeyboardEvent) => {
                                   if (event.key === "Enter" || event.key === " ") {
                                     event.preventDefault();
-                                    setSelected(request);
+                                    void openRequest(request);
                                   }
                                 }}
                                 className="cursor-pointer"
@@ -725,11 +762,15 @@ export function PaymentRequestsWorkspace({
         ]}
       />
 
-      {selected && payLink ? (
+      {selected ? (
         <Modal
           isOpen
           ariaLabel={t("DashboardPayments.requests.paymentRequestDetails")}
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            openingRequestId.current = null;
+            setSelected(null);
+            setSelectedLink(null);
+          }}
           size="lg"
         >
           <div className="space-y-5 p-6">
@@ -755,23 +796,25 @@ export function PaymentRequestsWorkspace({
               </p>
             </div>
 
-            <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
-              <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
-                {payLink}
-              </span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                iconLeft={<CopyIcon />}
-                onClick={() => {
-                  void navigator.clipboard.writeText(payLink);
-                  toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
-                }}
-              >
-                {t("DashboardPayments.requests.copy")}
-              </Button>
-            </div>
+            {payLink ? (
+              <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
+                <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
+                  {payLink}
+                </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  iconLeft={<CopyIcon />}
+                  onClick={() => {
+                    void navigator.clipboard.writeText(payLink);
+                    toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
+                  }}
+                >
+                  {t("DashboardPayments.requests.copy")}
+                </Button>
+              </div>
+            ) : null}
 
             <div className="rounded-2xl border border-border-default px-4">
               <div className="divide-y divide-border-default">
@@ -817,6 +860,10 @@ export function PaymentRequestsWorkspace({
             // Swap the create form for the details view and let the table repopulate
             // behind it, rather than closing and making the user find the new row.
             setCreateOpen(false);
+            openingRequestId.current = request ? request.id : null;
+            setSelectedLink(
+              request ? { requestId: request.id, payLink: payLinkFor(request.publicToken) } : null
+            );
             setSelected(request);
             router.refresh();
           }}

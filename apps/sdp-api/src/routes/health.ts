@@ -2,15 +2,17 @@
  * Health Check Route
  */
 
-import { EGRESS_READINESS_SERVES_TRAFFIC, resolveSdpReleaseChannel } from "@sdp/types";
+import { EGRESS_READINESS_SERVES_TRAFFIC } from "@sdp/types/health";
+import { resolveSdpReleaseChannel } from "@sdp/types/release-channels";
 import { Hono } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import { publicRoute } from "@/middleware/require-action";
 import { pingRedis } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
-const health = new Hono<{ Bindings: Env }>();
+export const health = new Hono<{ Bindings: Env }>();
 
-health.get("/", async (c) => {
+health.get("/", publicRoute("health check"), async (c) => {
   const timestamp = new Date().toISOString();
 
   // Basic health check
@@ -26,7 +28,7 @@ health.get("/", async (c) => {
   return c.json(health);
 });
 
-health.get("/ready", async (c) => {
+health.get("/ready", publicRoute("readiness check"), async (c) => {
   const [database, redis] = await Promise.allSettled([
     getDb(c.env).prepare("SELECT 1").first(),
     pingRedis(c.env),
@@ -53,5 +55,3 @@ health.get("/ready", async (c) => {
 
   return body.status === "ready" ? c.json(body) : c.json(body, 503);
 });
-
-export default health;

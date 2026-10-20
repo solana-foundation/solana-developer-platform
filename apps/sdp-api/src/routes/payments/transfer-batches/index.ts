@@ -1,35 +1,32 @@
 import { Hono } from "hono";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
-import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import type { Env } from "@/types/env";
 import {
   admitTransferBatchExecution,
   authorizeTransferBatch,
   createTransferBatch,
-  estimateTransferBatch,
   findTransferBatchRecordReplay,
-  getTransferBatch,
-  listTransferBatches,
-} from "./handlers";
+} from "@/routes/payments/transfer-batches/create";
+import { estimateTransferBatch } from "@/routes/payments/transfer-batches/estimate";
+import { getTransferBatch, listTransferBatches } from "@/routes/payments/transfer-batches/read";
+import type { Env } from "@/types/env";
 import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 import { createTransferBatchSchema, estimateTransferBatchSchema } from "./schemas";
 
-const transferBatches = new Hono<{ Bindings: Env }>();
+export const transferBatches = new Hono<{ Bindings: Env }>();
 
 transferBatches.post(
   "/estimate",
-  requirePermissions("payments:read", "wallets:read", "counterparties:read"),
+  requireAction("transfer_batches.read"),
   validateBody(estimateTransferBatchSchema),
   estimateTransferBatch
 );
 transferBatches.post(
   "/",
-  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
-  requireAllowedOperation("payment_transfer_batch_execute"),
+  requireAction("transfer_batches.execute"),
   validateBody(createTransferBatchSchema),
   authorize(authorizeTransferBatch),
   // Batches run longer than one transfer, recipient order does not change what
@@ -46,7 +43,5 @@ transferBatches.post(
   admit(admitTransferBatchExecution),
   createTransferBatch
 );
-transferBatches.get("/", requirePermissions("payments:read"), listTransferBatches);
-transferBatches.get("/:batchId", requirePermissions("payments:read"), getTransferBatch);
-
-export default transferBatches;
+transferBatches.get("/", requireAction("transfer_batches.read"), listTransferBatches);
+transferBatches.get("/:batchId", requireAction("transfer_batches.read"), getTransferBatch);

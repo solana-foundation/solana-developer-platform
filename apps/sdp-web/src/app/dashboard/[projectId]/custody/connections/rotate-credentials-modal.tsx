@@ -1,13 +1,13 @@
 "use client";
 
-import type { CustodyProvider } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
+import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Callout } from "@/components/ui/callout";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { rotateCredentialsAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";

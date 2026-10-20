@@ -1,10 +1,13 @@
 import { Hono } from "hono";
-import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams } from "@/middleware/validate";
+import {
+  authorizeCounterparty,
+  authorizeCounterpartyAccount,
+} from "@/routes/counterparties/access";
 import type { Env } from "@/types/env";
-import { authorizeCounterparty, authorizeCounterpartyAccount } from "../counterparties/access";
 import {
   archiveCounterpartyAccount,
   createCounterpartyAccount,
@@ -21,12 +24,12 @@ import {
 
 // Mounted under /counterparties/:counterpartyId/accounts. Auth and project
 // context middleware are applied by the parent counterparties router.
-const counterpartyAccounts = new Hono<{ Bindings: Env }>();
+export const counterpartyAccounts = new Hono<{ Bindings: Env }>();
 
-counterpartyAccounts.get("/", requirePermissions("counterparties:read"), listCounterpartyAccounts);
+counterpartyAccounts.get("/", requireAction("counterparties.read"), listCounterpartyAccounts);
 counterpartyAccounts.post(
   "/",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateParams(counterpartyAccountListParamsSchema),
   validateBody(createCounterpartyAccountSchema),
   authorize(authorizeCounterparty),
@@ -35,12 +38,12 @@ counterpartyAccounts.post(
 );
 counterpartyAccounts.get(
   "/:counterpartyAccountId",
-  requirePermissions("counterparties:read"),
+  requireAction("counterparties.read"),
   getCounterpartyAccount
 );
 counterpartyAccounts.patch(
   "/:counterpartyAccountId",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.execute"),
   validateParams(counterpartyAccountParamsSchema),
   validateBody(updateCounterpartyAccountSchema),
   authorize(authorizeCounterpartyAccount),
@@ -49,11 +52,9 @@ counterpartyAccounts.patch(
 );
 counterpartyAccounts.delete(
   "/:counterpartyAccountId",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateParams(counterpartyAccountParamsSchema),
   authorize(authorizeCounterpartyAccount),
   idempotent({ key: "accepted", serverErrors: "store" }),
   archiveCounterpartyAccount
 );
-
-export default counterpartyAccounts;

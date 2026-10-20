@@ -1,5 +1,5 @@
-import * as solanaRpc from "@sdp/rpc/solana";
-import { getDb } from "@/db";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentTransferBatchRow,
@@ -7,6 +7,7 @@ import type {
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { AppError, badRequest, internalError } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -18,13 +19,13 @@ import {
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import * as solanaServices from "@/services/solana";
+import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
+import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
-import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
@@ -61,10 +62,13 @@ export async function authorizeTransferBatch(
 ): Promise<AuthorizedBatchRequest> {
   // SAFETY: mounted after validateBody(createTransferBatchSchema).
   const body = input.body as CreateTransferBatchInput;
-  // Read fresh, never from the cached snapshot, which drops a binding once its
-  // wallet is inactive and would refuse the replay of a batch that ran.
-  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
-  return authorizeBatchRequest(c, body, null, body.sourceCustodyWalletId);
+  const authorized = await authorizeBatchRequest(c, body, body.sourceCustodyWalletId);
+  // The custody signer refuses a wallet outside the key's scope (HOO-2099).
+  // Refusing here as well, before the key is claimed, keeps a refused batch
+  // from writing failed recipients and an Idempotency-Key that would replay
+  // them after the scope is fixed.
+  assertCallerWalletInScope(authorized.scope.auth.walletAccess, authorized.sourceWallet.id);
+  return authorized;
 }
 
 /** The custody runtime takes the source wallet: state, after the replay exits. */
@@ -152,7 +156,7 @@ export async function createTransferBatch(
     "payments.transfer_batch"
   );
   const [signer, feePayer, lifetime] = await Promise.all([
-    solanaServices.createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet(
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,
@@ -160,7 +164,7 @@ export async function createTransferBatch(
       "payments.transfer_batch"
     ),
     feePayment.getFeePayer(),
-    solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
+    getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");

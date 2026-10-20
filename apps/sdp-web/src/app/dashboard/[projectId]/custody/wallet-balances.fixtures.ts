@@ -1,4 +1,5 @@
-import { type CustodyWalletTokenBalance, SOL_MINT } from "@sdp/types";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { sol, solToLamports } from "@solana/kit";
 import type { WalletTrackedBalancesResult } from "./[walletId]/wallet-detail-balances";
 

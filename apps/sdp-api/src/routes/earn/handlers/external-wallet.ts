@@ -1,12 +1,13 @@
-import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
+import { isEarnProviderId } from "@sdp/earn";
 import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
-import { notImplemented } from "@sdp/earn/errors";
+import { notImplemented, providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import {
   addDecimalAmounts,
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnDepositSwap,
   EarnExternalWalletDepositResponse,
@@ -26,12 +27,15 @@ import type {
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
-  SdpEnvironment,
-} from "@sdp/types";
-import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
-import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
+} from "@sdp/types/earn";
+import {
+  earnDepositStyle,
+  earnProviderDepositSettlement,
+  earnProviderWithdrawalSettlement,
+  earnWithdrawSlippageFloor,
+} from "@sdp/types/provider-access";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -44,9 +48,22 @@ import { badRequest, internalError, notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { type AppContext, requireEarnStrategyForCaller } from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
+import {
+  type earnExternalWalletDepositTransactionSchema,
+  earnExternalWalletEarningsQuerySchema,
+  earnExternalWalletMovementParamsSchema,
+  earnExternalWalletMovementsQuerySchema,
+  earnExternalWalletPositionSummaryQuerySchema,
+  earnExternalWalletPositionsQuerySchema,
+  type earnExternalWalletSubmitSchema,
+  type earnExternalWalletWithdrawalPreviewSchema,
+  type earnExternalWalletWithdrawalTransactionSchema,
+} from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
 import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
@@ -61,19 +78,6 @@ import {
 } from "@/services/earn/vault-external-wallet.service";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import type { AppContext } from "../context";
-import { requireEarnStrategyForCaller, resolveSdpEnvironment } from "../context";
-import {
-  type earnExternalWalletDepositTransactionSchema,
-  earnExternalWalletEarningsQuerySchema,
-  earnExternalWalletMovementParamsSchema,
-  earnExternalWalletMovementsQuerySchema,
-  earnExternalWalletPositionSummaryQuerySchema,
-  earnExternalWalletPositionsQuerySchema,
-  type earnExternalWalletSubmitSchema,
-  type earnExternalWalletWithdrawalPreviewSchema,
-  type earnExternalWalletWithdrawalTransactionSchema,
-} from "../schemas";
 import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,
@@ -105,9 +109,8 @@ import {
  * that takes the signed bytes back, records the movement, then broadcasts.
  *
  * WHY NO REQUEST GATE, stated here because its absence looks like the deposit
- * route's cautionary tale: the custody wallet binding governs the
- * organization's own custody and stands between a request and
- * `createOrgSignerForCustodyWallet`. This path never resolves a signer, never
+ * route's cautionary tale: a key's wallet scope governs the organization's
+ * own custody, at `createOrgSignerForCustodyWallet` (HOO-2099). This path never resolves a signer, never
  * touches custody, and moves the OWNER's money on the OWNER's signature, which
  * IS the authorization. There is no signing sink here for the
  * value-moving conformance inventory to find.
@@ -360,9 +363,8 @@ function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPosition
  * The read the cross-provider feed structurally cannot serve: its vault arm
  * requires a custody-wallet match and an owner-signed row has none. Like every
  * movement read this takes NO provider gate (ADR 0002 — it reports on money
- * that already moved) and, like the position reads, no `wallets:read`: these
- * are end-user wallets SDP does not custody, so wallet bindings have nothing
- * to say about them.
+ * that already moved) and, like the position reads, no wallet scope: these
+ * are end-user wallets SDP does not custody.
  *
  * The owner is a REQUIRED query filter, not a path segment, so the collection
  * keeps its `:movementId` detail route unambiguous. An owner with no recorded
@@ -800,7 +802,7 @@ export async function resolveExternalWalletExit(
  * "Gate asymmetry"): production slippage floor, environment capability,
  * surfacing, and catalogue admission apply to both tiers. Entitlement applies
  * only when a credential supplied an organization. Everything custody-shaped
- * stays absent: no wallet resolution, binding checks, or policy extraction.
+ * stays absent: no wallet resolution, wallet scope, or policy extraction.
  * The owner is an address, not a wallet SDP can reach.
  */
 export async function createEarnExternalWalletDepositTransaction(
@@ -1019,7 +1021,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 
 /**
  * POST /v1/earn/external-wallet/withdrawal-previews: quote one caller-owned
- * exit without applying custody-wallet bindings. The position's exact project
+ * exit without applying a custody wallet scope. The position's exact project
  * scope is the authorization boundary, matching the external build route.
  *
  * Like the build, this keeps every money-in gate out of the exit path. A

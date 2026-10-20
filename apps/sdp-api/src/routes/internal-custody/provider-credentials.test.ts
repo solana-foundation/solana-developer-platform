@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { type DatabaseClient, getDb } from "@/db";
+import { type DatabaseClient, getDb } from "@/db/client";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -11,15 +11,16 @@ import { AuditService } from "@/services/audit.service";
 import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { insertTestCustodyWalletRow, seedTestCustodySetup } from "@/test/helpers/custody";
 import { activateTestCustodyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import internalCustody from "./index";
+import { internalCustody } from "./index";
 
 let clerkToken: string;
 
@@ -524,16 +525,14 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("rejects API-key authentication even with custody admin permission", async () => {
     const rawKey = "sk_test_internal_credential_admin";
     const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       id: "key_internal_credential_admin",
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
       rateLimitTier: "standard",
       allowedIps: null,
-      signingWalletId: null,
       status: "active",
       expiresAt: null,
     });

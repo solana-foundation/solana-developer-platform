@@ -1,21 +1,21 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "@/routes/issuance/helpers";
+import type { seizeSchema } from "@/routes/issuance/schemas";
 import { AuditService } from "@/services/audit.service";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
-import {
-  createIssuanceMosaicService,
-  getTenantTokenService,
-  requireProjectScope,
-} from "../helpers";
-import type { seizeSchema } from "../schemas";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import {
   admitIssuanceRuntimeExecution,
@@ -78,7 +78,6 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const { signer, custodyWalletId } = authority;
@@ -179,7 +178,6 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     type: "seize",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -221,7 +219,6 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
@@ -272,7 +269,6 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     auth,
     custodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const signer = authority.signer;

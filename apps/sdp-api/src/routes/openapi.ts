@@ -2,12 +2,13 @@
  * OpenAPI Spec Route
  */
 
-import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types";
+import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import { Hono } from "hono";
+import { publicRoute } from "@/middleware/require-action";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
 
-const openapi = new Hono<{ Bindings: Env }>();
+export const openapi = new Hono<{ Bindings: Env }>();
 
 export function createWeakEtag(value: string): string {
   let hash = 2_166_136_261;
@@ -57,7 +58,7 @@ function hasMatchingEtag(ifNoneMatch: string | undefined, documentOpaqueTag: str
   });
 }
 
-openapi.get("/", (c) => {
+openapi.get("/", publicRoute("public OpenAPI document"), (c) => {
   const document = servedDocument(resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL));
   c.header("Cache-Control", OPENAPI_CACHE_CONTROL);
   c.header("ETag", document.etag);
@@ -71,5 +72,3 @@ openapi.get("/", (c) => {
   c.header("Content-Type", "application/json; charset=UTF-8");
   return c.body(document.body);
 });
-
-export default openapi;

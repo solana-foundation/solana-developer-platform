@@ -1,13 +1,13 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnStrategy } from "@sdp/types/earn";
 import {
   type EarnProviderId,
-  type EarnStrategy,
   earnDepositStyle,
   isEarnProviderSurfaced,
   isVaultDirectDepositEnabled,
   type ProviderAvailabilityEntry,
-  type SdpEnvironment,
   SURFACED_EARN_PROVIDERS,
-} from "@sdp/types";
+} from "@sdp/types/provider-access";
 
 export type EarnProviderAccess = Readonly<
   Partial<Record<EarnProviderId, ProviderAvailabilityEntry>>

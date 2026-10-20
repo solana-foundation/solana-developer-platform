@@ -1,28 +1,29 @@
-import type { CustodyProvider } from "@sdp/custody";
+import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import type { FullSigningPort } from "@sdp/custody/signing";
 import {
-  type CachedApiKey,
   CUSTODY_CONNECTION_LIFECYCLES,
   type CustodyConnectionCheckStatus,
   type CustodyConnectionLifecycle,
   type CustodyMode,
-  type MovementId,
+  type CustodyProvider,
   type ProviderCredentialStatus,
-} from "@sdp/types";
-import { PrivySigner } from "@solana/keychain-privy";
+} from "@sdp/types/custody";
+import type { MovementId } from "@sdp/types/movements";
 import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import type { SigningConfigRecord } from "@/services/adapters";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
@@ -32,8 +33,9 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
+import { type SeededApiKey, seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -69,16 +71,14 @@ const UNFINISHED_INSTALLATION_FACTS = {
   }
 >;
 
-const AUDIT_API_KEY: CachedApiKey = {
+const AUDIT_API_KEY: SeededApiKey = {
   id: "key_runtime_targets",
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -199,7 +199,7 @@ describe("CustodyRuntimeTargets", () => {
   it("admits an active Connection wallet without reading credentials", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
-    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const getPrivySigner = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -210,7 +210,7 @@ describe("CustodyRuntimeTargets", () => {
       })
     ).resolves.toBeUndefined();
     expect(read).not.toHaveBeenCalled();
-    expect(createPrivySigner).not.toHaveBeenCalled();
+    expect(getPrivySigner).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -302,12 +302,22 @@ describe("CustodyRuntimeTargets", () => {
       await expect(exit.signTransactions([])).resolves.toEqual([]);
     });
 
-    it("signs a start for an active organization", async () => {
+    it("signs a start for an active organization, as a live member", async () => {
       const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('om_runtime_targets', ?, ?, 'admin', 'active')`
+        )
+        .bind(ORGANIZATION_ID, USER_ID)
+        .run();
 
       const start = await signerFor(`cwlt_${config.id}`, "payments.transfer");
 
-      await expect(start.signTransactions([])).resolves.toEqual([]);
+      // A start signs only for an authenticated principal (HOO-2099).
+      await expect(
+        runAsMoneyPrincipal({ kind: "member", userId: USER_ID }, () => start.signTransactions([]))
+      ).resolves.toEqual([]);
     });
   });
 
@@ -1033,7 +1043,7 @@ describe("CustodyRuntimeTargets", () => {
       connection.id,
     ]);
     mockStoredCredentialRead();
-    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const getPrivySigner = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
     const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
 
     await expect(
@@ -1045,9 +1055,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(createPrivySigner).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestDelayMs: 0 })
-    );
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(0);
 
     await getDb(env).execute(
       "UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?",
@@ -1062,9 +1070,7 @@ describe("CustodyRuntimeTargets", () => {
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-    expect(createPrivySigner).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestDelayMs: 250 })
-    );
+    expect(lastPrivyAdapter(getPrivySigner).requestDelayMs).toBe(250);
   });
 
   it.each([
@@ -1379,7 +1385,7 @@ function createAuditContext(): Context<{ Bindings: Env }> {
   const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/v1/wallets"), {
     env,
   });
-  auditContext.set("apiKey", AUDIT_API_KEY);
+  auditContext.set("apiKey", { ...AUDIT_API_KEY, walletAccess: { scope: "all" } });
   return auditContext;
 }
 

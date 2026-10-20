@@ -1,15 +1,16 @@
-import type { CachedApiKey, CustodyProvider } from "@sdp/types";
+import type { CustodyProvider } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -28,16 +29,14 @@ const API_KEY = {
   raw: "sk_test_managed_release_channel",
   prefix: "sk_test_mrc",
 };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -50,7 +49,15 @@ const PUBLIC_KEYS = {
 describe("Managed custody out of the release channel", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
-    vi.stubGlobal("fetch", vi.fn());
+    // A dashboard session's token verifies against the local test issuer; every
+    // other outbound call is a Provider call the tests assert never happens.
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        isJwksRequest(input) ? realFetch(input, init) : Promise.resolve(new Response(null))
+      )
+    );
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
@@ -119,29 +126,23 @@ describe("Managed custody out of the release channel", () => {
     expect(await response.json()).toEqual(channelRefusalBody("privy"));
     expect(fetch).not.toHaveBeenCalled();
   });
-
-  it("refuses API-key Config wallet provisioning before any Provider call or row", async () => {
-    const response = await send(`/v1/projects/${PROJECT_ID}/api-keys`, "POST", {
-      name: "Managed out of channel key",
-      walletScope: "selected",
-      provisionWallet: { provider: "privy" },
-    });
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual(channelRefusalBody("privy"));
-    expect(await getDb(env).queryMany("SELECT id FROM custody_wallets ORDER BY id")).toEqual([
-      { id: "cwlt_managed_channel_anchorage" },
-      { id: "cwlt_managed_channel_privy_a" },
-      { id: "cwlt_managed_channel_privy_b" },
-    ]);
-    expect(
-      await getDb(env).queryMany("SELECT id FROM api_keys WHERE name = ?", [
-        "Managed out of channel key",
-      ])
-    ).toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
-  });
 });
+
+function isJwksRequest(input: Parameters<typeof fetch>[0]): boolean {
+  const jwksUrl = env.CLERK_JWKS_URL;
+  return (
+    jwksUrl !== undefined &&
+    String(input instanceof Request ? input.url : input).startsWith(jwksUrl)
+  );
+}
+
+async function _sendAs(
+  headers: Record<string, string>,
+  path: string,
+  body: Record<string, unknown>
+) {
+  return app.request(path, { method: "POST", headers, body: JSON.stringify(body) }, env);
+}
 
 async function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${API_KEY.raw}` } }, env);
@@ -216,10 +217,9 @@ async function seedFixture(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     createdBy: USER_ID,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await seedTestCustodyRows(env, {
     configs: [
       {

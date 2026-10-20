@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
-import { type CachedApiKey, type SolanaCluster, wellKnownMint } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
+import { type SolanaCluster, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { required } from "@/test/helpers/required";
 
@@ -19,18 +20,18 @@ vi.mock("@/routes/earn/handlers/curation", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnProviderWalletRow,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import type {
+  EarnProviderWalletRow,
+  EarnStrategyRow,
+  UpsertEarnStrategyInput,
+} from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, readRateLimitCount, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, readRateLimitCount } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_test_earn_routes",
@@ -50,16 +51,14 @@ const TEST_API_KEY = {
   raw: "sk_test_earn_routes",
   prefix: "sk_test_ear",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -75,7 +74,7 @@ let originalEarnEnabled: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -104,8 +103,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -115,8 +114,7 @@ async function seedAuth(): Promise<void> {
         "Earn Routes Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);

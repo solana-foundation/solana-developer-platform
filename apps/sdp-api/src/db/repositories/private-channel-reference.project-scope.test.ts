@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -18,10 +18,7 @@ const OWNER_WALLET = {
   label: "Owner treasury",
 };
 
-const WALLET_SCOPES: PrivateChannelReferenceWalletScope[] = [
-  { scope: "all" },
-  { scope: "selected", walletIds: [OWNER_WALLET.walletId] },
-];
+const WALLET_SCOPES: PrivateChannelReferenceWalletScope[] = [{ scope: "all" }];
 
 function listWalletReferences(projectId: string, walletScope: PrivateChannelReferenceWalletScope) {
   return createPostgresPrivateChannelReferenceRepository(getDb(env)).listReferences({

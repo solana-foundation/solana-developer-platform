@@ -1,8 +1,5 @@
-import {
-  deriveAblListAddress,
-  MintMetadataUpdateError,
-  PACKET_DATA_SIZE,
-} from "@sdp/issuance/mosaic";
+import { deriveAblListAddress, PACKET_DATA_SIZE } from "@sdp/issuance/mosaic/service";
+import { MintMetadataUpdateError } from "@sdp/issuance/mosaic/types";
 import {
   createRpc,
   getAccountInfo,
@@ -10,26 +7,29 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
-import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
-import { AuditService } from "@/services/audit.service";
-import type { MosaicFeePayment } from "@/services/issuance/mosaic";
-import type { TokenService } from "@/services/token.service";
-import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
-} from "../helpers";
-import type { confirmDeploySchema, deployTokenSchema, legacyDeployTokenSchema } from "../schemas";
+} from "@/routes/issuance/helpers";
+import type {
+  confirmDeploySchema,
+  deployTokenSchema,
+  legacyDeployTokenSchema,
+} from "@/routes/issuance/schemas";
+import { getLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
+import type { MosaicFeePayment } from "@/services/issuance/mosaic";
+import type { TokenService } from "@/services/token.service";
+import type { Env } from "@/types/env";
 import { getMosaicAclMode, shouldEnableOnChainAcl } from "./access-control";
 import {
   admitIssuanceRuntimeExecution,
@@ -318,14 +318,12 @@ async function resolveCompletedDeployReplay(params: {
     env: params.env,
     auth: params.auth,
     custodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   for (const id of new Set(Object.values(params.authorityCustodyWalletIds ?? {}))) {
     await resolveIssuanceWallet({
       env: params.env,
       auth: params.auth,
       custodyWalletId: id,
-      requiredWalletPermissions: ["tokens:write"],
     });
   }
   return true;
@@ -355,7 +353,6 @@ async function resolveDeployAuthorityWallets(
             env,
             auth,
             custodyWalletId,
-            requiredWalletPermissions: ["tokens:write"],
           })
         : undefined;
     })
@@ -378,7 +375,6 @@ async function createDeployMetadataSigner(
     auth,
     custodyWalletId: metadataWallet.custodyWalletId,
     currentAuthority: metadataWallet.publicKey,
-    requiredWalletPermissions: ["tokens:write"],
   });
   return metadataAuthority.signer;
 }
@@ -437,7 +433,6 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     env: c.env,
     auth,
     custodyWalletId: requestedCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
 
   const [metadataWallet, freezeWallet, delegateWallet] = await resolveDeployAuthorityWallets(
@@ -571,7 +566,6 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
       auth,
       custodyWalletId: deploymentWallet.custodyWalletId,
       currentAuthority: deploymentWallet.publicKey,
-      requiredWalletPermissions: ["tokens:write"],
     });
     const signer = authority.signer;
     custodyAddress = signer.address;
@@ -763,11 +757,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
     throw badRequest("Token already has a mint address");
   }
 
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    body.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
+  const signingWalletId = body.signingWalletId ?? token.signingWalletId;
 
   if (token.signingCustodyWalletId && signingWalletId !== token.signingWalletId) {
     throw new AppError(
@@ -1005,10 +995,8 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // body. A body value that diverged from prepare's would derive a different
     // custody address and silently record the wrong mint/metadata authorities —
     // and, for ABL tokens, the wrong list PDA. claimed.signingWalletId is the
-    // source of truth; resolve it again only to re-assert the key still has access.
-    const signingWalletId = resolveApiKeySigningWalletId(auth, claimed.signingWalletId, [
-      "tokens:write",
-    ]);
+    // source of truth; the custody signer decides whether this caller may sign.
+    const signingWalletId = claimed.signingWalletId;
 
     // Recompute the authorities the deploy used (custody signer === mint &
     // metadata authority, matching prepareDeploy) rather than trusting the
@@ -1141,9 +1129,7 @@ export const prepareDeployMetadata = async (
   // matching confirmDeploy. The follow-up tx is signed by the mint's metadata
   // update authority; a body override would resolve a different wallet and
   // produce a tx that can never succeed against the on-chain authority.
-  const signingWalletId = resolveApiKeySigningWalletId(auth, token.signingWalletId, [
-    "tokens:write",
-  ]);
+  const signingWalletId = token.signingWalletId;
 
   const authority = await createLegacyResolvedAuthoritySigner({
     movement: "issuance.authority",

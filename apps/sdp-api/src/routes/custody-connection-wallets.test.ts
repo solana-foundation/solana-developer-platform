@@ -1,14 +1,15 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, CustodyMode } from "@sdp/types";
+import type { CustodyMode } from "@sdp/types/custody";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { getLogger } from "@/runtime/logger";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { insertTestCustodyConfigRow } from "@/test/helpers/custody";
 import {
   insertTestStoredProviderCredential,
@@ -18,8 +19,8 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -47,16 +48,14 @@ const API_KEY = {
   raw: "sk_test_custody_connection_wallets",
   prefix: "sk_test_ccw",
 };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -65,7 +64,7 @@ const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
 
 async function seedFixture(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(
@@ -92,9 +91,17 @@ async function seedFixture(): Promise<void> {
     await tx.execute(
       `INSERT INTO api_keys (
          id, organization_id, project_id, created_by, name, key_prefix,
-         key_hash, role, permissions, status
-       ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`,
-      [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash]
+         key_hash, grants, status
+       ) VALUES (?, ?, ?, ?, 'Test', ?, ?, ?, 'active')`,
+      [
+        API_KEY.id,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        USER_ID,
+        API_KEY.prefix,
+        keyHash,
+        ALL_API_KEY_GRANTS,
+      ]
     );
     await insertTestCustodyConfigRow(tx, {
       id: CONFIG_ID,

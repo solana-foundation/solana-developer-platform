@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { isAppLocale, supportedLocales } from "@/i18n/config";
+import { englishSourceMessages } from "@/i18n/locales/en";
+import { getMessages, loadMessages } from "@/i18n/messages";
 import {
-  englishSourceMessages,
-  getMessages,
-  loadMessages,
   mergeLocalizedMessages,
   mergeLocalizedMessagesWithEmbeddedYieldBrand,
   translate,
-} from "@/i18n/messages";
+} from "@/i18n/translate";
 
 function flattenKeys(value: unknown, prefix = ""): string[] {
   if (typeof value === "string") {

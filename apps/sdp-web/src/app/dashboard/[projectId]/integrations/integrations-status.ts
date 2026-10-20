@@ -1,4 +1,4 @@
-import type { ComplianceProviderId, RampProviderId } from "@sdp/types";
+import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,

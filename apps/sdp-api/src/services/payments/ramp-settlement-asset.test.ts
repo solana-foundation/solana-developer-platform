@@ -1,6 +1,6 @@
-import { wellKnownMint } from "@sdp/types";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import * as events from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -73,7 +73,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
     vi.restoreAllMocks();
   });
 
-  it("completes a transfer when the provider delivered its asset", async () => {
+  it("keeps a correctly reported asset settling until chain proof", async () => {
     await seedStripeOnramp("xfr_asset_match", "cos_asset_match");
 
     const result = await applyRampSettlementEvent(env, "sandbox", {
@@ -85,7 +85,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
     });
 
     expect(result).toEqual({ applied: true, outcome: "applied" });
-    expect(await readRow("xfr_asset_match")).toEqual({ status: "completed", amount: "96.5" });
+    expect(await readRow("xfr_asset_match")).toEqual({ status: "settling", amount: null });
   });
 
   it("refuses another asset's delivery and records nothing", async () => {

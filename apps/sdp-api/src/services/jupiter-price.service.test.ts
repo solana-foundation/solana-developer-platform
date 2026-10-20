@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";

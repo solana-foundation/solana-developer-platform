@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import type { EarnStrategy, SdpEnvironment, SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { EarnStrategy } from "@sdp/types/earn";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EnglishTestI18n } from "../test-i18n";
+import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { EarnIntegrationGuide } from "./earn-integration-guide";
 import {
   buildEarnIntegrationSections,

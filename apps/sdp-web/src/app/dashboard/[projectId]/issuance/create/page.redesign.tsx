@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftFlow } from "./issuance-draft-flow.redesign";
 
 interface CreateDraftPageProps {
@@ -13,7 +13,7 @@ interface CreateDraftPageProps {
  * A new draft on the new design: the flow, with the project's wallets to hold its keys.
  * `?draft=` opens a draft kept in the browser instead of a fresh one.
  */
-export default async function CreateDraftPage({ searchParams }: CreateDraftPageProps) {
+export async function CreateDraftPage({ searchParams }: CreateDraftPageProps) {
   const [t, resolvedSearchParams] = await Promise.all([
     getTranslations(),
     searchParams ?? Promise.resolve(undefined),

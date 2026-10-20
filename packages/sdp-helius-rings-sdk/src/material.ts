@@ -10,7 +10,11 @@ import {
 } from "@heliuslabs/zolana";
 import { LocalKeys, type ProofService } from "@heliuslabs/zolana/client";
 import { LocalShieldedKeys } from "@heliuslabs/zolana/transaction";
-import { HeliusRingsError, RINGS_IDENTITY_MISMATCH, type RingsErrorCause } from "@sdp/helius-rings";
+import {
+  HeliusRingsError,
+  RINGS_IDENTITY_MISMATCH,
+  type RingsErrorCause,
+} from "@sdp/helius-rings/errors";
 import { address, getAddressEncoder, getBase58Decoder } from "@solana/kit";
 
 /** A viewing secret is a P-256 scalar, so not every 32 bytes are in range. */

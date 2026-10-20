@@ -3,15 +3,15 @@
 import {
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelEventDto,
-  WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Badge } from "@sdp/ui/badge";
+import { cn } from "@sdp/ui/cn";
+import { Modal } from "@sdp/ui/modal";
 import { ExternalLinkIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { cn } from "@/lib/utils";
 import {
   EVENT_FAMILY_BADGE,
   EVENT_STATUS_BADGE,

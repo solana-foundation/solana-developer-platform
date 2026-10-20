@@ -1,6 +1,6 @@
 import type { PrivateChannelRow } from "@sdp/private-channels/channels";
 import { validatePrivateChannelName } from "@sdp/private-channels/channels";
-import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelDto } from "@sdp/types";
+import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelDto } from "@sdp/types/private-channels";
 import { getAuth } from "@/lib/auth";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
@@ -9,9 +9,13 @@ import {
   type AppContext,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
-} from "../context";
-import { emitLifecycle, emitMember, requireActiveInstance } from "../helpers";
-import type { createChannelBodySchema } from "../schemas";
+} from "@/routes/private-channels/context";
+import {
+  emitLifecycle,
+  emitMember,
+  requireActiveInstance,
+} from "@/routes/private-channels/helpers";
+import type { createChannelBodySchema } from "@/routes/private-channels/schemas";
 
 function toPrivateChannelDto(row: PrivateChannelRow): PrivateChannelDto {
   return {

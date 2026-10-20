@@ -1,4 +1,4 @@
-import type { RingsGatewayPort } from "@sdp/helius-rings";
+import type { RingsGatewayPort } from "@sdp/helius-rings/port";
 
 /** Every method throws unless overridden, so a test names what it expects. */
 export function gatewayStub(overrides: Partial<RingsGatewayPort>): RingsGatewayPort {

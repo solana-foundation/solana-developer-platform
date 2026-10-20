@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { assetProfiles } from "@/flags";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftForm } from "./issuance-draft-form";
-import CreateDraftPage from "./page.redesign";
+import { CreateDraftPage } from "./page.redesign";
 
 async function CreateAssetPage() {
   const t = await getTranslations();

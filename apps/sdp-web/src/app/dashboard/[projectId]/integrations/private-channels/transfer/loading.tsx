@@ -1,4 +1,4 @@
-import { PrivateChannelsFormSkeleton } from "../private-channels-route-skeletons";
+import { PrivateChannelsFormSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
 
 export default function PrivateChannelsTransferLoading() {
   return <PrivateChannelsFormSkeleton />;

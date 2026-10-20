@@ -1,8 +1,8 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { useState } from "react";
 import { tokenMarkInitial } from "@/app/dashboard/[projectId]/issuance/issuance-token-fields";
-import { cn } from "@/lib/utils";
 
 /**
  * The identity mark for a token: the issuer's artwork, or a quiet monogram

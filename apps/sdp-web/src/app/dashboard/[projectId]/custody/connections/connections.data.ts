@@ -5,7 +5,7 @@ import {
   CUSTODY_PROVIDERS,
   type CustodyProvider,
   type CustodyWalletSummary,
-} from "@sdp/types";
+} from "@sdp/types/custody";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 

@@ -3,33 +3,37 @@ import {
   isActivatingRecurringPaymentStatus,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   recurringPaymentInFlightLifecycleOperation,
-} from "@sdp/types";
-import { getDb } from "@/db";
-import {
-  type CollectibleRecurringPaymentRow,
-  createPostgresPaymentRecurringPaymentsRepository,
-  type PaymentRecurringPaymentRow,
-  type RecoverableCollectionRecurringPaymentRow,
-} from "@/db/repositories";
+} from "@sdp/types/payments";
+import { getDb } from "@/db/client";
+import type {
+  CollectibleRecurringPaymentRow,
+  PaymentRecurringPaymentRow,
+  RecoverableCollectionRecurringPaymentRow,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import {
   assertMoneyStartAdmitted,
   checkMoneyStart,
   type MoneyAdmissionScope,
+  type MoneyAdmissionSubject,
   MoneyMovementRefusedError,
   type MoneyStartContext,
 } from "@/lib/money-admission";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { activateRecurringPayment } from "@/services/payments/recurring-payments/activation";
 import {
-  activateRecurringPayment,
-  cancelRecurringPayment,
   collectRecurringPayment,
   journalAutomatedCollectionFailure,
-  resumeRecurringPayment,
   skipRefusedRecurringCollectionPeriod,
-} from "@/services/payments/recurring-payments";
+} from "@/services/payments/recurring-payments/collection";
+import {
+  cancelRecurringPayment,
+  resumeRecurringPayment,
+} from "@/services/payments/recurring-payments/lifecycle";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -62,11 +66,26 @@ function emptyResult(): CollectDueRecurringPaymentsResult {
 function admissionFor(
   row: PaymentRecurringPaymentRow,
   movement: MoneyStartContext["movement"]
-): { scope: MoneyAdmissionScope; context: MoneyStartContext } {
+): {
+  scope: MoneyAdmissionScope;
+  context: MoneyStartContext;
+  subject: MoneyAdmissionSubject;
+} {
   return {
     scope: { organizationId: row.organization_id, projectId: row.project_id },
     context: { surface: "job", movement, subjectId: row.id },
+    subject: { custodyWalletId: row.source_custody_wallet_id },
   };
+}
+
+/**
+ * Each row runs as its own mandate (APE-343): the waists admit it by the
+ * recurring payment's live row (status, source wallet), never by the key or
+ * member who created or activated it, so revoking that key does not stop the
+ * schedule. "Revoke and cancel its recurring payments" is the explicit path.
+ */
+function asMandate<T>(row: PaymentRecurringPaymentRow, work: () => Promise<T>): Promise<T> {
+  return runAsMoneyPrincipal({ kind: "mandate", recurringPaymentId: row.id }, work);
 }
 
 /**
@@ -164,13 +183,13 @@ async function collectRow(
   env: Env,
   row: CollectibleRecurringPaymentRow | RecoverableCollectionRecurringPaymentRow
 ): Promise<CollectionRowOutcome> {
-  const { scope, context } = admissionFor(row, "recurring.collect");
+  const { scope, context, subject } = admissionFor(row, "recurring.collect");
   try {
     const sourceWallet = await resolveSourceWallet(env, row);
     if (!sourceWallet) {
       // A refused organization skips the period rather than journaling a
       // failure every retry window.
-      const decision = await checkMoneyStart(env, scope, context);
+      const decision = await checkMoneyStart(env, scope, context, subject);
       if (!decision.admitted) {
         return skipRefusedPeriod(env, row, new MoneyMovementRefusedError(decision.reason));
       }
@@ -196,7 +215,7 @@ async function collectRow(
       recurringPayment: row,
       initiatedByKeyId: null,
       collectionSource: "automated",
-      admitStart: () => assertMoneyStartAdmitted(env, scope, context),
+      admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
       idempotencyKey: null,
     });
     return "ok";
@@ -232,11 +251,11 @@ async function recoverLifecycleRow(
       idempotencyKey: null,
     };
     if (isActivatingRecurringPaymentStatus(row.status)) {
-      const { scope, context } = admissionFor(row, "recurring.activate");
+      const { scope, context, subject } = admissionFor(row, "recurring.activate");
       await activateRecurringPayment({
         ...input,
         createdBy: row.created_by,
-        admitStart: () => assertMoneyStartAdmitted(env, scope, context),
+        admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
       });
       return "ok";
     }
@@ -247,10 +266,10 @@ async function recoverLifecycleRow(
       return "ok";
     }
     if (operation === "resume") {
-      const { scope, context } = admissionFor(row, "recurring.resume");
+      const { scope, context, subject } = admissionFor(row, "recurring.resume");
       await resumeRecurringPayment({
         ...input,
-        admitStart: () => assertMoneyStartAdmitted(env, scope, context),
+        admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
       });
       return "ok";
     }
@@ -339,8 +358,8 @@ async function processRowsConcurrently<T extends PaymentRecurringPaymentRow>(
 
 /**
  * Recover stale lifecycle operations and collections, then collect due recurring payments, for
- * the open cluster scope's environment only. Runners start it once per environment through
- * `runInEachClusterScope`, so every row is built, sent and confirmed on its project's cluster.
+ * the open cluster scope's environment only. The Worker registers it once per environment (a
+ * `cluster` Cron Definition), so every row is built, sent and confirmed on its project's cluster.
  *
  * @param env - Runtime environment for repository and signer construction.
  * @param now - Tick time anchoring the due, stale and retry windows.
@@ -368,7 +387,7 @@ export async function collectDueRecurringPayments(
     limit,
   });
   await processRowsConcurrently(result, staleLifecyclePayments, "recovered", (row) =>
-    recoverLifecycleRow(env, row)
+    asMandate(row, () => recoverLifecycleRow(env, row))
   );
 
   const staleUpdatePayments = await recurringPaymentsRepo.listStaleUpdatePayments({
@@ -401,7 +420,7 @@ export async function collectDueRecurringPayments(
     limit,
   });
   await processRowsConcurrently(result, staleCollectionPayments, "recovered", (row) =>
-    collectRow(env, row)
+    asMandate(row, () => collectRow(env, row))
   );
 
   const duePayments = await recurringPaymentsRepo.listDueCollectionPayments({
@@ -410,7 +429,9 @@ export async function collectDueRecurringPayments(
     retryBefore,
     limit,
   });
-  await processRowsConcurrently(result, duePayments, "collected", (row) => collectRow(env, row));
+  await processRowsConcurrently(result, duePayments, "collected", (row) =>
+    asMandate(row, () => collectRow(env, row))
+  );
 
   return result;
 }

@@ -1,11 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { RingsGatewayPort, RuntimeHealth } from "@sdp/helius-rings";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type { RingsGatewayPort } from "@sdp/helius-rings/port";
+import type { RuntimeHealth } from "@sdp/helius-rings/types";
+import { createRingsGateway } from "@sdp/helius-rings-sdk/gateway";
 import {
-  createRingsGateway,
   type OuterTransactionPolicyInput,
   validateOuterTransaction as validateSdkOuterTransaction,
-} from "@sdp/helius-rings-sdk";
+} from "@sdp/helius-rings-sdk/outer-tx-policy";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import { createGuardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
@@ -78,6 +79,19 @@ export function ringsEgressFetch(
  */
 const exitFlow = new AsyncLocalStorage<true>();
 
+/**
+ * The Rings wallet a flow runs for, so the owner's signer is the custody
+ * record that wallet links to: several active records can hold one key, and
+ * the route checked the caller's scope on the linked one (HOO-2099).
+ */
+const signingWallet = new AsyncLocalStorage<string>();
+
+function forWallet<I extends { walletId: string }, R>(
+  run: (input: I) => Promise<R>
+): (input: I) => Promise<R> {
+  return (input) => signingWallet.run(input.walletId, () => run(input));
+}
+
 export function createConfiguredRingsGateway(
   env: Env,
   tenant: RingsGatewayTenant,
@@ -108,6 +122,7 @@ export function createConfiguredRingsGateway(
           organizationId: tenant.organizationId,
           projectId: tenant.projectId,
           owner,
+          ringsWalletId: signingWallet.getStore() ?? null,
           unsignedTxBase64,
           movement: exitFlow.getStore()
             ? "helius_rings.gateway_transaction"
@@ -121,6 +136,7 @@ export function createConfiguredRingsGateway(
           organizationId: tenant.organizationId,
           projectId: tenant.projectId,
           owner,
+          ringsWalletId: signingWallet.getStore() ?? null,
           messageBase64,
         })
       ),
@@ -136,8 +152,13 @@ export function createConfiguredRingsGateway(
   // and ring bring-up included, is a start.
   const gateway: RingsGatewayPort = {
     ...created,
-    ensureMergingEnabled: (input) => exitFlow.run(true, () => created.ensureMergingEnabled(input)),
-    rekeyIdentity: (input) => exitFlow.run(true, () => created.rekeyIdentity(input)),
+    provisionIdentity: forWallet((input) => created.provisionIdentity(input)),
+    readIdentity: forWallet((input) => created.readIdentity(input)),
+    syncPhoton: forWallet((input) => created.syncPhoton(input)),
+    ensureMergingEnabled: forWallet((input) =>
+      exitFlow.run(true, () => created.ensureMergingEnabled(input))
+    ),
+    rekeyIdentity: forWallet((input) => exitFlow.run(true, () => created.rekeyIdentity(input))),
   };
   const port = connection.ringRpcUrl
     ? gateway

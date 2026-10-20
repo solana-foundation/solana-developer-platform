@@ -39,7 +39,7 @@
  * vault-intent-execution.service.ts.
  */
 
-import { safeStringify } from "@sdp/solana";
+import { safeStringify } from "@sdp/solana/token-2022.utils";
 import { ANCHOR_FRAMEWORK_ERRORS } from "./anchor-framework-errors";
 
 /** The cluster's own variant name for a blockhash it does not know. */

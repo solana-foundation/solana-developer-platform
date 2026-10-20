@@ -1,9 +1,24 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { Suspense, use } from "react";
+import { useWalletActions } from "@/app/dashboard/[projectId]/custody/use-wallet-actions";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
+import {
+  formatCurrencyAmount,
+  formatDisplayAmount,
+  resolveTotalBalance,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDate } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import {
+  PAYMENTS_TABLE_CELL,
+  PAYMENTS_TABLE_HEAD,
+} from "@/app/dashboard/[projectId]/payments/payments-table";
 import {
   RecordBlock,
   RecordColumns,
@@ -12,27 +27,9 @@ import {
   StateBand,
 } from "@/components/refresh-record";
 import { TokenMark } from "@/components/token-mark";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
-import {
-  formatCurrencyAmount,
-  formatDisplayAmount,
-  resolveTotalBalance,
-} from "../../payments/payments-overview.utils";
-import { formatDate } from "../../payments/payments-presentation";
-import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../../payments/payments-table";
-import { useWalletActions } from "../use-wallet-actions";
 import { useWalletActivity } from "./use-wallet-activity";
 import { WalletActivityTable } from "./wallet-activity-table";
 import {
@@ -269,12 +266,13 @@ function TokensBlock({
 }) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const { isBusy, requestDevnetSol } = useWalletActions({
+  const { isBusy, canRequestDevnetSol, requestDevnetSol } = useWalletActions({
     walletId: wallet.walletId,
-    walletAddress: wallet.publicKey,
   });
-  // The faucet funds devnet, so it is offered on a sandbox project to a wallet that can sign.
-  const offersFaucet = sdpEnvironment === "sandbox" && wallet.isRuntimeExecutionAllowed;
+  // The faucet funds devnet, so it is offered on a sandbox project to a wallet that can sign,
+  // and to an admin: funding is wallets.execute.
+  const offersFaucet =
+    sdpEnvironment === "sandbox" && wallet.isRuntimeExecutionAllowed && canRequestDevnetSol;
   return (
     <RecordBlock
       title={t("DashboardCustody.walletTokens")}

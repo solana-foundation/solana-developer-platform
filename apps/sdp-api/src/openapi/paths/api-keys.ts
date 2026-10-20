@@ -1,13 +1,11 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-
 import {
-  apiKeyIdParamSchema,
   createApiKeyRequestSchema,
-  errorResponseSchema,
   rotateApiKeyRequestSchema,
   updateApiKeyRequestSchema,
-} from "../schemas";
+} from "@/openapi/schemas/api-keys";
+import { apiKeyIdParamSchema, errorResponseSchema } from "@/openapi/schemas/base";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   actionSuccessResponse,
@@ -18,6 +16,12 @@ import {
   listApiKeysResponse,
 } from "./responses";
 
+/**
+ * Registers API-key management. Keys are managed by a signed-in person only,
+ * never by an API key (HOO-2099), so these belong to the internal document.
+ *
+ * @param registry - The OpenAPI registry being built.
+ */
 export function registerApiKeyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
@@ -26,7 +30,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "List API keys",
     operationId: "listApiKeys",
     description: "Lists API keys for the authenticated organization.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
     },
@@ -46,7 +50,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Create API key",
     operationId: "createApiKey",
     description: "Creates a new API key. The full key is returned once.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
@@ -70,7 +74,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Get API key",
     operationId: "getApiKey",
     description: "Gets API key details by id.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -93,7 +97,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Update API key",
     operationId: "updateApiKey",
     description: "Updates API key attributes. Use null to clear optional fields.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -120,7 +124,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Rotate API key",
     operationId: "rotateApiKey",
     description: "Rotates an API key and returns the new key plus the old key grace period.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -146,8 +150,9 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "Deactivate API key",
     operationId: "revokeApiKey",
-    description: "Deactivates (soft deletes) an API key and invalidates it immediately.",
-    security: [{ apiKeyAuth: [] }],
+    description:
+      "Deactivates (soft deletes) an API key and invalidates it immediately. Recurring payments the key activated keep collecting: a schedule outlives the key that set it up. If the key may be compromised, set `cancelRecurringPayments` to cancel them as well.",
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -160,6 +165,11 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
             confirmation: z.string().min(1).openapi({
               description: "Type the exact API key name to confirm deletion.",
               example: "Primary Key",
+            }),
+            cancelRecurringPayments: z.boolean().optional().openapi({
+              description:
+                "Also cancel every active recurring payment this key activated, last resumed, or last changed the source wallet, recipient, token, amount or period of. Use it for a compromised key.",
+              example: true,
             }),
           })
         ),

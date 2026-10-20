@@ -2,7 +2,9 @@
  * Token test fixtures
  */
 
-import type { CachedApiKey, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types/tokens";
+import type { SeededApiKey } from "@/test/mocks/db";
 import { TEST_ORG, TEST_USER } from "./organizations";
 
 export const TEST_PROJECT = {
@@ -35,16 +37,15 @@ export const TEST_PROJECT_API_KEY = {
   prefix: "sk_test_pro",
 };
 
-export const TEST_PROJECT_CACHED_KEY: CachedApiKey = {
+export const TEST_PROJECT_CACHED_KEY: SeededApiKey = {
   id: TEST_PROJECT_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  // Not ALL_API_KEY_GRANTS: api-keys.ts imports this module (no cycle).
+  grants: [...API_KEY_GRANTABLE_ACTIONS],
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
   rotationDeadline: null,

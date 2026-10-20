@@ -1,15 +1,15 @@
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { createSigningService } from "@/services/domain/signing.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
 
@@ -21,16 +21,14 @@ const API_KEY = {
   raw: "sk_test_managed_production_use",
   prefix: "sk_test_mpu",
 };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -139,10 +137,9 @@ async function seedFixture(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     createdBy: USER_ID,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await seedTestCustodyRows(env, {
     configs: [
       {

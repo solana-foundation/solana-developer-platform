@@ -1,4 +1,4 @@
-import type { SdpModule } from "@sdp/types";
+import type { SdpModule } from "@sdp/types/release-channels";
 import { describe, expect, it, vi } from "vitest";
 
 const flagMocks = vi.hoisted(() => ({

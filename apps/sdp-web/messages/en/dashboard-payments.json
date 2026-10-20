@@ -1282,6 +1282,7 @@
       "paymentRequest": "Payment request",
       "amountRequested": "Amount requested",
       "paymentLinkCopied": "Payment link copied",
+      "paymentLinkCopyFailed": "Could not copy the payment link.",
       "reference": "Reference",
       "expires": "Expires",
       "destinationWalletId": "Destination wallet ID",
@@ -1329,7 +1330,8 @@
       "noPaymentRequests": "No payment requests yet",
       "noPaymentRequestsDescription": "Create a payment link to request a fixed payment.",
       "paymentRequestDetails": "Payment request details",
-      "copy": "Copy"
+      "copy": "Copy",
+      "paymentLinkNotPermitted": "Only members who can manage payment requests can copy their links."
     },
     "depositMethod": {
       "address": "Solana address",
@@ -1409,13 +1411,6 @@
       "createWallet": "Create a wallet",
       "lastDeposit": "· last {date}",
       "nothingYet": "· nothing yet"
-    },
-    "depositTimeline": {
-      "label": "Deposit progress",
-      "quoteAgreed": "Quote agreed",
-      "fundsSent": "Funds sent",
-      "receivedByProvider": "Received by provider",
-      "current": "(current step)"
     },
     "record": {
       "copyField": "Copy the {field}",

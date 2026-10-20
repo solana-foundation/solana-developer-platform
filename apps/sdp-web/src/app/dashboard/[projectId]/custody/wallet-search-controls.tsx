@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
+import { SearchInput } from "@sdp/ui/search-input";
 import { SearchIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { WALLET_SEARCH_MAX_LENGTH } from "./wallet-search";
 

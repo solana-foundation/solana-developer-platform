@@ -1,16 +1,8 @@
-/**
- * Cross-tenant access through the full HTTP stack under the plain
- * NOSUPERUSER/NOBYPASSRLS runtime role: API-key resolution runs under the
- * system database identity, the request narrows to the key's organization,
- * and row-level security (migration 0079) keeps one tenant's key from
- * reading another tenant's records even if a handler forgot its scoping.
- */
-
 import { hashString } from "@sdp/payments/hash";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -48,14 +40,6 @@ describe("tenant isolation through the HTTP stack", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
 
-    // API-key lookups may be served from the KV cache; drop any stale entries
-    // so each run resolves keys through the database path under test.
-    const kv = createKVStoreSet(env);
-    const cached = await kv.apiKeys.list();
-    for (const key of cached.keys) {
-      await kv.apiKeys.delete(key.name);
-    }
-
     const db = getDb(env);
     await db
       .prepare(
@@ -84,10 +68,17 @@ describe("tenant isolation through the HTTP stack", () => {
           .prepare(
             `INSERT INTO api_keys
                (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-                role, permissions, status)
-             VALUES (?, ?, ?, ?, 'HTTP isolation', 'sk_test_htt', ?, 'api_admin', '["*"]', 'active')`
+                grants, status)
+             VALUES (?, ?, ?, ?, 'HTTP isolation', 'sk_test_htt', ?, ?, 'active')`
           )
-          .bind(tenant.keyId, tenant.org, tenant.project, USER_ID, keyHashes.get(tenant.keyId)),
+          .bind(
+            tenant.keyId,
+            tenant.org,
+            tenant.project,
+            USER_ID,
+            keyHashes.get(tenant.keyId),
+            ALL_API_KEY_GRANTS
+          ),
         db
           .prepare(
             // provider_data is explicit: 0036 dropped its NOT NULL/DEFAULT, and

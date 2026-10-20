@@ -1,10 +1,10 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -16,12 +16,12 @@ import {
   ClassifyStep,
   ControlsStep,
   DetailsStep,
-  type DraftAccess,
   PermissionsStep,
   ReviewStep,
 } from "./draft-flow-steps.redesign";
 import { type DraftState, draftSchema } from "./draft-model";
 import {
+  type DraftAccess,
   type LocalDraft,
   removeLocalDraft,
   restoreDraft,

@@ -1,10 +1,7 @@
-import {
-  COUNTERPARTY_ENTITY_TYPES,
-  COUNTRY_CODES,
-  PERSISTED_RAMP_PROVIDERS,
-  RAMP_PROVIDERS,
-} from "@sdp/types";
-import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
+import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import { COUNTRY_CODES } from "@sdp/types/countries";
+import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { z } from "zod";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
@@ -13,22 +10,22 @@ import {
   createCounterpartySchema as createCounterpartySchemaBase,
   listCounterpartiesQuerySchema as listCounterpartiesQuerySchemaBase,
   updateCounterpartyObjectSchema as updateCounterpartyObjectSchemaBase,
-} from "../../routes/counterparties/schemas";
+} from "@/routes/counterparties/schemas";
 import {
   counterpartyAccountKindSchema as counterpartyAccountKindSchemaBase,
   counterpartyAccountParamsSchema as counterpartyAccountParamsSchemaBase,
   createCounterpartyAccountSchema as createCounterpartyAccountSchemaBase,
   listCounterpartyAccountsQuerySchema as listCounterpartyAccountsQuerySchemaBase,
   updateCounterpartyAccountObjectSchema as updateCounterpartyAccountSchemaBase,
-} from "../../routes/counterparty-accounts/schemas";
-import { listCounterpartyProviderAccountsQuerySchema as listCounterpartyProviderAccountsQuerySchemaBase } from "../../routes/counterparty-provider-accounts/schemas";
+} from "@/routes/counterparty-accounts/schemas";
+import { listCounterpartyProviderAccountsQuerySchema as listCounterpartyProviderAccountsQuerySchemaBase } from "@/routes/counterparty-provider-accounts/schemas";
+import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
   userIdSchema,
   withOpenApi,
-  z,
 } from "./base";
 
 export const counterpartyIdParamSchema = withOpenApi(

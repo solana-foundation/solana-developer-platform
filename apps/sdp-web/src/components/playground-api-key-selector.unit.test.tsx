@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -15,7 +16,6 @@ import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
 import { PlaygroundApiKeySelector } from "./playground-api-key-selector";
-import { ThemeScopeProvider } from "./theme-scope-provider";
 
 const workspace = vi.hoisted(() => ({
   dashboardAccess: { capabilities: { canManageApiKeys: true } },
@@ -24,14 +24,12 @@ const workspace = vi.hoisted(() => ({
       id: "key_test",
       name: "Test key",
       keyPrefix: "sk_test_example",
-      role: "api_developer",
       environment: "sandbox",
     },
     {
       id: "key_other_workspace",
       name: "Other workspace key",
       keyPrefix: "sk_test_example",
-      role: "api_developer",
       environment: "sandbox",
     },
   ],

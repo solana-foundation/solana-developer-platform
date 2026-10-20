@@ -1,15 +1,14 @@
-import type { ManagedRpcEnv } from "@sdp/rpc";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
+import type { ManagedRpcEnv } from "@sdp/rpc/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   GENESIS_HASH_BY_CLUSTER,
-  SDP_ENVIRONMENTS,
-  type SdpEnvironment,
   SOLANA_CLUSTERS,
   type SolanaCluster,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import { type Commitment, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND } from "@solana/kit";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { afterEach, beforeEach, vi } from "vitest";

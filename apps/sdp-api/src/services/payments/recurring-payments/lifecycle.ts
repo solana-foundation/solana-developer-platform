@@ -6,32 +6,35 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { MovementId } from "@sdp/types";
+import type { MovementId } from "@sdp/types/movements";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isPendingActivationRecurringPaymentStatus,
-} from "@sdp/types";
+  type PaymentRecurringPaymentLifecycleAttemptStage,
+} from "@sdp/types/payments";
 import type { Address, Instruction, MaybeAccount, Signature, TransactionSigner } from "@solana/kit";
 import type { SubscriptionDelegation } from "@solana/subscriptions";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import type {
+  PaymentRecurringPaymentLifecycleAttemptRow,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type { PaymentSubscriptionRow } from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
-  createPostgresPaymentRecurringPaymentsRepository,
-  createPostgresPaymentSubscriptionsRepository,
-  type PaymentRecurringPaymentLifecycleAttemptRow,
-  type PaymentRecurringPaymentLifecycleAttemptStage,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  type PaymentSubscriptionRow,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
-import * as solanaServices from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
@@ -40,6 +43,7 @@ import {
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   isSubscriptionDelegationCanceled,
+  lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
@@ -483,7 +487,28 @@ async function runRecurringPaymentLifecycle(
     input.sourceWallet.id
   );
 
+  // A fresh resume is admitted before its claim commits: the job recovers a
+  // claimed resume as its mandate, so a claim must never exist for a caller
+  // the waist would refuse (HOO-2099). A stale one is admitted below, only
+  // when it still has to sign.
+  const recoveringStaleLifecycle =
+    collectionState.recurringPayment.status ===
+    getRecurringPaymentLifecycleStatuses(input.operation).processingStatus;
+  if (input.operation === "resume" && !recoveringStaleLifecycle) {
+    await input.admitStart();
+  }
+
+  // A resume starts the mandate again; a cancel records nobody.
+  const activatedBy = input.operation === "resume" ? currentMandateActivator() : null;
   const claimResult = await getDb(input.env).transaction(async (tx) => {
+    await lockLiveActivatingKey(tx, {
+      activator: activatedBy,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      movement: "recurring.resume",
+      recurringPaymentId: collectionState.recurringPayment.id,
+      custodyWalletIds: [input.sourceWallet.id],
+    });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentLifecycle({
       recurringPaymentId: collectionState.recurringPayment.id,
@@ -492,6 +517,7 @@ async function runRecurringPaymentLifecycle(
       operation: input.operation,
       updatedAt: new Date().toISOString(),
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
+      activatedBy,
     });
     if (!claimed) return null;
     const attempt = await getOrCreateLifecycleAttempt({
@@ -603,14 +629,15 @@ async function runRecurringPaymentLifecycle(
       onChainSubscription = step.account;
     }
 
-    // Admission runs only before a new signature: a resumed attempt that the
+    // A fresh resume was admitted before its claim. A recovered one is
+    // admitted here, only before a new signature: a resumed attempt that the
     // chain shows landed has already returned, so a refusal never strands an
     // operation that is on chain. A refused resume goes back to `canceled`
     // through the failure reset, which matches the subscription on chain.
-    if (input.operation === "resume") {
+    if (recoveringStaleLifecycle && input.operation === "resume") {
       await input.admitStart();
     }
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,

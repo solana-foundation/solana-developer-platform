@@ -1,6 +1,7 @@
-import type { PersistedRampProviderId, RampProviderId, SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
+import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import { isRampProviderSurfaced, isRetiredRampProviderId } from "@sdp/types/provider-access";
 
 export type RampDirection = "onramp" | "offramp";

@@ -1,15 +1,18 @@
 "use client";
 
-import type { AssetAuditActorType, AssetAuditEvent, AssetAuditStatus } from "@sdp/types";
+import type { AssetAuditActorType, AssetAuditEvent, AssetAuditStatus } from "@sdp/types/audit";
+import type { StatusTone } from "@sdp/ui/status-text";
 import { useState } from "react";
 import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
-import type { StatusTone } from "@/components/ui/status-text";
+import {
+  type AssetAuditHistory,
+  fetchAssetAuditHistory,
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/asset-audit.data";
+import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance-query-key";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
 import { usePagedList } from "@/lib/use-paged-list";
-import { issuanceQueryKeys } from "../../issuance-query-key";
-import { type AssetAuditHistory, fetchAssetAuditHistory } from "../asset-profile/asset-audit.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 

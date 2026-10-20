@@ -1,4 +1,5 @@
-import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
+import type { EarnStrategy } from "@sdp/types/earn";
+import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 
 /**
  * The authenticated Embedded Yield loop, exactly as shipped (PRO-1722 +

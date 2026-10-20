@@ -1,3 +1,4 @@
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
@@ -8,9 +9,8 @@ import type {
   PreparePaymentSubscriptionAuthorizationResponse,
   PreparePaymentSubscriptionCollectionResponse,
   PreparePaymentSubscriptionLifecycleResponse,
-} from "@sdp/types";
-import type { Address } from "@solana/kit";
-import { createNoopSigner } from "@solana/kit";
+} from "@sdp/types/payments";
+import { type Address, createNoopSigner } from "@solana/kit";
 import {
   fetchMaybeSubscriptionDelegation,
   findSubscriptionAuthorityPda,
@@ -22,7 +22,6 @@ import {
   getTransferSubscriptionOverlayInstructionAsync,
 } from "@solana/subscriptions";
 import { z } from "zod";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
@@ -33,7 +32,9 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
+import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
+import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -45,9 +46,6 @@ import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
-import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
-import { mapCollectionAttemptRow } from "../mappers";
-import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,
@@ -436,7 +434,6 @@ export const prepareSubscriptionCollection = async (
 
   const scope = await resolveScope(c);
   const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, callerWallet.walletId, ["payments:write"]);
 
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const { planPda } = await derivePlanAddresses(plan);

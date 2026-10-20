@@ -1,19 +1,23 @@
 "use client";
 
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { Label } from "@sdp/ui/label";
+import { TableCell } from "@sdp/ui/table";
+import { TableRow } from "@solana/design-system/table";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import useSWR from "swr";
+import {
+  fetchTokenAllowlistPage,
+  type TokenAllowlistPage,
+} from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/allowlist.data";
+import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance-query-key";
+import { formatTokenDay } from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { issuanceQueryKeys } from "../../issuance-query-key";
-import { formatTokenDay } from "../../issuance-token-state.redesign";
-import { fetchTokenAllowlistPage, type TokenAllowlistPage } from "../asset-profile/allowlist.data";
 import type { TokenTabProps } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 

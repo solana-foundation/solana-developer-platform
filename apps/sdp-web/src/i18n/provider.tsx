@@ -3,7 +3,8 @@
 import { UiI18nProvider, type UiTranslate } from "@sdp/ui/i18n";
 import { createContext, type ReactNode, useCallback, useContext, useMemo } from "react";
 import type { AppLocale } from "@/i18n/config";
-import { type MessageKey, type Messages, type TranslationValues, translate } from "@/i18n/messages";
+import type { MessageKey, Messages } from "@/i18n/messages";
+import { type TranslationValues, translate } from "@/i18n/translate";
 
 type I18nContextValue = {
   locale: AppLocale;

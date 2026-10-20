@@ -1,21 +1,21 @@
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
-  RampProviderId,
+  PaymentTransactionKind,
   UnifiedTransaction,
   UnifiedTransactionModule,
   UnifiedTransactionStatus,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
-
-export interface UnifiedTransactionModuleWalletScope {
-  module: UnifiedTransactionModule;
-  custodyWalletIds: readonly string[];
-}
+} from "@sdp/types/unified-transactions";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface ListUnifiedTransactionsInput {
   organizationId: string;
   projectId: string | null;
-  moduleWalletScopes?: readonly UnifiedTransactionModuleWalletScope[];
   modules: readonly UnifiedTransactionModule[];
+  /**
+   * The kinds of Payments row listed when `modules` includes payments; never
+   * empty then (the caller drops payments instead).
+   */
+  paymentKinds: readonly PaymentTransactionKind[];
   /** Ramp providers the release channel leaves out: their Payments rows are not listed. */
   excludedRampProviders: readonly RampProviderId[];
   module?: UnifiedTransactionModule;

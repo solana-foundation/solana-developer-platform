@@ -1,9 +1,6 @@
-import type { BuildOperationInput } from "@sdp/helius-rings";
-import {
-  HeliusRingsError,
-  type PrivateOperationInput,
-  RINGS_IDENTITY_MISMATCH,
-} from "@sdp/helius-rings";
+import { HeliusRingsError, RINGS_IDENTITY_MISMATCH } from "@sdp/helius-rings/errors";
+import type { BuildOperationInput } from "@sdp/helius-rings/port";
+import type { PrivateOperationInput } from "@sdp/helius-rings/types";
 import {
   AccountRole,
   type Address,
@@ -28,13 +25,13 @@ import {
   signBytes,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
+import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import {
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
-} from "@/db/repositories";
-import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
-import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
+} from "@/db/repositories/repository-factory";
 import { AppError } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
@@ -1395,6 +1392,33 @@ describe("HeliusRingsService", () => {
 
       expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
       expect(submit).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["organization_inactive", false],
+      // A background resume of a build that died: the caller's retry signs as them.
+      ["principal_missing", true],
+    ] as const)("records a %s refusal as retryable: %s", async (reason, retryable) => {
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+
+      await service({
+        gateway,
+        signOuterTransaction: async () => {
+          throw new MoneyMovementRefusedError(reason);
+        },
+        submitOuterTransaction: async () => OUTER_TX.signature,
+      })
+        .prepareOperation(operationInput({ clientNonce: `nonce-refused-${reason}` }))
+        .catch(() => undefined);
+
+      const stored = await getDb(env)
+        .prepare(
+          "SELECT state, failure_code, retryable FROM helius_rings_operations ORDER BY created_at DESC LIMIT 1"
+        )
+        .first<{ state: string; failure_code: string; retryable: boolean }>();
+      expect(stored).toEqual({ state: "failed", failure_code: "signer_failed", retryable });
     });
 
     it("rejects changed signer message bytes before signed-byte persistence", async () => {

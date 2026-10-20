@@ -9,9 +9,9 @@ import type {
   Project,
   ProjectEnvironment,
   ProjectMember,
-  ProjectRole,
   ProjectSettings,
-} from "@sdp/types";
+} from "@sdp/types/projects";
+import type { ProjectRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { badRequest, internalError, notFound } from "@/lib/errors";

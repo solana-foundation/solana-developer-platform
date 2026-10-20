@@ -2,8 +2,8 @@ import type {
   PrivateChannelMemberTransferStatus,
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
-} from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+} from "@sdp/types/private-channels";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelTransferId(): string {
   return `pct_${crypto.randomUUID()}`;

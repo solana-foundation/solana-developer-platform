@@ -1,16 +1,16 @@
 import type { CountryCode } from "@sdp/types/countries";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
-  RampDirection,
   RequirementField,
   RequirementOption,
 } from "@sdp/types/ramp-requirements";
 import { offeredCountryCodes, offeredFiatCurrencies } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { SdpPaymentsError } from "../errors";
+import { SdpPaymentsError } from "#/errors";
 
 /**
  * Builds the ready state for a ramp counterparty.

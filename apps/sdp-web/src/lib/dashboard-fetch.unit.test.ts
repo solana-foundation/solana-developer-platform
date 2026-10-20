@@ -1,3 +1,4 @@
+import { RAMP_DIRECTIONS } from "@sdp/types/payments";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
@@ -682,16 +683,16 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
 
   // They fire as the user types; keyed, each would leave an unanswered key
   // behind that never expires.
-  it("leaves read-like POSTs (estimates, quotes, simulations) unkeyed", async () => {
+  it("leaves read-like POSTs (estimates, simulations, other quotes) unkeyed", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments`);
     const fetchMock = statusFetchMock(200, 200, 200, 200);
     vi.stubGlobal("fetch", fetchMock);
 
     for (const path of [
       "/api/dashboard/payments/transfers/batch/estimate",
-      "/api/dashboard/payments/ramps/onramp/quote",
       "/api/dashboard/payments/ramps/offramp/estimate?draft=1",
       "/api/dashboard/payments/ramps/sandbox/simulate",
+      "/api/test/quote",
     ]) {
       await dashboardRequest(path, { method: "POST", body: "{}" });
     }
@@ -703,4 +704,30 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
       null,
     ]);
   });
+
+  // APE-689: a ramp quote creates the transfer (and a Stripe session), so the
+  // retry after a lost answer must reach the API as the same request.
+  it.each(RAMP_DIRECTIONS)(
+    "keys the %s quote, reuses its key after a lost answer, and retires it once answered",
+    async (direction) => {
+      openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments`);
+      const fetchMock = vi
+        .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
+        .mockRejectedValueOnce(new TypeError("network down"));
+      vi.stubGlobal("fetch", fetchMock);
+      const quote = () =>
+        dashboardRequest(`/api/dashboard/payments/ramps/${direction}/quote`, {
+          method: "POST",
+          body: '{"amount":"100"}',
+        });
+
+      await expect(quote()).rejects.toThrow("network down");
+      await quote();
+      await quote();
+
+      expect(keyOfCall(fetchMock, 0)).toMatch(/^[0-9a-f-]{36}$/);
+      expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+      expect(keyOfCall(fetchMock, 2)).not.toBe(keyOfCall(fetchMock, 1));
+    }
+  );
 });

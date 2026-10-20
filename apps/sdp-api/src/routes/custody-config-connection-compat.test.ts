@@ -1,16 +1,16 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -36,16 +36,14 @@ const API_KEY = {
   prefix: "sk_test_ccc",
 };
 
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -178,7 +176,7 @@ async function request(path: string): Promise<Response> {
 
 async function seedScope(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   const db = getDb(env);
 
   await db.batch([
@@ -205,8 +203,8 @@ async function seedScope(): Promise<void> {
     await tx.execute(
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-          role, permissions, status)
-       VALUES (?, ?, ?, ?, 'Custody Config Connection Compat', ?, ?, 'api_admin', ?, 'active')`,
+          grants, status)
+       VALUES (?, ?, ?, ?, 'Custody Config Connection Compat', ?, ?, ?, 'active')`,
       [
         API_KEY.id,
         ORGANIZATION_ID,
@@ -214,7 +212,7 @@ async function seedScope(): Promise<void> {
         USER_ID,
         API_KEY.prefix,
         keyHash,
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
       ]
     );
     await insertTestCustodyConfigRow(tx, {

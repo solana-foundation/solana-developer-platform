@@ -1,7 +1,7 @@
-import type { MovementOf } from "@sdp/types";
+import type { MovementOf } from "@sdp/types/movements";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import * as moneyAdmission from "@/lib/money-admission";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import { env } from "@/test/helpers/env";
@@ -117,7 +117,8 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
       expect(admission).toHaveBeenCalledExactlyOnceWith(
         env,
         ADMISSION_SCOPE,
-        admissionContext(movement)
+        admissionContext(movement),
+        { custodyWalletId: TEST_CUSTODY_WALLET_ID }
       );
     }
   );
@@ -158,7 +159,8 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
       expect(admission).toHaveBeenCalledExactlyOnceWith(
         env,
         ADMISSION_SCOPE,
-        admissionContext(movement)
+        admissionContext(movement),
+        { custodyWalletId: TEST_CUSTODY_WALLET_ID }
       );
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(await countCounterpartyTransfers(counterpartyId)).toBe(0);

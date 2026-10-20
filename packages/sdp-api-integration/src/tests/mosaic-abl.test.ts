@@ -10,7 +10,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { TokenAllowlistResponse, TokenApiResponse } from "../helpers/api-types";
+import type { TokenAllowlistResponse, TokenApiResponse } from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
   initIntegrationSuite,
@@ -18,7 +18,7 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-} from "../helpers/integration";
+} from "#/helpers/integration";
 
 // Test wallet addresses (valid Base58)
 const TEST_WALLETS = {

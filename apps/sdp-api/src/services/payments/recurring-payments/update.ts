@@ -5,7 +5,7 @@ import {
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -17,9 +17,10 @@ import {
   isCanceledRecurringPaymentStatus,
   isPendingActivationRecurringPaymentStatus,
   isUpdatingRecurringPaymentStatus,
+  type PaymentRecurringPaymentUpdateAttemptMode,
   recurringPaymentInFlightLifecycleOperation,
   type UpdatePaymentRecurringPaymentRequest,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import {
   type Address,
   createNoopSigner,
@@ -30,21 +31,26 @@ import {
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import { z } from "zod";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db/client";
+import type {
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
+  PaymentRecurringPaymentUpdateAttemptRow,
+  RecurringPaymentActivator,
+  StoredRecurringPaymentActivator,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type {
+  PaymentSubscriptionPlanRow,
+  PaymentSubscriptionRow,
+  PaymentSubscriptionsRepository,
+} from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
-  createPostgresPaymentRecurringPaymentsRepository,
-  createPostgresPaymentSubscriptionsRepository,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  type PaymentRecurringPaymentUpdateAttemptMode,
-  type PaymentRecurringPaymentUpdateAttemptRow,
-  type PaymentSubscriptionPlanRow,
-  type PaymentSubscriptionRow,
-  type PaymentSubscriptionsRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import {
   AppError,
   badRequest,
@@ -54,6 +60,7 @@ import {
   transactionFailed,
 } from "@/lib/errors";
 import { normalizeDecimalString } from "@/lib/idempotency";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -62,20 +69,21 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
-import * as solanaServices from "@/services/solana";
+import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
 } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   isSubscriptionDelegationCanceled,
+  lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
   recurringPaymentErrorMessage,
@@ -607,6 +615,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   nowIso: string;
   recoveringStaleUpdate: boolean;
   idempotency: RecurringPaymentUpdateIdempotency | null;
+  previousActivator: StoredRecurringPaymentActivator | null;
 }): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
   // A stale claim resumes the in-flight attempt under its original key, or
   // records this request's key and fingerprint on it when it has none.
@@ -670,6 +679,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     updatedAt: input.nowIso,
     idempotencyKey: input.idempotency?.key ?? null,
     idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
+    previousActivator: input.previousActivator,
   });
 
   if (!attempt) {
@@ -898,7 +908,7 @@ async function runMetadataScheduleUpdate(input: {
     }
 
     const planPda = assertValidAddress(input.claimed.plan_pda, "planPda");
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
@@ -1006,7 +1016,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
@@ -1405,7 +1415,7 @@ async function runReplacementUpdate(input: {
     clampToMinimum: Boolean(planCreationSignature || authorizationSignature || oldCancelSignature),
   });
 
-  const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+  const sourceSigner = await createOrgSignerForCustodyWallet(
     input.env,
     input.organizationId,
     input.projectId,
@@ -1692,7 +1702,7 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
-    const oldSourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+    const oldSourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
@@ -1798,6 +1808,15 @@ async function recordRecurringPaymentUpdateFailure(input: {
       });
       if (updatedRecurringPayment === null)
         throw conflict("Recurring payment update changed concurrently");
+      // The new terms never took effect, so neither does the hand-over.
+      if (input.attempt.previous_activator) {
+        await recurringRepo.restoreRecurringPaymentActivator({
+          recurringPaymentId: input.claimed.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          activator: input.attempt.previous_activator,
+        });
+      }
     }
   });
 }
@@ -1810,6 +1829,7 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
   sourceWallet: CustodyWallet;
   updatedAt: string;
   staleBefore: string;
+  activatedBy: RecurringPaymentActivator | null;
 }): Promise<PaymentRecurringPaymentRow | null> {
   const locked = await input.db
     .prepare(
@@ -1861,6 +1881,128 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
     projectId: input.projectId,
     updatedAt: input.updatedAt,
     staleBefore: input.staleBefore,
+    activatedBy: input.activatedBy,
+  });
+}
+
+/**
+ * Admits an update that will sign, for every wallet it signs with: the source
+ * and, when the source changes, the new one, since the caller must be able to
+ * sign with the wallet it moves the mandate away from as well. A fresh update
+ * is admitted before its claim (`admitStart`). A recovered one passes none: it
+ * may only confirm saved work or finish the old plan's cancel (an exit), and
+ * any new signature it needs is decided by the signing waist (HOO-2099).
+ */
+async function admitUpdateExecution(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  walletIds: readonly string[];
+  admitStart: ((custodyWalletId: string) => Promise<void>) | null;
+}): Promise<void> {
+  for (const walletId of input.walletIds) {
+    await input.admitStart?.(walletId);
+  }
+  const signingService = createSigningService(input.env);
+  for (const walletId of input.walletIds) {
+    await signingService.admitRuntimeExecution(input.organizationId, input.projectId, walletId);
+  }
+}
+
+/**
+ * Claims an active recurring payment for an update and opens (or resumes) its
+ * attempt, in one transaction.
+ *
+ * An update that changes where or how much money moves re-authorizes the
+ * mandate, so its caller becomes the one it answers to: revoking that key
+ * cancels the mandate, as revoking its activator does (HOO-2099). The claim
+ * re-reads that key under a share lock, ordered against revocation as
+ * activation's is. A metadata or schedule change leaves the activator alone,
+ * and so does a recovered stale update, whose own claim recorded its caller.
+ */
+async function claimActiveRecurringPaymentUpdate(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  sourceWallet: CustodyWallet;
+  newSourceCustodyWalletId: string | null;
+  mode: PaymentRecurringPaymentUpdateAttemptMode;
+  resolved: Pick<
+    Awaited<ReturnType<typeof resolveRecurringPaymentUpdate>>,
+    "changedFields" | "beforeValues" | "afterValues"
+  >;
+  createdBy: string | null;
+  nowIso: string;
+  recoveringStaleUpdate: boolean;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
+}): Promise<{
+  claimed: PaymentRecurringPaymentRow;
+  attempt: PaymentRecurringPaymentUpdateAttemptRow;
+} | null> {
+  const updatedAt = new Date().toISOString();
+  const staleBefore = getRecurringPaymentOperationStaleBefore(input.nowIso);
+  const activatedBy =
+    input.mode === "replacement" && !input.recoveringStaleUpdate ? currentMandateActivator() : null;
+  return getDb(input.env).transaction(async (tx) => {
+    await lockLiveActivatingKey(tx, {
+      activator: activatedBy,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      movement: "recurring.update",
+      recurringPaymentId: input.recurringPayment.id,
+      // Moving the mandate signs with the wallet it leaves and the one it joins.
+      custodyWalletIds: input.newSourceCustodyWalletId
+        ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
+        : [input.sourceWallet.id],
+    });
+    const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    // Kept on the attempt, so an attempt abandoned before its terms take
+    // effect hands the payment back to the activator it had.
+    const previousActivator = activatedBy
+      ? await transactionRepo.lockRecurringPaymentActivator({
+          recurringPaymentId: input.recurringPayment.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+        })
+      : null;
+    const claimed = input.newSourceCustodyWalletId
+      ? await claimSourceChangingRecurringPaymentUpdate({
+          db: tx,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPayment: input.recurringPayment,
+          sourceWallet: input.sourceWallet,
+          updatedAt,
+          staleBefore,
+          activatedBy,
+        })
+      : await transactionRepo.claimRecurringPaymentUpdate({
+          recurringPaymentId: input.recurringPayment.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          updatedAt,
+          staleBefore,
+          activatedBy,
+        });
+    if (!claimed) return null;
+    const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
+      recurringRepo: transactionRepo,
+      claimed,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      mode: input.mode,
+      changedFields: input.resolved.changedFields.map(String),
+      beforeValues: input.resolved.beforeValues,
+      afterValues: input.resolved.afterValues,
+      newSourceCustodyWalletId: input.newSourceCustodyWalletId,
+      createdBy: input.createdBy,
+      nowIso: input.nowIso,
+      recoveringStaleUpdate: input.recoveringStaleUpdate,
+      idempotency: input.idempotency,
+      previousActivator,
+    });
+    return { claimed, attempt };
   });
 }
 
@@ -1875,6 +2017,13 @@ export async function updateRecurringPayment(input: {
   createdBy: string | null;
   /** The request's Idempotency-Key and body fingerprint, written on the attempt it claims. */
   idempotency: RecurringPaymentUpdateIdempotency | null;
+  /**
+   * Money admission (HOO-1955, HOO-2099) for one custody wallet a fresh
+   * update will sign with, run before the attempt is claimed and only when it
+   * signs: a refusal leaves the recurring payment untouched. A recovered
+   * stale update skips it; the signing waist decides any signature it needs.
+   */
+  admitStart: (custodyWalletId: string) => Promise<void>;
 }): Promise<PaymentRecurringPaymentRow> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
@@ -1930,20 +2079,17 @@ export async function updateRecurringPayment(input: {
   const mode = requestedActiveUpdateMode(resolved.changedFields);
   const requiresRuntimeExecution =
     mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;
+  const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
   if (requiresRuntimeExecution) {
-    const signingService = createSigningService(input.env);
-    await signingService.admitRuntimeExecution(
-      input.organizationId,
-      input.projectId,
-      input.sourceWallet.id
-    );
-    if (sourceChanged) {
-      await signingService.admitRuntimeExecution(
-        input.organizationId,
-        input.projectId,
-        resolved.sourceWallet.id
-      );
-    }
+    await admitUpdateExecution({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      walletIds: sourceChanged
+        ? [input.sourceWallet.id, resolved.sourceWallet.id]
+        : [input.sourceWallet.id],
+      admitStart: recoveringStaleUpdate ? null : input.admitStart,
+    });
   }
 
   if (resolved.changedFields.length === 0) {
@@ -1956,45 +2102,19 @@ export async function updateRecurringPayment(input: {
     return settled.recurringPayment;
   }
 
-  const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
-  const claimUpdatedAt = new Date().toISOString();
-  const staleBefore = getRecurringPaymentOperationStaleBefore(nowIso);
-  const claimResult = await getDb(input.env).transaction(async (tx) => {
-    const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    const claimed = sourceChanged
-      ? await claimSourceChangingRecurringPaymentUpdate({
-          db: tx,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          recurringPayment: settled.recurringPayment,
-          sourceWallet: input.sourceWallet,
-          updatedAt: claimUpdatedAt,
-          staleBefore,
-        })
-      : await transactionRepo.claimRecurringPaymentUpdate({
-          recurringPaymentId: settled.recurringPayment.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          updatedAt: claimUpdatedAt,
-          staleBefore,
-        });
-    if (!claimed) return null;
-    const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
-      recurringRepo: transactionRepo,
-      claimed,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      mode,
-      changedFields: resolved.changedFields.map(String),
-      beforeValues: resolved.beforeValues,
-      afterValues: resolved.afterValues,
-      newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
-      createdBy: input.createdBy,
-      nowIso,
-      recoveringStaleUpdate,
-      idempotency: input.idempotency,
-    });
-    return { claimed, attempt };
+  const claimResult = await claimActiveRecurringPaymentUpdate({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: settled.recurringPayment,
+    sourceWallet: input.sourceWallet,
+    newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
+    mode,
+    resolved,
+    createdBy: input.createdBy,
+    nowIso,
+    recoveringStaleUpdate,
+    idempotency: input.idempotency,
   });
   if (!claimResult) {
     throw conflict("Recurring payment update is already processing");

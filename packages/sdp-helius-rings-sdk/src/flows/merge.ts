@@ -5,7 +5,7 @@ import {
   approveIntent,
   buildMergeTransaction,
 } from "@heliuslabs/zolana/wallet";
-import { HeliusRingsError } from "@sdp/helius-rings";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import { type Address, address, type Transaction } from "@solana/kit";
 import { protocolMint, requireSpendMint } from "./mint.js";
 import { selectMergeNotes } from "./notes.js";

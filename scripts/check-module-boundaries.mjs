@@ -223,7 +223,7 @@ const MODULE_METADATA = [
   {
     name: "@sdp/rpc",
     directory: "packages/sdp-rpc",
-    purpose: "Solana RPC clients, errors, and relay helpers.",
+    purpose: "Solana RPC clients, errors, and transport helpers.",
     allowedDependencies: ["@sdp/types"],
   },
   {

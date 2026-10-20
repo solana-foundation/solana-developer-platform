@@ -1,4 +1,4 @@
-import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types";
+import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
 import { describe, expect, it } from "vitest";
 import { declaredAuthorization } from "@/middleware/authorize";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
@@ -44,6 +44,8 @@ const EXEMPT = {
   "POST /internal/dashboard/custody/connections/:connectionId/cancel": CONNECTION,
   "POST /internal/dashboard/custody/connections/:connectionId/complete": CONNECTION,
   "POST /internal/dashboard/custody/connections/:connectionId/deactivate": CONNECTION,
+  "POST /internal/dashboard/wallets/:walletId/faucet":
+    "dashboard-internal devnet faucet: airdrops free devnet SOL and stores nothing, so each press is a new airdrop",
   "POST /pay/:token/tx":
     "public and unauthenticated (no organization to scope a key to); the payment request token is the unit of retry",
   "POST /v1/payments/transfer-batches/estimate": "read-only estimate; moves and stores nothing",
@@ -60,10 +62,9 @@ const EXEMPT = {
  * first.
  */
 const NAMES_NOTHING = {
-  "POST /v1/compliance/address-screenings":
-    "screens an on-chain address the caller supplies; it names no resource of any project",
   "POST /v1/counterparties":
     "creates a counterparty in the caller's own project; it names no existing resource",
+  "POST /v1/wallets/initialize": "connects a provider in the caller's own project",
 } as const satisfies Record<string, string>;
 
 interface RouteSteps {

@@ -1,5 +1,3 @@
-import type { RpcEnv } from "@sdp/rpc";
-import { isTransientRpcError } from "@sdp/rpc";
 import { SdpRpcError, solanaRpcError } from "@sdp/rpc/errors";
 import {
   confirmTransaction,
@@ -7,6 +5,8 @@ import {
   type SolanaRpc,
   sendAndConfirmTransaction,
 } from "@sdp/rpc/solana";
+import { isTransientRpcError } from "@sdp/rpc/transient";
+import type { RpcEnv } from "@sdp/rpc/types";
 import { getBase64Codec, type Signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";

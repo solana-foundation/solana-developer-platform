@@ -1,11 +1,11 @@
-import type { SdpEnvironment } from "@sdp/types";
-import { SOL_MINT } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
-import app from "@/index";
+import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import * as sponsorshipService from "@/services/sponsorship.service";

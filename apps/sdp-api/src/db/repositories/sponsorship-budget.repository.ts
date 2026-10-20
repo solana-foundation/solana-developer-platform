@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AppDb, DatabaseExecutor } from "@/db";
+import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 
 export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
 

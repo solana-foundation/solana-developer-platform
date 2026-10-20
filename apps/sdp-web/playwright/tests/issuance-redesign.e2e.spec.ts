@@ -1,4 +1,4 @@
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { clearIssuanceFixtures, type IssuanceFixtures } from "../support/issuance-fixtures";
 import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
@@ -12,64 +12,28 @@ import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootst
 
 type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" | "permissions";
 
-// The API admits 300 dashboard requests a minute per user, and one page load costs about 20
-// (every server render and dashboard route also reads /v1/projects). The suite runs in one
-// job, so it never polls by reloading: an operation refreshes the page itself once it lands,
-// and a wait reloads once at most, when the in-place refresh did not show the change.
-// Back-to-back tests still add up, so each test also starts on a fresh budget (see
-// waitForFreshRateWindow).
-const RATE_WINDOW_MS = 60_000;
-
-/**
- * Waits until the API's rate limit no longer counts any request made before `lastActivity`.
- * The limit adds the current minute's count to a fading share of the previous minute's, so
- * old requests stop counting once a whole minute bucket has passed after theirs: 60 to 120
- * seconds of quiet. The wait is added to the test's timeout.
- */
-async function waitForFreshRateWindow(lastActivity: number, testInfo: TestInfo): Promise<void> {
-  const freshFrom = Math.floor(lastActivity / RATE_WINDOW_MS) * RATE_WINDOW_MS + 2 * RATE_WINDOW_MS;
-  const wait = freshFrom - Date.now();
-  if (wait <= 0) return;
-  testInfo.setTimeout(testInfo.timeout + wait);
-  await new Promise((resolve) => setTimeout(resolve, wait));
-}
-
-async function eventually(reopen: () => Promise<void>, check: () => Promise<void>) {
-  await check().catch(async () => {
-    await reopen();
-    await check();
-  });
-}
-
-async function withRetry(page: Page, ready: () => Promise<void>): Promise<void> {
-  await ready().catch(async () => {
-    const retryButton = page.getByRole("button", { name: "Retry", exact: true });
-    if ((await retryButton.count()) > 0) {
-      await retryButton.click();
-    } else {
-      await page.reload({ waitUntil: "domcontentloaded" });
-    }
-    await ready();
-  });
-}
+// The API admits 300 dashboard requests a minute per user. One page load costs about 20
+// (every server render and dashboard route also reads /v1/projects); the whole suite makes about
+// 220 and runs in under a minute, so it fits one window with no waiting. If it grows past 300 in a
+// minute, cut requests (a test that loads a page it does not need) before waiting out the limit.
+// It never polls by reloading and never retries a failed wait: an operation refreshes the page
+// itself once it lands, so a test waits for that and fails with the real error if it does not.
 
 async function gotoIssuanceList(page: Page, projectId: string): Promise<void> {
   await gotoProjectPage(page, projectId, "/dashboard/issuance");
   const createDraft = page.getByRole("link", { name: "Create a draft", exact: true }).first();
-  await withRetry(page, () => expect(createDraft).toBeVisible({ timeout: 60_000 }));
+  await expect(createDraft).toBeVisible({ timeout: 60_000 });
 }
 
 async function gotoToken(
   page: Page,
   projectId: string,
   tokenId: string,
-  tab: TokenTab = "overview"
+  tab: TokenTab
 ): Promise<void> {
   const query = tab === "overview" ? "" : `?tab=${tab}`;
   await gotoProjectPage(page, projectId, `/dashboard/issuance/${tokenId}${query}`);
-  await withRetry(page, () =>
-    expect(page.locator(`[data-token-page="${tab}"]`)).toBeVisible({ timeout: 60_000 })
-  );
+  await expect(page.locator(`[data-token-page="${tab}"]`)).toBeVisible({ timeout: 60_000 });
 }
 
 /**
@@ -85,17 +49,12 @@ function recordValue(page: Page, label: string) {
 }
 
 /**
- * Opens Compliance and waits for its access list to load: a loaded list shows its entries or
- * says it has none, while one still loading shows neither, so a check that an entry is gone
- * would otherwise pass against the empty loading state.
+ * Waits for the Compliance access list to load: a loaded list shows its entries or says it has
+ * none, while one still loading shows neither, so a check that an entry is gone would
+ * otherwise pass against the empty loading state.
  */
-async function openLoadedComplianceList(
-  page: Page,
-  projectId: string,
-  tokenId: string
-): Promise<void> {
+async function expectComplianceListLoaded(page: Page): Promise<void> {
   const compliance: TokenTab = "compliance";
-  await gotoToken(page, projectId, tokenId, compliance);
   const tab = page.locator(`[data-token-page="${compliance}"]`);
   await expect(
     tab.getByText("Nothing is on the list yet").or(tab.locator("tbody tr").first())
@@ -137,7 +96,7 @@ async function waitForActionResponse(
   );
   await trigger();
   const response = await responsePromise;
-  const body = await response.text().catch(() => "");
+  const body = await response.text();
   expect(response.ok(), body).toBe(true);
 }
 
@@ -151,9 +110,6 @@ test.describe
     );
 
     let fixtures: IssuanceFixtures;
-    // When this worker last used the API: the end of the bootstrap, then of each test. A retry
-    // runs in a new worker, so its bootstrap also outwaits the failed attempt's requests.
-    let lastActivity = Date.now();
 
     test.beforeAll(async ({ browser }) => {
       clearIssuanceFixtures();
@@ -163,15 +119,6 @@ test.describe
           bearerToken: session.getBearerToken,
         })
       );
-      lastActivity = Date.now();
-    });
-
-    test.beforeEach(async ({ page: _page }, testInfo) => {
-      await waitForFreshRateWindow(lastActivity, testInfo);
-    });
-
-    test.afterEach(() => {
-      lastActivity = Date.now();
     });
 
     test("R1. user sees every seeded token on the Issuance list", async ({ page }) => {
@@ -242,7 +189,7 @@ test.describe
     });
 
     test("R4. user deploys the seeded draft from Overview", async ({ page }) => {
-      await gotoToken(page, fixtures.projectId, fixtures.tokens.pending.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.pending.id, "overview");
       const deployButton = page.getByRole("button", { name: "Deploy token", exact: true });
       await expect(deployButton).toBeEnabled({ timeout: 120_000 });
       const successCount = await page.getByText("Deploy transaction finalized.").count();
@@ -252,19 +199,15 @@ test.describe
       await expect(deployDialog.getByRole("heading", { name: "Deploy token" })).toBeVisible();
       await deployDialog.getByRole("button", { name: "Deploy token", exact: true }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
-      await eventually(
-        () => gotoToken(page, fixtures.projectId, fixtures.tokens.pending.id),
-        () =>
-          expect(page.locator('[data-token-page="overview"]')).toContainText("Live onchain", {
-            timeout: 90_000,
-          })
-      );
+      await expect(page.locator('[data-token-page="overview"]')).toContainText("Live onchain", {
+        timeout: 90_000,
+      });
       await expect(page.getByRole("button", { name: "Deploy token", exact: true })).toHaveCount(0);
     });
 
     test("R5. user mints from Operations and sees the issued supply grow", async ({ page }) => {
       await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id, "operations");
-      const before = (await recordValue(page, "Issued supply").textContent()) ?? "";
+      const before = await recordValue(page, "Issued supply").innerText();
 
       await expect(operationButton(page, "mint")).toBeEnabled({ timeout: 120_000 });
       await operationButton(page, "mint").click();
@@ -281,10 +224,7 @@ test.describe
       await confirmAction(page, "Mint now");
       await waitForToast(page, "Mint transaction finalized.", successCount);
 
-      await eventually(
-        () => gotoToken(page, fixtures.projectId, fixtures.tokens.open.id, "operations"),
-        () => expect(recordValue(page, "Issued supply")).not.toHaveText(before, { timeout: 90_000 })
-      );
+      await expect(recordValue(page, "Issued supply")).not.toHaveText(before, { timeout: 90_000 });
       await expect(recordValue(page, "Issued supply")).toContainText("10");
     });
 
@@ -323,22 +263,16 @@ test.describe
         { method: "POST", pathIncludes: `/api/dashboard/issuance/tokens/${tokenId}/allowlist` },
         () => page.getByRole("button", { name: "Add entry", exact: true }).click()
       );
-      await eventually(
-        () => openLoadedComplianceList(page, fixtures.projectId, tokenId),
-        () =>
-          expect(page.getByRole("cell", { name: address }).first()).toBeVisible({
-            timeout: 90_000,
-          })
-      );
+      await expect(page.getByRole("cell", { name: address }).first()).toBeVisible({
+        timeout: 90_000,
+      });
 
       await waitForActionResponse(
         page,
         { method: "DELETE", pathIncludes: `/api/dashboard/issuance/tokens/${tokenId}/allowlist/` },
         () => page.getByRole("button", { name: `Remove ${address}` }).click()
       );
-      await eventually(
-        () => openLoadedComplianceList(page, fixtures.projectId, tokenId),
-        () => expect(page.getByRole("cell", { name: address })).toHaveCount(0, { timeout: 90_000 })
-      );
+      await expectComplianceListLoaded(page);
+      await expect(page.getByRole("cell", { name: address })).toHaveCount(0, { timeout: 90_000 });
     });
   });

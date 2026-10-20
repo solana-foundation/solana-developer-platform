@@ -1,3 +1,4 @@
+import { Callout } from "@sdp/ui/callout";
 import {
   Children,
   type ComponentProps,
@@ -12,7 +13,6 @@ import {
   trackedBalances,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.fixtures";
 import { WalletLabelInlineEditor } from "@/app/dashboard/[projectId]/custody/wallet-label-inline-editor";
-import { Callout } from "@/components/ui/callout";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { getTranslations } from "@/i18n/server";
@@ -40,7 +40,6 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
 }));
 
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mockFetchProjectProviderAvailability,
 }));
@@ -56,6 +55,7 @@ vi.mock("@/flags", () => ({
   issuance: mockIssuanceFlag,
   policies: mockPoliciesFlag,
 }));
+vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
@@ -73,9 +73,10 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (impor
   };
 });
 
-import WalletDetailPage, {
+import {
   WalletBalanceSummary,
   WalletBalancesSection,
+  WalletDetailPage,
 } from "./wallet-detail-page";
 
 function renderPage() {

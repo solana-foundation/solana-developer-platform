@@ -5,23 +5,21 @@
 
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
-import {
-  createFeePaymentAdapter,
-  KoraAdapter,
-  KoraClient,
-  resolveKoraEndpoint,
-} from "@sdp/fee-payment";
+import { createFeePaymentAdapter, resolveKoraEndpoint } from "@sdp/fee-payment";
+import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import { hashString } from "@sdp/payments/hash";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
+import { KoraClient } from "@solana/kora";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
-import { closeDatabasePools, getDb } from "@/db";
-import { createPostgresEarnRepository } from "@/db/repositories";
+import { closeDatabasePools, getDb } from "@/db/client";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
-import app from "@/index";
+import { app } from "@/index";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -37,7 +35,7 @@ import {
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -45,6 +43,7 @@ import {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
+import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -66,6 +65,7 @@ export const apiTestSupport = {
   createVaultDeadline,
   depositIntoVault,
   CustodyConfigStore,
+  ensureTestClerkIssuer,
   DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
@@ -76,7 +76,9 @@ export const apiTestSupport = {
   KoraClient,
   resolveEarnExecutionClient,
   resolveKoraEndpoint,
+  runAsMoneyPrincipal,
   seedTestDatabase,
+  signTestClerkJwt,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
   supportsVaultDirect,

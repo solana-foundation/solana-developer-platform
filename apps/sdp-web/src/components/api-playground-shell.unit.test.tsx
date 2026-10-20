@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +12,6 @@ import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-ap
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
-import { ThemeScopeProvider } from "./theme-scope-provider";
 
 const mocks = vi.hoisted(() => ({
   replaceSearchParams: vi.fn(),

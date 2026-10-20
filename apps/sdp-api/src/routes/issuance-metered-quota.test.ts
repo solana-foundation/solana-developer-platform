@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { ISSUANCE_PREPARE_QUOTA, ISSUANCE_SUPPLY_QUOTA } from "@/routes/issuance";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -11,13 +11,8 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  clearKVStores,
-  readRateLimitCount,
-  seedCachedApiKey,
-  seedRateLimit,
-} from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 
 const SUPPLY_ACTOR_COUNTER = `metered:${ISSUANCE_SUPPLY_QUOTA.name}:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;
 const PREPARE_ACTOR_COUNTER = `metered:${ISSUANCE_PREPARE_QUOTA.name}:org:${TEST_ORG.id}:key:${TEST_PROJECT_API_KEY.id}`;
@@ -48,16 +43,15 @@ describe("Issuance routes — metered quota", () => {
       .run();
     // After the organization and project, so the key's row is seeded with it.
     const keyHash = await hashString(TEST_PROJECT_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, TEST_PROJECT_CACHED_KEY);
+    await seedApiKeyRow(env, keyHash, TEST_PROJECT_CACHED_KEY);
   });
 
   it("does not charge quota counters for callers the permission gate rejects", async () => {
     const keyHash = await hashString("sk_test_quota_readonly", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       ...TEST_PROJECT_CACHED_KEY,
       id: "key_quota_readonly",
-      role: "api_readonly",
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
 
     const res = await app.request(

@@ -1,4 +1,4 @@
-import { COUNTRY_CODES, type CountryCode } from "@sdp/types";
+import { COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
 import { PERSISTED_RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { internalError } from "@/lib/errors";

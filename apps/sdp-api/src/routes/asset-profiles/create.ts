@@ -1,8 +1,8 @@
-import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities";
-import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
-import { getAssetTypeRegistryEntry } from "@sdp/types";
-import { asTransactionalClient, getDb } from "@/db";
-import { createPostgresAssetProfilesRepository } from "@/db/repositories";
+import { resolveSettingsToExtensions } from "@sdp/issuance/capabilities/resolver";
+import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates/definitions";
+import { getAssetTypeRegistryEntry } from "@sdp/types/asset-profiles";
+import { asTransactionalClient, getDb } from "@/db/client";
+import { createPostgresAssetProfilesRepository } from "@/db/repositories/asset-profile.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, internalError } from "@/lib/errors";
@@ -16,11 +16,11 @@ import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveIssuanceWallet } from "@/routes/issuance/handlers/authority-resolution";
+import { toPublicToken } from "@/routes/issuance/handlers/public-response";
+import type { createTokenWithAssetProfileSchema } from "@/routes/issuance/schemas";
 import { AuditService } from "@/services/audit.service";
 import { TokenService } from "@/services/token.service";
-import { resolveIssuanceWallet } from "../issuance/handlers/authority-resolution";
-import { toPublicToken } from "../issuance/handlers/public-response";
-import type { createTokenWithAssetProfileSchema } from "../issuance/schemas";
 import { mapToAssetProfile } from "./handlers";
 
 // POST /v1/issuance/asset-profiles: create token and profile in one transaction.
@@ -52,7 +52,6 @@ export const createTokenWithAssetProfile = async (
         env: c.env,
         auth,
         custodyWalletId: tokenInput.signingCustodyWalletId,
-        requiredWalletPermissions: ["tokens:write"],
       })
     : null;
 

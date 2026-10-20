@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 
-import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransaction } from "@sdp/types";
+import {
+  UNIFIED_TRANSACTION_MODULES,
+  type UnifiedTransaction,
+} from "@sdp/types/unified-transactions";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";

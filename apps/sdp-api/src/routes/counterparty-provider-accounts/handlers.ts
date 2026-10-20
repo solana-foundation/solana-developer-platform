@@ -1,16 +1,16 @@
-import {
-  type CounterpartyProviderAccount,
-  isRetiredRampProviderId,
-  type ListCounterpartyProviderAccountsResponse,
-} from "@sdp/types";
+import type {
+  CounterpartyProviderAccount,
+  ListCounterpartyProviderAccountsResponse,
+} from "@sdp/types/counterparties";
+import { isRetiredRampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { AppContext } from "@/routes/counterparties/context";
+import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { loadRampListingAdmission } from "@/routes/payments/ramps/admission";
-import type { AppContext } from "../counterparties/context";
-import { getCounterpartiesRepository } from "../counterparties/context";
 import { getCounterpartyProviderAccountsRepository } from "./context";
 import {
   counterpartyProviderAccountParamsSchema,

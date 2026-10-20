@@ -1,27 +1,28 @@
-import { mapPrivateChannelInstanceRow } from "@/db/repositories";
+import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
-import { getChannelBalance, mapPrivateChannelError } from "@/services/private-channels";
-import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
-import type { AppContext } from "../context";
 import {
+  type AppContext,
   getPrivateChannelInstanceRepository,
   loadPrivateChannelProjectRpcClient,
-} from "../context";
-import { balanceQuerySchema } from "../schemas";
+} from "@/routes/private-channels/context";
+import { balanceQuerySchema } from "@/routes/private-channels/schemas";
+import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { getChannelBalance } from "@/services/private-channels/balance";
+import { mapPrivateChannelError } from "@/services/private-channels/errors";
 
 /**
  * GET /balance — read an owner's channel token balance through the gateway.
  * `owner` accepts a `walletId`, a wallet public key, or a raw Solana address
  * (resolved via the shared wallet helpers); `mint` defaults to the instance
  * cluster's USDC mint. The connection is the project's ACTIVE persisted instance.
- * Feature-gated (router middleware) + `payments:read`.
+ * Feature-gated (router middleware) + `private_channels.read`.
  *
  * TODO(visibility): balance is per (wallet, mint) at the SPC layer and shared across
  * channels, so the read primitive is correct but this endpoint is UNDER-GATED: any
- * project member with `payments:read` can read ANY `owner`'s balance. The intended
+ * project member with `private_channels.read` can read ANY `owner`'s balance. The intended
  * rule is no visibility beyond your own channels — a caller may read a balance only
  * when they are a project ADMIN, the wallet's own user, or share an active channel
  * with it, which `private_channel_memberships` and
@@ -52,7 +53,7 @@ export async function getPrivateChannelBalance(c: AppContext) {
     const instance = mapPrivateChannelInstanceRow(row);
 
     const { wallets } = await resolveScope(c);
-    const owner = resolveWalletAddress(wallets, parsed.data.owner, "owner", auth, ["wallets:read"]);
+    const owner = resolveWalletAddress(wallets, parsed.data.owner, "owner");
 
     // Auth-enabled instances JWT-gate balance reads; mint the caller's SPC session.
     const gatewayAuth = await resolveGatewayAuth(c.env, {

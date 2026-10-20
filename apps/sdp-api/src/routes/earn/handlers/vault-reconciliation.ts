@@ -1,19 +1,17 @@
+import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
+import type { AppContext } from "@/routes/earn/context";
+import { getEarnRepository } from "@/routes/earn/context";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
+import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconciliation.service";
-import type { AppContext } from "../context";
-import { getEarnRepository, resolveSdpEnvironment } from "../context";
 import { listReadableEarnVaultWallets } from "./vault";
 
 /**

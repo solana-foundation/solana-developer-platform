@@ -1,24 +1,24 @@
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
 import type {
   ReadIdentityInput,
   ReadIdentityResult,
   RingsGatewayPort,
   SyncPhotonInput,
   SyncPhotonResult,
-} from "@sdp/helius-rings";
-import { HeliusRingsError } from "@sdp/helius-rings";
+} from "@sdp/helius-rings/port";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import { createHeliusRingsWalletRepository } from "@/db/repositories";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { createHeliusRingsWalletRepository } from "@/db/repositories/repository-factory";
+import { app } from "@/index";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 /**
@@ -48,16 +48,14 @@ const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 /** Allowlisted by neither the asset catalogue nor the spend gate. */
 const OTHER_MINT = "E4KqM12ZDosJbV7gZ5iR8rK1T2mC3nF4pQ6sU8wX9yZa";
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -67,7 +65,7 @@ let ringsWalletId: string;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   const db = getDb(env);
   await db.batch([
     db
@@ -87,8 +85,8 @@ async function seedAuth(): Promise<void> {
     db
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -98,8 +96,7 @@ async function seedAuth(): Promise<void> {
         "Rings Route Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -452,7 +449,43 @@ describe("Helius Rings routes", () => {
       expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("judges prepare, retry and execute against the key's allowed operations", async () => {
+    // Rings exits pay out to a destination the caller picks, and the custody
+    // signer admits exits without reading the principal, so every Rings write
+    // checks the key's wallet scope first (HOO-2099).
+    it.each([
+      { scope: "another wallet", walletIds: ["cw_hr_other"], status: 403 },
+      { scope: "this wallet", walletIds: ["cw_hr_route"], status: 201 },
+    ])("prepares with a key scoped to $scope: $status", async ({ walletIds, status }) => {
+      gatewayOverride.current = new InMemoryRingsGateway();
+      await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+           SELECT ?, id FROM custody_wallets WHERE id = ANY(?::text[])`
+        )
+        .bind(TEST_API_KEY.id, walletIds)
+        .run();
+
+      const res = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: `route-nonce-scope-${status}`,
+      });
+
+      expect(res.status).toBe(status);
+      if (status === 403) {
+        expect(JSON.stringify(await res.json())).toContain(
+          "The credential may not sign with this wallet"
+        );
+      }
+    });
+
+    it("requires helius_rings.execute to prepare, retry and execute", async () => {
       const gateway = new InMemoryRingsGateway();
       gateway.buildOperation = () =>
         Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
@@ -468,10 +501,10 @@ describe("Helius Rings routes", () => {
       ).json()) as { data: { operation: { id: string } } };
 
       const paymentsOnlyKey = { id: "key_hr_payments_only", raw: "sk_test_helius_rings_pay" };
-      await seedCachedApiKey(env, await hashString(paymentsOnlyKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+      await seedApiKeyRow(env, await hashString(paymentsOnlyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
         id: paymentsOnlyKey.id,
-        allowedOperations: ["payment"],
+        grants: ["helius_rings.manage"],
       });
       const restricted = (path: string, body: unknown) =>
         app.request(
@@ -496,28 +529,28 @@ describe("Helius Rings routes", () => {
         clientNonce: "route-nonce-allowed-ops-prepare",
       });
       expect(prepared.status).toBe(403);
-      expect(await refusedCode(prepared)).toBe("OPERATION_NOT_ALLOWED");
+      expect(await refusedCode(prepared)).toBe("INSUFFICIENT_PERMISSIONS");
 
       const retried = await restricted(
         `/v1/helius-rings/operations/${failed.data.operation.id}/retry`,
         { clientNonce: "route-nonce-allowed-ops-retry" }
       );
       expect(retried.status).toBe(403);
-      expect(await refusedCode(retried)).toBe("OPERATION_NOT_ALLOWED");
+      expect(await refusedCode(retried)).toBe("INSUFFICIENT_PERMISSIONS");
 
       const executed = await restricted(
         `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
         {}
       );
       expect(executed.status).toBe(403);
-      expect(await refusedCode(executed)).toBe("OPERATION_NOT_ALLOWED");
+      expect(await refusedCode(executed)).toBe("INSUFFICIENT_PERMISSIONS");
 
-      // A key whose list names the Rings family goes through to the normal path.
+      // A key holding helius_rings.execute goes through to the normal path.
       const privacyKey = { id: "key_hr_privacy_family", raw: "sk_test_helius_rings_privacy" };
-      await seedCachedApiKey(env, await hashString(privacyKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+      await seedApiKeyRow(env, await hashString(privacyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
         id: privacyKey.id,
-        allowedOperations: ["privacy"],
+        grants: ["helius_rings.execute"],
       });
       const allowedRetry = await app.request(
         `/v1/helius-rings/operations/${failed.data.operation.id}/retry`,
@@ -904,11 +937,10 @@ describe("Helius Rings routes", () => {
     it("403s without payments:write", async () => {
       const readOnlyKey = { id: "key_hr_sync_ro", raw: "sk_test_helius_rings_ro" };
       const keyHash = await hashString(readOnlyKey.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, keyHash, {
-        ...TEST_CACHED_API_KEY,
+      await seedApiKeyRow(env, keyHash, {
+        ...TEST_SEEDED_API_KEY,
         id: readOnlyKey.id,
-        role: "api_readonly",
-        permissions: ["payments:read"],
+        grants: ["transfers.read"],
       });
 
       const res = await app.request(
@@ -974,13 +1006,12 @@ describe("Helius Rings routes", () => {
     });
 
     // Read permission, unlike /sync's write: this advances no stored observation.
-    it("answers a key holding only payments:read", async () => {
+    it("answers a key holding only helius_rings.read", async () => {
       const readOnlyKey = { id: "key_hr_identity_ro", raw: "sk_test_helius_rings_id_ro" };
-      await seedCachedApiKey(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+      await seedApiKeyRow(env, await hashString(readOnlyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
         id: readOnlyKey.id,
-        role: "api_readonly",
-        permissions: ["payments:read"],
+        grants: ["helius_rings.read"],
       });
       gatewayOverride.current = {
         readIdentity: async () => PUBLISHED,
@@ -992,11 +1023,10 @@ describe("Helius Rings routes", () => {
 
     it("403s a key holding neither payments permission", async () => {
       const otherKey = { id: "key_hr_identity_none", raw: "sk_test_helius_rings_id_none" };
-      await seedCachedApiKey(env, await hashString(otherKey.raw, env.API_KEY_PEPPER), {
-        ...TEST_CACHED_API_KEY,
+      await seedApiKeyRow(env, await hashString(otherKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
         id: otherKey.id,
-        role: "api_readonly",
-        permissions: ["wallets:read"],
+        grants: ["wallets.read"],
       });
 
       const res = await get(`/v1/helius-rings/wallets/${ringsWalletId}/identity`, otherKey.raw);

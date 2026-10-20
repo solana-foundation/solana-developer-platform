@@ -1,5 +1,6 @@
-import type { FeePaymentPort } from "@sdp/fee-payment";
-import type { MovementOf, SolanaCluster } from "@sdp/types";
+import type { FeePaymentPort } from "@sdp/fee-payment/port";
+import type { MovementOf } from "@sdp/types/movements";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import {

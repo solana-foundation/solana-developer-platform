@@ -6,11 +6,10 @@
 // derives a different SwapDvp address than the one a counterparty was told to
 // fund. Callers convert to bigint at the edge, never number.
 
-import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import type { Address, Signature } from "@solana/kit";
-import type { RepositoryDbClient } from "./base";
-
-export type { DvpTradeSide, DvpTradeStatus } from "@sdp/types";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface DvpTradeRow {
   id: string;
@@ -149,16 +148,6 @@ export type DvpTradeInsert = Omit<
 export interface DvpTradeScope {
   organizationId: string;
   projectId: string;
-  /**
-   * Custody wallets a wallet-scoped API key may see trades for.
-   *
-   * `null` or absent means unrestricted — a Clerk session, or a key that is not
-   * wallet-scoped. An EMPTY ARRAY means deny everything, never "no filter". That
-   * reading is the repo-wide convention for wallet allowlists (see
-   * `payments.repository.postgres.ts:74-80`) and getting it backwards would turn
-   * a key with no usable bindings into a key that reads the whole project.
-   */
-  sdpWalletIds?: string[] | null;
 }
 
 /**
@@ -247,11 +236,19 @@ export interface DvpTradeRepository {
    * left in it within seven days of its expiry. An empty lane gives its turn to
    * the others, so no lane can starve another (PRO-1930, PRO-1974).
    *
-   * Deliberately UNSCOPED, unlike every read above. The reconciler is not acting
-   * for a caller — it is a background sweep, and scoping it to a project would
-   * mean a trade only advances while someone happens to be looking at it.
+   * Deliberately not tenant-scoped, unlike every read above. The reconciler is
+   * not acting for a caller — it is a background sweep, and scoping it to a
+   * project would mean a trade only advances while someone happens to be
+   * looking at it. It is scoped to one Environment (ADR 0007): each cluster
+   * registration of the sweep reads only its own cluster's trades.
+   *
+   * @param input.environment - The Environment whose trades the sweep reads.
+   * @param input.limit - The page size, from 1 to 256.
    */
-  listOpenForReconciliation(limit: number): Promise<DvpTradeRow[]>;
+  listOpenForReconciliation(input: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<DvpTradeRow[]>;
   /**
    * Writes an observation and the status derived from it.
    *
@@ -329,9 +326,17 @@ export interface DvpTradeRepository {
    * Frees close locks whose transaction can no longer land.
    *
    * Past its last valid block height a close either landed, and the reconciler
-   * records the close from the chain, or never will.
+   * records the close from the chain, or never will. Scoped to one Environment:
+   * `blockHeight` is that Environment's cluster's height, and another cluster's
+   * close locks are measured against their own chain.
+   *
+   * @param input.environment - The Environment whose trades' close locks are swept.
+   * @param input.blockHeight - That Environment's cluster's current block height.
    */
-  releaseExpiredCloseClaims(blockHeight: bigint): Promise<number>;
+  releaseExpiredCloseClaims(input: {
+    environment: SdpEnvironment;
+    blockHeight: bigint;
+  }): Promise<number>;
   /**
    * The project's trades, newest first, narrowed by the given filters.
    *

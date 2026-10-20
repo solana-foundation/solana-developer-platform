@@ -6,7 +6,7 @@
 
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { renderSupportMatrixMarkdown } from "../src/capabilities/support-matrix";
+import { renderSupportMatrixMarkdown } from "#/capabilities/support-matrix";
 
 const target = fileURLToPath(new URL("../src/capabilities/SUPPORT_MATRIX.md", import.meta.url));
 

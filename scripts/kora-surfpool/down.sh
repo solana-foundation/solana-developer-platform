@@ -19,29 +19,17 @@ if command -v docker >/dev/null 2>&1; then
   docker compose "${compose_args[@]}" down || true
 fi
 
-if [ -f "${KORA_RPC_PROXY_PID_FILE}" ]; then
-  pid="$(cat "${KORA_RPC_PROXY_PID_FILE}")"
-  if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
-    kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
+# A pid file can outlive its process (reboot, hard-closed terminal), so only
+# signal a pid that is still one of ours.
+for pid_file in "${KORA_RPC_PROXY_PID_FILE}" "${KORA_SHIM_PID_FILE}" "${SURFPOOL_PID_FILE}"; do
+  if [ -f "${pid_file}" ]; then
+    pid="$(cat "${pid_file}")"
+    if [ -n "${pid}" ] && [[ "$(ps -o command= -p "${pid}" 2>/dev/null)" == *surfpool* ]]; then
+      kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
+    fi
+    rm -f "${pid_file}"
   fi
-  rm -f "${KORA_RPC_PROXY_PID_FILE}"
-fi
-
-if [ -f "${KORA_SHIM_PID_FILE}" ]; then
-  pid="$(cat "${KORA_SHIM_PID_FILE}")"
-  if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
-    kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
-  fi
-  rm -f "${KORA_SHIM_PID_FILE}"
-fi
-
-if [ -f "${SURFPOOL_PID_FILE}" ]; then
-  pid="$(cat "${SURFPOOL_PID_FILE}")"
-  if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
-    kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
-  fi
-  rm -f "${SURFPOOL_PID_FILE}"
-fi
+done
 
 rm -f "${RUNTIME_ENV_FILE}" "${SURFPOOL_INFO_FILE}"
 

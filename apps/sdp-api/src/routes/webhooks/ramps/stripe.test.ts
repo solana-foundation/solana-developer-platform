@@ -55,10 +55,17 @@ describe("stripeWebhook", () => {
             destination_amount: "0.5",
             destination_currency: "usdc",
             destination_network: "solana",
+            transaction_id: "stripe-chain-signature",
+            wallet_address: "quoted-wallet",
           },
         })
       )
-    ).toMatchObject({ kind: "settled", reference: "cos_1", receivedAmount: "0.5" });
+    ).toMatchObject({
+      kind: "settled",
+      reference: "cos_1",
+      receivedAmount: "0.5",
+      onchain: { signature: "stripe-chain-signature", destinationAddress: "quoted-wallet" },
+    });
     expect(parseStripeEvent(event("rejected"))).toMatchObject({ kind: "failed" });
     expect(parseStripeEvent(event("initialized"))).toMatchObject({ kind: "ignore" });
     expect(parseStripeEvent({ type: "crypto.onramp_session.created", data: {} })).toMatchObject({
@@ -108,6 +115,29 @@ describe("stripeWebhook", () => {
     expect(completed({ destination_currency: 7, destination_network: "solana" })).toThrow(
       "destination currency or network"
     );
+  });
+
+  it.each([
+    ["transaction_id", 42],
+    ["wallet_address", { address: "quoted-wallet" }],
+    ["destination_amount", false],
+  ])("rejects malformed %s in completed delivery proof", (field, value) => {
+    expect(() =>
+      parseStripeEvent({
+        type: "crypto.onramp_session.updated",
+        data: {
+          object: {
+            id: "cos_bad_proof",
+            status: "fulfillment_complete",
+            transaction_details: {
+              destination_currency: "usdc",
+              destination_network: "solana",
+              [field]: value,
+            },
+          },
+        },
+      })
+    ).toThrow("malformed delivery proof");
   });
 
   it("throws on a known event type with a malformed envelope", () => {

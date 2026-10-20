@@ -1,10 +1,12 @@
-import { PAYMENT_TRANSFER_STATUSES, type RampProviderId } from "@sdp/types";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
   ApiPlaygroundFieldOption,
 } from "@/components/api-playground-shell";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 import { getRampProviderLabel } from "@/lib/ramps";
 

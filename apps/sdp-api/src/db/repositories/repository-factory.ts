@@ -1,5 +1,5 @@
 // biome-ignore-all lint/security/noSecrets: repository and method identifiers are not credentials
-import { type AppDb, getDb } from "@/db";
+import { type DatabaseClient as AppDb, getDb } from "@/db/client";
 import { bindRepositoryToTenant, type TenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 import type { AssetProfilesRepository } from "./asset-profile.repository";

@@ -1,12 +1,12 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { privyWalletExternalId } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   seedTestPrivyConnection,
@@ -14,8 +14,8 @@ import {
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
 
@@ -35,16 +35,14 @@ const API_KEY = {
   raw: "sk_test_custody_wallet_owner",
   prefix: "sk_test_cwo",
 };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -55,7 +53,7 @@ const originalPrivyAppSecret = env.PRIVY_APP_SECRET;
 
 async function seedFixture(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(
@@ -75,9 +73,9 @@ async function seedFixture(): Promise<void> {
   await getDb(env).execute(
     `INSERT INTO api_keys (
        id, organization_id, project_id, created_by, name, key_prefix,
-       key_hash, role, permissions, status
-     ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`,
-    [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash]
+       key_hash, grants, status
+     ) VALUES (?, ?, ?, ?, 'Test', ?, ?, ?, 'active')`,
+    [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash, ALL_API_KEY_GRANTS]
   );
   await seedTestCustodyRows(env, {
     configs: [

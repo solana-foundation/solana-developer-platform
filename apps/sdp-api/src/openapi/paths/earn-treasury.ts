@@ -1,12 +1,32 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { earnBalanceReadContextSchema } from "@sdp/types/earn-wire";
-import * as requests from "@/routes/earn/schemas";
-import { errorResponseSchema, successResponseSchema, z } from "../schemas/base";
+import {
+  earnBalanceReadContextSchema,
+  earnVaultDepositRecordSchema,
+  earnVaultDepositSchema,
+  earnVaultWithdrawalSchema,
+} from "@sdp/types/earn-wire";
+import { z } from "zod";
+import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import {
   earnExternalWalletWithdrawalRequestResponse,
   earnExternalWalletWithdrawalRequestsResponse,
-} from "../schemas/earn";
-import * as responses from "../schemas/earn-treasury";
+} from "@/openapi/schemas/earn";
+import {
+  earnMovementSchema,
+  earnPortfolioDepositSchema,
+  earnPortfolioWithdrawalSchema,
+  earnProgramSchema,
+  earnProgramWithdrawalPreviewSchema,
+  earnProgramWithdrawalRecordSchema,
+  earnVaultPositionSchema,
+  earnVaultQueuedWithdrawalPreviewResponse,
+  earnVaultWithdrawalOptionsResponse,
+  earnVaultWithdrawalPreviewResponse,
+  envelope,
+  listFields,
+  pageFields,
+} from "@/openapi/schemas/earn-treasury";
+import * as requests from "@/routes/earn/schemas";
 import {
   errorResponses,
   jsonContent,
@@ -75,18 +95,17 @@ export function registerEarnTreasuryPaths(
       },
     });
   }
-  const { envelope, pageFields, listFields } = responses;
-  const deposit = successResponseSchema(responses.earnVaultDepositSchema);
-  const depositRecord = envelope({ deposit: responses.earnVaultDepositRecordSchema });
-  const withdrawal = envelope({ withdrawal: responses.earnVaultWithdrawalSchema });
-  const program = envelope({ program: responses.earnProgramSchema });
-  const programWithdrawal = envelope({ withdrawal: responses.earnPortfolioWithdrawalSchema });
+  const deposit = successResponseSchema(earnVaultDepositSchema);
+  const depositRecord = envelope({ deposit: earnVaultDepositRecordSchema });
+  const withdrawal = envelope({ withdrawal: earnVaultWithdrawalSchema });
+  const program = envelope({ program: earnProgramSchema });
+  const programWithdrawal = envelope({ withdrawal: earnPortfolioWithdrawalSchema });
   route(
     "get",
     "movements",
     "listEarnMovements",
     "List all scoped Earn movements",
-    envelope({ movements: z.array(responses.earnMovementSchema), ...pageFields }),
+    envelope({ movements: z.array(earnMovementSchema), ...pageFields }),
     { query: requests.earnMovementsQuerySchema }
   );
   route(
@@ -107,7 +126,7 @@ export function registerEarnTreasuryPaths(
     "vault-deposits",
     "listEarnVaultDeposits",
     "List custody deposits",
-    envelope({ deposits: z.array(responses.earnVaultDepositRecordSchema), ...pageFields }),
+    envelope({ deposits: z.array(earnVaultDepositRecordSchema), ...pageFields }),
     { query: requests.earnVaultDepositsQuerySchema }
   );
   route(
@@ -124,14 +143,14 @@ export function registerEarnTreasuryPaths(
     "listEarnVaultPositions",
     "List live custody positions",
     envelope({
-      positions: z.array(responses.earnVaultPositionSchema),
+      positions: z.array(earnVaultPositionSchema),
       balanceReadContext: earnBalanceReadContextSchema.optional(),
       ...pageFields,
     }),
     {
       query: requests.earnVaultPositionsQuerySchema,
       description:
-        "Requires earn:read. Optional afterMovementIds is a comma-separated list of up to 100 visible custody movement IDs. Each affected position must be read at or after its movements' maximum confirmed slot; unrelated positions are not constrained. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
+        "Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up to 100 visible custody movement IDs. Each affected position must be read at or after its movements' maximum confirmed slot; unrelated positions are not constrained. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
     }
   );
   route(
@@ -152,7 +171,7 @@ export function registerEarnTreasuryPaths(
     "vault-withdrawals",
     "listEarnVaultWithdrawals",
     "List custody withdrawals",
-    envelope({ withdrawals: z.array(responses.earnVaultWithdrawalSchema), ...pageFields }),
+    envelope({ withdrawals: z.array(earnVaultWithdrawalSchema), ...pageFields }),
     { query: requests.earnVaultWithdrawalsQuerySchema }
   );
   route(
@@ -168,7 +187,7 @@ export function registerEarnTreasuryPaths(
     "vault-withdrawal-previews",
     "createEarnVaultWithdrawalPreview",
     "Preview a custody withdrawal",
-    responses.earnVaultWithdrawalPreviewResponse,
+    earnVaultWithdrawalPreviewResponse,
     { body: requests.earnVaultWithdrawalPreviewSchema }
   );
   route(
@@ -176,7 +195,7 @@ export function registerEarnTreasuryPaths(
     "vault-withdrawal-options",
     "getEarnVaultWithdrawalOptions",
     "Discover custody withdrawal routes",
-    responses.earnVaultWithdrawalOptionsResponse,
+    earnVaultWithdrawalOptionsResponse,
     { body: requests.earnVaultWithdrawalOptionsSchema }
   );
   route(
@@ -184,7 +203,7 @@ export function registerEarnTreasuryPaths(
     "vault-queued-withdrawal-previews",
     "createEarnVaultQueuedWithdrawalPreview",
     "Preview a queued custody withdrawal",
-    responses.earnVaultQueuedWithdrawalPreviewResponse,
+    earnVaultQueuedWithdrawalPreviewResponse,
     { body: requests.earnVaultQueuedWithdrawalPreviewSchema }
   );
   route(
@@ -238,7 +257,7 @@ export function registerEarnTreasuryPaths(
     "programs",
     "listEarnPrograms",
     "List provider-managed programs",
-    envelope({ programs: z.array(responses.earnProgramSchema), ...listFields }),
+    envelope({ programs: z.array(earnProgramSchema), ...listFields }),
     { query: requests.earnProgramsListQuerySchema }
   );
   route("post", "programs", "createEarnProgram", "Create a provider-managed program", program, {
@@ -268,7 +287,7 @@ export function registerEarnTreasuryPaths(
     "listEarnProgramDeposits",
     "List program deposits",
     envelope({
-      deposits: z.array(responses.earnPortfolioDepositSchema),
+      deposits: z.array(earnPortfolioDepositSchema),
       nextCursor: z.string().nullable(),
     }),
     { params: requests.earnProgramParamsSchema, query: requests.earnProgramDepositsQuerySchema }
@@ -278,7 +297,7 @@ export function registerEarnTreasuryPaths(
     "programs/{programId}/withdrawal-preview",
     "previewEarnProgramWithdrawal",
     "Preview a program withdrawal or read liquidity",
-    envelope({ preview: responses.earnProgramWithdrawalPreviewSchema }),
+    envelope({ preview: earnProgramWithdrawalPreviewSchema }),
     { params: requests.earnProgramParamsSchema, body: requests.earnProgramWithdrawalPreviewSchema }
   );
   route(
@@ -299,7 +318,7 @@ export function registerEarnTreasuryPaths(
     "programs/{programId}/withdrawals",
     "listEarnProgramWithdrawals",
     "List recorded program withdrawals",
-    envelope({ withdrawals: z.array(responses.earnProgramWithdrawalRecordSchema), ...listFields }),
+    envelope({ withdrawals: z.array(earnProgramWithdrawalRecordSchema), ...listFields }),
     {
       params: requests.earnProgramParamsSchema,
       query: requests.earnProgramWithdrawalsListQuerySchema,

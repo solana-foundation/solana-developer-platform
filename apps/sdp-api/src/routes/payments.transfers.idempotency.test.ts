@@ -1,8 +1,9 @@
-import type * as feePaymentAdapters from "@sdp/fee-payment";
-import { FeePaymentError } from "@sdp/fee-payment";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { createFeePaymentAdapter } from "@sdp/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment/port";
+import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -11,6 +12,7 @@ import {
   createFeePaymentAdapterMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
+  seedCachedKey,
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
@@ -45,7 +47,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -93,7 +95,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: vi.fn(),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
     const otherKey = {
       id: "key_payments_other",
       raw: "sk_test_payments_other",
@@ -104,8 +106,7 @@ describe("Payments routes — transfer idempotency", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
       createdBy: TEST_USER.id,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
     });
     const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -133,7 +134,7 @@ describe("Payments routes — transfer idempotency", () => {
     // A new transfer signs new bytes: a fresh blockhash keeps its signature distinct.
     getRecentBlockhashMock.mockResolvedValue({
       blockhash: TEST_SOLANA_ADDRESSES.wallet3 as Awaited<
-        ReturnType<typeof solanaRpc.getRecentBlockhash>
+        ReturnType<typeof getRecentBlockhash>
       >["blockhash"],
       lastValidBlockHeight: 1000n,
     });
@@ -160,7 +161,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: signAsFeePayerMock,
       signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -340,7 +341,7 @@ describe("Payments routes — transfer idempotency", () => {
       }),
       signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
       signAndSend: signAndSendMock,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const _headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -355,13 +356,13 @@ describe("Payments routes — transfer idempotency", () => {
     getRecentBlockhashMock
       .mockResolvedValueOnce({
         blockhash: "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2" as Awaited<
-          ReturnType<typeof solanaRpc.getRecentBlockhash>
+          ReturnType<typeof getRecentBlockhash>
         >["blockhash"],
         lastValidBlockHeight: 1000n,
       })
       .mockResolvedValueOnce({
         blockhash: "3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3" as Awaited<
-          ReturnType<typeof solanaRpc.getRecentBlockhash>
+          ReturnType<typeof getRecentBlockhash>
         >["blockhash"],
         lastValidBlockHeight: 1000n,
       });
@@ -372,5 +373,49 @@ describe("Payments routes — transfer idempotency", () => {
     const aJson = await readTransferResponse(a);
     const bJson = await readTransferResponse(b);
     expect(bJson.data.transfer.id).not.toBe(aJson.data.transfer.id);
+  });
+
+  // HOO-2099: the custody signer refuses a wallet outside a selected key's
+  // scope; authorize refuses it first, before the key is claimed, so the
+  // refusal writes no transfer row and no Idempotency-Key, and the same key
+  // runs once the scope allows the wallet.
+  it("refuses a transfer from a wallet outside the key's scope before writing anything", async () => {
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+        signerAddress: TEST_MOCK_FEE_PAYER,
+      }),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: vi
+        .fn()
+        .mockResolvedValue(
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+        ),
+    } as ReturnType<typeof createFeePaymentAdapter>);
+    await seedCachedKey({ walletScope: "selected", walletIds: [] });
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "1",
+    };
+
+    const refused = await postTransfer(body, { idempotencyKey: "xfer-out-of-scope" });
+
+    expect(refused.status).toBe(403);
+    await expect(refused.json()).resolves.toMatchObject({
+      error: { details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(await countTransferRows()).toBe(0);
+    const keys = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("xfer-out-of-scope")
+      .first<{ count: number }>();
+    expect(keys).toEqual({ count: 0 });
+
+    await seedCachedKey({ walletIds: [TEST_CUSTODY_WALLET_ID] });
+    expect((await postTransfer(body, { idempotencyKey: "xfer-out-of-scope" })).status).toBe(200);
   });
 });

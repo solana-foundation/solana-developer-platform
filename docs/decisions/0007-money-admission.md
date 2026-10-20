@@ -34,7 +34,7 @@ dropped.
    every sponsor has a tenant and a movement. Each caller names its
    movement (`MOVEMENTS` in `@sdp/types`); a start the organization may not make
    gets a signer or sponsor that refuses with 403 `FORBIDDEN`, logged as
-   `sdp_money_refused`, and an exit always signs. The decision is `decideMovement`, a pure function of the
+   `sdp_money_refused`, and an exit always signs for the organization (see the 2026-10-15 addendum for the credential). The decision is `decideMovement`, a pure function of the
    `projects ⋈ organizations` row, read alongside rows the waist already reads.
    Refusing at signing, not at resolution, keeps confirm-only flows working.
 4. **CI pins what could bypass the waists**: the constructors that turn a
@@ -47,13 +47,15 @@ dropped.
 
 ## Consequences
 
-- Classifying a movement as `exit` exempts it from admission, so it is a
-  security-reviewed change, as is adding a file to a checker allowlist.
+- Classifying a movement as `exit` exempts it from the organization's
+  admission, so it is a security-reviewed change, as is adding a file to a
+  checker allowlist.
 - Exits that let the caller pick a destination (Private Channels and Rings
-  withdrawals) are accepted as they are. The only organization that reaches
-  them through the API has lost the production entitlement and still owns the
-  funds; a compromised organization is suspended, and a suspended
-  organization's requests are refused before any handler runs.
+  withdrawals) are accepted as they are for the organization. The only
+  organization that reaches them through the API has lost the production
+  entitlement and still owns the funds; a compromised organization is
+  suspended, and a suspended organization's requests are refused before any
+  handler runs. The credential is decided for them like any exit (addendum).
 - A revoked organization's same-key retry of a completed request gets the
   refusal, not its stored response: authentication refuses the organization
   before idempotency replays anything (HOO-1918, #2251). There is no special
@@ -67,6 +69,36 @@ dropped.
 - Asynchronous, quorum-based signing (pending approvals, not built yet) must
   call the same decision when it opens a signing request and again when it
   executes, so a revocation during the wait still holds.
+
+## Addendum — 2026-10-15 The credential decides exits too (HOO-2099)
+
+API keys gained a wallet scope that only the waists enforce, so "an exit
+always signs" would let a key scoped to one wallet withdraw another wallet's
+Private Channels or Rings balance to any address. The waists now decide every
+signature from the ambient principal (`lib/money-principal.ts`), exits
+included:
+
+- **The organization still never refuses an exit.** A suspended or unentitled
+  organization can always unwind; nothing above changes for it.
+- **The credential does.** A key must be live and may sign only with a wallet
+  in its scope; a member must be live; a mandate signs only with its own
+  source wallet. An exit needs no action: the route's action admitted it.
+- **No principal, no read.** A reconciler or job finishing a payout runs with
+  no principal, and its exit signs without a database read, as before.
+- Routes that record a movement or call a gateway before they sign (Private
+  Channels, Rings) make the same scope refusal up front, from the
+  authenticated request, so a refused withdrawal leaves nothing behind.
+  So do the Idempotency-Key routes that name a source wallet (transfers,
+  transfer batches, signer check), in `authorize`: there the refusal also
+  keeps a failed row and its key out of the store, so a retry after the
+  scope is fixed runs. `assertCallerWalletInScope` reads the scope from
+  authentication (ADR 0009) and is a fast refusal only; the waist still
+  decides every signature.
+- **A claim the job can finish is ordered against revocation.** A fresh
+  recurring activation or resume is admitted before its claim, and the claim
+  re-reads the activating key under a share lock (`lockLiveActivatingKey`).
+  Revocation locks the key row and lists what it started after it commits,
+  so revoke-and-cancel either refuses the claim or sees it.
 
 ## Alternatives considered
 

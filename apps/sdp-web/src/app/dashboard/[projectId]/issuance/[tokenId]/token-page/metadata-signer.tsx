@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { TokenSignerSelect } from "../token-signer-select";
+import { TokenSignerSelect } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-signer-select";
 import type { TokenTabProps } from "./token-page.shared";
 
 /**

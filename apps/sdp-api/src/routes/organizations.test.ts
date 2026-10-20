@@ -1,20 +1,46 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Organization } from "@sdp/types";
+import type { Organization } from "@sdp/types/organizations";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const TEST_PROJECT = {
   id: "prj_test_organizations",
   slug: "test-test-org-project",
 };
+
+/** Organization administration is for a signed-in person (HOO-2099). */
+let clerkToken: string;
+
+async function seedOrganizationMember(role: "admin" | "member"): Promise<void> {
+  await getDb(env).batch([
+    getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
+    getDb(env)
+      .prepare(
+        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
+      )
+      .bind(TEST_MEMBER.id, TEST_ORG.id, TEST_USER.id, role, "active"),
+  ]);
+  clerkToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id);
+}
+
+async function setMemberRole(role: "admin" | "member"): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE organization_members SET role = ? WHERE organization_id = ? AND user_id = ?")
+    .bind(role, TEST_ORG.id, TEST_USER.id)
+    .run();
+  clerkToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id);
+}
 
 describe("Organizations routes", () => {
   let validKeyHash: string;
@@ -50,7 +76,7 @@ describe("Organizations routes", () => {
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
         .run();
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
     });
     it("returns organization details", async () => {
       const res = await app.request(
@@ -139,13 +165,11 @@ describe("Organizations routes", () => {
       expect(body.error.code).toBe("FORBIDDEN");
     });
     it("refuses a key whose organization does not exist", async () => {
-      const nonExistentOrgId = "org_nonexistent123";
-      await seedCachedApiKey(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
-        organizationId: nonExistentOrgId,
-      });
+      // A key row cannot outlive its organization (ON DELETE CASCADE), so a
+      // deleted organization row leaves an unknown key.
+      await getDb(env).prepare("DELETE FROM organizations WHERE id = ?").bind(TEST_ORG.id).run();
       const res = await app.request(
-        `/v1/organizations/${nonExistentOrgId}`,
+        `/v1/organizations/${TEST_ORG.id}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -162,10 +186,7 @@ describe("Organizations routes", () => {
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
         .run();
-      await seedCachedApiKey(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
-        permissions: ["*"],
-      });
+      await seedOrganizationMember("admin");
     });
     it("updates organization name", async () => {
       const res = await app.request(
@@ -173,7 +194,7 @@ describe("Organizations routes", () => {
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -196,7 +217,7 @@ describe("Organizations routes", () => {
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -215,7 +236,7 @@ describe("Organizations routes", () => {
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({}),
@@ -225,17 +246,13 @@ describe("Organizations routes", () => {
       expect(res.status).toBe(400);
     });
     it("requires org:write permission", async () => {
-      await clearKVStores(env);
-      await seedCachedApiKey(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
-        permissions: ["org:read"],
-      });
+      await setMemberRole("member");
       const res = await app.request(
         `/v1/organizations/${TEST_ORG.id}`,
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ name: "New Name" }),
@@ -271,7 +288,7 @@ describe("Organizations routes", () => {
       await getDb(env).batch([
         getDb(env)
           .prepare(
-            "INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
           )
           .bind(
             TEST_API_KEY.id,
@@ -281,14 +298,11 @@ describe("Organizations routes", () => {
             "Test Key",
             TEST_API_KEY.prefix,
             validKeyHash,
-            "api_admin",
+            ALL_API_KEY_GRANTS,
             "active"
           ),
       ]);
-      await seedCachedApiKey(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
-        permissions: ["*"],
-      });
+      clerkToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id);
     });
     it("soft deletes organization", async () => {
       const res = await app.request(
@@ -296,7 +310,7 @@ describe("Organizations routes", () => {
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
           },
         },
         env
@@ -316,7 +330,7 @@ describe("Organizations routes", () => {
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
           },
         },
         env
@@ -358,7 +372,7 @@ describe("Organizations routes", () => {
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
           },
         },
         env
@@ -380,7 +394,7 @@ describe("Organizations routes", () => {
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
           },
         },
         env
@@ -396,17 +410,13 @@ describe("Organizations routes", () => {
       }
     });
     it("requires org:admin permission", async () => {
-      await clearKVStores(env);
-      await seedCachedApiKey(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
-        permissions: ["org:read", "org:write"],
-      });
+      await setMemberRole("member");
       const res = await app.request(
         `/v1/organizations/${TEST_ORG.id}`,
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${clerkToken}`,
           },
         },
         env

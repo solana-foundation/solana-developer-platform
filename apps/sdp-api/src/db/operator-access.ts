@@ -12,7 +12,7 @@
  * registry deliberately when a new operational entry point needs this.
  */
 
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { runWithDatabaseIdentity } from "@/db/identity";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { AuditService } from "@/services/audit.service";

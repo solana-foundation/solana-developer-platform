@@ -1,10 +1,7 @@
-import type {
-  RampWebhookFailureOutcome,
-  RampWebhookProcessResult,
-  SdpRampProviderStages,
-} from "@sdp/types";
-import { RAMP_PROVIDERS } from "@sdp/types";
-import { getDb } from "@/db";
+import type { RampWebhookFailureOutcome, RampWebhookProcessResult } from "@sdp/types/payments";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import { getDb } from "@/db/client";
 import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,

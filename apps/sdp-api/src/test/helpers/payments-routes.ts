@@ -1,8 +1,9 @@
 import * as feePaymentAdapters from "@sdp/fee-payment";
+import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
   address,
@@ -17,10 +18,11 @@ import {
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
-import * as solanaServices from "@/services/solana";
+import * as solanaSigner from "@/services/solana/signer";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   seedTestPrivyConnection,
@@ -29,8 +31,8 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 export const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 
@@ -56,7 +58,7 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
-  solanaServices,
+  solanaSigner,
   "createOrgSignerForCustodyWallet"
 );
 
@@ -109,7 +111,7 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   maxAllowedLamports: 0n,
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
-} satisfies feePaymentAdapters.SponsorshipProviderConfiguration;
+} satisfies SponsorshipProviderConfiguration;
 
 export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
   const cause =
@@ -136,16 +138,14 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
   });
 }
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -173,7 +173,7 @@ let originalMoonPayOfframpUrl: string | undefined;
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
 
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -202,9 +202,9 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, grants = excluded.grants, status = excluded.status`
       )
       .bind(
         TEST_API_KEY.id,
@@ -214,8 +214,7 @@ async function seedAuthAndWallet(): Promise<void> {
         "Payments Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
     getDb(env)
@@ -258,10 +257,10 @@ export async function updateSeededWalletPublicKey(publicKey: string): Promise<vo
     .run();
 }
 
-export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
+export async function seedCachedKey(override: Partial<SeededApiKey>): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
+  await seedApiKeyRow(env, keyHash, {
+    ...TEST_SEEDED_API_KEY,
     ...override,
   });
 }

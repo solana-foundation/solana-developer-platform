@@ -1,24 +1,25 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { badRequestQuery, providerUnavailable } from "@/lib/errors";
 import { success } from "@/lib/response";
+import type { AppContext } from "@/routes/payments/context";
+import { getSplTokenBalances } from "@/routes/payments/token-accounts";
+import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
+import { resolveWalletFromParams } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import type { AppContext } from "../context";
-import * as tokenAccounts from "../token-accounts";
-import { resolveIssuedTokenLabelsByMint } from "../token-labels";
-import { resolveWalletFromParams } from "../wallets";
 import { walletBalancesQuerySchema } from "./schemas";
 
 const BALANCE_READ_TIMEOUT_MS = 3_000;
 
 export async function getWalletBalances(c: AppContext) {
-  const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { wallet } = await resolveWalletFromParams(c);
 
   const parsed = walletBalancesQuerySchema.safeParse(c.req.query());
   if (!parsed.success) throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
@@ -37,7 +38,7 @@ export async function getWalletBalances(c: AppContext) {
       })
       .send({ abortSignal })
       .then((response) => response.value),
-    tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
+    getSplTokenBalances(rpc, wallet.publicKey as Address, {
       tokenLabelsByMint,
       minContextSlot,
       abortSignal,
@@ -82,7 +83,7 @@ export async function getWalletBalances(c: AppContext) {
   const labeledBalances = await attachTokenSymbolsToBalances([
     {
       token: "SOL",
-      mint: tokenAccounts.SOL_MINT,
+      mint: SOL_MINT,
       amount: lamports.toString(),
       uiAmount: formatDecimalAmount(lamports, 9),
       decimals: 9,

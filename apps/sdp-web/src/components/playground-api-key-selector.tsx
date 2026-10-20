@@ -1,6 +1,9 @@
 "use client";
 
-import { SOLANA_CLUSTER_LABELS } from "@sdp/types";
+import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
+import { Input } from "@sdp/ui/input";
+import { useThemeScope, useThemeScopeAttributes } from "@sdp/ui/theme-scope";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Popover } from "radix-ui";
@@ -10,9 +13,6 @@ import {
   PendingApiKeyContext,
   type PendingApiKeyOutcome,
 } from "@/components/playground-pending-api-key";
-import { useThemeScope, useThemeScopeAttributes } from "@/components/theme-scope";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
@@ -62,12 +62,6 @@ async function resolveApiKey(apiKey: string): Promise<ResolvedApiKey | { error: 
     return { error: "" };
   }
 }
-
-const ROLE_LABEL_KEYS = {
-  api_admin: "DashboardCustody.admin",
-  api_readonly: "DashboardCustody.readOnly",
-  api_developer: "DashboardCustody.developer",
-} as const;
 
 // The key line names the environment in lower case, as part of the key's label ("Server · production").
 const KEY_ENVIRONMENT_LABEL_KEYS = {
@@ -244,7 +238,6 @@ function RefreshApiKeyPicker({ pasted }: { pasted: PastedApiKey }) {
   const fieldId = useId();
   const [open, setOpen] = useState(false);
   const { attached, resolution } = pasted;
-  const roleKey = attached ? labelKeyFor(ROLE_LABEL_KEYS, attached.role) : null;
   const environmentKey = attached
     ? labelKeyFor(KEY_ENVIRONMENT_LABEL_KEYS, attached.environment)
     : null;
@@ -315,12 +308,6 @@ function RefreshApiKeyPicker({ pasted }: { pasted: PastedApiKey }) {
       ) : null}
       {resolution.kind !== "checking" && resolution.kind !== "rejected" ? (
         <>
-          {roleKey ? (
-            <>
-              <Separator />
-              <span className="text-secondary">{t(roleKey)}</span>
-            </>
-          ) : null}
           <Separator />
           <span className="text-primary">{SOLANA_CLUSTER_LABELS[cluster]}</span>
         </>

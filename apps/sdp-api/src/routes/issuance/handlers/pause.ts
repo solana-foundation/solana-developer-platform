@@ -1,16 +1,16 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { AuditService } from "@/services/audit.service";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
   requireProjectScope,
-} from "../helpers";
-import type { pauseTokenSchema } from "../schemas";
+} from "@/routes/issuance/helpers";
+import type { pauseTokenSchema } from "@/routes/issuance/schemas";
+import { AuditService } from "@/services/audit.service";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
@@ -57,7 +57,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     type: "pause",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -89,7 +88,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     auth,
     currentAuthority: pauseAuthorityRaw,
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
@@ -153,7 +151,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
       auth,
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
-      requiredWalletPermissions: ["tokens:admin"],
     });
     const signer = authority.signer;
 
@@ -238,7 +235,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     type: "unpause",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -270,7 +266,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     auth,
     currentAuthority: pauseAuthorityRaw,
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
@@ -334,7 +329,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
       auth,
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
-      requiredWalletPermissions: ["tokens:admin"],
     });
     const signer = authority.signer;
 

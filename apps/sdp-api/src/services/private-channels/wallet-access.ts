@@ -1,75 +1,13 @@
-import {
-  type ApiKeyRole,
-  getPermissionsForApiKeyRole,
-  hasAllPermissions,
-  type MovementId,
-  PERMISSIONS,
-  type Permission,
-} from "@sdp/types";
-import { z } from "zod";
-import { getDb } from "@/db";
-import { parsePostgresJson } from "@/db/postgres-utils";
-import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
-import type { ApiKeyContext } from "@/lib/auth";
-import {
-  AppError,
-  conflict,
-  forbidden,
-  internalError,
-  providerUnavailable,
-  walletNotFound,
-} from "@/lib/errors";
-import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
+import type { MovementId } from "@sdp/types/movements";
+import { getDb } from "@/db/client";
+import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
+import { AppError, conflict, providerUnavailable, walletNotFound } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { createOrgSignerForCustodyWallet } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-
-const explicitPermissionsSchema = z.array(z.enum(PERMISSIONS));
-
-/**
- * Refresh the key's role and permissions before authorizing a specific
- * operation or wallet, and its liveness from the same row, so a key revoked
- * between authentication and this read signs nothing. Wallet bindings need no
- * re-read: authentication read them fresh for this request.
- */
-export async function refreshPrivateChannelAuth(
-  env: Env,
-  auth: ApiKeyContext,
-  projectId: string
-): Promise<ApiKeyContext> {
-  if (auth.authType !== "api_key") return auth;
-  const current = await getDb(env).queryOne<
-    { role: ApiKeyRole; permissions: string | null } & ApiKeyLifecycleColumns
-  >(
-    `SELECT role, permissions, status, expires_at, rotation_deadline
-       FROM api_keys
-      WHERE id = ? AND organization_id = ? AND project_id = ?`,
-    [auth.apiKeyId, auth.organizationId, projectId]
-  );
-  if (!current) throw forbidden("API key is not authorized for this project");
-  // The predicate request authentication applies: active, not past expiry,
-  // not past its rotation grace period.
-  if (apiKeyRowRefusal(current, Date.now()) !== null) {
-    throw forbidden("API key is no longer active");
-  }
-  let permissions: Permission[];
-  try {
-    // SQL NULL inherits the current role; an explicit empty array grants nothing.
-    permissions =
-      current.permissions === null
-        ? getPermissionsForApiKeyRole(current.role)
-        : explicitPermissionsSchema.parse(parsePostgresJson<unknown>(current.permissions));
-  } catch {
-    throw internalError("Stored API key permissions are invalid");
-  }
-  return {
-    ...auth,
-    role: current.role,
-    permissions,
-  };
-}
 
 export function listPrivateChannelCustodyWallets(
   env: Env,
@@ -90,9 +28,10 @@ export async function resolvePrivateChannelCustodyWallet(
   wallets?: CustodyWallet[],
   allowAddress = false
 ): Promise<CustodyWallet> {
-  const current = await refreshPrivateChannelAuth(env, auth, projectId);
-  if (!hasAllPermissions(current.permissions, ["payments:write"])) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: payments:write");
+  if (!authMayPerform(auth, "private_channels.execute")) {
+    throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
+      action: "private_channels.execute",
+    });
   }
   const candidates =
     wallets ?? (await listPrivateChannelCustodyWallets(env, auth.organizationId, projectId));
@@ -115,7 +54,10 @@ export async function resolvePrivateChannelCustodyWallet(
     publicKey: allowAddress ? selector : undefined,
   });
   if (owned?.id !== wallet.id) throw conflict("Custody wallet ownership is ambiguous");
-  assertApiKeyCustodyWalletAccess(current, wallet.id, ["payments:write"]);
+  // The custody signer refuses a wallet outside the key's scope for every
+  // movement, withdrawals included (HOO-2099); refusing here as well stops the
+  // flow before it records a movement or calls the gateway.
+  assertCallerWalletInScope(auth.walletAccess, wallet.id);
   return wallet;
 }
 

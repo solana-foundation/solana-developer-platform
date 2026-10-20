@@ -1,19 +1,23 @@
-import type {
-  PrivateChannelEventDto,
-  PrivateChannelEventFamily,
-  PrivateChannelEventStatus,
-} from "@sdp/types";
-import { hasPermission, PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/types";
-import type { PrivateChannelEventRow } from "@/db/repositories";
+import {
+  PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS,
+  type PrivateChannelEventDto,
+  type PrivateChannelEventFamily,
+  type PrivateChannelEventStatus,
+} from "@sdp/types/private-channels";
+import type { PrivateChannelEventRow } from "@/db/repositories/private-channel-event.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
-import type { AppContext } from "../context";
-import { getPrivateChannelEventRepository, getPrivateChannelRepository } from "../context";
-import { resolveEventViewer } from "../event-access";
-import { requireActiveInstance } from "../helpers";
-import { privateChannelEventsQuerySchema } from "../schemas";
+import { callerMayPerform } from "@/middleware/require-action";
+import {
+  type AppContext,
+  getPrivateChannelEventRepository,
+  getPrivateChannelRepository,
+} from "@/routes/private-channels/context";
+import { resolveEventViewer } from "@/routes/private-channels/event-access";
+import { requireActiveInstance } from "@/routes/private-channels/helpers";
+import { privateChannelEventsQuerySchema } from "@/routes/private-channels/schemas";
 
 function displayEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const displayPayload: Record<string, unknown> = {};
@@ -80,7 +84,7 @@ function eventsEnvelope(c: AppContext, rows: PrivateChannelEventRow[], hasMore: 
   const nextCursor = hasMore && last ? encodeKeysetCursor(last.occurred_at, last.id) : null;
   const auth = getAuth(c);
   const includeRawPayload =
-    auth.authType !== "api_key" && hasPermission(auth.permissions, "org:admin");
+    auth.authType !== "api_key" && callerMayPerform(c, "organizations.manage");
   return success(c, {
     events: rows.map((row) => mapPrivateChannelEventRow(row, includeRawPayload)),
     hasMore,

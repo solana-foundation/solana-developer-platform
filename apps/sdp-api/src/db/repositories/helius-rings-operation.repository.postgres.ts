@@ -1,5 +1,5 @@
-import { HeliusRingsError } from "@sdp/helius-rings";
-import type { AppDb } from "@/db";
+import { HeliusRingsError } from "@sdp/helius-rings/errors";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
   DEFAULT_RINGS_OPERATION_LIST_LIMIT,
@@ -282,21 +282,18 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listOperationsByProject(input: ListHeliusRingsOperationsByProjectInput) {
-      if (input.walletIds?.length === 0) return [];
-
-      const bindings: unknown[] = [input.organizationId, input.projectId];
-      const walletScope = input.walletIds ? " AND wallet_id = ANY(?)" : "";
-      if (input.walletIds) bindings.push([...input.walletIds]);
-      bindings.push(input.limit ?? DEFAULT_RINGS_OPERATION_LIST_LIMIT);
-
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE organization_id = ? AND project_id = ?${walletScope}
+            WHERE organization_id = ? AND project_id = ?
             ORDER BY created_at DESC, id DESC
             LIMIT ?`
         )
-        .bind(...bindings)
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.limit ?? DEFAULT_RINGS_OPERATION_LIST_LIMIT
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

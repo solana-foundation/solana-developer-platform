@@ -1,11 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder, systemAccountInfoResult } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
@@ -13,8 +13,8 @@ import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -47,16 +47,14 @@ const TEST_API_KEY = {
   prefix: "sk_test_cus",
 };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -66,7 +64,7 @@ const PARA_CONFIG_ID = "cust_cfg_wallet_by_id_para";
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -84,8 +82,8 @@ async function seedAuthAndConfigs(): Promise<void> {
   });
   await getDb(env).execute(
     `INSERT INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       TEST_API_KEY.id,
       TEST_ORG.id,
@@ -94,8 +92,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "Custody Wallet By ID Test Key",
       TEST_API_KEY.prefix,
       keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
+      ALL_API_KEY_GRANTS,
       "active",
     ]
   );
@@ -141,10 +138,10 @@ async function seedAuthAndConfigs(): Promise<void> {
   });
 }
 
-async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
+async function seedCachedKey(override: Partial<SeededApiKey>): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
+  await seedApiKeyRow(env, keyHash, {
+    ...TEST_SEEDED_API_KEY,
     ...override,
   });
 }
@@ -449,15 +446,8 @@ describe("Custody wallet by ID route", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 for API keys bound to a different wallet to avoid wallet enumeration", async () => {
-    await seedCachedKey({
-      walletBindings: [
-        {
-          walletId: "privy_wallet_a",
-          permissions: ["wallets:read"],
-        },
-      ],
-    });
+  it("returns 404 for a selected key that does not list the wallet, to avoid wallet enumeration", async () => {
+    await seedCachedKey({ walletScope: "selected", walletIds: [] });
 
     const res = await app.request(
       "/v1/wallets/para_wallet_a",
@@ -473,9 +463,51 @@ describe("Custody wallet by ID route", () => {
     expect(res.status).toBe(404);
   });
 
+  // HOO-2099: a selected key reaches only the wallets it lists, for writes as
+  // for reads (the wallet detail above), refused before the key is claimed.
+  it.each([
+    ["deletes", "DELETE", "/v1/wallets", { walletId: "para_wallet_a" }],
+    ["relabels", "PATCH", "/v1/wallets/para_wallet_a", { label: "taken" }],
+  ] as const)(
+    "returns 404 when a selected key %s a wallet it does not list",
+    async (_verb, method, path, body) => {
+      await seedCachedKey({ walletScope: "selected", walletIds: [] });
+      const before = await getDb(env)
+        .prepare("SELECT status, label FROM custody_wallets WHERE wallet_id = 'para_wallet_a'")
+        .first<{ status: string; label: string | null }>();
+
+      const res = await app.request(
+        path,
+        {
+          method,
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": `wallet-scope-${method}`,
+          },
+          body: JSON.stringify(body),
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      expect(
+        await getDb(env)
+          .prepare("SELECT status, label FROM custody_wallets WHERE wallet_id = 'para_wallet_a'")
+          .first<{ status: string; label: string | null }>()
+      ).toEqual(before);
+      expect(
+        await getDb(env)
+          .prepare("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
+          .bind(`wallet-scope-${method}`)
+          .first<{ count: number }>()
+      ).toEqual({ count: 0 });
+    }
+  );
+
   it("returns 403 when the API key does not include wallets:read permission", async () => {
     await seedCachedKey({
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
 
     const res = await app.request(

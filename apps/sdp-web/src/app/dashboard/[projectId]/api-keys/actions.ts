@@ -5,11 +5,11 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createSdpApiClient, requestProjectHref, requestProjectId } from "@/lib/sdp-api";
 import {
   type ApiKeyAuthoringDraft,
   type ApiKeyAuthoringMode,
-  buildAllowedOperations,
   buildEndpointWalletPayload,
 } from "./api-key-authoring";
 import {
@@ -59,10 +59,10 @@ export interface SaveApiKeyAuthoringInput {
   keyId?: string;
   draft: ApiKeyAuthoringDraft;
   /**
-   * Edit only: whether the user changed the operations section. A key can hold a stored
-   * value the API no longer accepts, so an untouched list is never sent back.
+   * Edit only: whether the user changed the permissions step. An untouched key keeps
+   * its stored grants, so a grant this deployment does not offer is never dropped.
    */
-  operationsTouched?: boolean;
+  grantsTouched?: boolean;
 }
 
 export type SaveApiKeyAuthoringResult =
@@ -80,17 +80,15 @@ function parseOptionalExpiration(value: string): string | null {
   return parsed.toISOString();
 }
 
-function validateAuthoringDraft(
-  draft: ApiKeyAuthoringDraft
-): "name" | "wallet" | "operations" | null {
+function validateAuthoringDraft(draft: ApiKeyAuthoringDraft): "name" | "wallet" | "grants" | null {
   if (!draft.name.trim()) {
     return "name";
   }
   if (draft.walletScope === "selected" && draft.selectedWalletIds.length === 0) {
     return "wallet";
   }
-  if (draft.operationsScope === "selected" && draft.selectedOperations.length === 0) {
-    return "operations";
+  if (draft.grants.length === 0) {
+    return "grants";
   }
   return null;
 }
@@ -115,6 +113,7 @@ async function deactivateApiKeyRequest(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
+  cancelRecurringPayments?: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const t = await getTranslations();
   const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
@@ -149,16 +148,27 @@ async function deactivateApiKeyRequest(input: {
 
   try {
     const client = await createSdpApiClient();
-    await client.fetch(`/v1/api-keys/${keyId}`, {
+    const cancelRecurringPayments = input.cancelRecurringPayments === true;
+    const response = await client.fetch<{
+      recurringPayments: { canceled: string[]; failed: string[] } | null;
+    }>(`/v1/api-keys/${keyId}`, {
       method: "DELETE",
-      body: JSON.stringify({
-        confirmation,
-      }),
+      body: JSON.stringify({ confirmation, cancelRecurringPayments }),
     });
 
+    const deactivated = t("DashboardCustody.apiKeyDeactivated", { name: keyName });
+    const recurring = response.recurringPayments;
+    if (!cancelRecurringPayments || !recurring) {
+      return { ok: true, message: deactivated };
+    }
+    // The key is revoked either way; a payment that could not be canceled is
+    // reported so it can be canceled on its own.
     return {
       ok: true,
-      message: t("DashboardCustody.apiKeyDeactivated", { name: keyName }),
+      message: `${deactivated} ${t("DashboardCustody.apiKeyRecurringCanceled", {
+        canceled: recurring.canceled.length,
+        failed: recurring.failed.length,
+      })}`,
     };
   } catch (error) {
     return {
@@ -179,8 +189,8 @@ export async function saveApiKeyAuthoringAction(
   if (validationError === "wallet") {
     return { ok: false, message: t("DashboardCustody.apiKeyWalletRequired") };
   }
-  if (validationError === "operations") {
-    return { ok: false, message: t("DashboardCustody.apiKeyOperationsRequired") };
+  if (validationError === "grants") {
+    return { ok: false, message: t("DashboardCustody.apiKeyGrantsRequired") };
   }
 
   let expiresAt: string | null;
@@ -191,7 +201,7 @@ export async function saveApiKeyAuthoringAction(
   }
 
   const walletPayload = buildEndpointWalletPayload(input.draft);
-  const allowedOperations = buildAllowedOperations(input.draft);
+  const allowedIps = parseAllowedIps(input.draft.allowedIps);
 
   try {
     const client = await createSdpApiClient();
@@ -203,10 +213,11 @@ export async function saveApiKeyAuthoringAction(
         method: "POST",
         body: JSON.stringify({
           name: input.draft.name.trim(),
-          role: input.draft.role,
+          grants: input.draft.grants,
           ...walletPayload,
-          ...(allowedOperations.length > 0 ? { allowedOperations } : {}),
-          ...(expiresAt ? { expiresAt } : {}),
+          // JSON drops an undefined field: no expiry or allowlist is sent as none.
+          expiresAt: expiresAt ?? undefined,
+          allowedIps: allowedIps.length > 0 ? allowedIps : undefined,
         }),
       });
 
@@ -234,12 +245,13 @@ export async function saveApiKeyAuthoringAction(
       body: JSON.stringify({
         name: input.draft.name.trim(),
         expiresAt,
+        // An empty allowlist clears it: the key may be used from any address.
+        allowedIps: allowedIps.length > 0 ? allowedIps : null,
         // `walletScope: "all"` alone resets the key to every wallet. The API refuses it
         // next to any wallet field, null included.
         ...walletPayload,
-        ...(input.operationsTouched
-          ? { allowedOperations: allowedOperations.length > 0 ? allowedOperations : null }
-          : {}),
+        // Untouched grants are left out (JSON drops undefined), so the key keeps them.
+        grants: input.grantsTouched ? input.draft.grants : undefined,
       }),
     });
 
@@ -336,6 +348,7 @@ export async function deactivateApiKeyInlineAction(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
+  cancelRecurringPayments?: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const result = await deactivateApiKeyRequest(input);
   if (result.ok) {

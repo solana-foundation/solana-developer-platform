@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { address, type Signature, stringifiedBigInt, stringifiedNumber } from "@solana/kit";
+import {
+  address,
+  createSolanaRpcFromTransport,
+  type RpcTransport,
+  type Signature,
+  signature,
+  stringifiedBigInt,
+  stringifiedNumber,
+  unixTimestamp,
+} from "@solana/kit";
 import { getTransaction, type SolanaRpc, tokenBalanceDelta } from "./solana";
-import { jsonParsedTransactionMeta, jsonParsedTransactionResponse } from "./test-fixtures";
+import {
+  type JsonParsedTransactionResponse,
+  jsonParsedTransactionMeta,
+  jsonParsedTransactionResponse,
+} from "./test-fixtures";
 
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const SHARE = "DvMCm7Xjirn7xmf3j4kWV49NGJUQqh7jVTAEvNNPAYiw";
@@ -125,6 +138,27 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
   assert.deepEqual(parsed?.postTokenBalances, [
     { accountIndex: 1, mint: USDC, owner: null, amount: "3", decimals: 6 },
   ]);
+});
+
+test("getTransaction surfaces the block time, null when the RPC has none", async () => {
+  const read = (blockTime?: JsonParsedTransactionResponse["blockTime"]) => {
+    const transport: RpcTransport = async <TResponse>() =>
+      // SAFETY: getTransaction sends this transport its one request, so this envelope is its response.
+      ({
+        jsonrpc: "2.0",
+        id: 1,
+        result: jsonParsedTransactionResponse({ meta: null, instructions: [], blockTime }),
+      }) as TResponse;
+    return getTransaction(
+      createSolanaRpcFromTransport(transport),
+      signature(
+        "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+      )
+    );
+  };
+
+  assert.equal((await read(unixTimestamp(1_792_000_000n)))?.blockTime, 1_792_000_000n);
+  assert.equal((await read())?.blockTime, null);
 });
 
 for (const { name, meta, known } of [

@@ -4,14 +4,22 @@
  * Projects group API keys by team or environment within an organization.
  */
 
-import type { ProjectRole } from "./permissions";
+import type { ProjectRole } from "./roles";
 
 export type ProjectEnvironment = "sandbox" | "production";
 
-export type ProjectStatus = "active" | "archived";
+export const PROJECT_STATUSES = ["active", "archived"] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
-// Re-export ProjectRole for convenience
-export type { ProjectRole } from "./permissions";
+/** Project statuses whose API keys may authenticate: an archived project's keys stop working. */
+export const PROJECT_STATUSES_THAT_MAY_AUTHENTICATE = [
+  "active",
+] as const satisfies readonly ProjectStatus[];
+
+/** Takes the raw column: an unknown status may not authenticate. */
+export function projectStatusMayAuthenticate(status: string): boolean {
+  return PROJECT_STATUSES_THAT_MAY_AUTHENTICATE.some((allowed) => allowed === status);
+}
 
 export interface ProjectSettings {
   webhookUrl?: string;

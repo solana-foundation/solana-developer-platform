@@ -5,14 +5,14 @@ import {
   createCounterpartiesRepository,
   createKycWalletsRepository,
   createWalletAssetEnrollmentsRepository,
-} from "@/db/repositories";
+} from "@/db/repositories/repository-factory";
 import { badRequest, notFound } from "@/lib/errors";
 import { parsePagination } from "@/lib/query";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getTenantTokenService, requireProjectScope } from "@/routes/issuance/helpers";
 import type { Env } from "@/types/env";
-import { getTenantTokenService, requireProjectScope } from "../helpers";
 
 type AppContext = Context<{ Bindings: Env }>;
 

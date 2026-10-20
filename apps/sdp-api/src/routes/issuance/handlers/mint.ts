@@ -1,27 +1,27 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction } from "@sdp/types";
+import type { TokenTransaction } from "@sdp/types/tokens";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  createIssuanceMosaicService,
+  getTenantTokenService,
+  requireProjectScope,
+} from "@/routes/issuance/helpers";
+import type { mintSchema } from "@/routes/issuance/schemas";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import {
-  createIssuanceMosaicService,
-  getTenantTokenService,
-  requireProjectScope,
-} from "../helpers";
-import type { mintSchema } from "../schemas";
 import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
@@ -232,7 +232,6 @@ async function resolveMintReplayBeforeLiveChecks(
     env: c.env,
     auth: resolved.auth,
     custodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const recovered = await recoverSettledMintReplay(
     new AuditService(getDb(c.env)),
@@ -481,7 +480,6 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: mintAuthority,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const { signer, custodyWalletId } = authority;
   // Build unsigned transaction using Mosaic
@@ -689,7 +687,6 @@ export async function extractMintRequest(
     auth,
     requestedCustodyWalletId: input.signingCustodyWalletId,
     currentAuthority,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
   const destination = assertValidAddress(input.mint.destination, "destination");
@@ -801,7 +798,6 @@ export const executeMint = async (c: AppContext) => {
       auth,
       custodyWalletId: tx.custodyWalletId,
       currentAuthority,
-      requiredWalletPermissions: ["tokens:write"],
     });
     const signer = authority.signer;
     const mosaic = createIssuanceMosaicService(c, authority, "sponsored");

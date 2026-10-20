@@ -1,20 +1,17 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import {
-  createPostgresEarnRepository,
-  type EarnStrategyRow,
-  type UpsertEarnStrategyInput,
-} from "@/db/repositories";
+import { getDb } from "@/db/client";
+import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 /**
  * ADR 0004 layer 1 (PRO-1934): the SDP-wide vault exposure cap at deposit
@@ -90,16 +87,14 @@ const TEST_PROJECT = { id: "prj_test_earn_cap", slug: "test-earn-cap-project" };
 const OTHER_PROJECT = { id: "prj_test_earn_cap_other", slug: "test-earn-cap-other" };
 const TEST_USER = { id: "usr_earn_cap", email: "earn-cap@example.com" };
 const TEST_API_KEY = { id: "key_earn_cap", raw: "sk_test_earn_cap", prefix: "sk_test_ear" };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -118,7 +113,7 @@ let originalCapsEnforced: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   const settings = JSON.stringify({ providerOverrides: { earn: { kamino: true, veda: true } } });
   await getDb(env).batch([
@@ -150,8 +145,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Earn Cap Test Key', ?, ?, 'api_admin', ?, 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Earn Cap Test Key', ?, ?, ?, 'active')`
       )
       .bind(
         TEST_API_KEY.id,
@@ -160,7 +155,7 @@ async function seedAuth(): Promise<void> {
         TEST_USER.id,
         TEST_API_KEY.prefix,
         keyHash,
-        JSON.stringify(["*"])
+        ALL_API_KEY_GRANTS
       ),
     getDb(env)
       .prepare(

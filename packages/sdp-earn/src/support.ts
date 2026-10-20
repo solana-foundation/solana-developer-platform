@@ -1,9 +1,9 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
-  type SdpEnvironment,
   type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
-} from "@sdp/types";
+} from "@sdp/types/well-known-tokens";
 import type { EarnDeclaredStrategySupport, ProviderStrategySnapshot } from "./types";
 
 /**

@@ -1,8 +1,8 @@
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
-import * as solanaServices from "@/services/solana";
+import * as solanaSigner from "@/services/solana/signer";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
@@ -56,12 +56,9 @@ function clerkAuth(organizationId: string, projectId: string): ApiKeyContext {
     organizationId,
     projectId,
     role: "admin",
-    permissions: ["*"],
+    grants: null,
     environment: "dashboard",
-    walletScope: "all",
-    signingWalletId: null,
-    signingWalletIds: [],
-    walletBindings: [],
+    walletAccess: { scope: "all" } as const,
     authType: "clerk",
     apiKeyId: null,
     userId: USER_ID,
@@ -199,7 +196,6 @@ describe("issuance authority resolution across an organization's projects", () =
           env,
           auth: clerkAuth(organizationId, projectId),
           custodyWalletId,
-          requiredWalletPermissions: ["tokens:write"],
         })
       ).resolves.toEqual({ custodyWalletId, providerWalletId, publicKey });
 
@@ -208,7 +204,6 @@ describe("issuance authority resolution across an organization's projects", () =
           env,
           auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
           custodyWalletId,
-          requiredWalletPermissions: ["tokens:write"],
         })
       ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     }
@@ -222,7 +217,6 @@ describe("issuance authority resolution across an organization's projects", () =
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         currentAuthority: SHARED_AUTHORITY,
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).resolves.toEqual(REQUESTER_WALLET);
   });
@@ -233,7 +227,6 @@ describe("issuance authority resolution across an organization's projects", () =
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         currentAuthority: SHARED_AUTHORITY,
-        requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({
       code: "CONFLICT",
@@ -246,7 +239,7 @@ describe("issuance authority resolution across an organization's projects", () =
     await seedRequesterProjectWallet();
     const signer = await generateKeyPairSigner();
     const exactSigner = vi
-      .spyOn(solanaServices, "createOrgSignerForCustodyWallet")
+      .spyOn(solanaSigner, "createOrgSignerForCustodyWallet")
       .mockResolvedValue(signer);
 
     await expect(
@@ -267,7 +260,7 @@ describe("issuance authority resolution across an organization's projects", () =
   });
 
   it("refuses a legacy deploy naming a wallet only another project holds", async () => {
-    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+    const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
     await expect(
       createLegacyResolvedAuthoritySigner({
@@ -282,7 +275,7 @@ describe("issuance authority resolution across an organization's projects", () =
 
   it("refuses a legacy deploy that names no wallet before any signer is loaded", async () => {
     await seedRequesterProjectWallet();
-    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+    const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
     await expect(
       createLegacyResolvedAuthoritySigner({

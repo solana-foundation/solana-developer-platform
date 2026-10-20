@@ -2,7 +2,7 @@
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import esbuild from "esbuild";
+import { build } from "esbuild";
 
 /**
  * WASM binaries that must sit BESIDE the bundle.
@@ -71,7 +71,6 @@ const banner =
 // migrate.js lets the prebuilt image apply migrations without the source tree.
 const entryPoints = {
   server: "src/server.ts",
-  job: "src/job.ts",
   migrate: "scripts/migrate-postgres.mjs",
   // custody-backfill.js re-encrypts legacy custody rows to KMS envelopes from the prebuilt image.
   "custody-backfill": "scripts/migrate-custody-encryption.ts",
@@ -83,14 +82,14 @@ const entryPoints = {
 
 const zkSdkNodeEntries = new Set();
 
-await esbuild.build({
+await build({
   entryPoints,
   bundle: true,
   platform: "node",
   target: "node22",
   format: "esm",
   outdir: "dist",
-  external: ["pg-native", "@sentry/profiling-node"],
+  external: ["pg-native"],
   banner: { js: banner },
   plugins: [zkSdkNodeWasmPlugin(zkSdkNodeEntries)],
 });

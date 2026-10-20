@@ -3,15 +3,15 @@ import {
   hastraDeployment,
   hastraDepositMints,
 } from "@sdp/types/hastra-programs";
-import { providerNotConfigured } from "../../errors";
+import { providerNotConfigured } from "#/errors";
+import { StubEarnClient } from "#/providers/stub";
 import type {
   EarnDeclaredStrategySupport,
   EarnLiveMetricsProvider,
   EarnRuntimeContext,
   ProviderStrategyMetrics,
   ProviderStrategySnapshot,
-} from "../../types";
-import { StubEarnClient } from "../stub";
+} from "#/types";
 import { readHastraPrimeMetrics } from "./prime-metrics";
 
 /**

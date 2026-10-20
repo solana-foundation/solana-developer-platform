@@ -4,8 +4,8 @@ import {
   isDecimalString,
   parseDecimalAmount,
 } from "@sdp/solana/amount";
-import { BASE58_ADDRESS_PATTERN } from "../base58-address";
-import { truncateMiddle } from "../truncate-middle";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
+import { truncateMiddle } from "@/app/dashboard/[projectId]/markets/truncate-middle";
 import type { KaminoVaultAllocation, KaminoVaultAllocations } from "./kamino-allocations-schema";
 
 /**

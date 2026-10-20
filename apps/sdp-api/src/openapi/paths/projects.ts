@@ -1,16 +1,17 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-
+import { createApiKeyRequestSchema } from "@/openapi/schemas/api-keys";
 import {
-  addProjectMemberRequestSchema,
-  createApiKeyRequestSchema,
   errorResponseSchema,
   includeArchivedQuerySchema,
   memberIdParamSchema,
   projectIdParamSchema,
+} from "@/openapi/schemas/base";
+import {
+  addProjectMemberRequestSchema,
   updateProjectMemberRequestSchema,
   updateProjectRequestSchema,
-} from "../schemas";
+} from "@/openapi/schemas/projects";
 import { errorResponses, jsonContent } from "./helpers";
 import {
   apiKeyCreateResponse,
@@ -121,7 +122,16 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
+}
 
+/**
+ * Registers project member and project API-key administration. These answer a
+ * signed-in person only, never an API key (HOO-2099), so they belong to the
+ * internal document alone.
+ *
+ * @param registry - The OpenAPI registry being built.
+ */
+export function registerProjectAdministrationPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
     path: "/v1/projects/{projectId}/members",
@@ -129,7 +139,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     summary: "List project members",
     operationId: "listProjectMembers",
     description: "Lists members assigned to the project.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         projectId: projectIdParamSchema,
@@ -151,7 +161,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     summary: "Add project member",
     operationId: "addProjectMember",
     description: "Adds an organization member to the project.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         projectId: projectIdParamSchema,
@@ -177,7 +187,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     summary: "Update project member",
     operationId: "updateProjectMember",
     description: "Updates a project member role.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         projectId: projectIdParamSchema,
@@ -203,7 +213,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     summary: "Remove project member",
     operationId: "removeProjectMember",
     description: "Removes a member from the project.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         projectId: projectIdParamSchema,
@@ -225,7 +235,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     summary: "List project API keys",
     operationId: "listProjectApiKeys",
     description: "Lists API keys scoped to the project.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         projectId: projectIdParamSchema,
@@ -247,7 +257,7 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     summary: "Create project API key",
     operationId: "createProjectApiKey",
     description: "Creates an API key scoped to the project. The full key is returned once.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({
         projectId: projectIdParamSchema,

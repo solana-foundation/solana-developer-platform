@@ -3,7 +3,7 @@
  *
  * Deposits, withdrawals and member transfers all answer the same question before
  * anything is signed: may value move out of THIS wallet, to THIS destination, on
- * THIS instance? Holding `payments:write` on the project is not enough — it only
+ * THIS instance? Holding `private_channels.execute` on the project is not enough — it only
  * proves the caller may move project funds at all. The control that actually
  * binds a wallet to the channel is `private_channel_verified_wallets`: the record
  * that the wallet completed the challenge → sign → verify handshake under the
@@ -20,14 +20,13 @@
  * have its channel balance burned, without ever having been enrolled.
  */
 
-import { isAddress } from "@sdp/solana/address";
-import { MEMO_PROGRAM_ADDRESS, type PrivateChannelInstance } from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types/private-channels";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import { isAddress } from "@solana/addresses";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import {
-  mapPrivateChannelInstanceRow,
-  type PrivateChannelUserRow,
-  type PrivateChannelVerifiedWalletRow,
-} from "@/db/repositories";
+import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
+import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
+import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories/private-channel-verified-wallet.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden } from "@/lib/errors";
 import {
@@ -35,8 +34,8 @@ import {
   resolvePrivateChannelCustodyWallet,
 } from "@/services/private-channels/wallet-access";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { AppContext } from "./context";
 import {
+  type AppContext,
   getPrivateChannelUserRepository,
   getPrivateChannelVerifiedWalletRepository,
 } from "./context";
@@ -138,9 +137,8 @@ export async function resolveVerifiedSourceWallet(
     allowAddress
   );
   // Enrolment answers whether the wallet may move value on this instance at
-  // all; the key's wallet bindings answer whether THIS credential may spend
-  // from it. Every other money route holds the second line too, and skipping
-  // it here would let a key bound to one wallet spend any enrolled wallet.
+  // all; the key's wallet scope, checked as the wallet resolves, answers
+  // whether THIS credential may spend from it.
 
   const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
     context.actor.id,

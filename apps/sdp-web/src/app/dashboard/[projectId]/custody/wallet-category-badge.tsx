@@ -1,12 +1,12 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
 import { Shield, WalletMinimal } from "lucide-react";
 import {
   WALLET_PROVIDER_CATEGORY_DETAILS,
   type WalletProviderCategory,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 interface WalletCategoryBadgeProps {
   category: WalletProviderCategory;

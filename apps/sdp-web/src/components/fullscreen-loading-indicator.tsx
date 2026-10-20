@@ -1,9 +1,9 @@
 "use client";
 
+import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { type ReactNode, useEffect, useState } from "react";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 const DEFAULT_RELOAD_DELAY_MS = 15_000;
 const SIDEBAR_ROW_IDS = ["home", "wallets", "issuance", "payments", "api-keys"];

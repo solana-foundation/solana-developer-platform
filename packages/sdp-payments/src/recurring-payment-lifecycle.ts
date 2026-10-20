@@ -5,7 +5,7 @@ import {
   RECURRING_PAYMENT_ACTIVATION_TRANSITION,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_UPDATE_TRANSITION,
-} from "@sdp/types";
+} from "@sdp/types/payments";
 import { z } from "zod";
 
 export const RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS = 15 * 60 * 1000;

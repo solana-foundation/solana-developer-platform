@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import type { Permission, SdpReleaseChannel } from "@sdp/types";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import type { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
-import app from "@/index";
+import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { transferResponse } from "@/openapi/paths/responses";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import type { createTransferSchema } from "@/routes/payments/transfers/schemas";
-import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -212,22 +211,7 @@ export async function seedConnectionOwnedDuplicateProviderWallet(): Promise<void
   ]);
 }
 
-export async function seedSelectedApiKeyWalletBindings(
-  bindings: Array<{
-    walletId: string;
-    custodyWalletId: string;
-    permissions: Permission[];
-  }>
-): Promise<void> {
-  await replaceApiKeyWalletBindings(
-    getDb(env),
-    TEST_API_KEY.id,
-    bindings.map(({ walletId, permissions }) => ({ walletId, permissions }))
-  );
-  await seedCachedKey({
-    walletScope: "selected",
-    signingWalletId: bindings[0] === undefined ? null : bindings[0].walletId,
-    signingWalletIds: bindings.map(({ walletId }) => walletId),
-    walletBindings: bindings,
-  });
+/** Make the test key `selected`, listing exactly these custody wallets (HOO-2099). */
+export async function seedSelectedApiKeyWallets(custodyWalletIds: string[]): Promise<void> {
+  await seedCachedKey({ walletScope: "selected", walletIds: custodyWalletIds });
 }

@@ -6,7 +6,8 @@ import {
   localeCookieName,
   supportedLocales,
 } from "@/i18n/config";
-import { loadMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
+import { loadMessages, type MessageKey } from "@/i18n/messages";
+import { type TranslationValues, translate } from "@/i18n/translate";
 
 function localeFromAcceptLanguage(value: string | null): AppLocale | undefined {
   if (!value) return undefined;

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams, validateQuery } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { autocomplete, getPlace, getStaticMap } from "./handlers";
@@ -15,7 +16,7 @@ import {
 // keystroke, so the actor ceiling stays interactive-typing friendly.
 const PLACES_QUOTA: MeteredQuotaConfig = { name: "places", actorMax: 120, orgMax: 600 };
 
-const places = new Hono<{ Bindings: Env }>();
+export const places = new Hono<{ Bindings: Env }>();
 
 places.use("*", unifiedAuthMiddleware());
 
@@ -23,25 +24,23 @@ places.use("*", unifiedAuthMiddleware());
 // must not be able to charge the org-wide pool and starve authorized users.
 places.post(
   "/autocomplete",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateBody(placesAutocompleteSchema),
   meteredQuota(PLACES_QUOTA),
   autocomplete
 );
 places.get(
   "/static-map",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateQuery(staticMapQuerySchema),
   meteredQuota(PLACES_QUOTA),
   getStaticMap
 );
 places.get(
   "/:placeId",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateParams(placeIdParamsSchema),
   validateQuery(placeDetailsQuerySchema),
   meteredQuota(PLACES_QUOTA),
   getPlace
 );
-
-export default places;

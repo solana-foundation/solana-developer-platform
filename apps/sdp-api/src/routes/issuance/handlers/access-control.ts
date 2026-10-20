@@ -1,5 +1,5 @@
 import type { AclMode } from "@sdp/issuance/mosaic/types";
-import type { Token, TokenTemplate } from "@sdp/types";
+import type { Token, TokenTemplate } from "@sdp/types/tokens";
 import { AppError } from "@/lib/errors";
 
 type TokenAccessControlShape = Pick<Token, "template" | "requiresAllowlist">;

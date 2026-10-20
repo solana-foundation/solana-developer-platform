@@ -1,27 +1,34 @@
 "use client";
 
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type Counterparty,
-  type PaymentRequest,
-  type PaymentRequestStatus,
-} from "@sdp/types";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { PaymentRequest, PaymentRequestLink, PaymentRequestStatus } from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
+import { cn } from "@sdp/ui/cn";
+import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
+import { StatusText } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableRow } from "@solana/design-system/table";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  formatDateTime,
+  formatDecimalAmount,
+} from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
+import { PaymentsTableHeader } from "@/app/dashboard/[projectId]/payments/payments-table-header";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Button } from "@/components/ui/button";
-import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar } from "@/components/ui/list-toolbar";
-import { SearchInput } from "@/components/ui/search-input";
-import { StatusText } from "@/components/ui/status-text";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
@@ -29,11 +36,6 @@ import {
   paymentRequestHref,
 } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { cn } from "@/lib/utils";
-import { shortenAddress } from "../payments-overview.utils";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL } from "../payments-table";
-import { PaymentsTableHeader } from "../payments-table-header";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,
@@ -441,14 +443,32 @@ export function PaymentRequestsWorkspace({
   };
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
-  const copyLink = (request: PaymentRequest) => {
+  const copyLink = (row: PaymentRequest) => {
     // A demo request lives in this browser only, so the public pay page can't open its link.
     if (demo) {
       toast.info(t("DashboardPayments.demo.noPayLink"));
       return;
     }
-    void navigator.clipboard.writeText(`${window.location.origin}/pay/${request.publicToken}`);
-    toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
+    // Reads never carry the pay link (APE-849); the link read returns it only to a
+    // member whose role may manage payment requests. Safari lets a clipboard
+    // write start only inside the click, so the write starts now with the link
+    // read as its pending contents.
+    let refusal: string | null = null;
+    const link = dashboardFetch<{ data: PaymentRequestLink }>(
+      `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
+    ).then((res) => {
+      if (!res.ok) {
+        refusal =
+          res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error;
+        throw new Error(refusal);
+      }
+      const url = `${window.location.origin}/pay/${res.data.data.publicToken}`;
+      return new Blob([url], { type: "text/plain" });
+    });
+    navigator.clipboard.write([new ClipboardItem({ "text/plain": link })]).then(
+      () => toast.success(t("DashboardPayments.requests.paymentLinkCopied")),
+      () => toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"))
+    );
   };
 
   return (

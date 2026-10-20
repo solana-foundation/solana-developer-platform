@@ -22,7 +22,6 @@ jobs:
       REGION: us-central1
       REPO: sdp-stage
       SERVICE: sdp-stage-api-public
-      JOB: sdp-stage-api-public-cron
       WORKER_SERVICE: sdp-stage-worker
       MIGRATE_JOB: sdp-stage-api-public-migrate
     steps:
@@ -82,26 +81,12 @@ jobs:
           echo "revision ${REVISION} never became ready" >&2
           exit 1
 
-      - name: Update cron job image
-        run: |
-          node .github/scripts/verify-managed-reconciliation-cadence.mjs \
-            "${JOB}" "${REGION}" "${PROJECT_ID}"
-          gcloud run jobs update "${JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-
       - name: Update worker image
         run: |
-          describe_err="$(mktemp)"
-          if gcloud run services describe "${WORKER_SERVICE}" \
-            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
-            gcloud run services update "${WORKER_SERVICE}" \
-              --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-          elif grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
-            echo "worker service ${WORKER_SERVICE} not created yet; skipping image update"
-          else
-            cat "${describe_err}" >&2
-            exit 1
-          fi
+          # The Worker is the only scheduler (ADR 0011): a missing service means no Money Exit
+          # runs, so this fails the deploy instead of skipping.
+          gcloud run services update "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
   smoke:
     name: Post-deploy stage smoke

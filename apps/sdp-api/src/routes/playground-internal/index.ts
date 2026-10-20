@@ -1,13 +1,15 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { getClerkAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { requireClerkSession, requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { ApiKeyService } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
@@ -21,10 +23,10 @@ const verifyApiKeySchema = z.object({
     .regex(/^sk_(test|live)_[A-Za-z0-9_-]+$/),
 });
 
-const playgroundInternal = new Hono<{ Bindings: Env }>();
+export const playgroundInternal = new Hono<{ Bindings: Env }>();
 
 playgroundInternal.use("*", unifiedAuthMiddleware());
-playgroundInternal.use("*", requireClerkSession());
+playgroundInternal.use("*", requireHumanSession());
 playgroundInternal.use("*", projectContextMiddleware());
 
 // Metered: each call hashes a caller-supplied key against the DB, which
@@ -32,7 +34,7 @@ playgroundInternal.use("*", projectContextMiddleware());
 // users.
 playgroundInternal.post(
   "/api-key/verify",
-  requirePermissions("api-keys:read"),
+  requireAction("api_keys.read"),
   validateBody(verifyApiKeySchema),
   meteredQuota({ name: "playground-verify", actorMax: 60, orgMax: 240 }),
   async (c: ValidatedBodyContext<typeof verifyApiKeySchema>) => {
@@ -61,5 +63,3 @@ playgroundInternal.post(
     return success(c, identity);
   }
 );
-
-export default playgroundInternal;

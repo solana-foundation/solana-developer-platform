@@ -1,12 +1,13 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_custody_self_hosted",
@@ -26,16 +27,14 @@ const TEST_API_KEY = {
   raw: "sk_test_custody_self_hosted",
   prefix: "sk_test_cus",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -85,7 +84,7 @@ function clearManagedProviderEnv(): void {
 
 async function seedAuth(tier: "individual" | "enterprise" = "individual"): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -105,8 +104,8 @@ async function seedAuth(tier: "individual" | "enterprise" = "individual"): Promi
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -116,8 +115,7 @@ async function seedAuth(tier: "individual" | "enterprise" = "individual"): Promi
         "Self-Hosted Custody Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -149,8 +147,12 @@ describe("Custody routes — self-hosted deployment mode", () => {
       {
         method: "POST",
         headers: {
+          ...(await clerkAdminHeaders(env, getDb(env), {
+            userId: TEST_USER.id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+          })),
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({ provider: "dfns" }),
       },
@@ -192,8 +194,12 @@ describe("Custody routes — managed-mode regression", () => {
       {
         method: "POST",
         headers: {
+          ...(await clerkAdminHeaders(env, getDb(env), {
+            userId: TEST_USER.id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+          })),
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({ provider: "local" }),
       },

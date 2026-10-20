@@ -1,28 +1,18 @@
 import { PAYMENT_TRANSFER_ID_PREFIX } from "@sdp/payments/ramps/shared";
-import {
-  isRampTransferType,
-  type PaymentTransactionKind,
-  type PaymentTransferStatus,
-  type PaymentTransferType,
-  RAMP_TRANSFER_TRANSITIONS,
-  RAMP_TRANSFER_TYPES,
-  type RampTransferTransitionId,
-  type RampTransferType,
-  type SdpEnvironment,
-  WALLET_TRANSFER_TYPES,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type {
+  PaymentTransferStatus,
+  PaymentTransferType,
+  RampTransferSettlement,
+  RampTransferTransitionId,
+  RampTransferType,
+} from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
-import type { RepositoryDbClient } from "./base";
+import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
+import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export {
-  isRampTransferType,
-  RAMP_TRANSFER_TRANSITIONS,
-  RAMP_TRANSFER_TYPES,
-  WALLET_TRANSFER_TYPES,
-};
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
-export type { PaymentTransferStatus, PaymentTransferType, RampTransferType };
 
 export interface PaymentTransferRow {
   id: string;
@@ -44,6 +34,8 @@ export interface PaymentTransferRow {
   /** A retired provider's historical row reads too; writes take a live `RampProviderId`. */
   provider: PersistedRampProviderId | null;
   provider_reference: string | null;
+  /** MoonPay's canonical top-level updatedAt for the currently bound transaction. */
+  provider_observed_at: string | null;
   delivery_mode: PaymentTransferDeliveryMode | null;
   fiat_currency: string | null;
   fiat_amount: string | null;
@@ -67,6 +59,9 @@ export interface PaymentTransferRow {
   created_at: string;
   updated_at: string;
 }
+
+/** A transfer row the repository has proven is a ramp transfer. */
+export type RampPaymentTransferRow = PaymentTransferRow & { type: RampTransferType };
 
 export function generatePaymentTransferId(): string {
   return `${PAYMENT_TRANSFER_ID_PREFIX}${crypto.randomUUID()}`;
@@ -133,8 +128,13 @@ export interface TransferStatusChangeFields {
   sourceAddress?: string | null;
   destinationAddress?: string | null;
   signature?: string | null;
+  serializedTx?: string | null;
+  slot?: number | null;
+  blockTime?: string | null;
+  fee?: number | null;
   amount?: string | null;
   fiatAmount?: string | null;
+  deliveryMode?: PaymentTransferDeliveryMode | null;
   providerData?: Record<string, unknown>;
   error?: string | null;
 }
@@ -144,19 +144,23 @@ export interface RampTransferTransitionInput extends TransferStatusChangeFields 
   organizationId: string;
   projectId: string;
   transition: RampTransferTransitionId;
+  /** MoonPay observations compare this timestamp only for the bound reference. */
+  providerObservation?: { reference: string; observedAt: string };
+  /** Chain verdict must still match the provider observation and row signature it checked. */
+  deliveryEvidence?: { providerSettlement: Record<string, unknown>; signature: string };
+  /** Untimed providers may claim completion evidence once, never replace it by redelivery. */
+  providerSettlementUnclaimed?: boolean;
+  providerSettlementMissingSignature?: boolean;
+  /** Matches only while `updated_at` still holds this value: a write decided on a read refuses a row that moved since. */
+  expectedUpdatedAt?: string;
   updatedAt: string;
 }
 
 export interface ListTransfersInput {
   organizationId: string;
   projectId: string;
-  walletAuthorization?: {
-    custodyWalletIds: string[];
-    providerWalletIds: string[];
-  };
   custodyWalletId?: string;
   walletId?: string;
-  walletIds?: string[];
   walletAddress?: string;
   counterpartyId?: string;
   search?: string;
@@ -212,8 +216,10 @@ export interface PaymentsRepositoryContext {
 export interface PaymentsRepository {
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
-   * Claims an awaiting off-ramp row for its crypto deposit transaction. The
-   * update succeeds only while every on-chain submission field is unoccupied.
+   * Claims an awaiting off-ramp row for its crypto deposit transaction through
+   * the `offramp_deposit_claimed` transition. The update succeeds only while
+   * the row still matches its deposit instruction and every on-chain
+   * submission field is unoccupied.
    */
   updateOnchainTransferForRamp(input: {
     transferId: string;
@@ -239,6 +245,10 @@ export interface PaymentsRepository {
     projectId: string;
     idempotencyKey: string;
   }): Promise<PaymentTransferRow | null>;
+  /**
+   * Updates a transfer's fields. An update carrying a `status` matches no ramp
+   * row: ramp statuses move only through `transitionRampTransfer`.
+   */
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   persistSignedTransfer(input: {
     transferId: string;
@@ -256,21 +266,6 @@ export interface PaymentsRepository {
     startedAt: string;
   }): Promise<PaymentTransferRow | null>;
   /**
-   * Atomically transitions a transfer's status only if it is currently one of
-   * `fromStatuses`, scoped to org/project. Returns the updated row, or null when
-   * no row matched (wrong owner, missing, or status changed concurrently).
-   */
-  updateTransferStatusGuarded(
-    input: TransferStatusChangeFields & {
-      transferId: string;
-      organizationId: string;
-      projectId: string;
-      fromStatuses: readonly PaymentTransferStatus[];
-      toStatus: PaymentTransferStatus;
-      updatedAt: string;
-    }
-  ): Promise<PaymentTransferRow | null>;
-  /**
    * Applies one `RAMP_TRANSFER_TRANSITIONS` entry as a compare-and-swap: the
    * row must be a ramp transfer of one of the transition's types, in one of its
    * source statuses, scoped to org/project. Returns the updated row, or null
@@ -278,55 +273,35 @@ export interface PaymentsRepository {
    * not a ramp transfer of those types).
    */
   transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
+  /** Fair, cluster-scoped page of provider-settled rows awaiting chain proof. */
+  listRampTransfersToVerify(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<PaymentTransferRow[]>;
+  /** Rotate polled rows without changing their business updated_at or status. */
+  markRampTransfersVerificationPolled(params: {
+    transferIds: readonly string[];
+    polledAt: string;
+  }): Promise<void>;
   /**
-   * Merges `providerData` into the row only while `claimPath` inside
-   * provider_data is still unset and the status is unchanged, so concurrent
-   * claims of the same field are decided by the row: exactly one writer
-   * matches, every other caller gets null and must re-read to compare.
-   *
-   * @param input.transferId - The transfer being claimed.
-   * @param input.organizationId - Tenant scope.
-   * @param input.projectId - Tenant scope.
-   * @param input.expectedStatus - The status the claim was computed from.
-   * @param input.claimPath - JSON path inside provider_data that must be NULL for the write to apply.
-   * @param input.providerData - Top-level provider_data keys to merge on success.
-   * @param input.updatedAt - Timestamp written on success.
-   * @returns The updated row, or null when the field was already claimed or the row moved.
+   * Claims the next ramp transfer a provider status pull should ask about: never
+   * polled first, then least recently polled, then oldest. Stamps
+   * `provider_status_last_polled_at` in the same statement, so a concurrent sweep
+   * skips the row, and leaves `updated_at` alone. A settling row whose provider
+   * evidence the chain verifier already holds is left to the verifier. System-only.
    */
-  claimTransferProviderData(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    expectedStatus: PaymentTransferStatus;
-    claimPath: readonly string[];
-    providerData: Record<string, unknown>;
-    updatedAt: string;
-  }): Promise<PaymentTransferRow | null>;
-  /**
-   * Removes a claim written by `claimTransferProviderData` when the guarded
-   * action definitively did not happen. The delete applies only when the row
-   * still holds the exact claim value the caller wrote and is still in the
-   * status the claim was made from, so a claim taken by another caller in
-   * between is never released.
-   *
-   * @param input.transferId - The transfer holding the claim.
-   * @param input.organizationId - Tenant scope.
-   * @param input.projectId - Tenant scope.
-   * @param input.expectedStatus - The status the claim was made from.
-   * @param input.claimPath - JSON path inside provider_data to remove.
-   * @param input.claimValue - The exact value currently expected at claimPath.
-   * @param input.updatedAt - Timestamp written on success.
-   * @returns The updated row, or null when the claim was not ours or the row moved.
-   */
-  releaseTransferProviderDataClaim(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string;
-    expectedStatus: PaymentTransferStatus;
-    claimPath: readonly string[];
-    claimValue: Record<string, unknown>;
-    updatedAt: string;
-  }): Promise<PaymentTransferRow | null>;
+  claimRampTransferForStatusPull(params: {
+    provider: RampProviderId;
+    environments: readonly SdpEnvironment[];
+    statuses: readonly PaymentTransferStatus[];
+    /** Rows updated since are left to the webhooks that may still be in flight. */
+    updatedBefore: string;
+    /** Rows polled since are not due yet. */
+    polledBefore: string;
+    /** Rows quiet since before this are past their revival window. */
+    updatedAfter?: string;
+    polledAt: string;
+  }): Promise<{ transfer: RampPaymentTransferRow; environment: SdpEnvironment } | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled
@@ -381,18 +356,45 @@ export interface PaymentsRepository {
     transferId: string;
     provider: RampProviderId;
   }): Promise<SdpEnvironment | null>;
+  /** Locks the transfer while a MoonPay claim or failed-attempt release is decided. Transaction only. */
+  lockTransferForProvider(input: {
+    transferId: string;
+    provider: RampProviderId;
+  }): Promise<{ transfer: PaymentTransferRow; environment: SdpEnvironment } | null>;
   /**
-   * Atomically binds a provider-owned reference to a provider transfer selected
-   * by SDP's internal correlation ID. Replays with the same reference succeed;
-   * a different occupied reference is never overwritten.
+   * Serializes MoonPay claims and failures for one transaction id, then reads
+   * its bound owner. Transaction only.
    */
-  setProviderReferenceIfEmpty(input: {
+  lockMoonpayTransactionOwner(transactionId: string): Promise<string | null>;
+  getFailedMoonpayTransaction(transactionId: string): Promise<{
+    transferId: string;
+    providerObservedAt: string;
+  } | null>;
+  recordFailedMoonpayTransaction(input: {
+    transactionId: string;
+    transferId: string;
+    providerObservedAt: string;
+    failureReason?: string;
+    settlement?: RampTransferSettlement;
+  }): Promise<void>;
+  /**
+   * Claims a provider reference after the caller locks and checks its transfer.
+   * MoonPay callers also lock the transaction id before checking its owner.
+   * Failed MoonPay transaction ids cannot claim even after the reference clears.
+   */
+  claimProviderReference(input: {
     transferId: string;
     provider: RampProviderId;
     providerReference: string;
     environment: SdpEnvironment;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
+  /** Clears a failed MoonPay attempt after its guarded status transition. Transaction only. */
+  releaseMoonpayProviderReference(input: {
+    transferId: string;
+    providerReference: string | null;
+    providerObservedAt: string | null;
+  }): Promise<void>;
   listTransfersBySignatures(params: {
     signatures: string[];
     organizationId: string;

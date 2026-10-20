@@ -1,8 +1,7 @@
-import { DVP_TRADE_STATUSES, type DvpSettlementAvailability } from "@sdp/types";
+import { DVP_TRADE_STATUSES, type DvpSettlementAvailability } from "@sdp/types/dvp";
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import { z } from "zod";
-import type { AppDb } from "@/db";
-import type { DatabaseExecutor } from "@/db/client";
+import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { escapeLikePattern } from "@/db/postgres-utils";
 import type {
   DvpTradeInsert,
@@ -170,31 +169,6 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          escrow_a_frozen, escrow_b_frozen,
          created_at, updated_at`;
 
-/**
- * The wallet allowlist clause, as SQL plus its bindings. Empty means
- * "authorized for no wallet" (`1 = 0`, never a dropped clause); absent or
- * null is unrestricted. A bound wallet admits the trades it is a PARTY to —
- * the wallet ids join to `custody_wallets.public_key`, duplicated across the
- * two per-side IN subqueries.
- */
-function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
-  sql: string;
-  bindings: string[];
-} {
-  if (sdpWalletIds === undefined || sdpWalletIds === null) {
-    return { sql: "", bindings: [] };
-  }
-  if (sdpWalletIds.length === 0) {
-    return { sql: " AND 1 = 0", bindings: [] };
-  }
-  const placeholders = sdpWalletIds.map(() => "?").join(", ");
-  return {
-    sql: ` AND (user_a IN (SELECT public_key FROM custody_wallets WHERE id IN (${placeholders}))
-            OR user_b IN (SELECT public_key FROM custody_wallets WHERE id IN (${placeholders})))`,
-    bindings: [...sdpWalletIds, ...sdpWalletIds],
-  };
-}
-
 export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository {
   /**
    * Inserts a DvP claim through either the client or its transaction executor.
@@ -338,7 +312,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row ? mapDvpTradeRow(row) : null;
     },
 
-    async listOpenForReconciliation(limit: number) {
+    async listOpenForReconciliation({ environment, limit }) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("listOpenForReconciliation limit must be an integer from 1 to 256");
       }
@@ -369,9 +343,11 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                       ELSE 2
                     END AS lane
                FROM dvp_trades t
-              WHERE t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-                 OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
-                     AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+               JOIN projects p ON p.id = t.project_id
+              WHERE p.environment = ?
+                AND (t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+                     OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                         AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days'))
            ), ranked AS (
              SELECT laned.*,
                     ROW_NUMBER() OVER (
@@ -393,7 +369,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                      lane ASC, lane_rank ASC
             LIMIT ?`
         )
-        .bind(limit)
+        .bind(environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },
@@ -463,27 +439,25 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
     },
 
     async getById(scope: DvpTradeScope, id: string) {
-      const wallets = walletScopeClause(scope.sdpWalletIds);
       const row = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ? AND id = ?${wallets.sql}`
+            WHERE organization_id = ? AND project_id = ? AND id = ?`
         )
-        .bind(scope.organizationId, scope.projectId, id, ...wallets.bindings)
+        .bind(scope.organizationId, scope.projectId, id)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },
 
     async getBySwapDvp(scope: DvpTradeScope, swapDvp: Address) {
-      const wallets = walletScopeClause(scope.sdpWalletIds);
       const row = await db
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE organization_id = ? AND project_id = ? AND swap_dvp = ?${wallets.sql}`
+            WHERE organization_id = ? AND project_id = ? AND swap_dvp = ?`
         )
-        .bind(scope.organizationId, scope.projectId, swapDvp, ...wallets.bindings)
+        .bind(scope.organizationId, scope.projectId, swapDvp)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },
@@ -581,23 +555,25 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .run();
     },
 
-    async releaseExpiredCloseClaims(blockHeight) {
+    async releaseExpiredCloseClaims({ environment, blockHeight }) {
       const result = await db
         .prepare(
           `UPDATE dvp_trades
               SET close_claim_signature = NULL, close_claim_action = NULL,
                   close_claim_expiry_height = NULL, updated_at = sdp_iso_now()
-            WHERE close_claim_signature IS NOT NULL
-              AND CAST(close_claim_expiry_height AS NUMERIC) < ?
-            RETURNING id`
+             FROM projects p
+            WHERE p.id = dvp_trades.project_id
+              AND p.environment = ?
+              AND dvp_trades.close_claim_signature IS NOT NULL
+              AND CAST(dvp_trades.close_claim_expiry_height AS NUMERIC) < ?
+            RETURNING dvp_trades.id`
         )
-        .bind(blockHeight.toString())
+        .bind(environment, blockHeight.toString())
         .all<{ id: string }>();
       return result.results.length;
     },
 
     async listByProject(scope: DvpTradeScope, filters: DvpTradeListFilters, limit: number) {
-      const wallets = walletScopeClause(scope.sdpWalletIds);
       const clauses = ["organization_id = ?", "project_id = ?"];
       const bindings: unknown[] = [scope.organizationId, scope.projectId];
 
@@ -653,11 +629,11 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .prepare(
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
-            WHERE ${clauses.join(" AND ")}${wallets.sql}
+            WHERE ${clauses.join(" AND ")}
             ORDER BY created_at DESC
             LIMIT ?`
         )
-        .bind(...bindings, ...wallets.bindings, limit)
+        .bind(...bindings, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

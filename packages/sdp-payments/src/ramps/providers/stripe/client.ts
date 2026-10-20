@@ -1,23 +1,26 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import type {
-  Counterparty,
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { Counterparty } from "@sdp/types/counterparties";
+import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments";
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { addDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
+import { addDecimalAmounts, divideDecimalAmounts } from "#/decimal";
 import {
   badRequest,
   estimateNotAvailable,
+  internalError,
   providerNotConfigured,
   providerUnavailable,
-} from "../../../errors";
-import { providerFetchJson } from "../../fetch";
-import { readyCounterparty } from "../../requirements";
-import { basicAuthHeader, UNREPORTED_COUNTRY_SUPPORT, unreportedCurrencyLimit } from "../../shared";
+  SdpPaymentsError,
+} from "#/errors";
+import { providerFetchJson } from "#/ramps/fetch";
+import { readyCounterparty } from "#/ramps/requirements";
+import {
+  basicAuthHeader,
+  UNREPORTED_COUNTRY_SUPPORT,
+  unreportedCurrencyLimit,
+} from "#/ramps/shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
@@ -28,8 +31,14 @@ import type {
   RampOnrampQuoteInput,
   RampProvider,
   RampRuntimeContext,
+  RampSettlementEvent,
+  RampTransferLookup,
   ValidateCounterpartyOptions,
-} from "../../types";
+} from "#/ramps/types";
+import {
+  stripeOnrampSessionStatusSchema,
+  stripeSessionSettlementEvent,
+} from "./session-status-mapping";
 
 const STRIPE_API_BASE_URL = "https://api.stripe.com";
 const STRIPE_API_VERSION = "2026-05-27.dahlia";
@@ -528,5 +537,38 @@ export class StripeRampClient implements RampProvider {
     _input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
     throw badRequest("Stripe off-ramp is not supported.", { provider: this.id });
+  }
+
+  /**
+   * One request: the onramp session the transfer was quoted with, mapped as
+   * its webhook is. The key picks the mode, so there is no `livemode` to check.
+   */
+  async fetchTransferStatus(
+    { env, mode }: RampRuntimeContext,
+    lookup: RampTransferLookup
+  ): Promise<readonly RampSettlementEvent[]> {
+    const config = readStripeConfig(env, mode);
+    if (lookup.rampType !== "onramp") {
+      throw badRequest("Stripe off-ramp is not supported.", { provider: this.id });
+    }
+    const sessionId = lookup.providerReference;
+    if (sessionId === null) {
+      throw internalError("A Stripe status lookup requires the session id.", {
+        provider: this.id,
+      });
+    }
+    const session = await stripeGet(
+      config.secretKey,
+      `${STRIPE_API_BASE_URL}/v1/crypto/onramp_sessions/${encodeURIComponent(sessionId)}`,
+      {},
+      stripeOnrampSessionStatusSchema
+    );
+    if (session.id !== sessionId) {
+      throw new SdpPaymentsError("PROVIDER_RESPONSE_INVALID", "stripe returned another session", {
+        provider: this.id,
+        outcome: "unknown",
+      });
+    }
+    return [stripeSessionSettlementEvent(session)];
   }
 }

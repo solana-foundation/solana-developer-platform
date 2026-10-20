@@ -1,26 +1,29 @@
 import { hashString } from "@sdp/payments/hash";
-import * as privateChannelsPkg from "@sdp/private-channels";
-import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import * as privateChannelsAuth from "@sdp/private-channels/auth";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
+import * as privateChannelsProbe from "@sdp/private-channels/probe";
 import {
-  type CachedApiKey,
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelDto,
   type PrivateChannelEventListEnvelope,
-} from "@sdp/types";
+} from "@sdp/types/private-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
-import * as pcServices from "@/services/private-channels";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import * as privateChannelService from "@/services/private-channels/service";
+import * as privateChannelWallets from "@/services/private-channels/wallets";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
-const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
-const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
-const overviewMock = vi.spyOn(pcServices, "getInstanceOverview");
+const probeConnectionMock = vi.spyOn(privateChannelsProbe, "probeConnection");
+const spcRegisterMock = vi.spyOn(privateChannelsAuth, "spcRegister");
+const overviewMock = vi.spyOn(privateChannelService, "getInstanceOverview");
 
 function unreachableOverview(error = "gateway down") {
   return {
@@ -41,16 +44,14 @@ const TEST_PROJECT = { id: "prj_pce_test", slug: "pc-events-test-project" };
 const TEST_USER = { id: "usr_pce_test", email: "pc-events-test@example.com" };
 const TEST_API_KEY = { id: "key_pce_test", raw: "sk_test_pc_events", prefix: "sk_test_pce" };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -73,7 +74,7 @@ function successProbe() {
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -92,8 +93,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -103,12 +104,14 @@ async function seedAuth(): Promise<void> {
         "PC Events Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
 }
+
+/** A signed-in admin: instance and principal setup are `private_channels.configure`. */
+let adminHeaders: Record<string, string>;
 
 function authHeaders() {
   return { Authorization: `Bearer ${TEST_API_KEY.raw}`, "Content-Type": "application/json" };
@@ -120,7 +123,7 @@ async function connectInstance(): Promise<void> {
     "/v1/private-channels/instance",
     {
       method: "POST",
-      headers: authHeaders(),
+      headers: adminHeaders,
       body: JSON.stringify({
         gatewayUrl: SANDBOX_DEFAULTS.gatewayUrl,
         escrowProgramId: SANDBOX_DEFAULTS.escrowProgramId,
@@ -157,6 +160,14 @@ describe("Private Channels — event routes", () => {
     overviewMock.mockReset();
     await seedTestDatabase(env);
     await seedAuth();
+    adminHeaders = {
+      ...(await clerkAdminHeaders(env, getDb(env), {
+        userId: TEST_USER.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      })),
+      "Content-Type": "application/json",
+    };
   });
 
   afterEach(async () => {
@@ -377,20 +388,22 @@ describe("Private Channels — event routes", () => {
 
   it("wallet verification events keep the verified pubkey in the payload", async () => {
     const pubkey = "So11111111111111111111111111111111111111112";
-    const verifyMock = vi.spyOn(pcServices, "verifyPrivateChannelWallet").mockResolvedValueOnce({
-      row: {
-        id: "pcvw_event_test",
-        user_id: "pcu_event_test",
-        wallet_id: "wallet_event_test",
-        pubkey,
-        verified_at: "2026-07-30T12:00:00.000Z",
-      },
-      instance: {
-        id: "pci_wallet_event_test",
-        organization_id: TEST_ORG.id,
-        project_id: TEST_PROJECT.id,
-      },
-    } as never);
+    const verifyMock = vi
+      .spyOn(privateChannelWallets, "verifyPrivateChannelWallet")
+      .mockResolvedValueOnce({
+        row: {
+          id: "pcvw_event_test",
+          user_id: "pcu_event_test",
+          wallet_id: "wallet_event_test",
+          pubkey,
+          verified_at: "2026-07-30T12:00:00.000Z",
+        },
+        instance: {
+          id: "pci_wallet_event_test",
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT.id,
+        },
+      } as never);
 
     let res: Response;
     try {
@@ -427,14 +440,16 @@ describe("Private Channels — event routes", () => {
 
   it("wallet revocation events keep the revoked pubkey in the payload", async () => {
     const pubkey = "So11111111111111111111111111111111111111113";
-    const deleteMock = vi.spyOn(pcServices, "deletePrivateChannelWallet").mockResolvedValueOnce({
-      instance: {
-        id: "pci_wallet_event_test",
-        organization_id: TEST_ORG.id,
-        project_id: TEST_PROJECT.id,
-      },
-      deleted: true,
-    } as never);
+    const deleteMock = vi
+      .spyOn(privateChannelWallets, "deletePrivateChannelWallet")
+      .mockResolvedValueOnce({
+        instance: {
+          id: "pci_wallet_event_test",
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT.id,
+        },
+        deleted: true,
+      } as never);
 
     let res: Response;
     try {
@@ -461,14 +476,16 @@ describe("Private Channels — event routes", () => {
 
   it("does not emit a wallet revocation event when no verification was deleted", async () => {
     const pubkey = "So11111111111111111111111111111111111111114";
-    const deleteMock = vi.spyOn(pcServices, "deletePrivateChannelWallet").mockResolvedValueOnce({
-      instance: {
-        id: "pci_wallet_event_test",
-        organization_id: TEST_ORG.id,
-        project_id: TEST_PROJECT.id,
-      },
-      deleted: false,
-    } as never);
+    const deleteMock = vi
+      .spyOn(privateChannelWallets, "deletePrivateChannelWallet")
+      .mockResolvedValueOnce({
+        instance: {
+          id: "pci_wallet_event_test",
+          organization_id: TEST_ORG.id,
+          project_id: TEST_PROJECT.id,
+        },
+        deleted: false,
+      } as never);
 
     let res: Response;
     try {
@@ -511,7 +528,7 @@ describe("Private Channels — event routes", () => {
     await connectInstance();
     const del = await app.request(
       "/v1/private-channels/instance",
-      { method: "DELETE", headers: authHeaders() },
+      { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(del.status).toBe(200);

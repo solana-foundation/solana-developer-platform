@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { RampProviderEstimateResult } from "@sdp/types";
+import type { RampProviderEstimateResult } from "@sdp/types/payments";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";

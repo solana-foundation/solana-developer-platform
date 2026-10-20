@@ -1,28 +1,13 @@
-/**
- * Regression test for the Hacktron finding: an API key created concurrently
- * with organization deletion — after the handler snapshots the org's key
- * hashes but before the revocation batch commits — is revoked in Postgres by
- * the batch, yet its hash is missing from the snapshot, so its cached
- * "active" auth entry is never refreshed and keeps authenticating for the
- * full cache TTL.
- *
- * The interleaving is made deterministic by mocking @/db: getDb returns a
- * proxy whose batch() runs a one-shot hook (insert the "concurrent" key and
- * seed its cache, exactly what a fill from a pre-revocation DB read does)
- * before delegating to the real batch. On unpatched code (hash snapshot
- * taken before the batch) the key survives with a warm active cache; on
- * patched code (snapshot taken after the batch) it is refreshed to revoked.
- */
-
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 
 const raceState = vi.hoisted(() => ({
   onBatch: null as null | (() => Promise<void>),
 }));
 
-vi.mock("@/db", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/db")>();
+vi.mock("@/db/client", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/db/client")>();
   return {
     ...original,
     getDb: (bindings: Parameters<typeof original.getDb>[0]) => {
@@ -47,12 +32,13 @@ vi.mock("@/db", async (importOriginal) => {
   };
 });
 
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_delete_race",
@@ -82,10 +68,10 @@ async function seedKeyRow(keyId: string, keyHash: string): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, ?, 'sk_test_rac', ?, 'api_admin', ?, 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+       VALUES (?, ?, ?, ?, ?, 'sk_test_rac', ?, ?, 'active')`
     )
-    .bind(keyId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, keyId, keyHash, JSON.stringify(["*"]))
+    .bind(keyId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, keyId, keyHash, ALL_API_KEY_GRANTS)
     .run();
 }
 
@@ -94,14 +80,11 @@ function cachedEntry(keyId: string) {
     id: keyId,
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
-    role: "api_admin" as const,
-    permissions: ["*" as const],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox" as const,
     rateLimitTier: "standard" as const,
     allowedIps: null,
-    signingWalletId: null,
-    signingWalletIds: [],
-    walletBindings: [],
+    walletAccess: { scope: "all" } as const,
     status: "active" as const,
     expiresAt: null,
     rotationDeadline: null,
@@ -111,6 +94,7 @@ function cachedEntry(keyId: string) {
 describe("organization deletion vs concurrent API key creation", () => {
   let adminHash: string;
   let concurrentHash: string;
+  let adminToken: string;
 
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -133,7 +117,16 @@ describe("organization deletion vs concurrent API key creation", () => {
     });
 
     await seedKeyRow(ADMIN_KEY.id, adminHash);
-    await seedCachedApiKey(env, adminHash, cachedEntry(ADMIN_KEY.id));
+    await seedApiKeyRow(env, adminHash, cachedEntry(ADMIN_KEY.id));
+    // An organization is deleted by a signed-in admin, never a key (HOO-2099).
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES ('mem_delete_race_admin', ?, ?, 'admin', 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_USER.id)
+      .run();
+    adminToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id);
   });
 
   afterEach(async () => {
@@ -141,20 +134,19 @@ describe("organization deletion vs concurrent API key creation", () => {
     await clearKVStores(env);
   });
 
-  it("refreshes the cache of a key created between the hash snapshot and the revocation batch", async () => {
+  it("refuses a key created between the hash snapshot and the revocation batch", async () => {
     // The "concurrent" creation lands right before the deletion batch
-    // commits: the row exists (so the batch revokes it) and its cache entry
-    // is active (as a fill from a pre-revocation DB read would leave it).
+    // commits: the row exists, so the batch revokes it.
     raceState.onBatch = async () => {
       await seedKeyRow(CONCURRENT_KEY.id, concurrentHash);
-      await seedCachedApiKey(env, concurrentHash, cachedEntry(CONCURRENT_KEY.id));
+      await seedApiKeyRow(env, concurrentHash, cachedEntry(CONCURRENT_KEY.id));
     };
 
     const res = await app.request(
       `/v1/organizations/${TEST_ORG.id}`,
       {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` },
+        headers: { Authorization: `Bearer ${adminToken}` },
       },
       env
     );
@@ -167,9 +159,9 @@ describe("organization deletion vs concurrent API key creation", () => {
       .first<{ status: string }>();
     expect(row?.status).toBe("revoked");
 
-    // …so its cached credentials must be rejected on the very next request.
+    // …so it is refused on the very next request.
     const withConcurrentKey = await app.request(
-      "/v1/api-keys",
+      `/v1/organizations/${TEST_ORG.id}`,
       { headers: { Authorization: `Bearer ${CONCURRENT_KEY.raw}` } },
       env
     );
@@ -185,7 +177,7 @@ describe("organization deletion vs concurrent API key creation", () => {
       `/v1/organizations/${TEST_ORG.id}`,
       {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` },
+        headers: { Authorization: `Bearer ${adminToken}` },
       },
       env
     );
@@ -201,7 +193,7 @@ describe("organization deletion vs concurrent API key creation", () => {
     expect(row?.status).toBe("active");
 
     const withEscapedKey = await app.request(
-      "/v1/api-keys",
+      `/v1/organizations/${TEST_ORG.id}`,
       { headers: { Authorization: `Bearer ${ESCAPED_KEY.raw}` } },
       env
     );

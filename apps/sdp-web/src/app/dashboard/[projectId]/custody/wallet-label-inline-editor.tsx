@@ -1,11 +1,11 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { PencilIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { updateWalletLabelAction } from "./actions";

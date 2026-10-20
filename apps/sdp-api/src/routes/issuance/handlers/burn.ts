@@ -1,10 +1,17 @@
 import { createRpcForSdk } from "@sdp/rpc/solana";
-import { type Address, assertValidAddress } from "@sdp/solana/address";
+import { assertValidAddress } from "@sdp/solana/address";
+import type { Address } from "@solana/addresses";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import {
+  createIssuanceToken2022Service,
+  getTenantTokenService,
+  requireProjectScope,
+} from "@/routes/issuance/helpers";
+import type { burnSchema } from "@/routes/issuance/schemas";
 import { AuditService } from "@/services/audit.service";
 import {
   assertTokenAllowsOperation,
@@ -12,12 +19,6 @@ import {
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
-import {
-  createIssuanceToken2022Service,
-  getTenantTokenService,
-  requireProjectScope,
-} from "../helpers";
-import type { burnSchema } from "../schemas";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
@@ -154,7 +155,6 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     env: c.env,
     auth,
     custodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const authority = await createResolvedAuthoritySigner({
     movement: "issuance.control",
@@ -162,7 +162,6 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     auth,
     custodyWalletId: wallet.custodyWalletId,
     currentAuthority: wallet.publicKey,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const signer = authority.signer;
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
@@ -275,7 +274,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     type: "burn",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -299,7 +297,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     env: c.env,
     auth,
     custodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.burn.source, "source");
@@ -367,7 +364,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       auth,
       custodyWalletId: wallet.custodyWalletId,
       currentAuthority: wallet.publicKey,
-      requiredWalletPermissions: ["tokens:write"],
     });
     const signer = authority.signer;
     const normalizedSource = await resolveValidatedBurnSource(

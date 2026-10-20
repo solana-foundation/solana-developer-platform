@@ -1,6 +1,6 @@
 "use server";
 
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";

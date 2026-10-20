@@ -1,7 +1,7 @@
 "use client";
 
+import { Button } from "@sdp/ui/button";
 import { XCircleIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 
 /**

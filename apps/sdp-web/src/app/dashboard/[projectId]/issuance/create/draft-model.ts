@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getTokenAccessControlMode } from "../access-control.utils";
+import { getTokenAccessControlMode } from "@/app/dashboard/[projectId]/issuance/access-control.utils";
 
 export const draftSchema = z
   .object({

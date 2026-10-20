@@ -1,6 +1,6 @@
+import { Button } from "@sdp/ui/button";
 import { CheckCircle2Icon } from "lucide-react";
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 
 export interface InstructionAction {
   loading: boolean;

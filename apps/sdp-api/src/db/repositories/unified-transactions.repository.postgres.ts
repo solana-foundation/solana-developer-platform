@@ -1,14 +1,15 @@
 import {
-  tokenFilterAliases,
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
-} from "@sdp/types";
+} from "@sdp/types/unified-transactions";
+import { tokenFilterAliases } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { badRequest } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { unifiedTransactionSchema } from "@/routes/transactions/schemas";
 import type {
+  ListUnifiedTransactionsInput,
   UnifiedTransactionsRepository,
   UnifiedTransactionsRepositoryDb,
 } from "./unified-transactions.repository";
@@ -45,6 +46,29 @@ function readJsonOrNull(value: string): unknown {
   }
 }
 
+/**
+ * The rows the caller may see: its permitted modules, the Payments kinds it
+ * may read, and no ramp transfer of a provider the release channel leaves out.
+ */
+function permittedRowClauses(input: ListUnifiedTransactionsInput): {
+  clauses: string[];
+  values: unknown[];
+} {
+  const clauses = [`module IN (${buildInClause(input.modules.length)})`];
+  const values: unknown[] = [...input.modules];
+  if (input.modules.includes("payments")) {
+    clauses.push(`(module <> 'payments' OR kind IN (${buildInClause(input.paymentKinds.length)}))`);
+    values.push(...input.paymentKinds);
+  }
+  if (input.excludedRampProviders.length > 0) {
+    clauses.push(
+      `NOT (module = 'payments' AND EXISTS (SELECT 1 FROM payment_transfers pt WHERE pt.id = unified_transactions.module_id AND pt.provider IN (${buildInClause(input.excludedRampProviders.length)})))`
+    );
+    values.push(...input.excludedRampProviders);
+  }
+  return { clauses, values };
+}
+
 export function createPostgresUnifiedTransactionsRepository(
   db: UnifiedTransactionsRepositoryDb
 ): UnifiedTransactionsRepository {
@@ -52,14 +76,9 @@ export function createPostgresUnifiedTransactionsRepository(
     async list(input) {
       const clauses = ["organization_id = ?"];
       const values: unknown[] = [input.organizationId];
-      clauses.push(`module IN (${buildInClause(input.modules.length)})`);
-      values.push(...input.modules);
-      if (input.excludedRampProviders.length > 0) {
-        clauses.push(
-          `NOT (module = 'payments' AND EXISTS (SELECT 1 FROM payment_transfers pt WHERE pt.id = unified_transactions.module_id AND pt.provider IN (${buildInClause(input.excludedRampProviders.length)})))`
-        );
-        values.push(...input.excludedRampProviders);
-      }
+      const permitted = permittedRowClauses(input);
+      clauses.push(...permitted.clauses);
+      values.push(...permitted.values);
       if (input.projectId !== null) {
         clauses.push("project_id IS NOT DISTINCT FROM ?");
         values.push(input.projectId);
@@ -103,26 +122,6 @@ export function createPostgresUnifiedTransactionsRepository(
       if (input.createdAtTo !== undefined) {
         clauses.push("created_at <= ?");
         values.push(input.createdAtTo);
-      }
-      if (input.moduleWalletScopes !== undefined) {
-        const scoped = input.moduleWalletScopes.filter(
-          (scope) => scope.custodyWalletIds.length > 0
-        );
-        if (scoped.length === 0) {
-          clauses.push("FALSE");
-        } else {
-          clauses.push(
-            `(${scoped
-              .map(
-                (scope) =>
-                  `(module = ? AND custody_wallet_id IN (${buildInClause(scope.custodyWalletIds.length)}))`
-              )
-              .join(" OR ")})`
-          );
-          for (const scope of scoped) {
-            values.push(scope.module, ...scope.custodyWalletIds);
-          }
-        }
       }
       if (input.cursor !== undefined) {
         const cursor = parseCursor(input.cursor);

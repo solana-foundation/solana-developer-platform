@@ -1,7 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SignatureInfo } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {

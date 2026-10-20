@@ -1,6 +1,6 @@
 "use client";
 
-import { Select, SelectItem } from "@/components/ui/select";
+import { Select, SelectItem } from "@sdp/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import type { AccessControlMode } from "./issuance-draft-wizard.types";
 

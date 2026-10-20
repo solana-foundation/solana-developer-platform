@@ -11,7 +11,7 @@
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { DVP_LEG_REFUSAL } from "@sdp/types";
+import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import {
   type Address,
   assertAccountExists,

@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import type { TokenOperations } from "../asset-profile/use-token-operations";
 import { FreezeAccountForm, PauseTransfersForm } from "./transfer-operation-forms";
 
 const messages = getMessages("en");

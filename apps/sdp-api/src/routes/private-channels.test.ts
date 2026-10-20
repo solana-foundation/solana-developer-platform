@@ -1,17 +1,20 @@
 import { hashString } from "@sdp/payments/hash";
-import * as privateChannelsPkg from "@sdp/private-channels";
-import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
-import type { CachedApiKey, PrivateChannelInstanceEnvelope } from "@sdp/types";
+import * as privateChannelsAuth from "@sdp/private-channels/auth";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
+import * as privateChannelsProbe from "@sdp/private-channels/probe";
+import type { PrivateChannelInstanceEnvelope } from "@sdp/types/private-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
-const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
-const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
+const probeConnectionMock = vi.spyOn(privateChannelsProbe, "probeConnection");
+const spcRegisterMock = vi.spyOn(privateChannelsAuth, "spcRegister");
 
 const TEST_ORG = {
   id: "org_pc_test",
@@ -31,16 +34,14 @@ const TEST_API_KEY = {
   raw: "sk_test_private_channels",
   prefix: "sk_test_pc",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -49,7 +50,7 @@ let originalPrivateChannelsEnabled: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -68,8 +69,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -79,12 +80,14 @@ async function seedAuth(): Promise<void> {
         "Private Channels Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
 }
+
+/** A signed-in admin: instance setup is `private_channels.configure`, which no key may hold. */
+let adminHeaders: Record<string, string>;
 
 function authHeaders() {
   return {
@@ -128,6 +131,14 @@ describe("Private Channels routes", () => {
     });
     await seedTestDatabase(env);
     await seedAuth();
+    adminHeaders = {
+      ...(await clerkAdminHeaders(env, getDb(env), {
+        userId: TEST_USER.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      })),
+      "Content-Type": "application/json",
+    };
   });
 
   afterEach(async () => {
@@ -155,7 +166,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "POST",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify(SANDBOX_DEFAULTS),
       },
       env
@@ -192,14 +203,14 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     const first = await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     expect(first.status).toBe(200);
 
     const res = await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     expect(res.status).toBe(409);
@@ -215,7 +226,7 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValue(successProbe());
     const created = await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     const createdBody = (await created.json()) as { data: { instance: { id: string } } };
@@ -229,7 +240,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "PATCH",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify({
           ...SANDBOX_DEFAULTS,
           instanceId: createdBody.data.instance.id,
@@ -255,7 +266,7 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValue(successProbe());
     const created = await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     const createdBody = (await created.json()) as { data: { instance: { id: string } } };
@@ -265,7 +276,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "PATCH",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify({
           ...SANDBOX_DEFAULTS,
           instanceId: createdBody.data.instance.id,
@@ -287,13 +298,13 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
 
     const res = await app.request(
       "/v1/private-channels/instance/disconnect",
-      { method: "POST", headers: authHeaders(), body: "{}" },
+      { method: "POST", headers: adminHeaders, body: "{}" },
       env
     );
     expect(res.status).toBe(200);
@@ -313,18 +324,18 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValue(successProbe());
     await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     await app.request(
       "/v1/private-channels/instance/disconnect",
-      { method: "POST", headers: authHeaders(), body: "{}" },
+      { method: "POST", headers: adminHeaders, body: "{}" },
       env
     );
 
     const withoutConfirm = await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     expect(withoutConfirm.status).toBe(409);
@@ -340,7 +351,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "POST",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify({ ...SANDBOX_DEFAULTS, confirmReactivate: true }),
       },
       env
@@ -356,13 +367,13 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
 
     const res = await app.request(
       "/v1/private-channels/instance",
-      { method: "DELETE", headers: authHeaders() },
+      { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(res.status).toBe(200);
@@ -380,7 +391,7 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     const created = await app.request(
       "/v1/private-channels/instance",
-      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     const createdBody = (await created.json()) as { data: { instance: { id: string } } };
@@ -399,7 +410,7 @@ describe("Private Channels routes", () => {
     // In-flight movement: deletion refuses but the drain is durable.
     const refused = await app.request(
       "/v1/private-channels/instance",
-      { method: "DELETE", headers: authHeaders() },
+      { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(refused.status).toBe(409);
@@ -430,7 +441,7 @@ describe("Private Channels routes", () => {
       .run();
     const retried = await app.request(
       "/v1/private-channels/instance",
-      { method: "DELETE", headers: authHeaders() },
+      { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(retried.status).toBe(200);
@@ -439,7 +450,7 @@ describe("Private Channels routes", () => {
   it("DELETE /instance returns 404 when there is no active row", async () => {
     const res = await app.request(
       "/v1/private-channels/instance",
-      { method: "DELETE", headers: authHeaders() },
+      { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(res.status).toBe(404);
@@ -450,7 +461,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "POST",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify({ ...SANDBOX_DEFAULTS, gatewayUrl: "not-a-url" }),
       },
       env
@@ -470,7 +481,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "POST",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify({
           ...SANDBOX_DEFAULTS,
           gatewayUrl: "http://169.254.169.254/latest/meta-data",
@@ -520,7 +531,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "POST",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify(SANDBOX_DEFAULTS),
       },
       env
@@ -550,7 +561,7 @@ describe("Private Channels routes", () => {
       "/v1/private-channels/instance",
       {
         method: "POST",
-        headers: authHeaders(),
+        headers: adminHeaders,
         body: JSON.stringify(SANDBOX_DEFAULTS),
       },
       env

@@ -1,6 +1,6 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import type { PaymentRampQuote } from "@sdp/types";
 import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
+import type { PaymentRampQuote } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
@@ -10,8 +10,7 @@ import { success } from "@/lib/response";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { rampTransferTokenMint } from "@/services/payment-operation.service";
-import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
 import {
   buildProviderDetails,
   type CreateOnrampQuoteBody,
@@ -20,10 +19,10 @@ import {
   persistRampQuoteTransfer,
   providersFromPairs,
   type RampQuoteResolved,
-  rampQuoteTransferStatus,
   resolveRampQuoteRequest,
   uniqueSorted,
-} from "../shared";
+} from "@/routes/payments/ramps/shared";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
   type createOnrampQuoteSchema,
   type estimateOnrampSchema,
@@ -134,11 +133,11 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           externalCustomerId: counterparty.id,
           paymentTransferId: pendingTransfer.id,
         });
-        const updated = await getPaymentsRepository(c).updateTransfer({
+        const updated = await getPaymentsRepository(c).transitionRampTransfer({
           transferId: pendingTransfer.id,
           organizationId: scope.auth.organizationId,
           projectId,
-          status: rampQuoteTransferStatus(quote),
+          transition: "quote_issued",
           deliveryMode: quote.deliveryMode,
           updatedAt: new Date().toISOString(),
         });
@@ -146,11 +145,11 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           throw internalError("Failed to complete MoonPay on-ramp transfer record");
         }
       } catch (error) {
-        await getPaymentsRepository(c).updateTransfer({
+        await getPaymentsRepository(c).transitionRampTransfer({
           transferId: pendingTransfer.id,
           organizationId: scope.auth.organizationId,
           projectId,
-          status: "failed",
+          transition: "quote_failed",
           error: error instanceof Error ? error.message : String(error),
           updatedAt: new Date().toISOString(),
         });

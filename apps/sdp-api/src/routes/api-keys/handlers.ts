@@ -1,223 +1,102 @@
-import { SigningError } from "@sdp/custody/signing";
 import type {
-  ApiKeyRole,
   CreateApiKeyResponse,
   ListApiKeysResponse,
-  Permission,
   RotateApiKeyResponse,
-} from "@sdp/types";
+} from "@sdp/types/api-keys";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
-import { asTransactionalClient, getDb } from "@/db";
-import {
-  dropApiKeyCacheEntry,
-  isApiKeyCacheWritable,
-  refreshApiKeyCache,
-} from "@/lib/api-key-cache";
+import { getDb } from "@/db/client";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveCreateWalletScope } from "@/routes/api-keys/wallet-scope";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
-  assertBindingsWithinActorWalletScope,
-  assertGrantableAllowedOperations,
-  isWalletScopedActor,
-  legacySigningWalletBinding,
-  resolveCreateWalletScope,
-  resolveUpdateWalletScope,
-  resolveWalletBindingsInScope,
+  assertApiKeyGrantsInReleaseChannel,
+  assertGrantableApiKeyGrants,
+  parseRequestedWalletScope,
+  requestApiKeyGrantChannel,
+  resolveSigningWalletsInProject,
 } from "@/services/api-key-scope.service";
-import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
+import { type AuditLogEntry, AuditService } from "@/services/audit.service";
 import {
-  type ExactApiKeyWalletBinding,
-  listApiKeyWalletBindings,
-  replaceApiKeyWalletBindings,
-} from "@/services/api-key-wallets.service";
-import { AuditService } from "@/services/audit.service";
+  type CancelActivatedByKeyResult,
+  cancelRecurringPaymentsActivatedByKey,
+} from "@/services/payments/recurring-payments/cancel-activated-by-key";
 import type { Env } from "@/types/env";
-import { buildApiKeyAccessSummaries } from "./access-response";
 import type {
   apiKeyCreateSchema,
   apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
 } from "./schemas";
+import { walletScopeAuditMetadata } from "./wallet-scope";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-/**
- * A mutation must not report success while the cache may still serve the
- * pre-mutation authorization. refreshApiKeyCache returns false when CAS
- * contention left a possibly-stale trusted entry in the slot; retry with
- * backoff, and if it never converges surface a retriable failure — the DB
- * mutation is already committed, so the caller re-issues the request rather
- * than trusting a success that silently kept the old cached authorization.
- */
-async function ensureApiKeyCacheRefreshed(
-  db: DatabaseClient,
-  kv: Parameters<typeof refreshApiKeyCache>[1],
-  keyHash: string
-): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
-    }
-    if (await refreshApiKeyCache(db, kv, keyHash)) {
-      return;
-    }
-  }
-  throw new AppError(
-    "INTERNAL_ERROR",
-    "The change was saved but the key's cached authorization could not be refreshed yet; retry the request"
-  );
-}
-
-/**
- * Best-effort variant for rotation, the one mutation that must NOT fail the
- * request over this write: the replacement key's one-time secret is already
- * committed and exists only in the pending response, so a 500 here pushes
- * the caller into rotating again — minting a second live credential while
- * the first one's secret is lost.
- *
- * Retries absorb transient failures. When they are exhausted the slot may
- * still hold the pre-rotation entry, whose `rotationDeadline: null` would let
- * the old secret reach protected endpoints past the deadline Postgres now
- * carries — and with `gracePeriodHours: 0` that deadline is immediate. So the
- * entry is dropped instead of left standing: the next request misses and
- * re-reads the real deadline, rather than waiting on the reconciliation
- * sweep. Only when that also fails is the sweep the remaining path.
- */
-async function tryRefreshApiKeyCache(
-  db: DatabaseClient,
-  kv: Parameters<typeof refreshApiKeyCache>[1],
-  keyHash: string
-): Promise<boolean> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
-    }
-    try {
-      if (await refreshApiKeyCache(db, kv, keyHash)) {
-        return true;
-      }
-    } catch {
-      // Thrown store errors retry like lost CAS rounds; the drop below and
-      // then the sweep are the remaining paths if the store stays down.
-    }
-  }
-
-  try {
-    await dropApiKeyCacheEntry(kv, keyHash);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Undo a committed rotation whose cache invalidation failed, putting Postgres
- * back into the state the stale cached entry already describes.
- *
- * This is the last repair that does not need the cache, so it retries rather
- * than settling for the one outcome nothing can fix: Postgres carrying a
- * rotation deadline the cache does not know about, which lets the old secret
- * authenticate past it. A single attempt would concede that on a dropped
- * connection or a lock timeout — far likelier than an outage lasting the whole
- * window. The undo is idempotent (clear the deadline, revoke the replacement),
- * so a retry after a partial-looking failure is safe.
- *
- * Failing every attempt means neither store accepts writes. Nothing can then
- * record the deadline anywhere the reader looks — not this handler, and not
- * the reconciliation sweep, which writes to the same cache — so the caller is
- * told which key to revoke by hand.
- */
-async function tryUndoRotation(
-  apiKeyService: ApiKeyService,
-  keyId: string,
-  replacementKeyId: string
-): Promise<boolean> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
-    }
-    try {
-      await apiKeyService.undoRotation(keyId, replacementKeyId);
-      return true;
-    } catch (error) {
-      getLogger().error(
-        { error, keyId, replacementKeyId, attempt },
-        "Rotation rollback attempt failed"
-      );
-    }
-  }
-  return false;
-}
-
+/** The signed-in person managing keys; the router refuses API keys first. */
 function resolveActor(c: AppContext): {
   organizationId: string;
-  permissions: Permission[];
-  apiKeyId: string | null;
-  userId: string | null;
+  role: OrganizationRole;
+  userId: string;
 } {
-  const apiKey = c.get("apiKey");
-  if (apiKey) {
-    return {
-      organizationId: apiKey.organizationId,
-      permissions: apiKey.permissions,
-      apiKeyId: apiKey.id,
-      userId: null,
-    };
-  }
+  const clerk = requireHumanActor(c);
+  return {
+    organizationId: clerk.organizationId,
+    role: clerk.role,
+    userId: clerk.userId,
+  };
+}
 
-  const clerk = c.get("clerk");
-  if (clerk) {
-    return {
-      organizationId: clerk.organizationId,
-      permissions: clerk.permissions,
-      apiKeyId: null,
-      userId: clerk.userId,
-    };
+/**
+ * Audit a reduction of authority that has already committed. The reduction
+ * must not depend on the ledger or Redis being healthy, so a failed write is
+ * logged as `sdp_audit_reduction_unaudited` for operators instead of failing
+ * the request.
+ */
+async function logReductionBestEffort(c: AppContext, entry: AuditLogEntry): Promise<void> {
+  try {
+    await new AuditService(getDb(c.env)).log(c, entry);
+  } catch (error) {
+    getLogger().error(
+      {
+        event: "sdp_audit_reduction_unaudited",
+        action: entry.action,
+        resourceType: entry.resourceType,
+        resourceId: entry.resourceId,
+        error,
+      },
+      "A committed reduction of authority could not be audited"
+    );
   }
-
-  throw new AppError("UNAUTHORIZED", "Authentication required");
 }
 
 export const listApiKeys = async (c: AppContext) => {
   resolveActor(c);
   const projectId = requireProjectId(c);
 
-  const db = getDb(c.env);
-  const apiKeyService = new ApiKeyService(db, getRequestTenantScope(c));
+  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
   const apiKeys = await apiKeyService.listForProject(projectId);
-  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
-    db,
-    apiKeys.map((key) => key.id)
-  );
 
   const response: ListApiKeysResponse = {
-    apiKeys: apiKeys.map((key) => {
-      const accessSummary = accessSummaryByKeyId.get(key.id);
-      const walletBindings = accessSummary?.walletBindings ?? [];
-
-      return {
-        id: key.id,
-        name: key.name,
-        keyPrefix: key.keyPrefix,
-        role: key.role as ApiKeyRole,
-        environment: key.environment as "sandbox" | "production",
-        status: key.status,
-        walletScope: key.walletScope,
-        signingWalletId: key.signingWalletId,
-        signingWalletIds: walletBindings.map((binding) => binding.walletId),
-        walletBindings,
-        allowedOperations: key.allowedOperations,
-        lastUsedAt: key.lastUsedAt,
-        expiresAt: key.expiresAt,
-        createdAt: key.createdAt,
-      };
-    }),
+    apiKeys: apiKeys.map((key) => ({
+      id: key.id,
+      name: key.name,
+      keyPrefix: key.keyPrefix,
+      grants: key.grants,
+      environment: key.environment,
+      status: key.status,
+      walletScope: key.walletScope,
+      walletIds: key.walletIds,
+      lastUsedAt: key.lastUsedAt,
+      expiresAt: key.expiresAt,
+      rotationDeadline: key.rotationDeadline,
+      createdAt: key.createdAt,
+    })),
   };
 
   return success(c, response);
@@ -227,180 +106,50 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   const actor = resolveActor(c);
   const orgId = actor.organizationId;
 
-  const {
-    name,
-    description,
-    role = "api_developer",
-    permissions,
-    walletScope,
-    allowedIps,
-    allowedOperations,
-    expiresAt,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    provisionWallet,
-    walletLabel,
-    walletPurpose,
-  } = c.req.valid("json");
+  const body = c.req.valid("json");
 
-  const provisionWalletRequested = provisionWallet !== undefined;
+  // Refused before anything is written; the service refuses them again.
+  assertGrantableApiKeyGrants(actor.role, body.grants);
+  assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), body.grants);
 
   const projectId = requireProjectId(c);
+  const walletScope = await resolveCreateWalletScope(
+    c,
+    { organizationId: actor.organizationId, projectId },
+    body
+  );
 
-  const walletSelection = resolveCreateWalletScope({
-    walletScope,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-    provisionWallet: provisionWalletRequested,
-  });
-
-  const actorApiKey = c.get("apiKey");
-  if (actorApiKey) {
-    assertBindingsWithinActorWalletScope(
-      actorApiKey,
-      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
-      walletScope
-    );
-  }
-
-  // Judge the requested Allowed Operations before any wallet is provisioned,
-  // so a refused request leaves nothing behind. The service judges again
-  // inside the key transaction.
-  assertGrantableAllowedOperations(actorApiKey?.allowedOperations ?? null, allowedOperations);
-
-  let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
-  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
-
-  if (provisionWalletRequested) {
-    if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
-    }
-    if (actorApiKey && isWalletScopedActor(actorApiKey)) {
-      throw new AppError(
-        "INSUFFICIENT_PERMISSIONS",
-        "Cannot provision a wallet from an API key with a selected wallet scope"
-      );
-    }
-
-    try {
-      const wallet = await provisionApiKeyWallet(getDb(c.env), c.env, {
-        auditContext: c,
-        creationReason: "api_key",
-        organizationId: actor.organizationId,
-        projectId,
-        owner: provisionWallet,
-        label: walletLabel,
-        purpose: walletPurpose,
-      });
-      resolvedSigningWalletId = wallet.walletId;
-      resolvedWalletBindings = [
-        { walletId: wallet.walletId, custodyWalletId: wallet.id, permissions: ["*"] },
-      ];
-    } catch (error) {
-      if (error instanceof SigningError) {
-        if (error.code === "NOT_FOUND") {
-          throw new AppError("CONFLICT", error.message);
-        }
-        throw badRequest(error.message);
-      }
-      throw error;
-    }
-  } else {
-    resolvedWalletBindings = await resolveWalletBindingsInScope(
-      getDb(c.env),
-      orgId,
-      projectId,
-      walletSelection.bindings
-    );
-  }
-
-  const resolveCreatorFallback = async (): Promise<string | null> => {
-    if (actor.userId) {
-      return actor.userId;
-    }
-
-    if (!actor.apiKeyId) {
-      return null;
-    }
-
-    const creator = await getDb(c.env)
-      .prepare(
-        `SELECT created_by
-       FROM api_keys
-       WHERE id = ? AND organization_id = ?`
-      )
-      .bind(actor.apiKeyId, orgId)
-      .first<{ created_by: string }>();
-
-    if (creator?.created_by) {
-      return creator.created_by;
-    }
-
-    const orgOwner = await getDb(c.env)
-      .prepare(
-        `SELECT user_id
-       FROM organization_members
-       WHERE organization_id = ? AND role IN ('admin', 'owner')
-       ORDER BY created_at ASC
-       LIMIT 1`
-      )
-      .bind(orgId)
-      .first<{ user_id: string }>();
-
-    return orgOwner?.user_id ?? null;
-  };
-
-  const createdBy = await resolveCreatorFallback();
-
-  if (!createdBy) {
-    throw new AppError("UNAUTHORIZED", "Could not resolve authenticated user for API key creation");
-  }
-
-  const db = getDb(c.env);
-  const createdKey = await db.transaction(async (tx) => {
-    const txDb = asTransactionalClient(tx);
+  // The key, its wallet list and its audit record commit together: if the
+  // audit write fails nothing commits, and the secret is never returned.
+  const createdKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     const key = await new ApiKeyService(txDb, getRequestTenantScope(c)).createApiKey({
       organizationId: orgId,
       projectId,
-      createdByUserId: createdBy,
-      createdByKeyId: actor.apiKeyId ?? undefined,
-      actorPermissions: actor.permissions,
-      actorApiKeyRole: c.get("apiKey")?.role ?? null,
-      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
-      name,
-      description,
-      role,
-      permissions,
-      allowedIps,
-      allowedOperations,
-      expiresAt,
-      signingWalletId: resolvedSigningWalletId,
+      createdByUserId: actor.userId,
+      actorRole: actor.role,
+      grantChannel: requestApiKeyGrantChannel(c),
+      name: body.name,
+      description: body.description,
+      grants: body.grants,
+      allowedIps: body.allowedIps,
+      expiresAt: body.expiresAt,
+      walletScope,
       pepper: c.env.API_KEY_PEPPER,
     });
-    if (resolvedWalletBindings.length > 0) {
-      await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
-    }
-    return key;
-  });
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "create",
-    resourceType: "api_key",
-    resourceId: createdKey.id,
-    metadata: {
-      name,
-      role,
-      environment: createdKey.environment,
-      walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
-      signingWalletId: resolvedSigningWalletId,
-      signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-      allowedOperations: allowedOperations ?? [],
-      provisionedWallet: provisionWalletRequested,
-    },
+    return {
+      result: key,
+      entry: {
+        action: "create",
+        resourceType: "api_key",
+        resourceId: key.id,
+        metadata: {
+          name: body.name,
+          grants: key.grants,
+          environment: key.environment,
+          ...walletScopeAuditMetadata(walletScope),
+        },
+      },
+    };
   });
 
   const response: CreateApiKeyResponse = {
@@ -409,7 +158,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       name: createdKey.name,
       key: createdKey.key, // Full key - only shown once!
       keyPrefix: createdKey.keyPrefix,
-      role: createdKey.role,
+      grants: createdKey.grants,
       environment: createdKey.environment,
       expiresAt: createdKey.expiresAt,
       createdAt: createdKey.createdAt,
@@ -431,26 +180,18 @@ export const getApiKey = async (c: AppContext) => {
     throw notFound("API key");
   }
 
-  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(getDb(c.env), [key.id]);
-  const accessSummary = accessSummaryByKeyId.get(key.id);
-  const walletBindings = accessSummary?.walletBindings ?? [];
-
   return success(c, {
     id: key.id,
     name: key.name,
     description: key.description,
     keyPrefix: key.keyPrefix,
-    role: key.role,
-    permissions: key.permissions,
+    grants: key.grants,
     environment: key.environment,
     status: key.status,
     projectId: key.projectId,
     allowedIps: key.allowedIps,
     walletScope: key.walletScope,
-    signingWalletId: key.signingWalletId,
-    signingWalletIds: walletBindings.map((binding) => binding.walletId),
-    walletBindings,
-    allowedOperations: key.allowedOperations,
+    walletIds: key.walletIds,
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
     rotatedFrom: key.rotatedFrom,
@@ -464,96 +205,52 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw badRequest("Cannot update the API key being used for this request");
-  }
-
   const body = c.req.valid("json");
 
   // Verify key belongs to this organization and the current project scope
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, key_hash, project_id, role FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      "SELECT id, project_id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
     .bind(keyId, actor.organizationId, projectId)
-    .first<{ id: string; key_hash: string; project_id: string; role: ApiKeyRole }>();
+    .first<{ id: string; project_id: string }>();
 
   if (!existing) {
     throw notFound("API key");
   }
 
-  const walletSelection = resolveUpdateWalletScope({
+  const requestedWalletScope = parseRequestedWalletScope({
     walletScope: body.walletScope,
-    signingWalletId: body.signingWalletId,
-    signingWalletIds: body.signingWalletIds,
-    walletBindings: body.walletBindings,
+    walletIds: body.walletIds,
   });
+  const walletScope =
+    requestedWalletScope === undefined
+      ? undefined
+      : await resolveSigningWalletsInProject(
+          getDb(c.env),
+          { organizationId: actor.organizationId, projectId: existing.project_id },
+          requestedWalletScope
+        );
 
-  const updateActorApiKey = c.get("apiKey");
-  if (updateActorApiKey && walletSelection.touched) {
-    assertBindingsWithinActorWalletScope(
-      updateActorApiKey,
-      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
-      body.walletScope
-    );
-  }
-  let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
-
-  if (walletSelection.touched) {
-    resolvedWalletBindings = await resolveWalletBindingsInScope(
-      getDb(c.env),
-      actor.organizationId,
-      existing.project_id,
-      walletSelection.bindings
-    );
-  }
-
-  await getDb(c.env).transaction(async (tx) => {
-    const txDb = asTransactionalClient(tx);
+  // The change, the key's wallet list and its audit record commit together.
+  await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     await new ApiKeyService(txDb, getRequestTenantScope(c)).updateApiKey({
       keyId,
       organizationId: actor.organizationId,
       projectId,
-      actorPermissions: actor.permissions,
-      actorApiKeyRole: c.get("apiKey")?.role ?? null,
-      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
-      currentRole: existing.role,
+      actorRole: actor.role,
+      grantChannel: requestApiKeyGrantChannel(c),
       name: body.name,
       description: body.description,
+      grants: body.grants,
       allowedIps: body.allowedIps,
-      allowedOperations: body.allowedOperations,
       expiresAt: body.expiresAt,
-      permissions: body.permissions,
-      signingWallet: walletSelection.touched
-        ? { walletId: walletSelection.defaultSigningWalletId }
-        : undefined,
+      walletScope,
     });
-    if (walletSelection.touched) {
-      await replaceApiKeyWalletBindings(txDb, keyId, resolvedWalletBindings);
-    }
-  });
-
-  // Refresh cache if auth-relevant fields changed. expiresAt matters too:
-  // the middleware enforces expiration from the cached entry, so a stale one
-  // would honor the old deadline for the full cache TTL. Refresh, never
-  // delete: an emptied slot invites an in-flight stale fill to repopulate it.
-  if (
-    body.allowedIps !== undefined ||
-    body.allowedOperations !== undefined ||
-    body.permissions !== undefined ||
-    body.expiresAt !== undefined ||
-    walletSelection.touched
-  ) {
-    await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
-  }
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "update",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: body,
+    return {
+      result: undefined,
+      entry: { action: "update", resourceType: "api_key", resourceId: keyId, metadata: body },
+    };
   });
 
   return success(c, { success: true });
@@ -564,75 +261,39 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  // Prevent rotating the key being used
-  if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw badRequest("Cannot rotate the API key being used for this request");
-  }
-
   const body = c.req.valid("json");
   const gracePeriodHours = body.gracePeriodHours ?? 24;
 
-  // Checked BEFORE anything commits. Once the rotation lands, the old key's
-  // cached entry must be invalidated or it keeps authorizing past its new
-  // deadline — and every recovery path (the refresh, the fallback drop, the
-  // reconciliation sweep) writes to this same store, so none of them can
-  // help if it is refusing writes. Rotation cannot be rolled back, cannot
-  // fail its response, and cannot be retried, so the only safe answer to an
-  // unwritable cache is to not start.
-  if (!(await isApiKeyCacheWritable(c.var.kv.apiKeys))) {
-    throw new AppError(
-      "SERVICE_UNAVAILABLE",
-      "Rotation is unavailable right now because cached credentials cannot be invalidated; nothing was changed, so retry shortly"
+  // The replacement, the target's deadline and the audit record commit
+  // together: if the audit write fails nothing commits, and the new secret is
+  // never returned (APE-418).
+  const rotation = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
+    const result = await new ApiKeyService(txDb, getRequestTenantScope(c)).rotateApiKey(
+      keyId,
+      actor.organizationId,
+      projectId,
+      gracePeriodHours,
+      actor.role,
+      c.env.API_KEY_PEPPER
     );
-  }
-
-  const rotatingActorKey = c.get("apiKey");
-  if (rotatingActorKey && isWalletScopedActor(rotatingActorKey)) {
-    const target = await getDb(c.env)
-      .prepare(
-        `SELECT signing_wallet_id
-         FROM api_keys
-         WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'`
-      )
-      .bind(keyId, actor.organizationId, projectId)
-      .first<{ signing_wallet_id: string | null }>();
-    if (target) {
-      const targetBindings = await listApiKeyWalletBindings(getDb(c.env), keyId);
-      const targetScope =
-        target.signing_wallet_id !== null || targetBindings.length > 0 ? "selected" : "all";
-      assertBindingsWithinActorWalletScope(
-        rotatingActorKey,
-        [
-          ...legacySigningWalletBinding(target.signing_wallet_id, targetBindings),
-          ...targetBindings,
-        ],
-        targetScope
-      );
-    }
-  }
-
-  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
-  const rotation = await apiKeyService.rotateApiKey(
-    keyId,
-    actor.organizationId,
-    projectId,
-    gracePeriodHours,
-    actor.permissions,
-    c.get("apiKey")?.role ?? null,
-    c.get("apiKey")?.allowedOperations ?? null,
-    c.env.API_KEY_PEPPER,
-    // The pre-flight check above fails fast, but the rows it judged can
-    // change before the rotation lock is taken; this guard re-judges the
-    // bindings the transaction actually copies.
-    rotatingActorKey && isWalletScopedActor(rotatingActorKey)
-      ? ({ signingWalletId, bindings }) =>
-          assertBindingsWithinActorWalletScope(
-            rotatingActorKey,
-            [...legacySigningWalletBinding(signingWalletId, bindings), ...bindings],
-            signingWalletId !== null || bindings.length > 0 ? "selected" : "all"
-          )
-      : undefined
-  );
+    return {
+      result,
+      entry:
+        result === null || isApiKeyAlreadyRotated(result)
+          ? null
+          : {
+              action: "update",
+              resourceType: "api_key",
+              resourceId: keyId,
+              metadata: {
+                action: "rotate",
+                newKeyId: result.apiKey.id,
+                gracePeriodHours,
+                rotationDeadline: result.previousKey.rotationDeadline,
+              },
+            },
+    };
+  });
 
   if (!rotation) {
     throw notFound("API key");
@@ -649,61 +310,6 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     );
   }
 
-  // Post-commit: the replacement exists and its secret lives only in the
-  // response below, so this must not simply throw — a 500 here would lose
-  // that secret. The pre-commit probe rules out a store that is already
-  // down, but it cannot stop one from failing in the window that follows.
-  const oldKeyCacheRefreshed = await tryRefreshApiKeyCache(
-    getDb(c.env),
-    c.var.kv.apiKeys,
-    rotation.previousKeyHash
-  );
-
-  if (!oldKeyCacheRefreshed) {
-    // The cache kept the pre-rotation entry: active, no deadline. Returning
-    // the secret now would leave the old key usable past the deadline
-    // Postgres carries, with every repair path blocked on the same store.
-    // Undo instead — put Postgres back into the state that stale entry
-    // already describes, so nothing is left inconsistent with it.
-    if (await tryUndoRotation(apiKeyService, keyId, rotation.apiKey.id)) {
-      getLogger().error(
-        { keyId, newKeyId: rotation.apiKey.id },
-        "Rotated key cache entry could not be refreshed or dropped; rotation rolled back"
-      );
-      throw new AppError(
-        "SERVICE_UNAVAILABLE",
-        "Rotation was rolled back because cached credentials could not be invalidated; nothing was changed, so retry shortly"
-      );
-    }
-
-    // Neither store accepted writes, so the rotation stands with a cached
-    // entry that still reports no deadline. Nothing here can repair that —
-    // the sweep writes to the same cache — so name the key an operator has
-    // to revoke by hand rather than imply an automatic recovery.
-    getLogger().error(
-      { keyId, newKeyId: rotation.apiKey.id },
-      "Rotated key cache entry could not be invalidated and every rollback attempt failed; the old secret authenticates until the cache accepts writes or its entry expires"
-    );
-    throw new AppError(
-      "INTERNAL_ERROR",
-      `Rotation committed but cached credentials could not be invalidated and the rollback failed. The replacement key is ${rotation.apiKey.id}; revoke it and retry, as its secret was not delivered.`
-    );
-  }
-
-  try {
-    await new AuditService(getDb(c.env)).log(c, {
-      action: "update",
-      resourceType: "api_key",
-      resourceId: keyId,
-      metadata: { action: "rotate", newKeyId: rotation.apiKey.id, gracePeriodHours },
-    });
-  } catch (error) {
-    getLogger().error(
-      { error, keyId, newKeyId: rotation.apiKey.id },
-      "Failed to audit an API key rotation that already committed"
-    );
-  }
-
   const response: RotateApiKeyResponse = {
     apiKey: rotation.apiKey,
     previousKey: rotation.previousKey,
@@ -717,22 +323,16 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  // Prevent revoking your own key
-  if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw badRequest("Cannot revoke the API key being used for this request");
-  }
-
-  const { confirmation } = c.req.valid("json");
+  const { confirmation, cancelRecurringPayments } = c.req.valid("json");
 
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, name, key_hash, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      "SELECT id, name, status, revoked_at FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
     .bind(keyId, actor.organizationId, projectId)
     .first<{
       id: string;
       name: string;
-      key_hash: string;
       status: string;
       revoked_at: string | null;
     }>();
@@ -742,13 +342,13 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   }
 
   if (existing.status === "deactivated" || existing.status === "revoked") {
-    // Already revoked in Postgres, but the cache may still say otherwise
-    // (e.g. the earlier revocation crashed between the DB write and the
-    // cache write). Re-assert before reporting success.
-    await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, existing.key_hash);
+    if (existing.revoked_at === null) {
+      throw internalError("A deactivated API key has no revocation time");
+    }
     return success(c, {
       success: true,
-      revokedAt: existing.revoked_at ?? new Date().toISOString(),
+      revokedAt: existing.revoked_at,
+      recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
     });
   }
 
@@ -760,29 +360,58 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     throw badRequest("Confirmation did not match the key name");
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
-  const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId, projectId);
+  // A reduction of authority commits first and never waits on the audit
+  // ledger or Redis: a key must stay revocable while either is down. Grants
+  // (create, rotate, update) keep their record in the same transaction and
+  // fail closed; this record is best-effort and a failure is logged loudly.
+  const revokedKey = await new ApiKeyService(getDb(c.env), getRequestTenantScope(c)).revokeApiKey(
+    keyId,
+    actor.organizationId,
+    projectId
+  );
+  if (revokedKey && !revokedKey.alreadyRevoked) {
+    await logReductionBestEffort(c, {
+      action: "delete",
+      resourceType: "api_key",
+      resourceId: keyId,
+      metadata: { action: "deactivate" },
+    });
+  }
 
   if (!revokedKey) {
     throw notFound("API key");
   }
 
-  // Overwrite the cache with the revoked state before reporting success.
-  // A plain delete would leave a window where an in-flight fill from a
-  // pre-revocation DB read repopulates the entry for the full cache TTL.
-  await ensureApiKeyCacheRefreshed(getDb(c.env), c.var.kv.apiKeys, revokedKey.keyHash);
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "delete",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: { action: "deactivate" },
-  });
-
   return success(c, {
     success: true,
     revokedAt: revokedKey.revokedAt,
+    recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
   });
 };
+
+/**
+ * After the revocation committed, and only when asked: cancel the recurring
+ * payments the key activated (APE-343). Each cancel is audited by its own
+ * lifecycle; a failure is reported, never undoes the revocation.
+ */
+async function cancelActivatedRecurringPayments(
+  c: AppContext,
+  requested: boolean | undefined,
+  apiKeyId: string
+): Promise<CancelActivatedByKeyResult | null> {
+  if (requested !== true) {
+    return null;
+  }
+  const recurringPayments = await cancelRecurringPaymentsActivatedByKey(c.env, {
+    organizationId: requireHumanActor(c).organizationId,
+    projectId: requireProjectId(c),
+    apiKeyId,
+  });
+  await logReductionBestEffort(c, {
+    action: "update",
+    resourceType: "api_key",
+    resourceId: apiKeyId,
+    metadata: { action: "cancel_recurring_payments", ...recurringPayments },
+  });
+  return recurringPayments;
+}

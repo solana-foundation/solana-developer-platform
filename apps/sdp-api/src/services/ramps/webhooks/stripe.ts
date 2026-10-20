@@ -1,42 +1,19 @@
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import { readRecord, readString } from "@sdp/payments/json";
+import {
+  stripeOnrampSessionStatusSchema,
+  stripeSessionSettlementEvent,
+} from "@sdp/payments/ramps/providers/stripe/session-status-mapping";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { RampWebhookProcessResult } from "@sdp/types/payments";
 import { z } from "zod";
 import { AppError, badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
-import type { RampWebhookProcessResult, WebhookProcessor } from "./processor";
-
-const STRIPE_SESSION_STATUS = {
-  requires_payment: "awaiting_payment",
-  fulfillment_processing: "settling",
-  fulfillment_complete: "settled",
-  rejected: "failed",
-} as const satisfies Record<string, RampSettlementEvent["kind"]>;
-
-type DeliveredAssetRail = NonNullable<
-  Extract<RampSettlementEvent, { kind: "settled" }>["deliveredAssetRail"]
->;
-
-/** The rail each Stripe destination currency settles on, on Solana. */
-const STRIPE_SOLANA_RAILS = {
-  usdc: "usdc.solana",
-  sol: "sol.solana",
-} as const satisfies Record<string, DeliveredAssetRail>;
-
-function isStripeSolanaCurrency(currency: string): currency is keyof typeof STRIPE_SOLANA_RAILS {
-  return Object.hasOwn(STRIPE_SOLANA_RAILS, currency);
-}
-
-/** The rail a completed Stripe session delivered, or null for an asset SDP does not sell on Solana. */
-function stripeDeliveredAssetRail(currency: string, network: string): DeliveredAssetRail | null {
-  if (network !== "solana" || !isStripeSolanaCurrency(currency)) {
-    return null;
-  }
-  return STRIPE_SOLANA_RAILS[currency];
-}
+import type { WebhookProcessor } from "./processor";
 
 /** The one field every Stripe event carries that says which mode it ran in. */
 const stripeEventModeSchema = z.object({ livemode: z.boolean() });
@@ -125,6 +102,21 @@ async function verifyStripeSignatures(input: {
   throw unauthorized("Invalid Stripe webhook signature");
 }
 
+/**
+ * The 400 for a session the shared mapping cannot read, in the words operators
+ * already search the inbox for.
+ */
+function malformedSessionMessage(type: string, error: z.ZodError): string {
+  const fields = new Set(error.issues.map((issue) => issue.path[0]));
+  if (fields.has("id")) {
+    return `Stripe "${type}" webhook is missing the session id`;
+  }
+  if (fields.has("status")) {
+    return `Stripe "${type}" webhook is missing the session status`;
+  }
+  return `Stripe "${type}" webhook carries a malformed session`;
+}
+
 export const stripeWebhook = {
   provider: "stripe" as const,
   signature: {
@@ -211,57 +203,26 @@ export const stripeWebhook = {
       });
     }
 
-    const reference = readString(session.id);
-    if (!reference) {
-      throw badRequest(`Stripe "${type}" webhook is missing the session id`, {
+    const parsed = stripeOnrampSessionStatusSchema.safeParse(session);
+    if (!parsed.success) {
+      throw badRequest(malformedSessionMessage(type, parsed.error), {
         provider: this.provider,
+        errors: parsed.error.issues,
       });
     }
-
-    const status = readString(session.status);
-    if (status === undefined) {
-      throw badRequest(`Stripe "${type}" webhook is missing the session status`, {
-        provider: this.provider,
-      });
-    }
-    const kind = STRIPE_SESSION_STATUS[status as keyof typeof STRIPE_SESSION_STATUS];
-    if (!kind) {
-      return { provider: this.provider, kind: "ignore", reason: `unsupported_status:${status}` };
-    }
-    if (kind === "failed") {
-      return {
-        provider: this.provider,
-        kind,
-        reference,
-        error: "Stripe rejected the on-ramp session.",
-      };
-    }
-    if (kind === "settled") {
-      const transactionDetails = readRecord(session.transaction_details);
-      const currency = transactionDetails
-        ? readString(transactionDetails.destination_currency)
-        : undefined;
-      const network = transactionDetails
-        ? readString(transactionDetails.destination_network)
-        : undefined;
-      if (currency === undefined || network === undefined) {
-        throw badRequest(
-          `Stripe "${type}" webhook is missing the completed session's destination currency or network`,
-          { provider: this.provider }
-        );
+    try {
+      return stripeSessionSettlementEvent(parsed.data);
+    } catch (error) {
+      // A completed session the mapping cannot settle: the 400 makes Stripe redeliver it.
+      if (error instanceof SdpPaymentsError && error.code === "PROVIDER_RESPONSE_INVALID") {
+        const details: Record<string, unknown> = { provider: this.provider };
+        if (error.diagnostics?.issues !== undefined) {
+          details.errors = error.diagnostics.issues;
+        }
+        throw badRequest(error.message, details);
       }
-      const receivedAmount = transactionDetails
-        ? readString(transactionDetails.destination_amount)
-        : undefined;
-      return {
-        provider: this.provider,
-        kind,
-        reference,
-        deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
-        ...(receivedAmount ? { receivedAmount } : {}),
-      };
+      throw error;
     }
-    return { provider: this.provider, kind, reference };
   },
 
   async process(

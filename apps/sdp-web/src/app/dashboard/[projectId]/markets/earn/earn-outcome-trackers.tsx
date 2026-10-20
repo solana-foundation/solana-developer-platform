@@ -1,6 +1,6 @@
 "use client";
 
-import type { EarnVaultDepositRecord, EarnVaultWithdrawal } from "@sdp/types";
+import type { EarnVaultDepositRecord, EarnVaultWithdrawal } from "@sdp/types/earn";
 import {
   useEarnVaultDepositOutcome,
   useEarnVaultWithdrawalOutcome,

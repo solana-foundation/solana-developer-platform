@@ -1,19 +1,17 @@
 /** Environment variables consumed by the Node API runtime. */
 
+import type { WalletAccess } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  EgressReadiness,
-  OrganizationEntitlements,
-  OrganizationRpcProvider,
-  Permission,
-  SdpRampProviderStages,
-} from "@sdp/types";
-import type { ManagedRpcEnv } from "@sdp/rpc";
+import type { Action } from "@sdp/types/actions";
+import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
+import type { EgressReadiness } from "@sdp/types/health";
+import type { OrganizationEntitlements } from "@sdp/types/organization-entitlements";
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
+import type { OrganizationRole } from "@sdp/types/roles";
+import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { ManagedRpcEnv } from "@sdp/rpc/types";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
-import type { Observability } from "@/runtime/observability";
 
 export interface Env extends ManagedRpcEnv {
   // Runtime data services
@@ -24,18 +22,10 @@ export interface Env extends ManagedRpcEnv {
   DATABASE_PREPARED_STATEMENTS?: string;
   REDIS_URL?: string;
 
-  // Cloud Run services disable embedded cron by default so the dedicated job
-  // is the sole scheduler. Set to "false" or "0" to opt in explicitly; other
-  // Node runtimes remain enabled by default and may opt out with "true"/"1".
+  // Cloud Run services disable embedded cron by default so only the Worker
+  // service (which sets "false") schedules Cron Definitions. Other Node
+  // runtimes remain enabled by default and may opt out with "true"/"1".
   DISABLE_CRON?: string;
-
-  // Deployment-owned Cloud Scheduler cadence for the dedicated managed
-  // reconciliation job. The job requires a five-field crontab and uses the
-  // exact value for its managed Sentry monitor configuration.
-  SDP_MANAGED_RECONCILIATION_CRON?: string;
-  // Cloud Run job timeout, projected from the same infrastructure resource.
-  // Sentry's minute-based maxRuntime is the ceiling of this value.
-  SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS?: string;
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
@@ -330,8 +320,6 @@ export interface Env extends ManagedRpcEnv {
 // Extend Hono's context with our bindings
 declare module "hono" {
   interface ContextVariableMap {
-    // Injected by createApp so handlers use the same implementation as tests
-    observability?: Observability;
     // Set by createApp on every request; see AppDeps.rampProviderStages
     rampProviderStages: SdpRampProviderStages;
     // Set by createApp on every request; see AppDeps.egressReadiness
@@ -359,25 +347,18 @@ declare module "hono" {
       id: string;
       organizationId: string;
       projectId: string;
-      role: string;
-      permissions: Permission[];
+      /** The key's explicit grants, read fresh on this request. */
+      grants: readonly Action[];
       environment: ApiKeyEnvironment;
-      allowedOperations?: AllowedOperation[] | null;
-      walletScope?: "all" | "selected";
-      signingWalletId: string | null;
-      signingWalletIds?: string[];
-      walletBindings?: Array<{
-        walletId: string;
-        custodyWalletId?: string;
-        permissions: Permission[];
-      }>;
+      /** The key's wallet scope, read fresh on this request (HOO-2099). */
+      walletAccess: WalletAccess;
     };
     // Clerk auth context set by middleware
     clerk?: {
       userId: string;
       organizationId: string;
-      permissions: Permission[];
-      role: string;
+      /** The member's organization role; its actions are ORGANIZATION_ROLE_ACTIONS[role]. */
+      role: OrganizationRole;
       clerkUserId: string;
       clerkOrgId: string;
       email: string | null;
@@ -404,5 +385,5 @@ declare module "hono" {
 }
 
 declare global {
-  type DatabaseClient = import("@/db").DatabaseClient;
+  type DatabaseClient = import("@/db/client").DatabaseClient;
 }

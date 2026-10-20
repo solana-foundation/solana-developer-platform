@@ -1,17 +1,16 @@
+import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import {
   DEFAULT_SDP_AI_GUIDE_URL,
   DEFAULT_SDP_API_URL,
   DEFAULT_SDP_DOCS_URL,
-  resolveSdpReleaseChannel,
-  type SdpReleaseChannel,
-} from "@sdp/types";
+} from "@sdp/types/site";
 import { Hono } from "hono";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
-
+import { publicRoute } from "@/middleware/require-action";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
 
-const llms = new Hono<{ Bindings: Env }>();
+export const llms = new Hono<{ Bindings: Env }>();
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
@@ -86,7 +85,7 @@ function renderBody(releaseChannel: SdpReleaseChannel): string {
 /** One body per release channel, built on first request from that channel's document. */
 const bodies = new Map<SdpReleaseChannel, string>();
 
-llms.get("/", (c) => {
+llms.get("/", publicRoute("AI discovery resource"), (c) => {
   const releaseChannel = resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL);
   let body = bodies.get(releaseChannel);
   if (body === undefined) {
@@ -97,5 +96,3 @@ llms.get("/", (c) => {
   c.header("Cache-Control", "public, max-age=3600");
   return c.body(body);
 });
-
-export default llms;

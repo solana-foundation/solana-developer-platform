@@ -1,13 +1,22 @@
-import { organizationStatusMayAuthenticate } from "@sdp/types";
+import type { Action } from "@sdp/types/actions";
+import {
+  API_KEY_WALLET_SCOPES,
+  type ApiKeyEnvironment,
+  type RateLimitTier,
+} from "@sdp/types/api-keys";
+import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
+import { projectStatusMayAuthenticate } from "@sdp/types/projects";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db";
-import { parsePostgresJson } from "@/db/postgres-utils";
+import { getDb } from "@/db/client";
+import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
+import { refuseTerminally } from "@/lib/api-key-refusal-cache";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
+import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
-import { resolveApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
+import { parseGrantsColumn } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -16,17 +25,18 @@ import type { Env } from "@/types/env";
  *
  * - the organization is still `active` — a deleted or suspended organization
  *   stops authenticating on its next request, whatever a cache still says;
- * - for an API key, the key's own row is still usable (active, not expired,
- *   not past its rotation deadline), read in the same statement by primary key;
- * - for an API key, its wallet scope and bindings (HOO-2048), so routes check
- *   wallets against this request's read and never re-read them;
- * - the request's origin passes `settings.allowedIpAddresses`.
+ * - for an API key, the key's own row, read in the same statement by key hash:
+ *   it is still usable (active, not expired, not past its rotation deadline),
+ *   its project is active, and every authorization field (grants, IP
+ *   restriction, rate-limit tier, project, environment)
+ *   comes from it;
+ * - for an API key, its wallet scope and the custody wallets a selected key
+ *   lists (HOO-2099), which wallet list and detail reads filter by; signing
+ *   re-checks the list itself, at the waist;
+ * - for an API key, the request's origin passes `settings.allowedIpAddresses`.
  *
- * Caches (the API-key KV entry, its reconciliation sweep) only make rejection
- * cheaper: they can never keep a revoked credential authenticated, because
- * this read runs on every request. Deliberately uncached for the same reason —
- * a cache would keep the previous answer for its TTL after a revocation or an
- * allowlist change.
+ * Deliberately uncached: a cache would keep the previous answer for its TTL
+ * after a revocation, a grant change or an allowlist change.
  *
  * Returns the raw settings it read, so authentication records the
  * organization's entitlements from the same read (APE-351).
@@ -47,9 +57,10 @@ function readAllowedIpAddresses(settings: string | null): unknown {
 }
 
 /**
- * Apply `settings.allowedIpAddresses` to the current request. Runs on every
- * authenticated path — a restriction only one of three doors honors is not a
- * restriction; an API key's own `allowedIps` intersects on top.
+ * Apply `settings.allowedIpAddresses` to an API-key request. The allowlist
+ * restricts where the organization's keys may be used from; it never filters
+ * a signed-in member, whose dashboard requests reach the API from SDP's own
+ * servers. A key's own `allowedIps` intersects on top.
  *
  * A malformed restriction fails closed. The settings column is JSON the API
  * writes itself, so a blob that does not parse is a bug: it throws, and the
@@ -85,150 +96,130 @@ export async function readActiveOrganizationSettings(
   return row.settings;
 }
 
-/**
- * Organization access for a session-based door (Clerk): the organization must
- * exist and be `active`, and the origin must pass its allowlist. Call it before
- * the door writes anything, so a refused request leaves no state behind.
- */
-export async function enforceOrganizationAccess(
-  c: Context<{ Bindings: Env }>,
-  organizationId: string
-): Promise<string | null> {
-  const settings = await readActiveOrganizationSettings(c.env, organizationId);
-  enforceIpAllowlist(c, settings);
-  return settings;
-}
+/** The key's active `api_key_signing_wallets`, aggregated to a `text[]`. */
+const signingWalletIdsSchema = z.array(z.string());
 
-/**
- * The `wallet_bindings` aggregate. `permissions` is the raw column, which
- * {@link resolveApiKeyWalletAuthorization} parses and fails closed on.
- */
-const walletBindingCandidatesSchema = z.array(
-  z.object({
-    wallet_id: z.string(),
-    permissions: z.unknown(),
-    candidates: z.array(z.object({ id: z.string(), status: z.string() })),
-  })
-);
+const walletScopeSchema = z.enum(API_KEY_WALLET_SCOPES);
 
-/** What the uncached API-key read decided: the settings and the key's wallet scope. */
-export interface ApiKeyOrganizationAccess {
+/** The `api_keys` row and its joins, as the authoritative read returns them. */
+type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  grants: unknown;
+  grants_assigned: boolean;
+  allowed_ips: string | null;
+  rate_limit_tier: RateLimitTier;
+  wallet_scope: string;
+  signing_wallet_ids: unknown;
+  environment: ApiKeyEnvironment;
+  project_status: string;
+  organization_status: string;
   settings: string | null;
-  walletAuthorization: ReturnType<typeof resolveApiKeyWalletAuthorization>;
+};
+
+/** Everything an API key may do on this request, all from one read. */
+export interface ApiKeyAuthorization {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  /** The key's explicit grants: aliases expanded, unknown strings dropped. */
+  grants: Action[];
+  environment: ApiKeyEnvironment;
+  rateLimitTier: RateLimitTier;
+  /** The organization's raw settings, for its entitlements. */
+  settings: string | null;
+  walletAccess: WalletAccess;
 }
 
 /**
- * Organization access for an API key, with the key's own live row in the same
- * statement: the organization must be `active` and the key's row must exist
- * and be usable, whatever the cached entry says. A cached key with no row is
- * refused like an unknown key; nothing falls back to the organization's word.
+ * Authorize an API key from its live rows: one uncached statement driven by
+ * `api_keys.key_hash` (UNIQUE) that returns the key's every authorization
+ * field, its project's status and environment, its organization's status and
+ * settings, and its wallet scope with the custody wallet ids a selected key
+ * lists. Nothing is cached, so a revocation, a grant change, an IP
+ * restriction, an archived project or a narrowed wallet scope applies on the
+ * key's next request.
  *
- * The same statement reads the key's wallet bindings (HOO-2048), each with the
- * custody wallets it could name and their status, so the request's wallet scope is never
- * the cache's: a key narrowed from all wallets to selected ones, or a binding
- * removed, takes effect on the key's next request. One round trip; routes
- * check wallets against this snapshot and do not re-read bindings.
+ * Refuses, in order: an unknown key (INVALID_API_KEY); an inactive
+ * organization or project (REVOKED_API_KEY); a revoked, expired or
+ * past-its-rotation-deadline key (REVOKED_API_KEY / EXPIRED_API_KEY); a key
+ * that predates grants (REVOKED_API_KEY); an
+ * origin outside the key's `allowed_ips`, then the organization's allowlist
+ * (FORBIDDEN). The filters stay out of SQL so each refusal keeps its code.
  */
-export async function enforceApiKeyOrganizationAccess(
+export async function authorizeApiKey(
   c: Context<{ Bindings: Env }>,
-  organizationId: string,
-  apiKeyId: string
-): Promise<ApiKeyOrganizationAccess> {
+  keyHash: string
+): Promise<ApiKeyAuthorization> {
   const row = await getDb(c.env)
     .prepare(
-      `SELECT o.status AS organization_status, o.settings,
-              ak.status, ak.expires_at, ak.rotation_deadline,
-              ak.signing_wallet_id, wb.wallet_bindings
-         FROM organizations o
-         LEFT JOIN api_keys ak ON ak.id = ? AND ak.organization_id = o.id
-         LEFT JOIN LATERAL (
-           SELECT COALESCE(
-                    json_agg(
-                      json_build_object(
-                        'wallet_id', b.wallet_id,
-                        'permissions', b.permissions,
-                        'candidates', (
-                          SELECT COALESCE(
-                                   json_agg(json_build_object('id', m.id, 'status', m.status) ORDER BY m.id),
-                                   '[]'::json
-                                 )
-                            FROM (
-                              SELECT w.id, w.status
-                                FROM custody_wallets w
-                                JOIN custody_configs cc ON cc.id = w.custody_config_id
-                               WHERE cc.organization_id = o.id
-                                 AND cc.project_id = ak.project_id
-                                 AND cc.status = 'active'
-                                 AND w.wallet_id = b.wallet_id
-                              UNION ALL
-                              SELECT w.id, w.status
-                                FROM custody_wallets w
-                                JOIN custody_connections cn ON cn.id = w.custody_connection_id
-                               WHERE cn.organization_id = o.id
-                                 AND cn.project_id = ak.project_id
-                                 AND cn.status = 'active'
-                                 AND w.wallet_id = b.wallet_id
-                            ) m
-                        )
-                      )
-                      ORDER BY b.created_at
-                    ),
-                    '[]'::json
-                  ) AS wallet_bindings
-             FROM (
-               SELECT p.wallet_id, p.permissions, p.created_at
-                 FROM api_key_wallet_permissions p
-                WHERE p.api_key_id = ak.id
-               UNION ALL
-               -- A legacy signing-wallet key carries no binding rows and holds
-               -- full access to its signing wallet.
-               SELECT ak.signing_wallet_id, '["*"]', ''
-                WHERE ak.signing_wallet_id IS NOT NULL
-                  AND NOT EXISTS (
-                    SELECT 1 FROM api_key_wallet_permissions p WHERE p.api_key_id = ak.id
-                  )
-             ) b
-         ) wb ON true
-        WHERE o.id = ?`
+      `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants, ak.grants_assigned,
+              ak.allowed_ips, ak.rate_limit_tier,
+              ak.status, ak.expires_at, ak.rotation_deadline, ak.wallet_scope,
+              ARRAY(
+                SELECT s.custody_wallet_id
+                  FROM api_key_signing_wallets s
+                 WHERE s.api_key_id = ak.id AND s.status = 'active'
+                 ORDER BY s.custody_wallet_id
+              ) AS signing_wallet_ids,
+              p.environment, p.status AS project_status,
+              o.status AS organization_status, o.settings
+         FROM api_keys ak
+         JOIN organizations o ON o.id = ak.organization_id
+         JOIN projects p ON p.id = ak.project_id AND p.organization_id = ak.organization_id
+        WHERE ak.key_hash = ?`
     )
-    .bind(apiKeyId, organizationId)
-    .first<
-      {
-        organization_status: string;
-        settings: string | null;
-        wallet_bindings: unknown;
-      } & (
-        | (ApiKeyLifecycleColumns & { signing_wallet_id: string | null })
-        | {
-            status: null;
-            expires_at: null;
-            rotation_deadline: null;
-            signing_wallet_id: null;
-          }
-      )
-    >();
+    .bind(keyHash)
+    .first<ApiKeyAuthorizationRow>();
 
-  if (!row || !organizationStatusMayAuthenticate(row.organization_status)) {
-    throw new AppError("REVOKED_API_KEY");
+  if (!row) {
+    throw refuseTerminally(keyHash, "INVALID_API_KEY");
   }
-  // The organization row comes back either way, so a missing key row is told
-  // apart from an inactive organization (which refuses as revoked, above).
-  if (row.status === null) {
-    throw new AppError("INVALID_API_KEY", "Invalid API key");
+  // Organization and project status before the key's own: a key created or
+  // rotated after an organization deletion enumerated its keys is covered by
+  // neither that deletion's revocation nor anything else.
+  if (
+    !organizationStatusMayAuthenticate(row.organization_status) ||
+    !projectStatusMayAuthenticate(row.project_status)
+  ) {
+    throw new AppError("REVOKED_API_KEY");
   }
   const refusal = apiKeyRowRefusal(row, Date.now());
+  // A dead key never comes back, so its refusal is remembered; the
+  // organization and project refusals above can lift and are not.
   if (refusal === "revoked") {
-    throw new AppError("REVOKED_API_KEY");
+    throw refuseTerminally(keyHash, "REVOKED_API_KEY");
   }
   if (refusal === "expired") {
-    throw new AppError("EXPIRED_API_KEY");
+    throw refuseTerminally(keyHash, "EXPIRED_API_KEY");
+  }
+  // A key from before grants holds none until a person gives it some; it is
+  // refused by name rather than failing every route. Not remembered: setting
+  // its grants makes it usable on the next request.
+  if (!row.grants_assigned) {
+    throw new AppError(
+      "REVOKED_API_KEY",
+      "This API key predates action grants. Give it grants on the API keys page, or create a new key."
+    );
+  }
+  if (!isClientIpAllowed(getClientIp(c), parseOptionalPostgresJson<unknown>(row.allowed_ips))) {
+    throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
   }
   enforceIpAllowlist(c, row.settings);
+
+  const custodyWalletIds = signingWalletIdsSchema.parse(row.signing_wallet_ids);
   return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    grants: parseGrantsColumn(row.grants),
+    environment: row.environment,
+    rateLimitTier: row.rate_limit_tier,
     settings: row.settings,
-    walletAuthorization: resolveApiKeyWalletAuthorization(
-      walletBindingCandidatesSchema.parse(parsePostgresJson<unknown>(row.wallet_bindings)),
-      row.signing_wallet_id
-    ),
+    walletAccess:
+      walletScopeSchema.parse(row.wallet_scope) === "all"
+        ? { scope: "all" }
+        : { scope: "selected", custodyWalletIds },
   };
 }

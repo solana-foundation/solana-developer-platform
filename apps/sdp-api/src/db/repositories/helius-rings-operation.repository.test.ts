@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -625,39 +625,6 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       await repo.reserveIntent(shieldIntent({ intentKey: "sha256:b" }));
 
       expect(await repo.listOperationsByWallet({ ...scope, walletId, limit: 1 })).toHaveLength(1);
-    });
-
-    it("applies the rings wallet allowlist before the project list limit", async () => {
-      const allowed = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:allowed" }));
-      const unauthorizedWallet = await walletRepo.createWallet({
-        ...scope,
-        sdpWalletId: "wal_hro_unauthorized",
-        name: "Unauthorized",
-        materialTag: "simulated",
-      });
-      if (!unauthorizedWallet) throw new Error("wallet fixture was not created");
-      const unauthorized = await repo.reserveIntent(
-        shieldIntent({
-          intentKey: "sha256:unauthorized",
-          walletId: unauthorizedWallet.id,
-        })
-      );
-      await setCreatedAt(allowed.operation.id, "2026-01-01T00:00:00.000Z");
-      await setCreatedAt(unauthorized.operation.id, "2026-02-01T00:00:00.000Z");
-
-      const listed = await repo.listOperationsByProject({
-        ...scope,
-        walletIds: [walletId],
-        limit: 1,
-      });
-
-      expect(listed.map((operation) => operation.id)).toEqual([allowed.operation.id]);
-    });
-
-    it("returns no project operations for an explicit empty rings wallet allowlist", async () => {
-      await repo.reserveIntent(shieldIntent());
-
-      expect(await repo.listOperationsByProject({ ...scope, walletIds: [] })).toEqual([]);
     });
   });
 

@@ -1,18 +1,18 @@
+import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   COUNTERPARTY_ENTITY_TYPES,
-  COUNTRIES,
   type Counterparty,
   type CounterpartyFieldOptionsResponse,
   type CounterpartyResponse,
-  getCryptoRailAssetLabel,
   type ListCounterpartiesResponse,
-  type ListProjectCounterpartyAccountsResponse,
-} from "@sdp/types";
+} from "@sdp/types/counterparties";
+import { COUNTRIES } from "@sdp/types/countries";
+import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import type { ListProjectCounterpartyAccountsResponse } from "@sdp/types/payments";
 import { z } from "zod";
-import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import { getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import {
@@ -26,11 +26,7 @@ import {
 import { created, noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { admitRamp } from "@/routes/payments/ramps/admission";
-import {
-  assertPaymentWalletExactAccess,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "@/routes/payments/wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { AuditService } from "@/services/audit.service";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
@@ -38,13 +34,13 @@ import {
   getCounterpartiesRepository,
   getCounterpartyAccountsRepository,
 } from "./context";
-import type { submitCounterpartyRequirementsSchema } from "./schemas";
 import {
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
   type createCounterpartySchema,
   listCounterpartiesQuerySchema,
   listCounterpartyAccountsQuerySchema,
+  type submitCounterpartyRequirementsSchema,
   type updateCounterpartySchema,
 } from "./schemas";
 
@@ -217,7 +213,6 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
       scope.wallets,
       query.data.destinationCustodyWalletId
     );
-    assertPaymentWalletExactAccess(c, destinationWallet.id, []);
     destinationWalletAddress = destinationWallet.publicKey;
   }
 

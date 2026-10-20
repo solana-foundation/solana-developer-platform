@@ -1,8 +1,7 @@
 import { Hono } from "hono";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
-import { requirePermissions } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { requestGate } from "@/middleware/request-gate";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -13,24 +12,21 @@ import {
 } from "./handlers";
 import { createOnrampQuoteSchema, estimateOnrampSchema } from "./schemas";
 
-const onramp = new Hono<{ Bindings: Env }>();
+export const onramp = new Hono<{ Bindings: Env }>();
 
-onramp.get("/currency", requirePermissions("payments:read"), listOnrampCurrencies);
+onramp.get("/currency", requireAction("onramp.read"), listOnrampCurrencies);
 onramp.post(
   "/estimate",
-  requirePermissions("payments:read"),
+  requireAction("onramp.read"),
   validateBody(estimateOnrampSchema),
   meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
   estimateOnramp
 );
 onramp.post(
   "/quote",
-  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
-  requireAllowedOperation("ramp_onramp_quote"),
+  requireAction("onramp.execute"),
   validateBody(createOnrampQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   requestGate({ extract: extractOnrampQuoteRequest }),
   createOnrampQuote
 );
-
-export default onramp;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import app from "@/index";
+import { app } from "@/index";
 import { env } from "@/test/helpers/env";
 
 async function llmsBody(releaseChannel: string): Promise<string> {
@@ -15,20 +15,21 @@ describe("GET /llms.txt", () => {
 
     expect(body).toContain("/openapi.json");
     expect(body).toContain("/docs");
-    expect(body).toContain("- API Keys: https://");
-    expect(body).toContain("/v1/api-keys");
+    // Keys are managed in the dashboard by a signed-in person (HOO-2099).
+    expect(body).not.toContain("/v1/api-keys");
     expect(body).toContain("/v1/wallets");
     expect(body).toContain("/v1/issuance");
+    expect(body).toContain("/v1/compliance");
     expect(body).not.toContain("/admin/allowlist");
     expect(body).not.toContain("/v1/onboarding");
     expect(body).not.toContain("/v1/organizations");
   });
 
-  it("lists only the families the deployment's release channel publishes", async () => {
-    const body = await llmsBody("stable");
+  it.each(["beta", "stable"])("lists only the families %s publishes", async (channel) => {
+    const body = await llmsBody(channel);
 
     expect(body).toContain("/v1/payments");
-    expect(body).toContain("/v1/compliance");
+    expect(body).not.toContain("/v1/compliance");
     expect(body).not.toContain("/v1/issuance");
     expect(body).not.toMatch(/earn/i);
   });

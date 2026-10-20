@@ -1,14 +1,14 @@
-import {
-  type ApiKeyRole,
-  getPermissionsForApiKeyRole,
-  type OrganizationProviderOverrides,
-  type ProjectProviderAvailability,
-  type ProjectProviderAvailabilityEntry,
-  type SdpEnvironment,
-} from "@sdp/types";
+import type { Action } from "@sdp/types/actions";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type {
+  OrganizationProviderOverrides,
+  ProjectProviderAvailability,
+  ProjectProviderAvailabilityEntry,
+} from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db";
-import app from "@/index";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
 import { clerkHeadersWithoutProject } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -21,20 +21,27 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
-  return mockCustodyReleaseChannels(
-    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelStages(
+    mockCustodyReleaseChannels(
+      await importOriginal<typeof import("@sdp/types/release-channels")>()
+    ),
+    RAMP_PROVIDERS
   );
 });
 
-vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+vi.mock("@sdp/types/provider-access", async (importOriginal) => {
+  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-stages");
+  return mockEarnProviderSurfacing(
+    await importOriginal<typeof import("@sdp/types/provider-access")>()
+  );
 });
 
 const earnPublication = vi.hoisted(() => ({ published: true }));
@@ -74,26 +81,22 @@ const API_KEYS = {
     prefix: "sk_live_ppa",
   },
 } as const satisfies Record<SdpEnvironment, TestApiKeyMaterial>;
-const ROLE_API_KEYS = {
-  api_admin: {
-    role: "api_admin",
+const GRANT_API_KEYS = [
+  {
+    label: "every grant",
+    grants: ALL_API_KEY_GRANTS,
     id: "key_project_provider_availability_admin",
     raw: "sk_test_project_provider_availability_admin",
     prefix: "sk_test_ppaa",
   },
-  api_developer: {
-    role: "api_developer",
-    id: "key_project_provider_availability_developer",
-    raw: "sk_test_project_provider_availability_developer",
-    prefix: "sk_test_ppad",
-  },
-  api_readonly: {
-    role: "api_readonly",
+  {
+    label: "projects.read only",
+    grants: ["projects.read"],
     id: "key_project_provider_availability_readonly",
     raw: "sk_test_project_provider_availability_readonly",
     prefix: "sk_test_ppar",
   },
-} as const satisfies { [Role in ApiKeyRole]: TestApiKeyMaterial & { role: Role } };
+] as const satisfies Array<TestApiKeyMaterial & { label: string; grants: readonly Action[] }>;
 const FIXTURE_PROVIDER_OVERRIDES: OrganizationProviderOverrides = {
   compliance: { range: true },
   earn: { veda: true },
@@ -334,28 +337,24 @@ async function setProviderOverrides(overrides: OrganizationProviderOverrides): P
 
 async function seedApiKey(
   key: TestApiKeyMaterial,
-  role: ApiKeyRole,
+  grants: readonly Action[],
   environment: SdpEnvironment
 ): Promise<void> {
-  const permissions = getPermissionsForApiKeyRole(role);
   const keyHash = await seedProjectApiKey(getDb(env), env, {
     key,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_IDS[environment],
     createdBy: USER_ID,
-    role,
-    permissions,
+    grants,
   });
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     id: key.id,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_IDS[environment],
-    role,
-    permissions,
+    grants,
     environment,
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   });
@@ -396,8 +395,8 @@ async function seedFixture(): Promise<void> {
     members: [OTHER_USER_ID],
   });
   await setProviderOverrides(FIXTURE_PROVIDER_OVERRIDES);
-  await seedApiKey(API_KEYS.sandbox, "api_admin", "sandbox");
-  await seedApiKey(API_KEYS.production, "api_admin", "production");
+  await seedApiKey(API_KEYS.sandbox, ALL_API_KEY_GRANTS, "sandbox");
+  await seedApiKey(API_KEYS.production, ALL_API_KEY_GRANTS, "production");
 }
 
 describe("GET /v1/projects/:projectId/provider-availability", () => {
@@ -651,13 +650,25 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     });
   });
 
-  it.for(Object.values(ROLE_API_KEYS))("serves an $role key bound to the project", async (key) => {
-    await seedApiKey(key, key.role, "sandbox");
+  it.for(GRANT_API_KEYS)("serves a key bound to the project holding $label", async (key) => {
+    await seedApiKey(key, key.grants, "sandbox");
 
     const response = await read(PROJECT_IDS.sandbox, apiKeyHeaders(key), deploymentEnv({}));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(availabilityBody(SANDBOX_AVAILABILITY));
+  });
+
+  it("refuses a key without projects.read, naming the action", async () => {
+    const [key] = GRANT_API_KEYS;
+    await seedApiKey(key, ["transfers.execute"], "sandbox");
+
+    const response = await read(PROJECT_IDS.sandbox, apiKeyHeaders(key), deploymentEnv({}));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "projects.read" } },
+    });
   });
 
   it("serves a dashboard session of the project's organization", async () => {
@@ -695,7 +706,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     expect(await response.json()).toEqual(PROJECT_NOT_FOUND_BODY);
   });
 
-  it("returns 404 to an API key bound to an archived project", async () => {
+  // Authentication refuses a key whose project is not active (HOO-2099).
+  it("refuses an API key bound to an archived project", async () => {
     await archiveProject(getDb(env), PROJECT_IDS.sandbox);
 
     const response = await read(
@@ -704,8 +716,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       deploymentEnv({})
     );
 
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual(PROJECT_NOT_FOUND_BODY);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "REVOKED_API_KEY" } });
   });
 
   it("returns 404 to a dashboard session of an archived project's members", async () => {

@@ -1,14 +1,16 @@
-import type { MoonpayRampSettlement } from "@sdp/types";
+import type { MoonpayRampSettlement, RampTransferType } from "@sdp/types/payments";
 import { z } from "zod";
-import { decimalStringFromNumber } from "../../../decimal";
-import type { RampOnchainTransfer, RampSettlementEvent } from "../../types";
+import { decimalStringFromNumber } from "#/decimal";
+import type { RampOnchainTransfer, RampSettlementEvent } from "#/ramps/types";
 
 export type MoonpaySettlementEvent =
   | ({ provider: "moonpay" } & Extract<RampSettlementEvent, { kind: "ignore" }>)
-  | ({ provider: "moonpay"; transferId: string } & Exclude<
-      RampSettlementEvent,
-      { kind: "ignore" }
-    >);
+  | ({
+      provider: "moonpay";
+      transferId: string;
+      providerObservedAt: string;
+      rampType: RampTransferType;
+    } & Exclude<RampSettlementEvent, { kind: "ignore" }>);
 
 const MOONPAY_TRANSACTION_STATUS = {
   waitingPayment: "awaiting_payment",
@@ -31,6 +33,7 @@ export const moonpayBuyTransactionSchema = z.object({
   externalTransactionId: z.string().nullish(),
   failureReason: z.string().nullish(),
   createdAt: z.string().optional(),
+  updatedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value).toISOString()),
   baseCurrencyAmount: z.number().optional(),
   quoteCurrencyAmount: z.number().optional(),
   feeAmount: z.number().optional(),
@@ -113,8 +116,8 @@ function buildMoonpaySettlement(
 
 /**
  * Maps one MoonPay transaction to the provider-agnostic settlement event, the
- * single mapping used by both the webhook processor and the reconciliation
- * cron so the two delivery paths cannot diverge.
+ * single mapping used by both the webhook processor and the status pull
+ * (`fetchTransferStatus`) so the two delivery paths cannot diverge.
  *
  * @param data - The MoonPay transaction payload (webhook `data` or API transaction object).
  * @returns The settlement event, or an ignore event for unmatchable payloads.
@@ -130,8 +133,10 @@ export function moonpayTransactionSettlementEvent(
   const identity: {
     reference: string;
     transferId: string;
+    rampType: "onramp";
     onchain?: RampOnchainTransfer;
-  } = { reference: data.id, transferId };
+    providerObservedAt: string;
+  } = { reference: data.id, transferId, rampType: "onramp", providerObservedAt: data.updatedAt };
   if (onchain !== undefined) {
     identity.onchain = onchain;
   }
@@ -141,6 +146,7 @@ export function moonpayTransactionSettlementEvent(
       provider: "moonpay",
       kind: "ignore",
       reason: `unsupported_status:${data.status}`,
+      unmappedStatus: data.status,
     };
   }
   const kind = MOONPAY_TRANSACTION_STATUS[data.status as keyof typeof MOONPAY_TRANSACTION_STATUS];
@@ -196,6 +202,7 @@ export const moonpaySellTransactionSchema = z.object({
   customerId: z.string().optional(),
   externalTransactionId: z.string().nullish(),
   failureReason: z.string().nullish(),
+  updatedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value).toISOString()),
   baseCurrencyAmount: z.number().optional(),
   quoteCurrencyAmount: z.number().optional(),
   refundWalletAddress: z.string().nullish(),
@@ -211,9 +218,6 @@ function moonpaySellOnchainTransfer(
     return undefined;
   }
   const onchain: RampOnchainTransfer = { signature: data.depositHash };
-  if (data.refundWalletAddress) {
-    onchain.sourceAddress = data.refundWalletAddress;
-  }
   if (data.depositWallet) {
     onchain.destinationAddress = data.depositWallet.walletAddress;
   }
@@ -228,7 +232,7 @@ function moonpaySellOnchainTransfer(
  * event. While the sale waits for its deposit the event carries the deposit
  * wallet and expected crypto amount, so SDP can send the crypto on the
  * customer's behalf — MoonPay may issue a NEW deposit wallet when the
- * customer re-confirms the sale, so the latest event always wins. A
+ * customer re-confirms the sale, so only a newer transaction observation wins. A
  * `requoteRequired` sale stays awaiting payment but carries `cryptoDeposit:
  * null`: the pending instruction is withdrawn until the customer accepts the
  * new quote.
@@ -247,8 +251,10 @@ export function moonpaySellTransactionSettlementEvent(
   const identity: {
     reference: string;
     transferId: string;
+    rampType: "offramp";
     onchain?: RampOnchainTransfer;
-  } = { reference: data.id, transferId };
+    providerObservedAt: string;
+  } = { reference: data.id, transferId, rampType: "offramp", providerObservedAt: data.updatedAt };
   if (onchain !== undefined) {
     identity.onchain = onchain;
   }
@@ -258,6 +264,7 @@ export function moonpaySellTransactionSettlementEvent(
       provider: "moonpay",
       kind: "ignore",
       reason: `unsupported_status:${data.status}`,
+      unmappedStatus: data.status,
     };
   }
   const kind =
@@ -289,16 +296,19 @@ export function moonpaySellTransactionSettlementEvent(
           : {}),
       };
     }
-    case "settled":
-      return {
+    case "settled": {
+      const event: MoonpaySettlementEvent = {
         provider: "moonpay",
         kind,
         ...identity,
         ...providerCustomer,
-        ...(data.quoteCurrencyAmount !== undefined
-          ? { receivedAmount: decimalStringFromNumber(data.quoteCurrencyAmount) }
-          : {}),
       };
+      if (data.refundWalletAddress) event.refundAddress = data.refundWalletAddress;
+      if (data.quoteCurrencyAmount !== undefined) {
+        event.receivedAmount = decimalStringFromNumber(data.quoteCurrencyAmount);
+      }
+      return event;
+    }
     case "failed":
       return {
         provider: "moonpay",

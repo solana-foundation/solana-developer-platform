@@ -2,17 +2,17 @@ import {
   BYOK_CUSTODY_PROVIDERS,
   CUSTODY_PROVIDERS,
   isByokCustodyProvider,
+} from "@sdp/types/custody";
+import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
   resolveSdpReleaseChannel,
+  SDP_BYOK_CUSTODY_PROVIDER_STAGES,
+  SDP_MANAGED_CUSTODY_PROVIDER_STAGES,
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
   type SdpRampProviderStages,
-} from "@sdp/types";
-import {
-  SDP_BYOK_CUSTODY_PROVIDER_STAGES,
-  SDP_MANAGED_CUSTODY_PROVIDER_STAGES,
 } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
@@ -284,8 +284,8 @@ describe("release channels", () => {
         "private_channels",
         "helius_rings",
       ],
-      beta: ["custody", "payments", "recurring_payments", "compliance", "markets", "earn"],
-      stable: ["custody", "payments", "recurring_payments", "compliance"],
+      beta: ["custody", "payments", "recurring_payments", "markets", "earn"],
+      stable: ["custody", "payments", "recurring_payments"],
     });
   });
 

@@ -1,14 +1,12 @@
-import type { CachedApiKey } from "@sdp/types";
-import type { Context } from "hono";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { projectContextMiddleware } from "@/middleware/project-context";
-import { TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { authenticateTestClerkUser, ensureTestClerkIssuer } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
@@ -36,8 +34,8 @@ function buildApp(setup: (c: Context<{ Bindings: Env }>) => void) {
   return app;
 }
 
-function apiKeyContext(environment: "sandbox" | "production"): CachedApiKey {
-  return { ...TEST_CACHED_API_KEY, environment };
+function apiKeyContext(environment: "sandbox" | "production") {
+  return { ...TEST_SEEDED_API_KEY, environment, walletAccess: { scope: "all" } as const };
 }
 
 async function probe(setup: (c: Context<{ Bindings: Env }>) => void) {

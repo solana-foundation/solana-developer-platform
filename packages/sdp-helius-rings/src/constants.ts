@@ -1,14 +1,3 @@
-/**
- * Runtime-iterable enums for the domain. Types derived from these arrays live
- * in `./types.ts` — one source of truth per set.
- */
-
-/** Operation state, ordered along the happy path (draft → completed). `failed` is terminal from any non-terminal state; `voided` is terminal from `failed` only. */
-export {
-  HELIUS_RINGS_OPERATION_STATUSES as OPERATION_STATES,
-  HELIUS_RINGS_OPERATION_TYPES as OP_TYPES,
-} from "@sdp/types";
-
 export const FAILURE_CODES = [
   "proof_failed",
   "signer_failed",

@@ -2,10 +2,12 @@
  * API Error Types and Handlers
  */
 
-import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction";
-import type { CountryCode, IdempotencyErrorCode } from "@sdp/types";
+import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
+import type { CountryCode } from "@sdp/types/countries";
+import type { IdempotencyErrorCode } from "@sdp/types/idempotency";
+import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 
 export type ErrorCode =
   | "BAD_REQUEST"
@@ -218,7 +220,7 @@ export class AppError extends Error {
    * that submitted the data in it, so stripping its own counterparty fields out
    * of a validation error would cost the caller the one thing that makes the
    * error actionable. PII scrubbing belongs at the sinks we read —
-   * `scrubTelemetry` for logs and Sentry, `scrubAuditMetadata` for the ledger.
+   * `scrubTelemetry` for logs, `scrubAuditMetadata` for the ledger.
    */
   toResponse(): ErrorResponse {
     const details = this.details ? redactCredentialSecrets(this.details) : undefined;
@@ -403,27 +405,4 @@ export async function nullOnExpected<T>(
     }
     throw err;
   }
-}
-
-export function redactErrorForCapture(err: Error): Error {
-  const sanitized = new Error(redactCredentialString(err.message));
-  sanitized.name = err.name;
-  sanitized.stack = err.stack ? redactCredentialString(err.stack) : undefined;
-
-  const source = err as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  const target = sanitized as Error & {
-    context?: unknown;
-    cause?: unknown;
-  };
-  if (source.context !== undefined) {
-    target.context = redactCredentialSecrets(source.context);
-  }
-  if (source.cause !== undefined) {
-    target.cause = redactCredentialSecrets(source.cause);
-  }
-
-  return sanitized;
 }

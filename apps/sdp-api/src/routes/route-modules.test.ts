@@ -3,17 +3,15 @@ import {
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
-} from "@sdp/types";
+} from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { routeOwnerOf as ownerOf, ROUTE_OWNERS } from "@/routes/route-modules";
-import { noopObservability } from "@/runtime/observability";
 import { env as baseEnv } from "@/test/helpers/env";
 
 function registeredRoutes() {
   const app = createApp({
-    observability: noopObservability,
     rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
   });
   const routes = new Map<string, { method: string; path: string }>();

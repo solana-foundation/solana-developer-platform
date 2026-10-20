@@ -1,7 +1,7 @@
+import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { DesignSwitch } from "@/components/new-design";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import { cn } from "@/lib/utils";
 import { IssuanceCreateSkeleton as LegacyIssuanceCreateSkeleton } from "./issuance-create-skeleton";
 import { IssuanceDetailSkeleton as LegacyIssuanceDetailSkeleton } from "./issuance-detail-skeleton";
 import { IssuancePageSkeleton as LegacyIssuancePageSkeleton } from "./issuance-page-skeleton";

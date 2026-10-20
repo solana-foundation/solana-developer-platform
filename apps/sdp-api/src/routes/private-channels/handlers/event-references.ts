@@ -1,29 +1,23 @@
-import { hasPermission } from "@sdp/types";
-import type { PrivateChannelReferenceWalletScope } from "@/db/repositories";
-import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
+import type { PrivateChannelReferenceWalletScope } from "@/db/repositories/private-channel-reference.repository";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
-import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
-import type { AppContext } from "../context";
-import { getPrivateChannelReferenceRepository } from "../context";
-import { resolveEventViewer } from "../event-access";
+import { callerMayPerform } from "@/middleware/require-action";
+import {
+  type AppContext,
+  getPrivateChannelReferenceRepository,
+} from "@/routes/private-channels/context";
+import { resolveEventViewer } from "@/routes/private-channels/event-access";
 
-function resolveWalletScope(auth: ApiKeyContext): PrivateChannelReferenceWalletScope {
-  if (!hasPermission(auth.permissions, "wallets:read")) {
-    return { scope: "none" };
-  }
-
-  const walletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["wallets:read"]);
-  if (walletIds === null) {
-    return { scope: "all" };
-  }
-  return walletIds.length > 0 ? { scope: "selected", walletIds } : { scope: "none" };
+/** Wallet labels follow `wallets.read`, project-wide like every read but the wallet list (HOO-2099). */
+function resolveWalletScope(c: AppContext): PrivateChannelReferenceWalletScope {
+  return callerMayPerform(c, "wallets.read") ? { scope: "all" } : { scope: "none" };
 }
 
 /**
  * GET /events/references — flat id→name dictionary for event enrichment.
  * Channels and members follow the same viewer rules as the events feed.
  * Issued-token symbols are project-wide (public on-chain data), and wallet
- * labels follow the same wallets:read and selected-wallet scope as custody.
+ * labels follow the wallets.read action.
  */
 export async function listPrivateChannelEventReferences(c: AppContext) {
   const auth = getAuth(c);
@@ -36,7 +30,7 @@ export async function listPrivateChannelEventReferences(c: AppContext) {
   const rows = await getPrivateChannelReferenceRepository(c).listReferences({
     organizationId: auth.organizationId,
     projectId,
-    walletScope: resolveWalletScope(auth),
+    walletScope: resolveWalletScope(c),
     viewer,
   });
 

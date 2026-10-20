@@ -1,6 +1,12 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -22,11 +28,14 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "correctness": {
         "noUnusedVariables": "error",
         "noUnusedImports": "error",
-        "useExhaustiveDependencies": "warn"
+        "useExhaustiveDependencies": "warn",
+        "noUnusedPrivateClassMembers": "error",
+        "noPrivateImports": "error",
+        "noUndeclaredDependencies": "error"
       },
       "suspicious": {
         "noExplicitAny": "error",
@@ -35,11 +44,30 @@
         "noConfusingVoidType": "error",
         "noAsyncPromiseExecutor": "error",
         "noUnsafeDeclarationMerging": "error",
-        "noVar": "error"
+        "noVar": "error",
+        "noTsIgnore": "error",
+        "noImportCycles": "error"
       },
       "style": {
         "noNonNullAssertion": "warn",
-        "useConst": "error"
+        "useConst": "error",
+        "noEnum": "error",
+        "useImportType": "error",
+        "noDefaultExport": "error",
+        "noExportedImports": "error",
+        "useExportType": "error",
+        "useNodejsImportProtocol": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": ["../**", "!../package.json"],
+                "message": "Parent-relative imports are banned (ADR 0010). Use @/ in an app, #/ inside a package, @sdp/<pkg>/<subpath> across workspaces."
+              }
+            ]
+          }
+        }
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
@@ -49,7 +77,8 @@
           }
         },
         "noBannedTypes": "error",
-        "noUselessTypeConstraint": "error"
+        "noUselessTypeConstraint": "error",
+        "noStaticOnlyClass": "error"
       },
       "security": {
         "noDangerouslySetInnerHtml": "error",
@@ -181,20 +210,28 @@
               "level": "error",
               "options": {
                 "paths": {
-                  "@sdp/types": {
+                  "@sdp/types/unified-transactions": {
                     "importNames": [
                       "UNIFIED_TRANSACTION_MODULES",
-                      "UNIFIED_TRANSACTION_SDP_MODULES",
-                      "SDP_MODULES",
-                      "RAMP_PROVIDERS"
+                      "UNIFIED_TRANSACTION_SDP_MODULES"
                     ],
+                    "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
+                  },
+                  "@sdp/types/release-channels": {
+                    "importNames": ["SDP_MODULES"],
                     "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
                   },
                   "@sdp/types/provider-access": {
                     "importNames": ["RAMP_PROVIDERS"],
                     "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
                   }
-                }
+                },
+                "patterns": [
+                  {
+                    "group": ["../**", "!../package.json"],
+                    "message": "Parent-relative imports are banned (ADR 0010). Use @/ in an app, #/ inside a package, @sdp/<pkg>/<subpath> across workspaces."
+                  }
+                ]
               }
             }
           }
@@ -210,7 +247,17 @@
       "linter": {
         "rules": {
           "style": {
-            "noRestrictedImports": "off"
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["../**", "!../package.json"],
+                    "message": "Parent-relative imports are banned (ADR 0010). Use @/ in an app, #/ inside a package, @sdp/<pkg>/<subpath> across workspaces."
+                  }
+                ]
+              }
+            }
           }
         }
       }
@@ -233,7 +280,13 @@
                     "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
-                }
+                },
+                "patterns": [
+                  {
+                    "group": ["../**", "!../package.json"],
+                    "message": "Parent-relative imports are banned (ADR 0010). Use @/ in an app, #/ inside a package, @sdp/<pkg>/<subpath> across workspaces."
+                  }
+                ]
               }
             }
           }
@@ -271,9 +324,130 @@
                     "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
-                }
+                },
+                "patterns": [
+                  {
+                    "group": ["../**", "!../package.json"],
+                    "message": "Parent-relative imports are banned (ADR 0010). Use @/ in an app, #/ inside a package, @sdp/<pkg>/<subpath> across workspaces."
+                  }
+                ]
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/app/**/page.ts",
+        "**/app/**/page.tsx",
+        "**/app/**/layout.ts",
+        "**/app/**/layout.tsx",
+        "**/app/**/loading.ts",
+        "**/app/**/loading.tsx",
+        "**/app/**/error.ts",
+        "**/app/**/error.tsx",
+        "**/app/**/not-found.ts",
+        "**/app/**/not-found.tsx",
+        "**/app/**/template.ts",
+        "**/app/**/template.tsx",
+        "**/app/**/default.ts",
+        "**/app/**/default.tsx",
+        "**/app/**/global-error.ts",
+        "**/app/**/global-error.tsx",
+        "**/app/**/opengraph-image.ts",
+        "**/app/**/opengraph-image.tsx",
+        "**/app/**/twitter-image.ts",
+        "**/app/**/twitter-image.tsx",
+        "**/app/**/sitemap.ts",
+        "**/app/**/sitemap.tsx",
+        "**/app/**/robots.ts",
+        "**/app/**/robots.tsx",
+        "**/app/**/manifest.ts",
+        "**/app/**/manifest.tsx",
+        "**/src/middleware.ts",
+        "**/src/proxy.ts",
+        "**/src/instrumentation.ts",
+        "**/*.config.ts",
+        "**/*.config.mts",
+        "**/*.config.js",
+        "**/*.config.mjs",
+        "**/mdx-components.tsx",
+        "**/agents/sdp-translation-agent/agent/agent.ts",
+        "**/agents/sdp-translation-agent/agent/channels/*.ts",
+        "**/agents/sdp-translation-agent/agent/tools/*.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/apps/*/src/**/*.ts",
+        "**/apps/*/src/**/*.tsx",
+        "**/packages/*/src/**/*.ts",
+        "**/packages/*/src/**/*.tsx",
+        "!**/packages/sdp-dvp/**",
+        "!**/packages/sdp-spc-escrow/**",
+        "!**/packages/sdp-spc-withdraw/**",
+        "!**/packages/bigint-buffer/**",
+        "!**/app/**/page.ts",
+        "!**/app/**/page.tsx",
+        "!**/app/**/layout.ts",
+        "!**/app/**/layout.tsx",
+        "!**/app/**/loading.ts",
+        "!**/app/**/loading.tsx",
+        "!**/app/**/error.ts",
+        "!**/app/**/error.tsx",
+        "!**/app/**/not-found.ts",
+        "!**/app/**/not-found.tsx",
+        "!**/app/**/template.ts",
+        "!**/app/**/template.tsx",
+        "!**/app/**/default.ts",
+        "!**/app/**/default.tsx",
+        "!**/app/**/global-error.ts",
+        "!**/app/**/global-error.tsx",
+        "!**/app/**/opengraph-image.ts",
+        "!**/app/**/opengraph-image.tsx",
+        "!**/app/**/twitter-image.ts",
+        "!**/app/**/twitter-image.tsx",
+        "!**/app/**/sitemap.ts",
+        "!**/app/**/sitemap.tsx",
+        "!**/app/**/robots.ts",
+        "!**/app/**/robots.tsx",
+        "!**/app/**/manifest.ts",
+        "!**/app/**/manifest.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "error",
+            "noReExportAll": "error"
+          }
+        }
+      },
+      "plugins": ["./.biome-plugins/no-export-from.grit"]
+    },
+    {
+      "includes": ["**/*.mjs", "**/*.cjs", "**/scripts/**", "**/.github/scripts/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnresolvedImports": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/apps/sdp-web/playwright/**", "scripts/**", "**/generated/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
           }
         }
       }

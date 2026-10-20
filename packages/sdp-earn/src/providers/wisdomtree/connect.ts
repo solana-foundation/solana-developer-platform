@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import type { EarnProviderId } from "@sdp/types/provider-access";
-import { providerNotConfigured, providerUnavailable, SdpEarnError } from "../../errors";
-import { providerFetchJson } from "../../fetch";
-import type { EarnRuntimeContext } from "../../types";
+import { providerNotConfigured, providerUnavailable, SdpEarnError } from "#/errors";
+import { providerFetchJson } from "#/fetch";
+import type { EarnRuntimeContext } from "#/types";
 
 /**
  * WisdomTree Connect REST client — the HTTP half of the integration, shared by

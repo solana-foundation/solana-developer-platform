@@ -1,6 +1,6 @@
 "use client";
 
-import type { AssetAuditActorType, AssetAuditEvent } from "@sdp/types";
+import type { AssetAuditActorType, AssetAuditEvent } from "@sdp/types/audit";
 import {
   Activity,
   Ban,
