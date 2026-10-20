@@ -338,6 +338,11 @@ export function createPostgresPaymentsRepository(
 
     const assignments = ["status = ?", "updated_at = ?", ...sql.assignments];
     const assignmentValues: unknown[] = [guard.toStatus, input.updatedAt, ...sql.assignmentValues];
+    // A ramp reaches completed only once its delivery is verified; that moment is its confirmation.
+    if (guard.toStatus === "completed") {
+      assignments.push("confirmed_at = COALESCE(confirmed_at, ?)");
+      assignmentValues.push(input.updatedAt);
+    }
     if (input.sourceAddress !== undefined) {
       assignments.push("source_address = ?");
       assignmentValues.push(input.sourceAddress);

@@ -168,6 +168,13 @@ function onrampReceivedAmount(
   return formatDecimalAmount(baseUnits, decimals);
 }
 
+/** The block time as the ISO string the transfer record stores, or null when the RPC had none. */
+function blockTimeIso(blockTime: bigint | null | undefined): string | null {
+  return blockTime === null || blockTime === undefined
+    ? null
+    : new Date(Number(blockTime) * 1000).toISOString();
+}
+
 async function verifyOnramp(
   repo: PaymentsRepository,
   chain: RampChainReader,
@@ -215,6 +222,7 @@ async function verifyOnramp(
       },
     },
     slot,
+    blockTime: blockTimeIso(transaction.blockTime),
     updatedAt: new Date().toISOString(),
   };
   if (transfer.amount === null) update.amount = amount;

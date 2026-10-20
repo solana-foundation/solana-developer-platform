@@ -79,7 +79,7 @@ async function seedTransfer(input: {
 async function row(id: string) {
   return getDb(env)
     .prepare(
-      "SELECT status, amount, fiat_amount, source_address, destination_address, provider_data FROM payment_transfers WHERE id = ?"
+      "SELECT status, amount, fiat_amount, source_address, destination_address, block_time, confirmed_at, provider_data FROM payment_transfers WHERE id = ?"
     )
     .bind(id)
     .first<{
@@ -88,6 +88,8 @@ async function row(id: string) {
       fiat_amount: string | null;
       source_address: string | null;
       destination_address: string | null;
+      block_time: string | null;
+      confirmed_at: string | null;
       provider_data: Record<string, unknown>;
     }>();
 }
@@ -157,6 +159,8 @@ describe("verifyRampDeliveries", () => {
       fiat_amount: "10",
       source_address: null,
       destination_address: "quoted-destination",
+      block_time: "2026-10-19T00:05:00.000Z",
+      confirmed_at: expect.any(String),
       provider_data: {
         verifiedDelivery: {
           signature: SIG_1,
@@ -434,8 +438,9 @@ describe("verifyRampDeliveries", () => {
       amount: "1",
       fiat_amount: "10",
       destination_address: "quoted-deposit",
+      confirmed_at: expect.any(String),
     });
-    expect((await row("xfr_off_pending"))?.status).toBe("settling");
+    expect(await row("xfr_off_pending")).toMatchObject({ status: "settling", confirmed_at: null });
   });
 
   it("never completes a provider-reported deposit without SDP submission evidence", async () => {
