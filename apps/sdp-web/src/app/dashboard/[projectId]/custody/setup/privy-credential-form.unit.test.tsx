@@ -3,7 +3,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import useSWR, { SWRConfig } from "swr";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   recheckPrivyCredentialAction,
   submitPrivyCredentialAction,
@@ -15,17 +15,11 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT } from "@/test/projects";
+import { generateFireblocksCsrAction, loadFireblocksCsrAction } from "./fireblocks-csr-actions";
 import { PrivyCredentialForm } from "./privy-credential-form";
 
 vi.mock("@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () => ({
-  loadFireblocksCsrAction: vi.fn(async () => ({
-    status: "success",
-    csr: {
-      id: "fbcsr_11111111-1111-4111-8111-111111111111",
-      csrPem: "public-csr",
-      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-    },
-  })),
+  loadFireblocksCsrAction: vi.fn(),
   generateFireblocksCsrAction: vi.fn(),
   loadFireblocksVaultsAction: vi.fn(async () => ({
     status: "success",
@@ -72,7 +66,111 @@ describe("PrivyCredentialForm", () => {
     dashboardRouter.push.mockClear();
     vi.mocked(submitPrivyCredentialAction).mockReset();
     vi.mocked(recheckPrivyCredentialAction).mockReset();
+    vi.mocked(loadFireblocksCsrAction)
+      .mockReset()
+      .mockResolvedValue({
+        status: "success",
+        csr: {
+          id: "fbcsr_11111111-1111-4111-8111-111111111111",
+          csrPem: "public-csr",
+          expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+        },
+      });
+    vi.mocked(generateFireblocksCsrAction).mockReset();
   });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("reloads registration after every rejected Fireblocks attempt and connects with a fresh CSR", async () => {
+    const csrs = [1, 2, 3].map((attempt) => ({
+      id: `fbcsr_attempt_${attempt}`,
+      csrPem: `public-csr-${attempt}`,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }));
+    vi.mocked(loadFireblocksCsrAction)
+      .mockResolvedValueOnce({ status: "success", csr: csrs[0] })
+      .mockResolvedValueOnce({ status: "success", csr: null })
+      .mockResolvedValueOnce({ status: "success", csr: null });
+    vi.mocked(generateFireblocksCsrAction)
+      .mockResolvedValueOnce({ status: "success", csr: csrs[1] })
+      .mockResolvedValueOnce({ status: "success", csr: csrs[2] });
+    vi.mocked(submitPrivyCredentialAction)
+      .mockResolvedValueOnce({ status: "failed", message: "Rejected", connectionId: "cconn_test" })
+      .mockResolvedValueOnce({ status: "failed", message: "Rejected", connectionId: "cconn_test" })
+      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL() {
+          return "blob:csr";
+        }
+        static revokeObjectURL() {}
+      }
+    );
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    renderForm("fireblocks");
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        const generate = await screen.findByRole("button", { name: "Generate and download CSR" });
+        expect(screen.getByRole("button", { name: "Connect and verify" })).toHaveProperty(
+          "disabled",
+          true
+        );
+        expect(screen.queryByRole("checkbox")).toBeNull();
+        expect(screen.getByLabelText("API user ID")).toHaveProperty("value", "");
+        await user.click(generate);
+      }
+      await screen.findByRole("button", { name: "Download CSR" });
+      await user.type(screen.getByLabelText("API user ID"), `api-user-${attempt}`);
+      await user.click(screen.getByRole("button", { name: "Load vaults" }));
+      await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
+      await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+      await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(attempt + 1));
+      const payload = vi.mocked(submitPrivyCredentialAction).mock.calls[attempt][0];
+      expect(payload.get("signingKeyId")).toBe(csrs[attempt].id);
+      if (attempt > 0) {
+        expect(payload.get("connectionId")).toBe("cconn_test");
+        expect(submittedKey(attempt)).not.toBe(submittedKey(attempt - 1));
+      }
+    }
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
+  });
+
+  it.each(["invalid", "error"] as const)(
+    "retains the Fireblocks CSR and submission key for an %s result",
+    async (status) => {
+      vi.mocked(submitPrivyCredentialAction)
+        .mockResolvedValueOnce({ status, message: "Try again" })
+        .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
+      const user = userEvent.setup();
+      renderForm("fireblocks");
+      await screen.findByRole("button", { name: "Download CSR" });
+      await user.type(screen.getByLabelText("API user ID"), "api-user");
+      await user.click(screen.getByRole("button", { name: "Load vaults" }));
+      await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
+      await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+      if (status === "invalid") {
+        await screen.findByText("Try again");
+        expect(screen.getByLabelText("API user ID")).toHaveProperty("value", "api-user");
+        expect(screen.getByRole("checkbox", { name: /Treasury/ })).toHaveProperty("checked", true);
+      }
+      await user.click(
+        await screen.findByRole("button", {
+          name: status === "error" ? "Retry submission" : "Connect and verify",
+        })
+      );
+      await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
+      const calls = vi.mocked(submitPrivyCredentialAction).mock.calls;
+      expect(calls[1][0].get("signingKeyId")).toBe(calls[0][0].get("signingKeyId"));
+      expect(submittedKey(1)).toBe(submittedKey(0));
+    }
+  );
 
   it("submits the generated Fireblocks key reference and never requests a private key", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValue({

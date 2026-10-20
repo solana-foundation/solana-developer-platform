@@ -63,7 +63,7 @@ function CredentialFields({
   defaultLabel: string;
   onAppSecretChange: (value: string) => void;
   onFireblocksReadyChange: (ready: boolean) => void;
-  fireblocksResetKey: string;
+  fireblocksResetKey: number;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
@@ -212,6 +212,7 @@ function usePrivyCredentialSubmission({
   const refreshWalletInventory = useWalletInventoryRefresh();
   const [isPending, startTransition] = useTransition();
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [credentialAttempt, setCredentialAttempt] = useState(0);
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
   const [appSecret, setAppSecret] = useState("");
   const lastPayloadRef = useRef(new FormData());
@@ -266,6 +267,9 @@ function usePrivyCredentialSubmission({
       // of colliding with it as a fresh submission.
       onRecoveryLockChange?.(false);
       setIdempotencyKey(crypto.randomUUID());
+      // Each rejection can consume the CSR, including consecutive failures
+      // with the same check.kind. Validation errors and unknown outcomes keep it.
+      setCredentialAttempt((attempt) => attempt + 1);
       setAppSecret("");
       setCheck({ kind: "failed", message: result.message, connectionId: result.connectionId });
       return;
@@ -349,7 +353,16 @@ function usePrivyCredentialSubmission({
     });
   };
 
-  return { appSecret, check, handleRecheck, handleReplay, handleSubmit, isPending, setAppSecret };
+  return {
+    appSecret,
+    check,
+    credentialAttempt,
+    handleRecheck,
+    handleReplay,
+    handleSubmit,
+    isPending,
+    setAppSecret,
+  };
 }
 
 /** The four statuses whose render replaces the form with a recovery panel. */
@@ -509,13 +522,21 @@ export function ByokCredentialForm({
   onPendingChange?: (pending: boolean) => void;
 }) {
   const t = useTranslations();
-  const { appSecret, check, handleRecheck, handleReplay, handleSubmit, isPending, setAppSecret } =
-    usePrivyCredentialSubmission({
-      onPendingChange,
-      onRecoveryChange,
-      onRecoveryLockChange,
-      onSuccess,
-    });
+  const {
+    appSecret,
+    check,
+    credentialAttempt,
+    handleRecheck,
+    handleReplay,
+    handleSubmit,
+    isPending,
+    setAppSecret,
+  } = usePrivyCredentialSubmission({
+    onPendingChange,
+    onRecoveryChange,
+    onRecoveryLockChange,
+    onSuccess,
+  });
 
   const [fireblocksReady, setFireblocksReady] = useState(false);
   const ready = provider !== "fireblocks" || fireblocksReady;
@@ -559,7 +580,7 @@ export function ByokCredentialForm({
         defaultLabel={defaultLabel}
         onAppSecretChange={setAppSecret}
         onFireblocksReadyChange={setFireblocksReady}
-        fireblocksResetKey={check.kind}
+        fireblocksResetKey={credentialAttempt}
         t={t}
       />
 

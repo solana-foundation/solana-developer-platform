@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
+import { isFireblocksByokWallet } from "@/app/dashboard/[projectId]/payments/fireblocks-wallet";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import type { CreateTransferInput } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
@@ -338,7 +339,7 @@ export function useOnchainSendWizard({
     useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
   useFireblocksDestination({
     enabled:
-      selectedWallet?.provider === "fireblocks" && !signingUnavailable && !submitting && !finished,
+      isFireblocksByokWallet(selectedWallet) && !signingUnavailable && !submitting && !finished,
     walletId: fields.walletId,
     counterpartyId,
     accountId: selectedAccount?.id ?? "",

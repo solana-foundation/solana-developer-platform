@@ -370,6 +370,32 @@ Verification for this rebase:
 No unresolved critical/high-severity issue was identified in this scoped source review. The
 repository-wide SVG lint findings and live-provider limitations above remain explicit exceptions.
 
+### Greptile follow-up — 2026-10-20
+
+All three findings on [PR #2455](https://github.com/solana-foundation/solana-developer-platform/pull/2455)
+still applied after the rebase and are corrected:
+
+- [Repeated setup failures](https://github.com/solana-foundation/solana-developer-platform/pull/2455#discussion_r4328491935):
+  a separate attempt counter reloads Fireblocks registration after every conclusive rejection,
+  even when the preceding result was also `failed`. Client validation failures retain the CSR
+  and selections; an uncertain submission still replays its frozen payload with the original key.
+- [Managed-wallet instructions and checks](https://github.com/solana-foundation/solana-developer-platform/pull/2455#discussion_r4328491946):
+  both Pay designs use one predicate requiring the Fireblocks provider and a custody connection
+  ID. Managed Fireblocks wallets no longer receive native-transfer fee/memo instructions or
+  calls to BYOK-only destination/policy endpoints. A fully populated managed-wallet selection
+  now makes zero advisory requests, down from two; BYOK retains its two debounced reads.
+  No signing, submission, or Solana RPC behavior changes.
+- [Translation ownership](https://github.com/solana-foundation/solana-developer-platform/pull/2455#discussion_r4328491953):
+  Spanish, French, Portuguese and Vietnamese custody catalogs match main exactly. Product copy
+  remains in English source catalogs; release automation owns localized updates.
+
+Regression tests reproduced the failures before the fixes. They cover two consecutive credential
+rejections followed by success, validation and uncertain-outcome retries, and wallet switching
+between managed Fireblocks, BYOK Fireblocks and Privy in both Pay designs. The full dashboard
+suite passes **388 files / 3,581 tests**, including coverage thresholds. Dashboard typechecking,
+changed-file Biome, module boundaries, UI copy audit and catalog ownership checks pass.
+No live Fireblocks request or customer transaction was made.
+
 ### Existing local databases from the unreleased branch
 
 The old branch used migration names 0127–0130, now occupied by main. A fresh database needs no

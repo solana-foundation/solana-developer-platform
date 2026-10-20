@@ -242,7 +242,12 @@ describe("OnchainSendStepContent", () => {
     renderStep({
       ...baseWizard,
       currentStepId: "REVIEW",
-      selectedWallet: { ...labeledWallet, provider: "fireblocks" },
+      selectedWallet: {
+        ...labeledWallet,
+        provider: "fireblocks",
+        custodyConfigId: undefined,
+        custodyConnectionId: "cconn_fireblocks",
+      },
       transferResult: {
         id: "xfr_fireblocks",
         custodyWalletId: labeledWallet.id,

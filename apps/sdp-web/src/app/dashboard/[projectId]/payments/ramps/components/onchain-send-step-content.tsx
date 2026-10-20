@@ -16,6 +16,7 @@ import {
 import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
+import { isFireblocksByokWallet } from "@/app/dashboard/[projectId]/payments/fireblocks-wallet";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import type { OnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard";
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
@@ -215,7 +216,7 @@ function DetailsStep({ wizard }: StepProps) {
       </div>
       <FireblocksTransferPolicy
         enabled={
-          wizard.selectedWallet?.provider === "fireblocks" && !wizard.submitting && !wizard.finished
+          isFireblocksByokWallet(wizard.selectedWallet) && !wizard.submitting && !wizard.finished
         }
         selection={{
           walletId: wizard.fields.walletId,
@@ -278,7 +279,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           />
         )}
       </div>
-      {selectedWallet?.provider === "fireblocks" ? (
+      {isFireblocksByokWallet(selectedWallet) ? (
         <p className="text-sm text-secondary">
           {t("DashboardPayments.onchainSend.fireblocksReview")}
         </p>

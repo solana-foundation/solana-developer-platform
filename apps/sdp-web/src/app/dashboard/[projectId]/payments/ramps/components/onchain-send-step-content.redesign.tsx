@@ -21,6 +21,7 @@ import {
 import Link from "next/link";
 import { useMemo } from "react";
 import { NewSolanaAddressForm } from "@/app/dashboard/[projectId]/payments/counterparty/new-solana-address-form";
+import { isFireblocksByokWallet } from "@/app/dashboard/[projectId]/payments/fireblocks-wallet";
 import {
   formatTokenAmount,
   shortenAddress,
@@ -358,7 +359,7 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
       <PrivateSendOption status={privateSend ?? null} />
       <FireblocksTransferPolicy
         enabled={
-          wizard.selectedWallet?.provider === "fireblocks" && !wizard.submitting && !wizard.finished
+          isFireblocksByokWallet(wizard.selectedWallet) && !wizard.submitting && !wizard.finished
         }
         selection={{
           walletId: wizard.fields.walletId,
@@ -421,7 +422,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           </DetailRow>
         )}
       </DetailList>
-      {selectedWallet?.provider === "fireblocks" ? (
+      {isFireblocksByokWallet(selectedWallet) ? (
         <p className="text-sm text-secondary">
           {t("DashboardPayments.onchainSend.fireblocksReview")}
         </p>
