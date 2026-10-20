@@ -7340,6 +7340,60 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
       });
 
+      it("fails a replacement whose saved setup never broadcast, back on its old mandate", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(oldSubscriptionPda, null, DEFAULT_RECURRING_CHAIN);
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await update()).status).toBe(409);
+        await leaveUpdateCrashedAt(activated.id, key);
+        // The run saved the source wallet's setup and died before subscribe.
+        const setupSaved = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_update_attempts
+                SET authorization_setup_signature = ?, authorization_signature = NULL,
+                    last_valid_block_height = ?
+              WHERE recurring_payment_id = ? AND status = 'processing'`
+          )
+          .bind(testSignature(8), SAVED_SEND_EXPIRY, activated.id)
+          .run();
+        expect(setupSaved).toBe(1);
+        // Neither the subscription authority nor a delegating token account shows.
+        delegationsBesideActiveOld(oldSubscriptionPda, null, PAST_SAVED_EXPIRY);
+        const sent = sends();
+
+        const retry = await update();
+
+        expect(retry.status).toBe(400);
+        expect(await errorCode(retry)).toBe("TRANSACTION_FAILED");
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "failed",
+          stage: "authorize_subscription",
+          authorization_setup_signature: null,
+          authorization_signature: null,
+        });
+        const current = await app.request(
+          actionPath(activated.id),
+          { headers: RECURRING_HEADERS },
+          env
+        );
+        expect((await parseRecurringResponse(current)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: activated.amount,
+          planId: activated.planId,
+          subscriptionId: activated.subscriptionId,
+          authorizationSignature: activated.authorizationSignature,
+        });
+      });
+
       it("keeps a stalled update's saved authorization in flight while it can still land", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const oldSubscriptionPda = required(activated.subscriptionPda);
