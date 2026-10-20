@@ -984,20 +984,8 @@ async function runMetadataScheduleUpdate(input: {
           env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          save: async (signature) => {
-            attempt = requireUpdatedAttempt(
-              await recurringRepo.updateUpdateAttempt({
-                attemptId: attempt.id,
-                organizationId: input.organizationId,
-                projectId: input.projectId,
-                planUpdateSignature: signature,
-                updatedAt: new Date().toISOString(),
-              })
-            );
-          },
-          rows: [
-            { slot: { row: "update_attempt", column: "plan_update_signature" }, id: attempt.id },
-          ],
+          slot: { row: "update_attempt", column: "plan_update_signature" },
+          attemptId: attempt.id,
         }),
       });
       await confirmSubscriptionSignature(
@@ -1079,23 +1067,8 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      save: async (signature) => {
-        requireUpdatedAttempt(
-          await input.recurringRepo.updateUpdateAttempt({
-            attemptId: input.attempt.id,
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            authorizationSetupSignature: signature,
-            updatedAt: new Date().toISOString(),
-          })
-        );
-      },
-      rows: [
-        {
-          slot: { row: "update_attempt", column: "authorization_setup_signature" },
-          id: input.attempt.id,
-        },
-      ],
+      slot: { row: "update_attempt", column: "authorization_setup_signature" },
+      attemptId: input.attempt.id,
     }),
   });
   await confirmSubscriptionSignature(initSignature, "Recurring payment update failed on-chain");
@@ -1540,20 +1513,8 @@ async function runReplacementUpdate(input: {
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        save: async (signature) => {
-          attempt = requireUpdatedAttempt(
-            await recurringRepo.updateUpdateAttempt({
-              attemptId: attempt.id,
-              organizationId: input.organizationId,
-              projectId: input.projectId,
-              planCreationSignature: signature,
-              updatedAt: new Date().toISOString(),
-            })
-          );
-        },
-        rows: [
-          { slot: { row: "update_attempt", column: "plan_creation_signature" }, id: attempt.id },
-        ],
+        slot: { row: "update_attempt", column: "plan_creation_signature" },
+        attemptId: attempt.id,
       }),
     });
     await confirmSubscriptionSignature(
@@ -1696,20 +1657,8 @@ async function runReplacementUpdate(input: {
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        save: async (signature) => {
-          attempt = requireUpdatedAttempt(
-            await recurringRepo.updateUpdateAttempt({
-              attemptId: attempt.id,
-              organizationId: input.organizationId,
-              projectId: input.projectId,
-              authorizationSignature: signature,
-              updatedAt: new Date().toISOString(),
-            })
-          );
-        },
-        rows: [
-          { slot: { row: "update_attempt", column: "authorization_signature" }, id: attempt.id },
-        ],
+        slot: { row: "update_attempt", column: "authorization_signature" },
+        attemptId: attempt.id,
       }),
     });
     await confirmSubscriptionSignature(
@@ -1775,18 +1724,8 @@ async function runReplacementUpdate(input: {
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        save: async (signature) => {
-          attempt = requireUpdatedAttempt(
-            await recurringRepo.updateUpdateAttempt({
-              attemptId: attempt.id,
-              organizationId: input.organizationId,
-              projectId: input.projectId,
-              oldCancelSignature: signature,
-              updatedAt: new Date().toISOString(),
-            })
-          );
-        },
-        rows: [{ slot: { row: "update_attempt", column: "old_cancel_signature" }, id: attempt.id }],
+        slot: { row: "update_attempt", column: "old_cancel_signature" },
+        attemptId: attempt.id,
       }),
     });
     await confirmSubscriptionSignature(

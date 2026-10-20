@@ -41,6 +41,7 @@ import type {
   RecoverableCollectionRecurringPaymentRow,
   RecurringPaymentActivator,
   RecurringPaymentStepSignatureSlot,
+  SetPaymentRecurringPaymentStepSignatureInput,
   StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
@@ -329,7 +330,6 @@ async function getUpdateEventByIdInternal(
 }
 
 const STEP_SIGNATURE_TABLES = {
-  recurring_payment: "payment_recurring_payments",
   activation_attempt: "payment_recurring_payment_activation_attempts",
   update_attempt: "payment_recurring_payment_update_attempts",
   lifecycle_attempt: "payment_recurring_payment_lifecycle_attempts",
@@ -941,7 +941,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   authorization_signature =
                     CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
-                  metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
                   idempotency_key = COALESCE(idempotency_key, ?),
                   updated_at = ?
             WHERE id = ?
@@ -957,8 +956,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.authorizationSignature ?? null,
           input.error !== undefined,
           input.error ?? null,
-          input.metadata !== undefined,
-          input.metadata === undefined ? null : JSON.stringify(input.metadata),
           input.adoptIdempotencyKey ?? null,
           input.updatedAt,
           input.attemptId,
@@ -1230,26 +1227,47 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       });
     },
 
-    async clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput) {
+    async setStepSignature(input: SetPaymentRecurringPaymentStepSignatureInput) {
       const table = STEP_SIGNATURE_TABLES[input.slot.row];
       const { column } = input.slot;
       // Table and column come from the typed slot, never from caller text.
-      const [assignment, match] =
-        column === "metadata.authorizationSetupSignature"
-          ? [
-              "metadata = metadata - 'authorizationSetupSignature'",
-              "metadata ->> 'authorizationSetupSignature' = ?",
-            ]
-          : [`${column} = NULL`, `${column} = ?`];
       const rowsAffected = await db
         .prepare(
           `UPDATE ${table}
-              SET ${assignment},
+              SET ${column} = ?,
+                  last_valid_block_height = ?::numeric,
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND ${match}`
+              AND ${column} IS NULL`
+        )
+        .bind(
+          input.signature,
+          input.lastValidBlockHeight,
+          input.updatedAt,
+          input.id,
+          input.organizationId,
+          input.projectId
+        )
+        .run();
+      return rowsAffected > 0;
+    },
+
+    async clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput) {
+      const table = STEP_SIGNATURE_TABLES[input.slot.row];
+      const { column } = input.slot;
+      // Table and column come from the typed slot, never from caller text.
+      const rowsAffected = await db
+        .prepare(
+          `UPDATE ${table}
+              SET ${column} = NULL,
+                  last_valid_block_height = NULL,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND ${column} = ?`
         )
         .bind(input.updatedAt, input.id, input.organizationId, input.projectId, input.signature)
         .run();

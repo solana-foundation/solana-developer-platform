@@ -335,17 +335,16 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
 }
 
 /**
- * Where one subscription step's saved signature lives. Activation's authority-setup signature is a
- * key in its attempt's `metadata`, not a column.
+ * Where one subscription step's saved signature lives: always its attempt row. The schedule row's
+ * signatures are written once the step lands.
  */
 export type RecurringPaymentStepSignatureSlot =
-  | { row: "recurring_payment"; column: "plan_creation_signature" | "authorization_signature" }
   | {
       row: "activation_attempt";
       column:
         | "plan_creation_signature"
-        | "authorization_signature"
-        | "metadata.authorizationSetupSignature";
+        | "authorization_setup_signature"
+        | "authorization_signature";
     }
   | {
       row: "update_attempt";
@@ -358,9 +357,21 @@ export type RecurringPaymentStepSignatureSlot =
     }
   | { row: "lifecycle_attempt"; column: "signature" };
 
+export interface SetPaymentRecurringPaymentStepSignatureInput {
+  slot: RecurringPaymentStepSignatureSlot;
+  /** The attempt's id. */
+  id: string;
+  organizationId: string;
+  projectId: string;
+  signature: string;
+  /** The last block height at which the signed transaction can land, as a u64 decimal string. */
+  lastValidBlockHeight: string;
+  updatedAt: string;
+}
+
 export interface ClearPaymentRecurringPaymentStepSignatureInput {
   slot: RecurringPaymentStepSignatureSlot;
-  /** The recurring payment's id for `recurring_payment`, otherwise the attempt's. */
+  /** The attempt's id. */
   id: string;
   organizationId: string;
   projectId: string;
@@ -414,7 +425,6 @@ export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
   planCreationSignature?: string | null;
   authorizationSignature?: string | null;
   error?: string | null;
-  metadata?: Record<string, unknown>;
   /**
    * A keyed request that adopts this attempt (a stale claim, a takeover)
    * records its Idempotency-Key on it when it has none (HOO-1918), so a retry
@@ -630,8 +640,14 @@ export interface PaymentRecurringPaymentsRepository {
     input: UpdatePaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
   /**
-   * Null a step's saved signature after its send was provably refused, only while the slot still
-   * holds that signature.
+   * Save a step's signature and expiry before its send, only while the slot is empty.
+   *
+   * @returns False when the slot already holds a signature.
+   */
+  setStepSignature(input: SetPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
+  /**
+   * Null a step's saved signature and expiry after its send was provably refused, only while the
+   * slot still holds that signature.
    *
    * @returns False when the slot no longer holds it.
    */

@@ -30,17 +30,19 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
-import { type DatabaseExecutor, getDb } from "@/db/client";
+import type { DatabaseExecutor } from "@/db/client";
 import type {
   PaymentRecurringPaymentRow,
   RecurringPaymentStepSignatureSlot,
 } from "@/db/repositories/payment-recurring-payments.repository";
-import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
-import { createTokenRepository } from "@/db/repositories/repository-factory";
+import {
+  createPaymentRecurringPaymentsRepository,
+  createTokenRepository,
+} from "@/db/repositories/repository-factory";
 import type { ApiKeyLifecycleColumns } from "@/lib/api-key-rotation";
 import {
   AppError,
@@ -289,57 +291,60 @@ export async function sendSubscriptionInstructions(input: {
   });
 }
 
-/** A row holding one of a step's saved signatures. */
-export interface SubscriptionStepSignatureRow {
-  slot: RecurringPaymentStepSignatureSlot;
-  /** The recurring payment's id for `recurring_payment`, otherwise the attempt's. */
-  id: string;
-}
-
 /**
- * The submission store every subscription step sends with. `save` writes the step's signature
- * column(s) before the send; after a provably refused send, `rows` are cleared, each only while
- * it still holds that signature, so a retry sends again instead of waiting on a transaction that
- * never left. Recovery reads the saved signature and the chain, so there is no started marker.
+ * The submission store every subscription step sends with. The step's signature and expiry are
+ * saved on its attempt row before the send, only into an empty slot; after a provably refused
+ * send the slot is cleared, only while it still holds that signature, so a retry sends again
+ * instead of waiting on a transaction that never left. Recovery reads the saved signature and the
+ * chain, so there is no started marker.
  *
- * @param step - The step's tenant, signature writer and the rows `save` writes.
+ * @param step - The step's tenant, attempt id and signature slot.
  * @returns The store.
  */
 export function createSubscriptionStepStore(step: {
   env: Env;
   organizationId: string;
   projectId: string;
-  save: (signature: Signature) => Promise<void>;
-  rows: readonly SubscriptionStepSignatureRow[];
+  slot: RecurringPaymentStepSignatureSlot;
+  attemptId: string;
 }): SignedSubmissionStore {
+  const recurringRepo = createPaymentRecurringPaymentsRepository(step.env, createTenantScope(step));
+  const target = {
+    slot: step.slot,
+    id: step.attemptId,
+    organizationId: step.organizationId,
+    projectId: step.projectId,
+  };
   return {
-    persistSigned: ({ signature }) => step.save(signature),
+    persistSigned: async ({ signature, lastValidBlockHeight }) => {
+      const saved = await recurringRepo.setStepSignature({
+        ...target,
+        signature,
+        lastValidBlockHeight,
+        updatedAt: new Date().toISOString(),
+      });
+      if (!saved) {
+        throw conflict("Recurring payment step signature changed concurrently");
+      }
+    },
     markStarted: async () => {},
     hasStarted: async () => false,
     clearSigned: async (signature) => {
-      const updatedAt = new Date().toISOString();
-      await getDb(step.env).transaction(async (tx) => {
-        const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-        for (const row of step.rows) {
-          const cleared = await recurringRepo.clearStepSignature({
-            ...row,
-            organizationId: step.organizationId,
-            projectId: step.projectId,
-            signature,
-            updatedAt,
-          });
-          getLogger().info(
-            {
-              project_id: step.projectId,
-              row_id: row.id,
-              slot: `${row.slot.row}.${row.slot.column}`,
-              signature,
-              cleared,
-            },
-            "Recurring payment step signature cleared after a refused send"
-          );
-        }
+      const cleared = await recurringRepo.clearStepSignature({
+        ...target,
+        signature,
+        updatedAt: new Date().toISOString(),
       });
+      getLogger().info(
+        {
+          project_id: step.projectId,
+          attempt_id: step.attemptId,
+          slot: `${step.slot.row}.${step.slot.column}`,
+          signature,
+          cleared,
+        },
+        "Recurring payment step signature cleared after a refused send"
+      );
     },
   };
 }

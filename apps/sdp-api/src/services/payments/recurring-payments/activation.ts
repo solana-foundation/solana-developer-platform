@@ -579,23 +579,8 @@ async function prepareSubscriptionAuthorityForActivation(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      save: async (signature) => {
-        requireUpdatedAttempt(
-          await input.recurringRepo.updateActivationAttempt({
-            attemptId: input.attempt.id,
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            metadata: { authorizationSetupSignature: signature },
-            updatedAt: new Date().toISOString(),
-          })
-        );
-      },
-      rows: [
-        {
-          slot: { row: "activation_attempt", column: "metadata.authorizationSetupSignature" },
-          id: input.attempt.id,
-        },
-      ],
+      slot: { row: "activation_attempt", column: "authorization_setup_signature" },
+      attemptId: input.attempt.id,
     }),
   });
   await confirmSubscriptionSignature(initSignature, "Recurring payment activation failed on-chain");
@@ -716,16 +701,8 @@ export async function activateRecurringPayment(input: {
   const { attempt, claimed } = claimResult;
 
   let currentStage: PaymentRecurringPaymentActivationAttemptStage = "create_plan";
-  let planCreationSignature = parseNullableStoredSignature(
-    claimed.plan_creation_signature !== null
-      ? claimed.plan_creation_signature
-      : attempt.plan_creation_signature
-  );
-  let authorizationSignature = parseNullableStoredSignature(
-    claimed.authorization_signature !== null
-      ? claimed.authorization_signature
-      : attempt.authorization_signature
-  );
+  let planCreationSignature = parseNullableStoredSignature(attempt.plan_creation_signature);
+  let authorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
 
   try {
     if (recoveringStaleActivation && (!planCreationSignature || !authorizationSignature)) {
@@ -837,41 +814,8 @@ export async function activateRecurringPayment(input: {
           env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          save: (signature) =>
-            getDb(input.env).transaction(async (tx) => {
-              const signatureUpdatedAt = new Date().toISOString();
-              const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-              const updatedRecurringPayment =
-                await txRecurringRepo.updateRecurringPaymentActivation({
-                  recurringPaymentId: claimed.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  planCreationSignature: signature,
-                  updatedAt: signatureUpdatedAt,
-                });
-              if (updatedRecurringPayment === null) {
-                throw conflict("Recurring payment activation changed concurrently");
-              }
-              requireUpdatedAttempt(
-                await txRecurringRepo.updateActivationAttempt({
-                  attemptId: attempt.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  planCreationSignature: signature,
-                  updatedAt: signatureUpdatedAt,
-                })
-              );
-            }),
-          rows: [
-            {
-              slot: { row: "recurring_payment", column: "plan_creation_signature" },
-              id: claimed.id,
-            },
-            {
-              slot: { row: "activation_attempt", column: "plan_creation_signature" },
-              id: attempt.id,
-            },
-          ],
+          slot: { row: "activation_attempt", column: "plan_creation_signature" },
+          attemptId: attempt.id,
         }),
       });
       onChainPlan = await confirmActivationPlan({ rpc, planPda, planCreationSignature });
@@ -894,6 +838,7 @@ export async function activateRecurringPayment(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       planCreatedAt,
+      planCreationSignature,
       updatedAt: new Date().toISOString(),
     });
 
@@ -1026,41 +971,8 @@ export async function activateRecurringPayment(input: {
           env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          save: (signature) =>
-            getDb(input.env).transaction(async (tx) => {
-              const signatureUpdatedAt = new Date().toISOString();
-              const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-              const updatedRecurringPayment =
-                await txRecurringRepo.updateRecurringPaymentActivation({
-                  recurringPaymentId: claimed.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  authorizationSignature: signature,
-                  updatedAt: signatureUpdatedAt,
-                });
-              if (updatedRecurringPayment === null) {
-                throw conflict("Recurring payment activation changed concurrently");
-              }
-              requireUpdatedAttempt(
-                await txRecurringRepo.updateActivationAttempt({
-                  attemptId: attempt.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  authorizationSignature: signature,
-                  updatedAt: signatureUpdatedAt,
-                })
-              );
-            }),
-          rows: [
-            {
-              slot: { row: "recurring_payment", column: "authorization_signature" },
-              id: claimed.id,
-            },
-            {
-              slot: { row: "activation_attempt", column: "authorization_signature" },
-              id: attempt.id,
-            },
-          ],
+          slot: { row: "activation_attempt", column: "authorization_signature" },
+          attemptId: attempt.id,
         }),
       });
       currentStage = "finalize";

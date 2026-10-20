@@ -690,6 +690,18 @@ async function runRecurringPaymentLifecycle(
                 : onChainSubscription,
           });
 
+    const stagedAttempt = await recurringRepo.updateLifecycleAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stage: currentStage,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+    if (stagedAttempt === null) {
+      throw conflict("Recurring payment lifecycle attempt changed concurrently");
+    }
+    attempt = stagedAttempt;
     signature = await sendSubscriptionInstructions({
       movement: LIFECYCLE_MOVEMENTS[input.operation],
       env: input.env,
@@ -702,23 +714,8 @@ async function runRecurringPaymentLifecycle(
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        save: async (savedSignature) => {
-          const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
-            attemptId: attempt.id,
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            stage: currentStage,
-            signature: savedSignature,
-            error: null,
-            updatedAt: new Date().toISOString(),
-          });
-          if (updatedAttempt === null) {
-            throw conflict("Recurring payment lifecycle attempt changed concurrently");
-          }
-          attempt = updatedAttempt;
-          signature = savedSignature;
-        },
-        rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
+        slot: { row: "lifecycle_attempt", column: "signature" },
+        attemptId: attempt.id,
       }),
     });
 
@@ -747,6 +744,18 @@ async function runRecurringPaymentLifecycle(
       },
       "Recurring payment lifecycle operation failed"
     );
+    // The step store saved this run's signature before the send; a send error leaves it unknown here.
+    const latestAttempt = await recurringRepo.getLatestLifecycleAttempt({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: claimed.id,
+      operation: input.operation,
+      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+    });
+    if (latestAttempt !== null && latestAttempt.id === attempt.id) {
+      attempt = latestAttempt;
+      signature = parseNullableStoredSignature(latestAttempt.signature);
+    }
     const failedAt = new Date().toISOString();
     // Failed on chain, or refused at preflight (its saved signature already cleared).
     const definitelyFailed = isDefiniteSubmissionError(error);
