@@ -604,6 +604,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         ...tenant,
         slot,
         id,
+        recurringPaymentId,
         signature: testSignature(seed),
         lastValidBlockHeight: height,
         updatedAt: STEP_UPDATED_AT,

@@ -21,6 +21,7 @@ import {
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
+  removeNullCharacters,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   signature,
@@ -6721,7 +6722,7 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).not.toBe("active");
       });
 
-      it("keeps a resumed metadata update in flight when the chain read fails", async () => {
+      it("keeps a resumed metadata update in flight when the chain read fails, then resends it expecting the recorded plan", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
         const metadataUri = "https://example.com/recurring/unsettled.json";
@@ -6759,6 +6760,41 @@ describe("Payments routes — recurring", () => {
           .bind(activated.id)
           .first<{ status: PaymentRecurringPaymentAttemptStatus }>();
         expect(attempt?.status).toBe("processing");
+
+        await leaveUpdateCrashedAt(activated.id, key);
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_update_attempts
+                SET plan_update_signature = NULL, last_valid_block_height = NULL
+              WHERE recurring_payment_id = ?`
+          )
+          .bind(activated.id)
+          .run();
+        // Recreated outside this attempt: neither the recorded plan nor the target.
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          plan: () => ({
+            createdAt: 1_770_000_001n,
+            metadataUri: "https://example.com/recurring/elsewhere.json",
+          }),
+        });
+
+        await request();
+
+        expect(sent).toHaveBeenCalledTimes(1);
+        const [{ instructions }] = required(sent.mock.calls[0]);
+        const { updatePlanData } = subscriptionsProgram
+          .getUpdatePlanInstructionDataDecoder()
+          .decode(required(required(instructions[0]).data));
+        expect({
+          expectedCreatedAt: updatePlanData.expectedCreatedAt,
+          expectedMetadataUri: removeNullCharacters(updatePlanData.expectedMetadataUri),
+          metadataUri: removeNullCharacters(updatePlanData.metadataUri),
+        }).toEqual({
+          expectedCreatedAt: 1_770_000_000n,
+          expectedMetadataUri: "",
+          metadataUri,
+        });
       });
 
       it("sends a cancel the chain does not show", async () => {

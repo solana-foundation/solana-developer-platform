@@ -330,7 +330,7 @@ describe("readRecurringPaymentStep", () => {
         plan: "is gone",
         account: null,
         state: "unsent",
-        changedOutside: 1,
+        changedOutside: 0,
       },
     ] as const)("is $state when the plan $plan", async ({ account, state, changedOutside }) => {
       const errors = spyLogEvents("error");
