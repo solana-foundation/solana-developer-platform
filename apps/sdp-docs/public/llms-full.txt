@@ -4674,7 +4674,7 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
-| `TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` address outside Cloud Run. Enable only behind an ingress that replaces caller-supplied forwarding headers; direct deployments share the fail-closed unidentified quota bucket. |
+| `TRUST_PROXY_HEADERS` | `false` | How to read `X-Forwarded-For`. `true` trusts the first address — enable only behind an ingress that replaces caller-supplied forwarding headers. `gclb` is for ingress restricted to a Google Cloud external Application Load Balancer, which appends the verified client address instead. Direct deployments leave this `false` and share the fail-closed unidentified quota bucket. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
 for server-to-server calls. The browser-facing `NEXT_PUBLIC_*` URLs default to

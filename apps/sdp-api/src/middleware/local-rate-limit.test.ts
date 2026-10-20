@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import { localRateLimit } from "./local-rate-limit";
 
-// SAFETY: the limiter reads only K_SERVICE, via getClientIp; the rest of Env is
-// irrelevant to it and constructing a whole one would say nothing extra.
-const CLOUD_RUN_ENV = { K_SERVICE: "sdp-api" } as unknown as Env;
+// SAFETY: the limiter reads only TRUST_PROXY_HEADERS, via getClientIp; the rest
+// of Env is irrelevant to it and constructing a whole one would say nothing extra.
+const CLOUD_RUN_ENV = { TRUST_PROXY_HEADERS: "gclb" } as unknown as Env;
 
 function buildApp(limits: { maxRequests: number; maxTrackedKeys: number }) {
   const app = new Hono<{ Bindings: Env }>();
