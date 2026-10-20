@@ -587,17 +587,20 @@ async function executePlaygroundRequest({
       headers,
       body: sentBody,
     });
+    // A followed redirect is an expired session's sign-in page, not the API's
+    // answer: it settles nothing, so a write keeps its key for the retry.
+    if (response.redirected) {
+      onExecutionError(t("Shared.SharedComponents.playgroundSessionExpired"));
+      return;
+    }
     const text = await response.text();
     const body = text ? parseResponseBody(text) : {};
     const responseHeaders = playgroundResponseHeaders(response.headers);
 
     // Only an answer to the write itself settles its key; a keyless read (say,
-    // a GET checking whether the lost write landed) leaves it for the retry. A
-    // followed redirect (an expired session's sign-in page) is not the API's
-    // answer, so it keeps the key too.
+    // a GET checking whether the lost write landed) leaves it for the retry.
     if (
       claimed !== undefined &&
-      !response.redirected &&
       answerRetiresKey({
         status: response.status,
         replayed: responseHeaders["idempotent-replayed"] === "true",

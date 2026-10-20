@@ -317,6 +317,9 @@ describe("ApiPlaygroundShell", () => {
     };
 
     await send(1);
+    // Not shown as the API's 200: the sign-in page is never the answer.
+    await waitFor(() => expect(view.container.textContent).toContain("Your session expired"));
+    expect(view.container.textContent).not.toContain("Sign in</html>");
     await send(2);
 
     expect(sentKey(0)).toEqual(expect.any(String));
