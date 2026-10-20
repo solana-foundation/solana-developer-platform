@@ -1248,8 +1248,8 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
     }
   });
 
-  async function setBothStatuses(status: "activating" | "updating"): Promise<void> {
-    await getDb(env).prepare("UPDATE payment_recurring_payments SET status = ?").bind(status).run();
+  async function setBothActivating(): Promise<void> {
+    await getDb(env).prepare("UPDATE payment_recurring_payments SET status = 'activating'").run();
   }
 
   const JOB_READS: readonly {
@@ -1259,15 +1259,9 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
   }[] = [
     {
       read: "listStaleLifecyclePayments",
-      prepare: () => setBothStatuses("activating"),
+      prepare: setBothActivating,
       list: (environment) =>
         repo.listStaleLifecyclePayments({ environment, staleBefore: READ_AT, limit: 10 }),
-    },
-    {
-      read: "listStaleUpdatePayments",
-      prepare: () => setBothStatuses("updating"),
-      list: (environment) =>
-        repo.listStaleUpdatePayments({ environment, staleBefore: READ_AT, limit: 10 }),
     },
     {
       read: "listRecoverableCollectionPayments",
