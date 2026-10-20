@@ -7221,6 +7221,64 @@ describe("Payments routes — recurring", () => {
         );
       });
 
+      it("keeps an update in flight when its old-subscription cancel is refused, and sends the cancel again on the next run", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        rejectPoolSendAfter(2, sendTransactionPreflightError());
+        const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+        onTestFinished(() => errorLog.mockRestore());
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+
+        const refused = await update();
+
+        expect(refused.status).toBe(400);
+        expect(await errorCode(refused)).toBe("TRANSACTION_FAILED");
+        // The new mandate is live, so the update never unwinds to the old one.
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "cancel_old_subscription",
+          old_cancel_signature: null,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+        const failed = errorLog.mock.calls.filter(([payload]) => {
+          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+          return (
+            parsed.success && parsed.data.event === "sdp_api_recurring_payment_old_cancel_failed"
+          );
+        });
+        expect(failed).toHaveLength(1);
+        expect(required(failed[0])[0]).toEqual(
+          expect.objectContaining({
+            recurring_payment_id: activated.id,
+            step: "cancel_old_subscription",
+            old_subscription_pda: activated.subscriptionPda,
+            refused_signature: poolSentSignatures()[4],
+          })
+        );
+
+        await leaveUpdateCrashedAt(activated.id, key);
+        const sent = sends();
+
+        const retry = await update();
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+        });
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          old_cancel_signature: poolSentSignatures()[5],
+        });
+      });
+
       it("keeps a stalled update's saved authorization in flight while it can still land", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const oldSubscriptionPda = required(activated.subscriptionPda);
