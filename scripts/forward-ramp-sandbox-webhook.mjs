@@ -14,6 +14,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 
 const MOONPAY_API_URL = "https://api.moonpay.com";
 const STRIPE_API_URL = "https://api.stripe.com";
@@ -26,6 +27,62 @@ const MOONPAY_LOOKUP_PATHS = {
   onramp: "/v1/transactions/ext",
   offramp: "/v3/sell_transactions/ext",
 };
+
+const nonBlankStringSchema = z.string().regex(/\S/, "must not be blank");
+const sdpApiUrlSchema = z.url().default(DEFAULT_SDP_API_URL);
+
+/** The environment a MoonPay replay reads, parsed before its first request. */
+export const moonpayEnvSchema = z.object({
+  MOONPAY_SANDBOX_API_KEY: nonBlankStringSchema,
+  MOONPAY_SANDBOX_WEBHOOK_KEY: nonBlankStringSchema,
+  SDP_API_URL: sdpApiUrlSchema,
+});
+
+/** The environment a Stripe replay reads, parsed before its first request. */
+export const stripeEnvSchema = z.object({
+  STRIPE_SANDBOX_SECRET_KEY: nonBlankStringSchema,
+  STRIPE_SANDBOX_WEBHOOK_SECRET: nonBlankStringSchema,
+  SDP_API_URL: sdpApiUrlSchema,
+});
+
+/**
+ * Every buy or every sale MoonPay holds for one external id. Only the fields
+ * this script reads are checked, as the API's MoonPay schemas check them
+ * (packages/sdp-payments/src/ramps/providers/moonpay/event-status-mapping.ts).
+ * The rest pass through untouched, so SDP receives MoonPay's record as is.
+ */
+export const moonpayLookupSchema = z.array(
+  z.looseObject({
+    id: nonBlankStringSchema,
+    status: nonBlankStringSchema,
+    externalCustomerId: z.string().nullish(),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+);
+
+/**
+ * A Stripe onramp session, checked where this script reads it and otherwise
+ * forwarded as Stripe returned it. A live-mode session never belongs in the
+ * sandbox inbox.
+ */
+export const stripeOnrampSessionSchema = z.looseObject({
+  id: z.string().startsWith("cos_"),
+  status: nonBlankStringSchema,
+  livemode: z.literal(false),
+});
+
+/**
+ * Parses external input at the boundary. A failure names the source and each
+ * field that failed, never a value, so no key reaches the output.
+ */
+export function parseInput(source, schema, input) {
+  const result = schema.safeParse(input);
+  if (!result.success) {
+    const problems = z.prettifyError(result.error).replace(/\s+/g, " ").trim();
+    throw new Error(`${source} is invalid: ${problems}`);
+  }
+  return result.data;
+}
 
 function hmacHex(key, timestamp, body) {
   return createHmac("sha256", key).update(`${timestamp}.${body}`).digest("hex");
@@ -69,35 +126,33 @@ export function stripeEventBody(session, eventId, createdSeconds) {
   });
 }
 
-function requireEnv(name) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`${name} is not set`);
-  }
-  return value;
-}
-
-async function readJson(response, source) {
+async function readProviderRecord(response, source, schema) {
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`${source} answered ${response.status}: ${text.slice(0, 300)}`);
   }
-  return JSON.parse(text);
+  return parseInput(source, schema, JSON.parse(text));
 }
 
-async function postWebhook(provider, body, signatureHeader) {
-  const baseUrl =
-    process.env.SDP_API_URL === undefined ? DEFAULT_SDP_API_URL : process.env.SDP_API_URL;
-  const response = await fetch(`${baseUrl}/webhooks/payments/ramps/sandbox/${provider}`, {
+/**
+ * Posts one signed webhook to the local API. The API acks every event it
+ * verifies with a 2xx, so any other status (a mismatched key, the ramps module
+ * off, a server error) throws and the command exits non-zero.
+ */
+export async function postWebhook(sdpApiUrl, provider, body, signatureHeader) {
+  const response = await fetch(`${sdpApiUrl}/webhooks/payments/ramps/sandbox/${provider}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...signatureHeader },
     body,
   });
-  return `HTTP ${response.status} ${(await response.text()).slice(0, 300)}`;
+  const outcome = `HTTP ${response.status} ${(await response.text()).slice(0, 300)}`;
+  if (!response.ok) {
+    throw new Error(`${provider} webhook rejected: ${outcome}`);
+  }
+  return outcome;
 }
 
-async function moonpayRecords(transferId) {
-  const apiKey = requireEnv("MOONPAY_SANDBOX_API_KEY");
+async function moonpayRecords(apiKey, transferId) {
   const records = [];
   for (const [direction, path] of Object.entries(MOONPAY_LOOKUP_PATHS)) {
     const url = `${MOONPAY_API_URL}${path}/${encodeURIComponent(transferId)}?apiKey=${encodeURIComponent(apiKey)}`;
@@ -106,54 +161,68 @@ async function moonpayRecords(transferId) {
     if (response.status === 404) {
       continue;
     }
-    for (const transaction of await readJson(response, `MoonPay ${path}`)) {
+    const transactions = await readProviderRecord(response, `MoonPay ${path}`, moonpayLookupSchema);
+    for (const transaction of transactions) {
       records.push({ direction, transaction });
     }
   }
   // Oldest first, so SDP sees each transaction's states in the order MoonPay reached them.
-  return records.sort((a, b) => a.transaction.updatedAt.localeCompare(b.transaction.updatedAt));
+  // Date.parse, as the API orders them: MoonPay's timestamps may carry an offset.
+  return records.sort(
+    (a, b) => Date.parse(a.transaction.updatedAt) - Date.parse(b.transaction.updatedAt)
+  );
 }
 
-async function forwardMoonpay(transferId) {
-  const webhookKey = requireEnv("MOONPAY_SANDBOX_WEBHOOK_KEY");
-  const records = await moonpayRecords(transferId);
+async function forwardMoonpay(transferId, env) {
+  const records = await moonpayRecords(env.MOONPAY_SANDBOX_API_KEY, transferId);
   if (records.length === 0) {
     throw new Error(`MoonPay's sandbox holds no buy or sale for ${transferId} yet`);
   }
   for (const { direction, transaction } of records) {
     const body = moonpayWebhookBody(direction, transaction);
     const timestamp = Math.floor(Date.now() / 1000);
-    const outcome = await postWebhook("moonpay", body, {
-      "moonpay-signature-v2": moonpaySignatureHeader(webhookKey, timestamp, body),
+    const outcome = await postWebhook(env.SDP_API_URL, "moonpay", body, {
+      "moonpay-signature-v2": moonpaySignatureHeader(
+        env.MOONPAY_SANDBOX_WEBHOOK_KEY,
+        timestamp,
+        body
+      ),
     });
     console.log(`moonpay ${direction} ${transaction.id} ${transaction.status} -> ${outcome}`);
   }
 }
 
-async function forwardStripe(sessionId) {
-  const secretKey = requireEnv("STRIPE_SANDBOX_SECRET_KEY");
-  const webhookSecret = requireEnv("STRIPE_SANDBOX_WEBHOOK_SECRET");
+async function forwardStripe(sessionId, env) {
   const response = await fetch(
     `${STRIPE_API_URL}/v1/crypto/onramp_sessions/${encodeURIComponent(sessionId)}`,
-    { headers: { authorization: `Bearer ${secretKey}`, "Stripe-Version": STRIPE_API_VERSION } }
+    {
+      headers: {
+        authorization: `Bearer ${env.STRIPE_SANDBOX_SECRET_KEY}`,
+        "Stripe-Version": STRIPE_API_VERSION,
+      },
+    }
   );
-  const session = await readJson(response, "Stripe onramp session");
+  const session = await readProviderRecord(
+    response,
+    "Stripe onramp session",
+    stripeOnrampSessionSchema
+  );
   const eventId = localStripeEventId();
   const timestamp = Math.floor(Date.now() / 1000);
   const body = stripeEventBody(session, eventId, timestamp);
-  const outcome = await postWebhook("stripe", body, {
-    "stripe-signature": stripeSignatureHeader(webhookSecret, timestamp, body),
+  const outcome = await postWebhook(env.SDP_API_URL, "stripe", body, {
+    "stripe-signature": stripeSignatureHeader(env.STRIPE_SANDBOX_WEBHOOK_SECRET, timestamp, body),
   });
   console.log(`stripe ${session.id} ${session.status} as ${eventId} -> ${outcome}`);
 }
 
 async function main([provider, id]) {
   if (provider === "moonpay" && id?.startsWith("xfr_")) {
-    await forwardMoonpay(id);
+    await forwardMoonpay(id, parseInput("environment", moonpayEnvSchema, process.env));
     return;
   }
   if (provider === "stripe" && id?.startsWith("cos_")) {
-    await forwardStripe(id);
+    await forwardStripe(id, parseInput("environment", stripeEnvSchema, process.env));
     return;
   }
   throw new Error(

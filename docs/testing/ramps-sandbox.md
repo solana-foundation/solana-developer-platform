@@ -89,7 +89,8 @@ record, wraps it as the webhook the provider sends, signs it with the
 sandbox webhook key, and posts it to
 `/webhooks/payments/ramps/sandbox/<provider>` on `SDP_API_URL` (default
 `http://127.0.0.1:8787`). It never invents provider data and never prints a
-key.
+key. It exits non-zero when its environment or a provider record doesn't
+parse, or when the API refuses a webhook.
 
 ```bash
 # MoonPay: every buy or sale MoonPay holds for the transfer, oldest first.
