@@ -1,3 +1,4 @@
+import { SigningError } from "@sdp/custody/signing";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,20 +7,15 @@ import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
 
-type StaleUpdateRow = PaymentRecurringPaymentRow & {
-  oldest_updated_at: string;
-  stale_count: number;
-};
-
 interface MockState {
   activateRecurringPayment: ReturnType<typeof vi.fn>;
   cancelRecurringPayment: ReturnType<typeof vi.fn>;
   collectRecurringPayment: ReturnType<typeof vi.fn>;
   journalAutomatedCollectionFailure: ReturnType<typeof vi.fn>;
   resumeRecurringPayment: ReturnType<typeof vi.fn>;
+  resumeRecurringPaymentUpdate: ReturnType<typeof vi.fn>;
   findOperationalWalletById: ReturnType<typeof vi.fn>;
   listStaleLifecyclePayments: ReturnType<typeof vi.fn>;
-  listStaleUpdatePayments: ReturnType<typeof vi.fn>;
   listRecoverableCollectionPayments: ReturnType<typeof vi.fn>;
   listDueCollectionPayments: ReturnType<typeof vi.fn>;
   checkMoneyStart: ReturnType<typeof vi.fn>;
@@ -27,7 +23,6 @@ interface MockState {
     due: PaymentRecurringPaymentRow[];
     lifecycle: PaymentRecurringPaymentRow[];
     staleCollection: PaymentRecurringPaymentRow[];
-    staleUpdate: StaleUpdateRow[];
   };
 }
 
@@ -37,9 +32,9 @@ const mocks = vi.hoisted<MockState>(() => ({
   collectRecurringPayment: vi.fn(),
   journalAutomatedCollectionFailure: vi.fn(),
   resumeRecurringPayment: vi.fn(),
+  resumeRecurringPaymentUpdate: vi.fn(),
   findOperationalWalletById: vi.fn(),
   listStaleLifecyclePayments: vi.fn(),
-  listStaleUpdatePayments: vi.fn(),
   listRecoverableCollectionPayments: vi.fn(),
   listDueCollectionPayments: vi.fn(),
   checkMoneyStart: vi.fn(),
@@ -47,7 +42,6 @@ const mocks = vi.hoisted<MockState>(() => ({
     due: [],
     lifecycle: [],
     staleCollection: [],
-    staleUpdate: [],
   },
 }));
 
@@ -66,7 +60,6 @@ vi.mock("@/lib/money-admission", async (importOriginal) => ({
 vi.mock("@/db/repositories/payment-recurring-payments.repository.postgres", () => ({
   createPostgresPaymentRecurringPaymentsRepository: () => ({
     listStaleLifecyclePayments: mocks.listStaleLifecyclePayments,
-    listStaleUpdatePayments: mocks.listStaleUpdatePayments,
     listRecoverableCollectionPayments: mocks.listRecoverableCollectionPayments,
     listDueCollectionPayments: mocks.listDueCollectionPayments,
   }),
@@ -92,11 +85,18 @@ vi.mock("@/services/payments/recurring-payments/lifecycle", () => ({
   resumeRecurringPayment: mocks.resumeRecurringPayment,
 }));
 
+vi.mock("@/services/payments/recurring-payments/update", () => ({
+  resumeRecurringPaymentUpdate: mocks.resumeRecurringPaymentUpdate,
+}));
+
 let collectDueRecurringPayments: typeof import("./collect-recurring-payments").collectDueRecurringPayments;
 let activateRecurringPayment: typeof import("@/services/payments/recurring-payments/activation").activateRecurringPayment;
 let cancelRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").cancelRecurringPayment;
 let collectRecurringPayment: typeof import("@/services/payments/recurring-payments/collection").collectRecurringPayment;
 let resumeRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").resumeRecurringPayment;
+let resumeRecurringPaymentUpdate: typeof import("@/services/payments/recurring-payments/update").resumeRecurringPaymentUpdate;
+
+const SOURCE_WALLET_PIN = { id: "cwlt_1", walletId: "wallet_1", publicKey: "source_address" };
 
 function collectDueRecurringPaymentsIn(environment: SdpEnvironment, now: Date) {
   return runInClusterScope({ projectId: null, environment }, () =>
@@ -153,6 +153,9 @@ describe("collectDueRecurringPayments", () => {
     ({ cancelRecurringPayment, resumeRecurringPayment } = await import(
       "@/services/payments/recurring-payments/lifecycle"
     ));
+    ({ resumeRecurringPaymentUpdate } = await import(
+      "@/services/payments/recurring-payments/update"
+    ));
   });
 
   beforeEach(() => {
@@ -162,17 +165,14 @@ describe("collectDueRecurringPayments", () => {
     mocks.collectRecurringPayment.mockReset();
     mocks.journalAutomatedCollectionFailure.mockReset();
     mocks.resumeRecurringPayment.mockReset();
+    mocks.resumeRecurringPaymentUpdate.mockReset();
     mocks.findOperationalWalletById.mockReset();
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
     mocks.rows.staleCollection = [];
-    mocks.rows.staleUpdate = [];
     mocks.listStaleLifecyclePayments
       .mockReset()
       .mockImplementation(async () => mocks.rows.lifecycle);
-    mocks.listStaleUpdatePayments
-      .mockReset()
-      .mockImplementation(async () => mocks.rows.staleUpdate);
     mocks.listRecoverableCollectionPayments
       .mockReset()
       .mockImplementation(async () => mocks.rows.staleCollection);
@@ -186,10 +186,14 @@ describe("collectDueRecurringPayments", () => {
     mocks.cancelRecurringPayment.mockResolvedValue(recurringRow("canceled"));
     mocks.collectRecurringPayment.mockResolvedValue({});
     mocks.resumeRecurringPayment.mockResolvedValue(recurringRow("active"));
+    mocks.resumeRecurringPaymentUpdate.mockResolvedValue(recurringRow("active"));
   });
 
   it("recovers interrupted operations before collecting due payments", async () => {
-    const lifecycle = recurringRow("activating", { id: "prp_activation" });
+    const lifecycle = recurringRow("activating", {
+      id: "prp_activation",
+      source_custody_wallet_id: "cwlt_activation",
+    });
     const staleCollection = recurringRow("active", { id: "prp_stale_collection" });
     const due = recurringRow("active", { id: "prp_due" });
     mocks.rows.lifecycle = [lifecycle];
@@ -200,7 +204,13 @@ describe("collectDueRecurringPayments", () => {
 
     expect(result).toEqual({ recovered: 2, collected: 1, failed: 0, skipped: 0, refused: 0 });
     expect(activateRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: lifecycle })
+      expect.objectContaining({
+        recurringPayment: lifecycle,
+        sourceWallet: { id: "cwlt_activation", walletId: "wallet_1", publicKey: "source_address" },
+      })
+    );
+    expect(mocks.findOperationalWalletById).not.toHaveBeenCalledWith(
+      expect.objectContaining({ custodyWalletId: "cwlt_activation" })
     );
     expect(collectRecurringPayment).toHaveBeenNthCalledWith(
       1,
@@ -229,11 +239,61 @@ describe("collectDueRecurringPayments", () => {
 
     expect(result).toEqual({ recovered: 2, collected: 0, failed: 0, skipped: 0, refused: 0 });
     expect(cancelRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: canceling })
+      expect.objectContaining({ recurringPayment: canceling, sourceWallet: SOURCE_WALLET_PIN })
     );
     expect(resumeRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: resuming })
+      expect.objectContaining({ recurringPayment: resuming, sourceWallet: SOURCE_WALLET_PIN })
     );
+    expect(mocks.findOperationalWalletById).not.toHaveBeenCalled();
+  });
+
+  it("routes an updating row to the update resume with the row's wallet pin", async () => {
+    const updating = recurringRow("updating");
+    mocks.rows.lifecycle = [updating];
+
+    const result = await collectDueRecurringPaymentsIn("sandbox", new Date());
+
+    expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0, refused: 0 });
+    expect(resumeRecurringPaymentUpdate).toHaveBeenCalledExactlyOnceWith({
+      env,
+      organizationId: "org_1",
+      projectId: "proj_1",
+      sourceWallet: SOURCE_WALLET_PIN,
+      recurringPayment: updating,
+    });
+    expect(mocks.findOperationalWalletById).not.toHaveBeenCalled();
+    expect(activateRecurringPayment).not.toHaveBeenCalled();
+    expect(cancelRecurringPayment).not.toHaveBeenCalled();
+    expect(resumeRecurringPayment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a CONFLICT", new AppError("CONFLICT", "update held"), { skipped: 1, failed: 0 }],
+    [
+      "a wallet that cannot sign",
+      new SigningError("wallet gone", "WALLET_NOT_FOUND"),
+      { skipped: 0, failed: 1 },
+    ],
+  ])("counts %s from the update resume", async (_, error, counts) => {
+    const logError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    mocks.rows.lifecycle = [recurringRow("updating")];
+    mocks.resumeRecurringPaymentUpdate.mockRejectedValue(error);
+
+    const result = await collectDueRecurringPaymentsIn("sandbox", new Date());
+
+    expect(result).toEqual({ recovered: 0, collected: 0, refused: 0, ...counts });
+    logError.mockRestore();
+  });
+
+  it("fails an updating row with no exact source wallet without resuming it", async () => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    mocks.rows.lifecycle = [recurringRow("updating", { source_custody_wallet_id: null })];
+
+    const result = await collectDueRecurringPaymentsIn("sandbox", new Date());
+
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0, refused: 0 });
+    expect(resumeRecurringPaymentUpdate).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("recovers a canceled payment attempt without creating a future collection", async () => {
@@ -256,7 +316,6 @@ describe("collectDueRecurringPayments", () => {
 
       for (const read of [
         mocks.listStaleLifecyclePayments,
-        mocks.listStaleUpdatePayments,
         mocks.listRecoverableCollectionPayments,
         mocks.listDueCollectionPayments,
       ]) {
@@ -365,61 +424,6 @@ describe("collectDueRecurringPayments", () => {
         reason: "source_wallet_mismatch",
       },
       "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
-    );
-    warn.mockRestore();
-  });
-
-  it("summarizes stale recurring payment updates without changing them", async () => {
-    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-    mocks.rows.staleUpdate = [
-      {
-        ...recurringRow("updating", {
-          id: "prp_newer_update",
-          updated_at: "2026-07-01T11:05:00.000Z",
-        }),
-        oldest_updated_at: "2026-07-01T11:00:00.000Z",
-        stale_count: 27,
-      },
-      {
-        ...recurringRow("updating", { id: "prp_older_update" }),
-        oldest_updated_at: "2026-07-01T11:00:00.000Z",
-        stale_count: 27,
-      },
-    ];
-
-    const result = await collectDueRecurringPaymentsIn("sandbox", new Date("2026-07-01T12:30:00Z"));
-
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 0, refused: 0 });
-    expect(collectRecurringPayment).not.toHaveBeenCalled();
-    expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
-    expect(mocks.listStaleUpdatePayments).toHaveBeenCalledWith({
-      environment: "sandbox",
-      staleBefore: "2026-07-01T12:15:00.000Z",
-      limit: 25,
-    });
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(
-      {
-        oldest_updated_at: "2026-07-01T11:00:00.000Z",
-        reason: "stale_recurring_payment_updates",
-        recurring_payments: [
-          {
-            organization_id: "org_1",
-            project_id: "proj_1",
-            recurring_payment_id: "prp_newer_update",
-            updated_at: "2026-07-01T11:05:00.000Z",
-          },
-          {
-            organization_id: "org_1",
-            project_id: "proj_1",
-            recurring_payment_id: "prp_older_update",
-            updated_at: "2026-07-01T11:00:00.000Z",
-          },
-        ],
-        stale_count: 27,
-        truncated: true,
-      },
-      "collectDueRecurringPayments: recurring payment updates are stale; collections stay paused until callers retry the same updates"
     );
     warn.mockRestore();
   });
