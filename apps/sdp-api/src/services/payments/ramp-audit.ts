@@ -2,10 +2,7 @@ import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
 import { getDb } from "@/db/client";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import {
-  createSystemTransactionalPaymentsRepository,
-  createTransactionalPaymentsRepository,
-} from "@/db/repositories/repository-factory";
+import { createTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { type AuditAction, AuditService, type SystemAuditLogEntry } from "@/services/audit.service";
@@ -69,15 +66,18 @@ export function auditedRampWrite(
   });
 }
 
-/** `auditedRampWrite` for a provider event or the delivery verifier. */
+/**
+ * `auditedRampWrite` for the delivery verifier, which has no request. The
+ * caller builds its system repository on the transaction it is handed.
+ */
 export function auditedRampWriteSystem(
   env: Env,
   action: RampAuditAction,
-  write: (repository: PaymentsRepository) => Promise<PaymentTransferRow | null>,
+  write: (tx: DatabaseClient) => Promise<PaymentTransferRow | null>,
   extra: Record<string, unknown> = {}
 ): Promise<PaymentTransferRow | null> {
   return systemRampAuditService(env).logSystemWithin(async (tx) => {
-    const written = await write(createSystemTransactionalPaymentsRepository(tx));
+    const written = await write(tx);
     return { entry: written ? rampAuditEntry(action, written, extra) : null, result: written };
   });
 }

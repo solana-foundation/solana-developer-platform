@@ -13,7 +13,10 @@ import type { RampDeliveryMismatch, RampDeliveryMismatchReason } from "@sdp/type
 import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { assertIsSignature, type Signature } from "@solana/kit";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
+import {
+  createSystemPaymentsRepository,
+  createSystemTransactionalPaymentsRepository,
+} from "@/db/repositories/repository-factory";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { auditedRampWriteSystem } from "@/services/payments/ramp-audit";
@@ -285,7 +288,7 @@ async function verifyOnramp(
   const completed = await auditedRampWriteSystem(
     env,
     "settle",
-    (audited) => audited.transitionRampTransfer(update),
+    (tx) => createSystemTransactionalPaymentsRepository(tx).transitionRampTransfer(update),
     {
       source: "chain",
       fromStatus: transfer.status,
@@ -345,8 +348,8 @@ async function verifyOfframps(
       const updated = await auditedRampWriteSystem(
         env,
         "settle",
-        (audited) =>
-          audited.transitionRampTransfer({
+        (tx) =>
+          createSystemTransactionalPaymentsRepository(tx).transitionRampTransfer({
             transferId: entry.transfer.id,
             organizationId: entry.transfer.organization_id,
             projectId: entry.transfer.project_id,
