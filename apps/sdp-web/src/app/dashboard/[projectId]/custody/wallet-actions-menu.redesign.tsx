@@ -9,15 +9,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
-import {
-  ArrowUpRight,
-  ChevronDown,
-  Droplets,
-  Ellipsis,
-  EllipsisVertical,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowUpRight, ChevronDown, Ellipsis, EllipsisVertical, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { DevnetSolMenuItem } from "@/app/dashboard/[projectId]/custody/devnet-sol-menu-item";
 import { useWalletActions } from "@/app/dashboard/[projectId]/custody/use-wallet-actions";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -39,29 +33,6 @@ function formatWalletLabel(walletLabel: string | null, walletAddress: string): s
   const trimmed = walletLabel?.trim();
   if (trimmed) return trimmed;
   return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
-}
-
-function DevnetSolMenuItem({
-  isBusy,
-  canRequest,
-  onSelect,
-}: {
-  isBusy: boolean;
-  canRequest: boolean;
-  onSelect: () => void;
-}) {
-  const t = useTranslations();
-  const label = isBusy
-    ? t("DashboardCustody.requesting")
-    : canRequest
-      ? t("DashboardCustody.requestDevnetSol")
-      : t("DashboardCustody.requestDevnetSolAdminOnly");
-  return (
-    <DropdownMenuItem onSelect={onSelect} disabled={isBusy || !canRequest}>
-      <Droplets className="h-4 w-4" />
-      {label}
-    </DropdownMenuItem>
-  );
 }
 
 export function WalletActionsMenu({
