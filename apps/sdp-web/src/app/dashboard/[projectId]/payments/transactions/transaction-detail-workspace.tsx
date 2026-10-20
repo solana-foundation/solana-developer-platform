@@ -192,11 +192,14 @@ function useTransactionSummary(
     ramp?.kind === "needs_review"
       ? { label: t("DashboardPayments.ramps.phase.review.badge"), tone: "attention" as const }
       : ledgerStatus;
-  const why = ramp
-    ? ramp.description
-    : transaction.module === "payments" && isPaymentTransferStatus(transaction.moduleStatus)
-      ? paymentWhy(transaction.moduleStatus, transfer, t)
-      : undefined;
+  const paymentStatus =
+    transaction.module === "payments" && isPaymentTransferStatus(transaction.moduleStatus)
+      ? transaction.moduleStatus
+      : null;
+  // A ramp's phase says why; any other payment, its status.
+  const why =
+    ramp?.description ??
+    (paymentStatus === null ? undefined : paymentWhy(paymentStatus, transfer, t));
   const soldCrypto = saleFiat ? cryptoAmount : null;
   return { status, amount, soldCrypto, direction, contact, title, why };
 }
