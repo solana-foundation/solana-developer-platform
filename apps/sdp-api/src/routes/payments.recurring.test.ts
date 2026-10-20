@@ -8817,6 +8817,72 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
       });
 
+      it("leaves a metadata update in flight when another run re-claimed the schedule before its finalize lands", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        // Another run re-claims the schedule once this run's finalize has written the plan.
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => {
+            const repository = createRepository(db);
+            return {
+              ...repository,
+              updateRecurringPayment: async (input) => {
+                if (input.status === "active" && input.expectedStatus === "updating") {
+                  await getDb(env)
+                    .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+                    .bind(new Date(Date.now() + 1000).toISOString(), activated.id)
+                    .run();
+                }
+                return repository.updateRecurringPayment(input);
+              },
+            };
+          });
+        onTestFinished(() => repositorySpy.mockRestore());
+
+        const update = await app.request(
+          actionPath(activated.id),
+          {
+            method: "PATCH",
+            headers: keyed(crypto.randomUUID()),
+            body: JSON.stringify({ metadataUri: "https://example.com/recurring/reclaimed.json" }),
+          },
+          env
+        );
+
+        expect(update.status).toBe(409);
+        expect(await errorCode(update)).toBe("CONFLICT");
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+        expect(await recurringMetadataUri(activated.id)).toBe(activated.metadataUri);
+        expect(
+          await getDb(env)
+            .prepare("SELECT metadata_uri FROM payment_subscription_plans WHERE id = ?")
+            .bind(required(activated.planId))
+            .first<{ metadata_uri: string | null }>()
+        ).toEqual({ metadata_uri: activated.metadataUri });
+        expect(
+          await getDb(env)
+            .prepare(
+              `SELECT status, stage, plan_update_signature
+                 FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?`
+            )
+            .bind(activated.id)
+            .first<{
+              status: PaymentRecurringPaymentAttemptStatus;
+              stage: PaymentRecurringPaymentUpdateAttemptStage;
+              plan_update_signature: string | null;
+            }>()
+        ).toEqual({
+          status: "processing",
+          stage: "update_plan",
+          plan_update_signature: required(poolSentSignatures()[2]),
+        });
+      });
+
       it("the cron finishes a stale replacement whose saved old-subscription cancel was dropped, and the same key then replays it", async () => {
         mockDistinctRecentBlockhashes();
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
