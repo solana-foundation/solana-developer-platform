@@ -577,9 +577,9 @@ async function updatePendingRecurringPayment(input: {
 
 /**
  * Writes a pending schedule's new values in one CAS write on its status and `updated_at`. A change
- * to anything the plan carries (every field but `firstCollectionAt`) drops the plan reference, so
- * activation creates a fresh plan with a new program plan id instead of reusing one with the old
- * terms; the orphan plan row stays.
+ * to anything the plan carries (every field but `firstCollectionAt`) drops the plan and
+ * subscription references, so activation creates a fresh plan with a new program plan id and a
+ * fresh subscription instead of reusing rows with the old terms or subscriber; the orphan rows stay.
  *
  * @param recurringRepo - The transaction's recurring payments repository.
  * @param input - The schedule, its resolved update and the write's timestamp.
@@ -631,6 +631,14 @@ async function updatePendingRecurringPaymentRow(
     planCreationSignature: dropsPlanReference
       ? null
       : input.recurringPayment.plan_creation_signature,
+    subscriptionId: dropsPlanReference ? null : input.recurringPayment.subscription_id,
+    subscriptionPda: dropsPlanReference ? null : input.recurringPayment.subscription_pda,
+    subscriptionAuthorityAddress: dropsPlanReference
+      ? null
+      : input.recurringPayment.subscription_authority_address,
+    authorizationSignature: dropsPlanReference
+      ? null
+      : input.recurringPayment.authorization_signature,
     expectedStatus: "pending_activation",
     expectedUpdatedAt: input.recurringPayment.updated_at,
     updatedAt,
@@ -1072,8 +1080,16 @@ interface UpdateStepSend {
   instructions: Instruction[];
   slot: UpdateAttemptStepSlot;
   effect: RecurringPaymentStepEffect;
-  /** The program error a resend raises when an earlier send of this step already landed. */
-  alreadyDone: subscriptionsProgram.SubscriptionsError | null;
+  /**
+   * The program error a resend raises when an earlier send of this step may already have landed,
+   * and what a re-read that does not show the effect means: `pending` when the error proves the
+   * effect exists (the reading endpoint lags the simulating one), `failed` when the error also
+   * fires without it.
+   */
+  alreadyDone: {
+    code: subscriptionsProgram.SubscriptionsError;
+    notLanded: "pending" | "failed";
+  } | null;
   onFailure: UpdateStepFailureOutcome;
   failureMessage: string;
   logContext: RecurringPaymentStepLogContext;
@@ -1124,19 +1140,22 @@ async function sendUpdateStep(input: UpdateStepSend): Promise<SettledUpdateStep>
         !subscriptionsProgram.isSubscriptionsError(
           error.refusal,
           { instructions: input.instructions },
-          input.alreadyDone
+          input.alreadyDone.code
         )
       ) {
         return failUpdateStep(input, error, null);
       }
-      return settleFailedUpdateStep(input, error, { signature: null, lastValidBlockHeight: null });
+      return settleAlreadyDoneRefusal(input, input.alreadyDone.notLanded, error);
     }
     const saved = await reloadSavedUpdateStep(input);
     // The store saves before the send, so an empty slot proves this run broadcast nothing.
     if (saved.signature === null) {
       return failUpdateStep(input, error, null);
     }
-    return settleFailedUpdateStep(input, error, saved);
+    return settleFailedUpdateStep(input, {
+      signature: saved.signature,
+      lastValidBlockHeight: saved.lastValidBlockHeight,
+    });
   }
 }
 
@@ -1181,22 +1200,69 @@ async function reloadSavedUpdateStep(
 }
 
 /**
- * Reads a step whose send failed, and acts on it.
+ * Reads a step whose resend the program refused as already done; the refusal cleared its slot,
+ * so the read carries no saved signature. Landed goes on with no signature. Not landed is
+ * pending or failed as the refusal's `notLanded` says: pending keeps the attempt in flight, and
+ * the next run finds the slot empty and sends again.
  *
  * @param input - The step's send.
- * @param failure - The send's error.
- * @param saved - The step's saved signature (null when none is saved) and the row's stored expiry.
+ * @param notLanded - What a read that does not show the effect means.
+ * @param refusal - The refusal.
+ * @returns The landed step.
+ * @throws ResumedStepUnsettledError when the read is pending, or not landed and `notLanded` is
+ *   `pending`.
+ * @throws RecurringPaymentUpdateStepFailedError when an unwinding step is not landed and
+ *   `notLanded` is `failed`.
+ * @throws `refusal` when the old subscription's cancel is not landed and `notLanded` is `failed`.
+ */
+async function settleAlreadyDoneRefusal(
+  input: UpdateStepSend,
+  notLanded: "pending" | "failed",
+  refusal: SponsoredSendRefusedError
+): Promise<SettledUpdateStep> {
+  const step = await readRecurringPaymentStep({
+    effect: input.effect,
+    savedSignature: null,
+    lastValidBlockHeight: null,
+    logContext: input.logContext,
+  });
+  switch (step.state) {
+    case "landed":
+      return { state: "landed", signature: null, accounts: step.accounts };
+    case "pending":
+      throw new ResumedStepUnsettledError();
+    case "unsent":
+    case "dropped":
+      switch (notLanded) {
+        case "pending":
+          throw new ResumedStepUnsettledError();
+        case "failed":
+          return failUpdateStep(input, refusal, null);
+        default:
+          return assertNever(notLanded);
+      }
+    default:
+      return assertNever(step);
+  }
+}
+
+/**
+ * Reads a step whose send failed after the store saved its signature, and acts on it. A saved
+ * step never reads as unsent; the reader's unsent arm is kept in flight with pending.
+ *
+ * @param input - The step's send.
+ * @param saved - The step's saved signature and the row's stored expiry.
  * @param saved.signature - The saved signature.
  * @param saved.lastValidBlockHeight - The stored expiry.
  * @returns The landed step.
  * @throws ResumedStepUnsettledError when the step is pending.
- * @throws RecurringPaymentUpdateStepFailedError when an unwinding step is unsent or dropped.
- * @throws `failure` when the old subscription's cancel is unsent or dropped.
+ * @throws RecurringPaymentUpdateStepFailedError when an unwinding step is dropped.
+ * @throws A TRANSACTION_FAILED error when the old subscription's cancel is dropped, after its
+ *   signature is cleared.
  */
 async function settleFailedUpdateStep(
   input: UpdateStepSend,
-  failure: Error,
-  saved: { signature: Signature | null; lastValidBlockHeight: string | null }
+  saved: { signature: Signature; lastValidBlockHeight: string | null }
 ): Promise<SettledUpdateStep> {
   const step = await readRecurringPaymentStep({
     effect: input.effect,
@@ -1207,26 +1273,26 @@ async function settleFailedUpdateStep(
   switch (step.state) {
     case "landed":
       return { state: "landed", signature: saved.signature, accounts: step.accounts };
+    case "unsent":
     case "pending":
       throw new ResumedStepUnsettledError();
-    case "unsent":
-      return failUpdateStep(input, failure, null);
     case "dropped": {
-      const clear =
-        saved.signature === null ? null : { slot: input.slot, signature: saved.signature };
-      if (clear !== null && input.onFailure.outcome === "stay_in_flight") {
+      if (input.onFailure.outcome === "stay_in_flight") {
         await clearDroppedOldCancel({
           env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
           recurringPaymentId: input.recurringPaymentId,
           attemptId: input.attemptId,
-          signature: clear.signature,
+          signature: saved.signature,
           oldSubscriptionPda: input.onFailure.oldSubscriptionPda,
           logContext: input.logContext,
         });
       }
-      return failUpdateStep(input, transactionFailed(input.failureMessage), clear);
+      return failUpdateStep(input, transactionFailed(input.failureMessage), {
+        slot: input.slot,
+        signature: saved.signature,
+      });
     }
     default:
       return assertNever(step);
@@ -1446,7 +1512,10 @@ async function runMetadataScheduleUpdate(input: {
         targetMetadataUri,
         logContext,
       }),
-      alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__STALE_PLAN_APPROVAL,
+      alreadyDone: {
+        code: subscriptionsProgram.SUBSCRIPTIONS_ERROR__STALE_PLAN_APPROVAL,
+        notLanded: "failed",
+      },
       onFailure: { outcome: "unwind" },
       failureMessage,
       logContext,
@@ -1472,8 +1541,8 @@ async function runMetadataScheduleUpdate(input: {
  * Makes sure the source wallet's subscription authority and token account exist and delegate to
  * each other before subscribe. A setup an earlier run saved a signature for is read first, as
  * every other step is; otherwise a wallet that already has both skips the step, and one missing
- * either sends the setup (the token account create, then the authority init) through the step
- * runner.
+ * either sends the setup (the token account create when it is missing, then the authority init,
+ * always) through the step runner.
  *
  * @param input - The setup's accounts, signers and attempt.
  * @returns The subscription authority as read after setup.
@@ -1534,15 +1603,16 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   }
 
   const payer = createNoopSigner(input.feePayer);
-  const initAuthorityInstruction = input.subscriptionAuthority.exists
-    ? null
-    : await subscriptionsProgram.getInitSubscriptionAuthorityOverlayInstructionAsync({
-        owner: input.sourceSigner,
-        payer,
-        tokenMint: input.mint,
-        tokenProgram: input.tokenProgram,
-        userAta: input.sourceTokenAccount.tokenAccount,
-      });
+  // The init always goes out: it is idempotent on an existing authority (its `initId` stays) and
+  // re-runs the token account's Approve, which the setup effect requires.
+  const initAuthorityInstruction =
+    await subscriptionsProgram.getInitSubscriptionAuthorityOverlayInstructionAsync({
+      owner: input.sourceSigner,
+      payer,
+      tokenMint: input.mint,
+      tokenProgram: input.tokenProgram,
+      userAta: input.sourceTokenAccount.tokenAccount,
+    });
   const createSourceAtaInstruction = input.sourceTokenAccount.exists
     ? null
     : getCreateAssociatedTokenIdempotentInstruction({
@@ -1564,7 +1634,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     feePayer: input.feePayer,
     instructions: [
       ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
+      initAuthorityInstruction,
     ],
     slot,
     effect,
@@ -1576,7 +1646,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   if (settled.state === "landed") {
     return subscriptionsProgram.decodeSubscriptionAuthority(settled.accounts[0]);
   }
-  if (!initAuthorityInstruction) {
+  if (input.subscriptionAuthority.exists) {
     return input.subscriptionAuthority;
   }
 
@@ -1989,7 +2059,10 @@ async function sendReplacementPlanCreation(input: {
     instructions: [createPlanInstruction],
     slot: input.slot,
     effect: planCreatedEffect(input.planPda),
-    alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__PLAN_ALREADY_EXISTS,
+    alreadyDone: {
+      code: subscriptionsProgram.SUBSCRIPTIONS_ERROR__PLAN_ALREADY_EXISTS,
+      notLanded: "pending",
+    },
     onFailure: { outcome: "unwind" },
     failureMessage: input.failureMessage,
     logContext: input.logContext,
@@ -2109,7 +2182,10 @@ async function sendReplacementAuthorization(input: {
     instructions: [subscribeInstruction],
     slot: input.slot,
     effect: delegationCreatedEffect(input.subscriptionPda),
-    alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__ALREADY_SUBSCRIBED,
+    alreadyDone: {
+      code: subscriptionsProgram.SUBSCRIPTIONS_ERROR__ALREADY_SUBSCRIBED,
+      notLanded: "pending",
+    },
     onFailure: { outcome: "unwind" },
     failureMessage: input.failureMessage,
     logContext: input.logContext,
@@ -2447,7 +2523,10 @@ async function runReplacementUpdate(input: {
         instructions: [cancelInstruction],
         slot: { row: "update_attempt", column: "old_cancel_signature" },
         effect: delegationCanceledEffect(replacement.oldSubscriptionPda),
-        alreadyDone: subscriptionsProgram.SUBSCRIPTIONS_ERROR__SUBSCRIPTION_ALREADY_CANCELLED,
+        alreadyDone: {
+          code: subscriptionsProgram.SUBSCRIPTIONS_ERROR__SUBSCRIPTION_ALREADY_CANCELLED,
+          notLanded: "pending",
+        },
         onFailure: {
           outcome: "stay_in_flight",
           oldSubscriptionPda: replacement.oldSubscriptionPda,
