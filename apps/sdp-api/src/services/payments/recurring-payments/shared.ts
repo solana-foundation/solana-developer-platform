@@ -547,24 +547,29 @@ export function requireActionableStep(
 }
 
 /**
- * Plan creation's effect: the plan account exists. It is unique to the attempt because the
+ * Plan creation's effect: the plan account exists and decodes as a plan; one that does not
+ * decode throws, which the reader takes as pending. It is unique to the attempt because the
  * program plan id is fresh per attempt.
  *
  * @param planPda - The plan's address.
  * @returns The effect.
  */
 export function planCreatedEffect(planPda: Address): RecurringPaymentStepEffect {
-  return { addresses: [planPda], landed: ([plan]) => plan.exists };
+  return { addresses: [planPda], landed: ([plan]) => decodePlan(plan).exists };
 }
 
 /**
- * Subscribe's effect: the subscription delegation exists.
+ * Subscribe's effect: the subscription delegation exists and decodes as one; one that does not
+ * decode throws, which the reader takes as pending.
  *
  * @param subscriptionPda - The delegation's address.
  * @returns The effect.
  */
 export function delegationCreatedEffect(subscriptionPda: Address): RecurringPaymentStepEffect {
-  return { addresses: [subscriptionPda], landed: ([delegation]) => delegation.exists };
+  return {
+    addresses: [subscriptionPda],
+    landed: ([delegation]) => decodeSubscriptionDelegation(delegation).exists,
+  };
 }
 
 /**
