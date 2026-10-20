@@ -27,7 +27,6 @@ import {
   createNoopSigner,
   type Instruction,
   type MaybeEncodedAccount,
-  removeNullCharacters,
   type Signature,
   type TransactionSigner,
 } from "@solana/kit";
@@ -92,6 +91,7 @@ import {
   createSubscriptionStepStore,
   delegationCanceledEffect,
   delegationCreatedEffect,
+  derivePlanAddresses,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   planCreatedEffect,
@@ -905,7 +905,8 @@ async function finalizeMetadataScheduleUpdate(input: {
 }
 
 /**
- * The plan's update-guarded fields as the claimed schedule recorded them, for a resumed update.
+ * The plan's update-guarded fields as the claimed schedule recorded them: what every plan update
+ * send expects and every read of it compares against.
  *
  * @param claimed - The claimed active schedule.
  * @returns Its plan's `createdAt` and metadata URI as the program stores them.
@@ -968,27 +969,113 @@ interface UpdatePhase {
 /**
  * Runs an update's unwinding steps. Inside them any error but a pending step becomes
  * `RecurringPaymentUpdateStepFailedError`, once no saved step is unread: the step runner settles
- * every send before it returns or throws, so nothing this run sent can still land.
+ * every send before it returns or throws, so nothing this run sent can still land. Every step
+ * failure, raised or converted, passes `beforeUnwind` first, which may refuse the unwind.
  *
  * @param phase - The run's unwinding steps.
  * @param run - The steps.
+ * @param beforeUnwind - The chain check an unwind must pass, or null when it needs none.
  * @returns What the steps return.
- * @throws ResumedStepUnsettledError when a step is pending.
+ * @throws ResumedStepUnsettledError when a step is pending, or `beforeUnwind` refuses the unwind.
  * @throws RecurringPaymentUpdateStepFailedError when a step fails with nothing in flight.
  */
-async function insideUpdatePhase<T>(phase: UpdatePhase, run: () => Promise<T>): Promise<T> {
+async function insideUpdatePhase<T>(
+  phase: UpdatePhase,
+  run: () => Promise<T>,
+  beforeUnwind: ((stepFailure: RecurringPaymentUpdateStepFailedError) => Promise<void>) | null
+): Promise<T> {
+  let stepFailure: RecurringPaymentUpdateStepFailedError;
   try {
     return await run();
   } catch (error) {
     if (
       !(error instanceof Error) ||
       error instanceof ResumedStepUnsettledError ||
-      error instanceof RecurringPaymentUpdateStepFailedError ||
-      phase.unreadSavedStep !== null
+      (phase.unreadSavedStep !== null && !(error instanceof RecurringPaymentUpdateStepFailedError))
     ) {
       throw error;
     }
-    throw new RecurringPaymentUpdateStepFailedError({ failure: error, clear: null });
+    stepFailure =
+      error instanceof RecurringPaymentUpdateStepFailedError
+        ? error
+        : new RecurringPaymentUpdateStepFailedError({ failure: error, clear: null });
+  }
+  if (beforeUnwind !== null) {
+    await beforeUnwind(stepFailure);
+  }
+  throw stepFailure;
+}
+
+/**
+ * Refuses to unwind a replacement whose new delegation is on chain. A replacement never returns
+ * to `active` on the old mandate while the new delegation exists: both would be live. The new
+ * delegation is derived from the attempt's replacement plan, so the check holds however far this
+ * run got; with no replacement plan recorded, no new delegation can exist. Costs one plan row
+ * read and two RPC calls, only on the unwind path.
+ *
+ * @param input - The run's attempt and the failure being unwound.
+ * @param input.env - The environment.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.attempt - The run's attempt as it stands.
+ * @param input.stepFailure - The step failure the update would unwind for.
+ * @throws ResumedStepUnsettledError when the new delegation exists or cannot be read; the
+ *   attempt stays in flight and the next run continues from the landed authorization.
+ * @throws AppError INTERNAL_ERROR when the recorded replacement plan row is missing.
+ */
+async function assertReplacementDelegationAbsent(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  attempt: PaymentRecurringPaymentUpdateAttemptRow;
+  stepFailure: RecurringPaymentUpdateStepFailedError;
+}): Promise<void> {
+  if (input.attempt.new_plan_id === null) {
+    return;
+  }
+  const plan = await createPaymentSubscriptionsRepository(
+    input.env,
+    createTenantScope(input)
+  ).getPlanById({
+    planId: input.attempt.new_plan_id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (plan === null) {
+    throw internalError("Recurring payment replacement plan was not found");
+  }
+  const { owner, planPda } = await derivePlanAddresses(plan);
+  const [subscriptionPda] = await subscriptionsProgram.findSubscriptionDelegationPda({
+    planPda,
+    subscriber: owner,
+  });
+  const logContext: RecurringPaymentStepLogContext = {
+    recurring_payment_id: input.attempt.recurring_payment_id,
+    attempt_id: input.attempt.id,
+    step: "authorize_subscription",
+  };
+  const delegation = await readRecurringPaymentStep({
+    effect: delegationCreatedEffect(subscriptionPda),
+    savedSignature: null,
+    lastValidBlockHeight: null,
+    logContext,
+  });
+  switch (delegation.state) {
+    case "unsent":
+    case "dropped":
+      return;
+    case "landed":
+    case "pending":
+      logEvent("error", {
+        event: "sdp_api_recurring_payment_unwind_refused_delegation_live",
+        ...logContext,
+        delegation_state: delegation.state,
+        subscription_pda: subscriptionPda,
+        ...describeError(input.stepFailure.failure),
+      });
+      throw new ResumedStepUnsettledError();
+    default:
+      return assertNever(delegation);
   }
 }
 
@@ -1395,7 +1482,7 @@ async function runMetadataScheduleUpdate(input: {
     unreadSavedStep: planUpdateSignature === null ? null : "plan_update_signature",
   };
 
-  const nextDueAt = await insideUpdatePhase(phase, async () => {
+  const metadataSteps = async () => {
     let onChainSubscription: Awaited<
       ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
     > | null = null;
@@ -1441,20 +1528,25 @@ async function runMetadataScheduleUpdate(input: {
       attempt_id: attempt.id,
       step: "update_plan",
     };
+    // Every send and read of this step works from the pre-image the schedule recorded, fresh or
+    // resumed: the send expects it, so the program refuses (522) a plan changed outside this
+    // attempt instead of overwriting it, and the effect compares the plan against it.
+    const preImage = planMetadataPreImage(input.claimed);
+    const effect = planMetadataUpdatedEffect({
+      planPda,
+      preImage,
+      targetMetadataUri,
+      logContext,
+    });
     // A signature saved in the step's slot means an earlier run reached the send (HOO-2044): the
-    // plan's metadata, against the pre-image the schedule recorded, settles whether it landed.
+    // plan's metadata settles whether it landed.
     if (planUpdateSignature !== null) {
       await readSavedUnwindStep({
         phase,
         slot,
         signature: planUpdateSignature,
         lastValidBlockHeight: attempt.last_valid_block_height,
-        effect: planMetadataUpdatedEffect({
-          planPda,
-          preImage: planMetadataPreImage(input.claimed),
-          targetMetadataUri,
-          logContext,
-        }),
+        effect,
         failureMessage,
         logContext,
       });
@@ -1467,12 +1559,6 @@ async function runMetadataScheduleUpdate(input: {
     if (!onChainPlan.exists) {
       throw transactionFailed("Subscription plan was not found on-chain");
     }
-    // The send expects the plan as read, so the program refuses a plan changed since instead of
-    // overwriting it; a failed send's re-read compares against the same pre-image.
-    const expectedPreImage: RecurringPaymentPlanMetadataPreImage = {
-      createdAt: onChainPlan.data.data.terms.createdAt.toString(),
-      metadataUri: removeNullCharacters(onChainPlan.data.data.metadataUri),
-    };
 
     attempt = requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
@@ -1485,9 +1571,9 @@ async function runMetadataScheduleUpdate(input: {
     );
     const instruction = await subscriptionsProgram.getUpdatePlanOverlayInstruction({
       endTs: onChainPlan.data.data.endTs,
-      expectedCreatedAt: onChainPlan.data.data.terms.createdAt,
+      expectedCreatedAt: BigInt(preImage.createdAt),
       expectedEndTs: onChainPlan.data.data.endTs,
-      expectedMetadataUri: onChainPlan.data.data.metadataUri,
+      expectedMetadataUri: preImage.metadataUri,
       expectedPullers: onChainPlan.data.data.pullers,
       metadataUri: targetMetadataUri,
       owner: sourceSigner,
@@ -1506,12 +1592,7 @@ async function runMetadataScheduleUpdate(input: {
       sourceSigner,
       instructions: [instruction],
       slot,
-      effect: planMetadataUpdatedEffect({
-        planPda,
-        preImage: expectedPreImage,
-        targetMetadataUri,
-        logContext,
-      }),
+      effect,
       alreadyDone: {
         code: subscriptionsProgram.SUBSCRIPTIONS_ERROR__STALE_PLAN_APPROVAL,
         notLanded: "failed",
@@ -1521,7 +1602,8 @@ async function runMetadataScheduleUpdate(input: {
       logContext,
     });
     return resolvedNextDueAt;
-  });
+  };
+  const nextDueAt = await insideUpdatePhase(phase, metadataSteps, null);
 
   return finalizeMetadataScheduleUpdate({
     env: input.env,
@@ -2079,7 +2161,10 @@ async function sendReplacementPlanCreation(input: {
 
 /**
  * Sends a replacement's authorization: its stage, the source wallet's setup when it needs one,
- * then subscribe to the new plan, each through the step runner.
+ * then subscribe to the new plan, each through the step runner. A subscribe refused as already
+ * subscribed whose re-read shows the delegation goes on to the old cancel in this run with no
+ * signature saved; a later run finds the slot empty, sends again, and re-derives landed from the
+ * chain the same way, and an unwind first checks the chain for the delegation.
  *
  * @param input - The authorization's accounts, signers, terms and attempt.
  * @returns The attempt after its stage write, and the authorization signature (null when the
@@ -2222,7 +2307,7 @@ async function runReplacementUpdate(input: {
   const replacementPeriodStartAt = attempt.created_at;
   const phase: UpdatePhase = { unreadSavedStep: latestSavedReplacementStep(attempt) };
 
-  const replacement = await insideUpdatePhase(phase, async () => {
+  const replacementSteps = async () => {
     if (
       !input.claimed.plan_pda ||
       !input.claimed.subscription_id ||
@@ -2467,7 +2552,16 @@ async function runReplacementUpdate(input: {
       subscriptionAuthorityAddress,
       authorizationSignature,
     };
-  });
+  };
+  const replacement = await insideUpdatePhase(phase, replacementSteps, (stepFailure) =>
+    assertReplacementDelegationAbsent({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      attempt,
+      stepFailure,
+    })
+  );
 
   const cancelOldLogContext: RecurringPaymentStepLogContext = {
     recurring_payment_id: attempt.recurring_payment_id,

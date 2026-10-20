@@ -610,10 +610,11 @@ export interface RecurringPaymentPlanMetadataPreImage {
  * Update plan's effect, a three-way compare of the plan's `createdAt` and metadata URI. The
  * target is landed. The pre-image is not landed. Any other existing plan is not landed and is
  * logged as changed outside this attempt; an absent plan is not landed and not logged, since the
- * caller fails it as not found. A resend after a not-landed read signs the pre-image as the
- * program's `expected_created_at` and `expected_metadata_uri`, so the program refuses it unless
- * the plan still holds the pre-image, and the refusal fails the step definitely. `endTs` and
- * pullers have no stored pre-image, and only SDP's key can change them.
+ * caller fails it as not found. Every send of the step, fresh or resumed, signs the pre-image as
+ * the program's `expected_created_at` and `expected_metadata_uri`, so the program refuses it
+ * (stale plan approval) unless the plan still holds the pre-image; that refusal re-reads this
+ * effect, and anything but the target fails the step. `endTs` and pullers have no stored
+ * pre-image, and only SDP's key can change them.
  *
  * @param input - The plan and the values to compare.
  * @param input.planPda - The plan's address.
