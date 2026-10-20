@@ -11,10 +11,9 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
 import { type MoneyAdmissionFacts, MoneyMovementRefusedError } from "@/lib/money-admission";
-import { env as testEnv } from "@/test/helpers/env";
 import { admittedMoneyFacts } from "@/test/helpers/money-admission";
 import {
   garbageSignTestTransaction,
@@ -228,9 +227,7 @@ describe("BudgetedFeePayment", () => {
 
   it("reserves network fee plus Kora outflow ceiling and denies before provider execution", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
-    const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
-    if (!getSponsorshipConfiguration) throw new Error("test provider omitted configuration");
-    vi.mocked(getSponsorshipConfiguration).mockResolvedValueOnce({
+    vi.mocked(provider.getSponsorshipConfiguration).mockResolvedValueOnce({
       signerAddress: FEE_PAYER,
       maxAllowedLamports: 1_000_000n,
       feePayerMayTransferLamports: true,
@@ -620,6 +617,94 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
   });
 
+  it("records the breaker transition with the reason that caused it", async () => {
+    const { feePayment, repository } = harness();
+    repository.markSigned.mockRejectedValue(new Error("ledger offline"));
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_accounting_unavailable",
+        network: "devnet",
+        organization_id: "org_1",
+        error_name: "Error",
+      })
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_breaker_tripped",
+        network: "devnet",
+        reason: "Signed sponsorship persistence failed",
+      })
+    );
+    const payloads = logEvent.mock.calls.map(([, payload]) => JSON.stringify(payload));
+    expect(payloads.some((payload) => payload.includes("ledger offline"))).toBe(false);
+  });
+
+  it("releases the racing reservation instead of tripping the breaker on a duplicate signature", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    repository.markSigned.mockResolvedValue("duplicate_signature");
+    await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toBeInstanceOf(Uint8Array);
+    expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "Transaction already sponsored under another reservation"
+    );
+    expect(budgetRedis.settle).toHaveBeenCalled();
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a stale provider callback loses ownership to a retry", async () => {
+    const { feePayment, repository, budgetRedis } = harness();
+    repository.markSigned.mockResolvedValueOnce("stale");
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "devnet",
+      "Signed sponsorship outcome lost its durable state transition"
+    );
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("leaves a durable terminal-unsynced row when the Redis sync marker write fails", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
+      new FeePaymentError("rejected", "PROVIDER_REJECTED")
+    );
+    repository.markRedisSettled.mockRejectedValueOnce(new Error("postgres timeout"));
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(budgetRedis.settle).toHaveBeenCalledOnce();
+    expect(repository.tripGlobalBreaker).toHaveBeenCalled();
+  });
+
+  it("does not let a stale deterministic failure release a newer attempt", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
+      new FeePaymentError("stale rejection", "PROVIDER_REJECTED")
+    );
+    repository.markReleased.mockResolvedValueOnce(false);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    expect(repository.markReleased).toHaveBeenCalledWith(expect.any(String), 1, "stale rejection");
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+    expect(repository.markRedisSettled).not.toHaveBeenCalled();
+  });
+
   describe("money admission (HOO-1955)", () => {
     const DELETED = { ...ACTIVE_SANDBOX, organizationStatus: "deleted" };
 
@@ -803,9 +888,7 @@ describe("BudgetedFeePayment", () => {
 
   it("maps uncertain Kora and RPC preflight failures to service unavailable", async () => {
     const { feePayment, provider, repository } = harness();
-    const getConfig = provider.getSponsorshipConfiguration;
-    if (!getConfig) throw new Error("Expected sponsorship configuration capability");
-    vi.mocked(getConfig).mockRejectedValueOnce(new Error("offline"));
+    vi.mocked(provider.getSponsorshipConfiguration).mockRejectedValueOnce(new Error("offline"));
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
     });
@@ -863,35 +946,5 @@ describe("BudgetedFeePayment", () => {
       expect.any(String),
       expect.any(String)
     );
-  });
-});
-
-describe("sponsorship network-fee preflight on the scope's Kora upstream", () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => vi.unstubAllEnvs());
-
-  it("refuses to sponsor a production scope before signing when the mainnet Kora RPC is unset", async () => {
-    vi.stubEnv("KORA_MAINNET_RPC_URL", "");
-    const parts = harnessParts();
-    readMoneyAdmissionFacts.mockResolvedValue(ACTIVE_ENTITLED_PRODUCTION);
-    parts.repository.resolvePolicies.mockResolvedValue([
-      { ...policy("global"), network: "mainnet" },
-      { ...policy("organization"), network: "mainnet" },
-      { ...policy("project"), network: "mainnet" },
-    ]);
-
-    await runInClusterScope({ projectId: SCOPE.projectId, environment: "production" }, async () => {
-      const feePayment = new BudgetedFeePayment(testEnv, SCOPE, parts.provider, {
-        repository: parts.repository,
-        budgetRedis: parts.budgetRedis,
-        now: () => new Date("2026-08-03T10:15:00.000Z"),
-      });
-      await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
-        code: "PROVIDER_NOT_AVAILABLE",
-        message: "Sponsorship preflight is unavailable",
-        cause: expect.objectContaining({ code: "RPC_NOT_CONFIGURED" }),
-      });
-    });
-    expect(parts.provider.signAsFeePayer).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,7 @@
  * The platform sponsors all transaction fees via Kora's fee payer.
  */
 
-import type { Address } from "@solana/kit";
+import { type Address, assertIsAddress } from "@solana/kit";
 import {
   type Config,
   type FeePayerPolicy,
@@ -134,15 +134,16 @@ export class KoraAdapter implements FeePaymentPort {
       try {
         const response = await this.client.getPayerSigner();
         const feePayer =
-          (response as { signer_address?: string }).signer_address ??
-          (response as { payment_address?: string }).payment_address ??
-          (response as { payerSigner?: string }).payerSigner;
+          response.signer_address ?? response.payment_address ?? response.payerSigner;
 
         if (!feePayer) {
           throw new Error("Kora did not return a fee payer address");
         }
 
-        return feePayer as Address;
+        // Parsed, not cast: the address is cached process-wide and every adapter on the endpoint
+        // builds against it.
+        assertIsAddress(feePayer);
+        return feePayer;
       } catch (error) {
         if (attempt < maxRetries && isRetryableGetFeePayerError(error)) {
           await sleep((attempt + 1) * 300);

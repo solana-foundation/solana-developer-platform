@@ -169,6 +169,7 @@ describe("closeDvpTrade", () => {
       prepareOwnedSubmission,
       providerId: "test",
       signAsFeePayer: vi.fn(),
+      getSponsorshipConfiguration: vi.fn(),
     });
     closeLocks.clear();
     getBlockHeight.mockResolvedValue(50n);

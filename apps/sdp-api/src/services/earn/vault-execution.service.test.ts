@@ -80,6 +80,7 @@ function feePayment(overrides: Partial<FeePaymentPort> = {}): FeePaymentPort {
     providerId: "test",
     getFeePayer: vi.fn().mockResolvedValue(feePayerAddress),
     signAsFeePayer: vi.fn().mockImplementation(async (bytes: Uint8Array) => bytes),
+    getSponsorshipConfiguration: vi.fn(),
     ...overrides,
   } as FeePaymentPort;
 }

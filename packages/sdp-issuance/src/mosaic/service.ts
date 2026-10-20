@@ -17,6 +17,7 @@ import {
   type ConfirmTransactionOptions,
   confirmTransaction,
   createRpcForSdk,
+  sendTransaction,
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -30,7 +31,6 @@ import {
   fetchEncodedAccount,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
-  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   type Rpc,
@@ -1217,15 +1217,7 @@ export class MosaicService {
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
       await onBeforeSubmit?.();
-      const sponsorSigned = getTransactionDecoder().decode(
-        await feePayment.signAsFeePayer(txBytes)
-      );
-      const signature = await this.rpc
-        .sendTransaction(getBase64EncodedWireTransaction(sponsorSigned), {
-          skipPreflight: false,
-          encoding: "base64",
-        })
-        .send();
+      const signature = await sendTransaction(this.rpc, await feePayment.signAsFeePayer(txBytes));
       return this.confirmSubmitted(signature);
     }
 

@@ -66,7 +66,7 @@ export interface FeePaymentPort {
   signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array>;
 
   /** Conservative provider-side lamport outflow ceiling used for admission. */
-  getSponsorshipConfiguration?(): Promise<SponsorshipProviderConfiguration>;
+  getSponsorshipConfiguration(): Promise<SponsorshipProviderConfiguration>;
 }
 
 export interface SponsorshipProviderConfiguration {

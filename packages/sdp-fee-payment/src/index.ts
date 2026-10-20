@@ -18,7 +18,7 @@ export interface KoraEndpoint {
 }
 
 /** Each cluster's Kora env keys: the service the API calls and the Solana RPC that Kora reads. */
-const KORA_ENV_KEYS = {
+export const KORA_ENV_KEYS = {
   devnet: {
     serviceUrl: "KORA_DEVNET_URL",
     upstreamRpcUrl: KORA_UPSTREAM_RPC_ENV_KEYS.devnet,

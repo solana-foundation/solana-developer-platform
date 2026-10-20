@@ -1,3 +1,4 @@
+import { KORA_ENV_KEYS } from "@sdp/fee-payment";
 import type { FeePaymentEnv } from "@sdp/fee-payment/port";
 import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -202,17 +203,9 @@ export function isEarnVaultSponsorshipEnabled(
   cluster: SolanaCluster
 ): boolean {
   if (!isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED)) return false;
-  return Boolean(env[KORA_URL_ENV_KEYS[cluster]]?.trim());
+  // Keyed by cluster, not the scope: Earn's anonymous paths run without one (HOO-1881).
+  return Boolean(env[KORA_ENV_KEYS[cluster].serviceUrl]?.trim());
 }
-
-/**
- * Each cluster's Kora URL, for Earn's cluster-keyed check: its anonymous paths run without a
- * cluster scope (HOO-1881). The boot check guarantees the cluster's upstream RPC alongside it.
- */
-const KORA_URL_ENV_KEYS = {
-  devnet: "KORA_DEVNET_URL",
-  "mainnet-beta": "KORA_MAINNET_URL",
-} as const satisfies Record<SolanaCluster, keyof FeePaymentEnv>;
 
 /**
  * Whether the Earn volume caps (ADR 0004) REFUSE, or only observe.

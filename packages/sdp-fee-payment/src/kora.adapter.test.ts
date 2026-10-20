@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { KoraAdapter, type KoraAdapterConfig } from "./kora.adapter";
-import { FeePaymentError } from "./port";
+import { FeePaymentError, type FeePaymentErrorCode } from "./port";
 
 type KoraTransport = NonNullable<KoraAdapterConfig["client"]>;
 
@@ -52,6 +52,10 @@ function makeAdapter(getConfig: () => Promise<unknown>): KoraAdapter {
 
 const USER_ID = "user_fee_payment_test";
 
+function syntheticSigner(read: number): string {
+  return `${"1".repeat(31)}${read + 1}`;
+}
+
 async function unstubbed(): Promise<never> {
   throw new Error("not stubbed in this test");
 }
@@ -99,7 +103,7 @@ describe("KoraAdapter fee-payer address cache", () => {
     const client = koraTransport({
       getPayerSigner: async () => {
         reads += 1;
-        return { signer_address: `Signer${reads}` };
+        return { signer_address: syntheticSigner(reads) };
       },
       signTransaction: unstubbed,
     });
@@ -108,21 +112,21 @@ describe("KoraAdapter fee-payer address cache", () => {
     const second = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_b", client });
 
     assert.deepEqual(await Promise.all([first.getFeePayer(), second.getFeePayer()]), [
-      "Signer1",
-      "Signer1",
+      syntheticSigner(1),
+      syntheticSigner(1),
     ]);
     const later = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_c", client });
-    assert.equal(await later.getFeePayer(), "Signer1");
+    assert.equal(await later.getFeePayer(), syntheticSigner(1));
     const otherKora = new KoraAdapter({
       rpcUrl: "https://kora-other.mock.invalid",
       userId: "user_a",
       client,
     });
-    assert.equal(await otherKora.getFeePayer(), "Signer2");
+    assert.equal(await otherKora.getFeePayer(), syntheticSigner(2));
     assert.equal(reads, 2);
   });
 
-  it("never stores a failed read", async () => {
+  it("never stores a failed read, including an answer that is not an address", async () => {
     let reads = 0;
     const adapter = new KoraAdapter({
       rpcUrl: "https://kora-fails-once.mock.invalid",
@@ -130,8 +134,7 @@ describe("KoraAdapter fee-payer address cache", () => {
       client: koraTransport({
         getPayerSigner: async () => {
           reads += 1;
-          if (reads === 1) throw new Error("Kora Error -32032: Unauthorized");
-          return { signer_address: SIGNER };
+          return { signer_address: reads === 1 ? "not-an-address" : SIGNER };
         },
         signTransaction: unstubbed,
       }),
@@ -150,7 +153,7 @@ describe("KoraAdapter fee-payer address cache", () => {
     const client = koraTransport({
       getPayerSigner: async () => {
         reads += 1;
-        return { signer_address: `Signer${reads}` };
+        return { signer_address: syntheticSigner(reads) };
       },
       signTransaction: (request) => {
         signerKeys.push(request.signer_key);
@@ -161,24 +164,24 @@ describe("KoraAdapter fee-payer address cache", () => {
     const adapter = new KoraAdapter({ rpcUrl: rotatingUrl, userId: USER_ID, client });
     const bystander = new KoraAdapter({ rpcUrl: rotatingUrl, userId: "user_bystander", client });
 
-    assert.equal(await adapter.getFeePayer(), "Signer1");
-    assert.equal(await bystander.getFeePayer(), "Signer1");
+    assert.equal(await adapter.getFeePayer(), syntheticSigner(1));
+    assert.equal(await bystander.getFeePayer(), syntheticSigner(1));
     const refusedFirst = adapter.signAsFeePayer(new Uint8Array([1]));
     const refusedLate = adapter.signAsFeePayer(new Uint8Array([2]));
     await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(signerKeys, ["Signer1", "Signer1"]);
+    assert.deepEqual(signerKeys, [syntheticSigner(1), syntheticSigner(1)]);
 
     firstRefusal.refuse(new Error("RPC Error -32001: signer_key is not a Kora signer"));
     await assert.rejects(
       refusedFirst,
       (error: unknown) => error instanceof FeePaymentError && error.code === "PROVIDER_REJECTED"
     );
-    assert.equal(await adapter.getFeePayer(), "Signer2");
-    assert.equal(await bystander.getFeePayer(), "Signer1");
+    assert.equal(await adapter.getFeePayer(), syntheticSigner(2));
+    assert.equal(await bystander.getFeePayer(), syntheticSigner(1));
 
     lateRefusal.refuse(new Error("RPC Error -32001: signer_key is not a Kora signer"));
     await assert.rejects(refusedLate, FeePaymentError);
-    assert.equal(await adapter.getFeePayer(), "Signer2");
+    assert.equal(await adapter.getFeePayer(), syntheticSigner(2));
     assert.equal(reads, 2);
   });
 
@@ -203,6 +206,76 @@ describe("KoraAdapter fee-payer address cache", () => {
     const nextRequest = new KoraAdapter({ rpcUrl: unreachableUrl, userId: USER_ID, client });
     assert.equal(await nextRequest.getFeePayer(), SIGNER);
     assert.equal(reads, 1);
+  });
+});
+
+describe("KoraAdapter sign refusals", () => {
+  it("maps each Kora refusal of a sign to its FeePaymentError code", async () => {
+    const refusals: Array<[Error, FeePaymentErrorCode]> = [
+      [new Error("RPC Error -32090: server exploded"), "NETWORK_ERROR"],
+      [new Error("RPC Error -32000: Invalid transaction: simulation failed"), "PROVIDER_REJECTED"],
+      [
+        new Error("Kora Error -32001: Validation error: mutable mint authority"),
+        "PROVIDER_REJECTED",
+      ],
+      [
+        Object.assign(new Error("Kora Error -32603: wrapped"), { code: -32003 }),
+        "INSUFFICIENT_BALANCE",
+      ],
+      [new Error("RPC Error -32602: invalid params"), "SIGNING_FAILED"],
+      [new Error("Kora Error -32030: Rate limit exceeded"), "RATE_LIMITED"],
+    ];
+    for (const [refusal, expectedCode] of refusals) {
+      const adapter = new KoraAdapter({
+        rpcUrl: "https://kora-refusals.mock.invalid",
+        userId: USER_ID,
+        client: koraTransport({
+          getPayerSigner: async () => ({ signer_address: SIGNER }),
+          signTransaction: async () => {
+            throw refusal;
+          },
+        }),
+      });
+      await assert.rejects(
+        adapter.signAsFeePayer(new Uint8Array([1])),
+        (error: unknown) => error instanceof FeePaymentError && error.code === expectedCode,
+        refusal.message
+      );
+    }
+  });
+});
+
+describe("KoraAdapter Cloud Run identity token cache", () => {
+  it("shares one metadata fetch per audience across adapters and never stores a failed one", async (t) => {
+    const koraUrl = "https://kora-identity.mock.invalid";
+    let metadataFetches = 0;
+    t.mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+      if (String(input).startsWith("http://metadata.google.internal/")) {
+        metadataFetches += 1;
+        return metadataFetches === 1
+          ? new Response("", { status: 503 })
+          : new Response("synthetic-identity-token");
+      }
+      return Response.json({ jsonrpc: "2.0", id: 1, result: { tokens: [] } });
+    });
+    const first = new KoraAdapter({
+      rpcUrl: koraUrl,
+      userId: "user_a",
+      identityTokenAudience: koraUrl,
+    });
+    const second = new KoraAdapter({
+      rpcUrl: koraUrl,
+      userId: "user_b",
+      identityTokenAudience: koraUrl,
+    });
+
+    await assert.rejects(first.getSupportedTokens(), FeePaymentError);
+    assert.deepEqual(await Promise.all([first.getSupportedTokens(), second.getSupportedTokens()]), [
+      [],
+      [],
+    ]);
+    assert.deepEqual(await second.getSupportedTokens(), []);
+    assert.equal(metadataFetches, 2);
   });
 });
 

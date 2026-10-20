@@ -204,6 +204,10 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     return this.provider.getFeePayer();
   }
 
+  getSponsorshipConfiguration(): Promise<SponsorshipProviderConfiguration> {
+    return this.provider.getSponsorshipConfiguration();
+  }
+
   private async verifySponsorResponse(
     sponsorSigned: Uint8Array,
     reservation: AdmissionResult
@@ -451,16 +455,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
-    if (!this.provider.getSponsorshipConfiguration) {
-      throw new FeePaymentError(
-        "Managed sponsorship provider does not expose fail-closed configuration",
-        "PROVIDER_NOT_AVAILABLE"
-      );
-    }
     const network = this.network;
-    let providerConfig: Awaited<
-      ReturnType<NonNullable<FeePaymentPort["getSponsorshipConfiguration"]>>
-    >;
+    let providerConfig: Awaited<ReturnType<FeePaymentPort["getSponsorshipConfiguration"]>>;
     let networkFee: bigint;
     try {
       [providerConfig, networkFee] = await Promise.all([
@@ -523,12 +519,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     context: AdmissionContext,
     durableReplay: SponsorshipReservation | null
   ): AdmissionResult | null {
-    const hasOperationResponse = durableReplay ? reservationHasResponse(durableReplay) : false;
-    if (
-      durableReplay &&
-      ["signed", "submitted", "committed"].includes(durableReplay.status) &&
-      hasOperationResponse
-    ) {
+    if (durableReplay && reservationHasResponse(durableReplay)) {
       return {
         id: context.id,
         attempt: durableReplay.attempt,
@@ -729,11 +720,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
           return owned();
         }
       }
-      if (
-        existing &&
-        ["signed", "submitted", "committed"].includes(existing.status) &&
-        reservationHasResponse(existing)
-      ) {
+      if (existing && reservationHasResponse(existing)) {
         return {
           kind: "replay",
           result: {

@@ -1,9 +1,5 @@
 import { createKoraAdapter, resolveKoraEndpoint } from "@sdp/fee-payment";
-import {
-  FeePaymentError,
-  type FeePaymentPort,
-  type SponsorshipProviderConfiguration,
-} from "@sdp/fee-payment/port";
+import type { FeePaymentPort, SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { MovementId } from "@sdp/types/movements";
 import type { Address, Signature } from "@solana/kit";
@@ -72,17 +68,6 @@ function withOwnedSubmissionLifecycle(
   provider: FeePaymentPort,
   admission: { env: Env; scope: SponsorshipMovementScope }
 ): SponsorshipFeePayment {
-  const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
-  let feePayer: Promise<Address> | undefined;
-  const sponsor = () => {
-    if (!feePayer) {
-      feePayer = provider.getFeePayer();
-      feePayer.catch(() => {
-        feePayer = undefined;
-      });
-    }
-    return feePayer;
-  };
   const admit = async () => {
     assertSponsorshipAdmitted(
       admission.scope,
@@ -95,19 +80,15 @@ function withOwnedSubmissionLifecycle(
     const decoded = await assertSponsorSignedSameMessage({
       requested: transaction,
       sponsorSigned: signedTransaction,
-      sponsor: await sponsor(),
+      sponsor: await provider.getFeePayer(),
     });
     return { signedTransaction, decoded };
   };
   return {
     providerId: provider.providerId,
-    getFeePayer: () => sponsor(),
+    getFeePayer: () => provider.getFeePayer(),
     signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
-    ...(getSponsorshipConfiguration
-      ? {
-          getSponsorshipConfiguration: () => getSponsorshipConfiguration.call(provider),
-        }
-      : {}),
+    getSponsorshipConfiguration: () => provider.getSponsorshipConfiguration(),
     async prepareOwnedSubmission(transaction, lifecycle) {
       const { decoded } = await signVerified(transaction);
       const submission = {
@@ -208,14 +189,10 @@ export function isKoraSponsorshipConfigured(env: Env): boolean {
 export async function getManagedSponsorshipProviderConfiguration(
   env: Env
 ): Promise<SponsorshipProviderConfiguration> {
-  const provider = instrumentedAdapter(env, "sdp:v1:system:sponsorship-reconciliation");
-  if (!provider.getSponsorshipConfiguration) {
-    throw new FeePaymentError(
-      "Managed sponsorship provider does not expose fail-closed configuration",
-      "PROVIDER_NOT_AVAILABLE"
-    );
-  }
-  return provider.getSponsorshipConfiguration();
+  return instrumentedAdapter(
+    env,
+    "sdp:v1:system:sponsorship-reconciliation"
+  ).getSponsorshipConfiguration();
 }
 
 /**

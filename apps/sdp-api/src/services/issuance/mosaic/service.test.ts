@@ -81,6 +81,7 @@ function makeFeePayment(koraAddress: Address): {
     providerId: "test-kora",
     getFeePayer,
     signAsFeePayer,
+    getSponsorshipConfiguration: vi.fn(),
   };
   return { port, getFeePayer, signAsFeePayer };
 }
@@ -349,12 +350,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     });
 
     function stubSponsoredSubmission(sentSignature: Signature) {
-      const sendTransaction = vi.fn().mockReturnValue({
-        send: vi.fn().mockResolvedValue(sentSignature),
-      });
-      vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue({
-        sendTransaction,
-      } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
+      const sendSpy = vi.spyOn(RpcModule, "sendTransaction").mockResolvedValue(sentSignature);
       const partialSpy = vi
         .spyOn(Signers, "partiallySignTransactionMessageWithSigners")
         .mockResolvedValue({ __sentinel: "partial-tx" } as never);
@@ -362,25 +358,12 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         encode: () => new Uint8Array([1, 2, 3]),
       } as never);
       fee.signAsFeePayer.mockResolvedValue(new Uint8Array([4, 5, 6]));
-      vi.spyOn(Kit, "getTransactionDecoder").mockReturnValue({
-        decode: (sponsorSignedBytes: Uint8Array) => ({ sponsorSignedBytes }),
-      } as never);
-      const wireSpy = vi
-        .spyOn(Kit, "getBase64EncodedWireTransaction")
-        .mockReturnValue("sponsored-wire-tx" as never);
-      const sponsored = new MosaicService(
-        env as ConstructorParameters<typeof MosaicService>[0],
-        signer,
-        fee.port,
-        { transactionFailedError: transactionFailed }
-      );
-      return { sponsored, sendTransaction, partialSpy, wireSpy };
+      return { sendSpy, partialSpy };
     }
 
     it("submits via the Kora two-signer path: the sponsor signs and the RPC sends", async () => {
       const koraSignature = "kora-sig" as Signature;
-      const { sponsored, sendTransaction, partialSpy, wireSpy } =
-        stubSponsoredSubmission(koraSignature);
+      const { sendSpy, partialSpy } = stubSponsoredSubmission(koraSignature);
       const confirmSpy = vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
         signature: koraSignature,
         slot: 7n,
@@ -388,15 +371,11 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         err: null,
       } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
 
-      const result = await sponsored.createToken(srfc37Options());
+      const result = await service.createToken(srfc37Options());
 
       expect(partialSpy).toHaveBeenCalledWith(FAKE_FULL_TX);
       expect(fee.signAsFeePayer).toHaveBeenCalledExactlyOnceWith(new Uint8Array([1, 2, 3]));
-      expect(wireSpy).toHaveBeenCalledWith({ sponsorSignedBytes: new Uint8Array([4, 5, 6]) });
-      expect(sendTransaction).toHaveBeenCalledExactlyOnceWith("sponsored-wire-tx", {
-        skipPreflight: false,
-        encoding: "base64",
-      });
+      expect(sendSpy).toHaveBeenCalledExactlyOnceWith(expect.anything(), new Uint8Array([4, 5, 6]));
       expect(confirmSpy).toHaveBeenCalledTimes(1);
       expect(result.signature).toBe(koraSignature);
       expect(result.slot).toBe(7n);
@@ -404,7 +383,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
 
     it("throws TRANSACTION_FAILED carrying the on-chain error when confirmation reports failure", async () => {
       const koraSignature = "kora-sig" as Signature;
-      const { sponsored } = stubSponsoredSubmission(koraSignature);
+      stubSponsoredSubmission(koraSignature);
       const onChainError = { InstructionError: [0, { Custom: 6001 }] };
       vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
         signature: koraSignature,
@@ -413,7 +392,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         err: onChainError,
       } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
 
-      const error = await sponsored.createToken(srfc37Options()).then(
+      const error = await service.createToken(srfc37Options()).then(
         () => {
           throw new Error("expected createToken to reject");
         },

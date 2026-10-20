@@ -1,14 +1,16 @@
+import { apiTestSupport } from "@sdp/api/test-support";
 import { resolveDefaultCluster } from "@sdp/rpc/config";
 import { env } from "#env-impl";
 
-/** The run's cluster's `KORA_<CLUSTER>` prefix: the harness sponsors on `SOLANA_NETWORK`'s cluster. */
-const KORA_ENV_PREFIX =
-  resolveDefaultCluster(env) === "mainnet-beta" ? "KORA_MAINNET" : "KORA_DEVNET";
+const { KORA_ENV_KEYS } = apiTestSupport;
+
+/** The run's cluster's Kora env keys: the harness sponsors on `SOLANA_NETWORK`'s cluster. */
+const koraEnvKeys = KORA_ENV_KEYS[resolveDefaultCluster(env)];
 
 /** The env var that names {@link koraEndpoint}'s URL, for "missing" messages. */
-export const KORA_URL_ENV_KEY = `${KORA_ENV_PREFIX}_URL` as const;
+export const KORA_URL_ENV_KEY = koraEnvKeys.serviceUrl;
 
-const koraUrl = env[KORA_URL_ENV_KEY]?.trim();
+const koraUrl = env[koraEnvKeys.serviceUrl]?.trim();
 
 /**
  * The Kora this run targets: the `SOLANA_NETWORK` cluster's `KORA_<CLUSTER>_*` trio, or null.
@@ -18,8 +20,8 @@ const koraUrl = env[KORA_URL_ENV_KEY]?.trim();
 export const koraEndpoint = koraUrl
   ? {
       rpcUrl: koraUrl,
-      apiKey: env[`${KORA_ENV_PREFIX}_API_KEY`],
-      identityTokenAudience: env[`${KORA_ENV_PREFIX}_CLOUD_RUN_AUDIENCE`],
+      apiKey: env[koraEnvKeys.apiKey],
+      identityTokenAudience: env[koraEnvKeys.identityTokenAudience],
     }
   : null;
 

@@ -24,7 +24,7 @@ describe("Token2022Service burn", () => {
   const sendTransaction = vi.fn<
     (
       wireTransaction: Kit.Base64EncodedWireTransaction,
-      config: { skipPreflight: boolean; encoding: "base64" }
+      config: { skipPreflight: boolean; encoding: "base64"; maxRetries?: bigint }
     ) => { send: typeof send }
   >(() => ({ send }));
 
@@ -133,7 +133,7 @@ describe("Token2022Service burn", () => {
     const sponsorSigned = Kit.getTransactionDecoder().decode(await fullySignTestTransaction(bytes));
     expect(sendTransaction).toHaveBeenCalledExactlyOnceWith(
       Kit.getBase64EncodedWireTransaction(sponsorSigned),
-      { skipPreflight: false, encoding: "base64" }
+      { skipPreflight: false, encoding: "base64", maxRetries: undefined }
     );
     expect(RpcModule.confirmTransaction).toHaveBeenCalledWith(expect.anything(), signature);
   });

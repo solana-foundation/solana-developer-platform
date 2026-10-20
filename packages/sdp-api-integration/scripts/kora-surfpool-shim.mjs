@@ -158,7 +158,7 @@ function getConfig() {
       get_payer_signer: true,
       get_supported_tokens: true,
       liveness: true,
-      sign_and_send_transaction: true,
+      sign_and_send_transaction: false,
       sign_transaction: true,
       transfer_transaction: false,
     },

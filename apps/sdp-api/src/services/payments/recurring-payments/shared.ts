@@ -312,31 +312,34 @@ export function createSubscriptionStepStore(step: {
   save: (signature: Signature) => Promise<void>;
   rows: readonly SubscriptionStepSignatureRow[];
 }): SignedSubmissionStore {
-  let savedSignature: Signature | null = null;
   return {
-    persistSigned: async ({ signature }) => {
-      await step.save(signature);
-      savedSignature = signature;
-    },
+    persistSigned: ({ signature }) => step.save(signature),
     markStarted: async () => {},
     hasStarted: async () => false,
-    clearSigned: async () => {
-      if (savedSignature === null) return;
-      const signature = savedSignature;
+    clearSigned: async (signature) => {
       const updatedAt = new Date().toISOString();
       await getDb(step.env).transaction(async (tx) => {
         const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
         for (const row of step.rows) {
-          await recurringRepo.clearStepSignature({
+          const cleared = await recurringRepo.clearStepSignature({
             ...row,
             organizationId: step.organizationId,
             projectId: step.projectId,
             signature,
             updatedAt,
           });
+          getLogger().info(
+            {
+              project_id: step.projectId,
+              row_id: row.id,
+              slot: `${row.slot.row}.${row.slot.column}`,
+              signature,
+              cleared,
+            },
+            "Recurring payment step signature cleared after a refused send"
+          );
         }
       });
-      savedSignature = null;
     },
   };
 }

@@ -9,6 +9,7 @@ import {
   createRpcForSdk,
   type SimulationResult,
   type SolanaRpcSdkBridge,
+  sendTransaction,
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
@@ -18,7 +19,6 @@ import {
   createNoopSigner,
   getBase64EncodedWireTransaction,
   getBase64Encoder,
-  getTransactionDecoder,
   getTransactionEncoder,
   type Rpc,
   type Signature,
@@ -122,15 +122,7 @@ export class Token2022Service {
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-      const sponsorSigned = getTransactionDecoder().decode(
-        await this.feePayment.signAsFeePayer(txBytes)
-      );
-      const signature = await rpc
-        .sendTransaction(getBase64EncodedWireTransaction(sponsorSigned), {
-          skipPreflight: false,
-          encoding: "base64",
-        })
-        .send();
+      const signature = await sendTransaction(rpc, await this.feePayment.signAsFeePayer(txBytes));
       const confirmation = await confirmTransaction(rpc, signature);
 
       if (confirmation.err) {

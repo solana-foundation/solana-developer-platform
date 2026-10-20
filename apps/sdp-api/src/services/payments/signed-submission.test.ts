@@ -14,7 +14,7 @@ import { createTransferSignedSubmissionStore } from "./signed-submission";
 const SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
 
-function preflightError(cause?: unknown) {
+function preflightError(cause?: unknown, logs?: string[]) {
   return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
     accounts: null,
     fee: null,
@@ -29,6 +29,7 @@ function preflightError(cause?: unknown) {
     returnData: null,
     unitsConsumed: null,
     ...(cause === undefined ? {} : { cause }),
+    ...(logs === undefined ? {} : { logs }),
   });
 }
 
@@ -157,7 +158,7 @@ describe("submitSponsoredTransaction", () => {
     ).rejects.toMatchObject({ code: "TRANSACTION_FAILED", message: cause.message });
 
     expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledWith(error);
-    expect(store.clearSigned).toHaveBeenCalledOnce();
+    expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
   });
 
   it("forgets the signed transaction when releasing a preflight rejection fails", async () => {
@@ -186,7 +187,43 @@ describe("submitSponsoredTransaction", () => {
       })
     ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
 
-    expect(store.clearSigned).toHaveBeenCalledOnce();
+    expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
+  });
+
+  it("does not retry a preflight rejection whose program log reads as transient", async () => {
+    vi.useFakeTimers();
+    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
+    const feePayment = {
+      prepareOwnedSubmission: vi.fn(async () => ({
+        signedTransaction: new Uint8Array([1, 2, 3]),
+        signature: SIGNATURE,
+        releaseDefinitelyUnbroadcast,
+      })),
+    } as unknown as SponsorshipFeePayment;
+    const store = {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+      clearSigned: vi.fn(),
+    };
+    const error = preflightError(undefined, ["Program log: Error: oracle price timed out"]);
+    const send = vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValue(error);
+
+    const result = expect(
+      submitSponsoredTransaction({
+        feePayment,
+        rpc: {} as solanaRpc.SolanaRpc,
+        transaction: new Uint8Array([9]),
+        lastValidBlockHeight: 123n,
+        store,
+      })
+    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
+    await vi.runAllTimersAsync();
+
+    await result;
+    expect(send).toHaveBeenCalledOnce();
+    expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledExactlyOnceWith(error);
+    expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
   });
 
   it("maps an account-frozen preflight rejection without losing definiteness", async () => {

@@ -232,3 +232,13 @@ When working on design or frontend changes:
 - Raw `<img>` srcs (JSX/TSX or inline `<img>` in MDX) must point at `/docs/images/...`, not `/images/...`. Production traffic arrives through sdp-web's `/docs/:path*` proxy, which never forwards root-level `/images` requests; a rewrite in `next.config.mjs` maps `/docs/images/*` back onto `public/images/*`. Markdown-syntax images (`![](/images/...)`) are exempt: fumadocs-mdx compiles them to static imports that already resolve correctly.
 - Use proper image sizes relative to their container — do not use oversized images (e.g., 1024px for a 32px container). Use at most 2x the container size for retina support.
 - Run `npm run build` and check for errors before pushing to staging.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

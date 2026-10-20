@@ -126,6 +126,7 @@ describe("Public payment request routes", () => {
       providerId: "test",
       getFeePayer: async () => TEST_MOCK_FEE_PAYER,
       signAsFeePayer: sponsorSignTestTransaction,
+      getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
       prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
     }));
   }
@@ -310,6 +311,7 @@ describe("Public payment request routes", () => {
         providerId: "test",
         getFeePayer: async () => TEST_MOCK_FEE_PAYER,
         signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
         prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
       }));
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
