@@ -7,6 +7,7 @@ import {
   estimateLimitCopy,
   estimateRateCopy,
   formatEstimateFigure,
+  youPayCopy,
 } from "./ramp-estimate-copy";
 
 const messages = getMessages("en");
@@ -32,6 +33,58 @@ describe("formatEstimateFigure", () => {
     expect(formatEstimateFigure("1234.5", "en")).toBe("1,234.50");
     expect(formatEstimateFigure("0.004321", "en")).toBe("0.004321");
     expect(formatEstimateFigure("not a number", "en")).toBe("not a number");
+  });
+});
+
+describe("youPayCopy", () => {
+  const onramp = (overrides: Partial<PaymentRampEstimate>) =>
+    estimate({ direction: "onramp", ...overrides });
+
+  it("adds fees charged on top of the amount, as Stripe does", () => {
+    const copy = youPayCopy(
+      t,
+      {
+        estimate: onramp({
+          provider: "stripe",
+          fiatAmount: "25",
+          totalFiatAmount: "26.02",
+          fees: { currency: "USD", total: "1.02" },
+        }),
+        amount: "25",
+        fiat: "USD",
+      },
+      "en"
+    );
+    expect(copy).toEqual({ value: "26.02 USD", aside: "25.00 USD plus the provider's fees" });
+  });
+
+  it("says the fees are inside a total MoonPay's widget takes them out of", () => {
+    const copy = youPayCopy(
+      t,
+      {
+        estimate: onramp({
+          fiatAmount: "21.7",
+          totalFiatAmount: "25",
+          fees: { currency: "USD", total: "3.3" },
+        }),
+        amount: "25",
+        fiat: "USD",
+      },
+      "en"
+    );
+    expect(copy).toEqual({ value: "25.00 USD", aside: "Includes the provider's fees" });
+  });
+
+  it("names no fees for a free buy or before any estimate", () => {
+    const free = onramp({ totalFiatAmount: "25", fees: { currency: "USD", total: "0" } });
+    expect(youPayCopy(t, { estimate: free, amount: "25", fiat: "USD" }, "en")).toEqual({
+      value: "25.00 USD",
+      aside: undefined,
+    });
+    expect(youPayCopy(t, { estimate: null, amount: "25", fiat: "USD" }, "en")).toEqual({
+      value: "25.00 USD",
+      aside: undefined,
+    });
   });
 });
 

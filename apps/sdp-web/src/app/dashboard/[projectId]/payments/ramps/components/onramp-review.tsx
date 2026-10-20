@@ -1,6 +1,5 @@
 "use client";
 
-import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import { CUSTODY_PROVIDER_CATALOG_BY_ID } from "@sdp/types/custody";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { PaymentRampEstimate } from "@sdp/types/payments";
@@ -13,6 +12,7 @@ import { useRampEstimate } from "@/app/dashboard/[projectId]/payments/ramps/hook
 import {
   estimateRateCopy,
   formatEstimateFigure,
+  youPayCopy,
 } from "@/app/dashboard/[projectId]/payments/ramps/ramp-estimate-copy";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
@@ -169,12 +169,7 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
   const now = useSecondsTick(ok?.expiresAt !== undefined);
   const fiat = selectedRampPair.fiatCurrency.toUpperCase();
   const asset = getCryptoRailAssetLabel(selectedRampPair.assetRail);
-  const total = ok?.totalFiatAmount;
-  const totalIncludesFees =
-    total !== undefined &&
-    isDecimalString(total) &&
-    isDecimalString(fields.amount) &&
-    compareDecimalAmounts(total, fields.amount) !== 0;
+  const youPay = youPayCopy(t, { estimate: ok, amount: fields.amount, fiat }, locale);
 
   return (
     <div className="space-y-8">
@@ -190,14 +185,8 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
           />
           <ReviewRow
             label={t("DashboardPayments.ramps.youPay")}
-            value={`${formatDecimalAmount(total ?? fields.amount, locale)} ${fiat}`}
-            aside={
-              totalIncludesFees
-                ? t("DashboardPayments.ramps.youPayIncludesFees", {
-                    amount: `${formatDecimalAmount(fields.amount, locale)} ${fiat}`,
-                  })
-                : undefined
-            }
+            value={youPay.value}
+            aside={youPay.aside}
           />
           <EstimateRows estimate={ok} amount={fields.amount} asset={asset} />
           <WalletRow wallet={selectedWallet} />

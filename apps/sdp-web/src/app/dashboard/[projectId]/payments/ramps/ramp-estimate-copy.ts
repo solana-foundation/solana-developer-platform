@@ -5,6 +5,7 @@ import type {
   PaymentRampEstimateFees,
   RampProviderEstimateResult,
 } from "@sdp/types/payments";
+import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 
@@ -93,6 +94,46 @@ export function estimateFeeCopy(
     amount: formatEstimateFigure(fees.total, locale, minimumFractionDigits),
     currency: fees.currency,
   });
+}
+
+/**
+ * "You pay" on the on-ramp review: the provider's total and how its fees sit in
+ * it. Stripe adds them on top of the amount; MoonPay's widget takes them out of
+ * it. Without a total the amount typed stands alone.
+ */
+export function youPayCopy(
+  t: Translate,
+  {
+    estimate,
+    amount,
+    fiat,
+  }: { estimate: PaymentRampEstimate | null; amount: string; fiat: string },
+  locale: string
+): { value: string; aside: string | undefined } {
+  const total = estimate?.totalFiatAmount;
+  if (
+    estimate === null ||
+    total === undefined ||
+    !isDecimalString(total) ||
+    !isDecimalString(amount)
+  ) {
+    return { value: `${formatDecimalAmount(amount, locale)} ${fiat}`, aside: undefined };
+  }
+  const value = `${formatDecimalAmount(total, locale)} ${fiat}`;
+  if (compareDecimalAmounts(total, amount) > 0) {
+    return {
+      value,
+      aside: t("DashboardPayments.ramps.youPayPlusFees", {
+        amount: `${formatDecimalAmount(amount, locale)} ${fiat}`,
+      }),
+    };
+  }
+  return {
+    value,
+    aside: isPositiveDecimal(estimate.fees.total)
+      ? t("DashboardPayments.ramps.youPayFeesIncluded")
+      : undefined,
+  };
 }
 
 function isPositiveDecimal(value: string): boolean {
