@@ -36,6 +36,19 @@ export function findWalletBalanceForToken(
   return wallet?.balances?.find((balance) => balance.token === token) ?? null;
 }
 
+/**
+ * What the wallet holds of `token`: "0" when its balances were read without
+ * the token, null with no wallet or when the API could not read them (it then
+ * omits `balances`), so an unread balance never passes for an empty one.
+ */
+export function walletTokenBalance(
+  wallet: PaymentsDashboardWallet | null,
+  token: string
+): string | null {
+  if (wallet?.balances === undefined) return null;
+  return findWalletBalanceForToken(wallet, token)?.uiAmount ?? "0";
+}
+
 /** Whether `amount` of `token` is more than the wallet holds; false until both are known. */
 export function exceedsWalletBalance(
   wallet: PaymentsDashboardWallet | null,
@@ -43,9 +56,20 @@ export function exceedsWalletBalance(
   amount: string
 ): boolean {
   const wanted = amount.trim();
-  if (!wallet || !isDecimalString(wanted)) return false;
-  const held = findWalletBalanceForToken(wallet, token)?.uiAmount ?? "0";
-  return isDecimalString(held) && compareDecimalAmounts(wanted, held) > 0;
+  const held = walletTokenBalance(wallet, token);
+  return (
+    held !== null &&
+    isDecimalString(wanted) &&
+    isDecimalString(held) &&
+    compareDecimalAmounts(wanted, held) > 0
+  );
+}
+
+/** What Max fills in: a positive held balance, else null. */
+export function maxPayoutAmount(held: string | null): string | null {
+  return held !== null && isDecimalString(held) && compareDecimalAmounts(held, "0") > 0
+    ? held
+    : null;
 }
 
 export function walletBalanceAssetOptions(

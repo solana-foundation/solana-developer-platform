@@ -9,7 +9,11 @@ import {
   type OfframpFinalStepWizard,
   offrampFooterAction,
 } from "@/app/dashboard/[projectId]/payments/ramps/offramp-footer-action";
-import { exceedsWalletBalance } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import {
+  exceedsWalletBalance,
+  maxPayoutAmount,
+  walletTokenBalance,
+} from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { OfframpFooterActionButton, OfframpOutcome } from "./offramp-final-step";
@@ -137,5 +141,20 @@ describe("exceedsWalletBalance", () => {
     expect(exceedsWalletBalance(wallet, "SOL", "0.1")).toBe(true);
     expect(exceedsWalletBalance(wallet, "USDC", "")).toBe(false);
     expect(exceedsWalletBalance(null, "USDC", "25")).toBe(false);
+  });
+
+  it("never blocks on a balance the API could not read", () => {
+    const unread: PaymentsDashboardWallet = { ...wallet, balances: undefined };
+
+    expect(walletTokenBalance(unread, "USDC")).toBeNull();
+    expect(exceedsWalletBalance(unread, "USDC", "25")).toBe(false);
+    expect(walletTokenBalance(wallet, "SOL")).toBe("0");
+    expect(walletTokenBalance(wallet, "USDC")).toBe("5");
+  });
+
+  it("offers Max only for a positive balance", () => {
+    expect(maxPayoutAmount("5")).toBe("5");
+    expect(maxPayoutAmount("0")).toBeNull();
+    expect(maxPayoutAmount(null)).toBeNull();
   });
 });

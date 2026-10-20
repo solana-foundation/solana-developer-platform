@@ -99,6 +99,7 @@
     },
     "ramps": {
       "max": "MAX",
+      "balanceUnread": "Balance unavailable",
       "recentTransfersRequestFailed": "Recent transfers request failed.",
       "recentTransfers": "Recent Transfers",
       "noRecentTransactions": "No recent transactions.",
