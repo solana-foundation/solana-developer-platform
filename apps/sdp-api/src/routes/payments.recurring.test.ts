@@ -12,6 +12,7 @@ import {
   type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
   type PaymentSubscriptionCollectionAttemptStatus,
+  type PaymentSubscriptionStatus,
   type PaymentTransferStatus,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
@@ -9812,6 +9813,120 @@ describe("Payments routes — recurring", () => {
               .all<{ id: string }>()
           ).results
         ).toEqual([]);
+      });
+
+      it("leaves a dropped subscribe in flight when another run re-claimed the activation before its failure lands", async () => {
+        const { created, planSignature, subscribeSignature } = await leaveSubscribeInFlight();
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          absoluteSlot: 2_900,
+          blockHeight: 1_001,
+          delegation: () => null,
+        });
+        // Another run re-claims the schedule between this run's clear and its schedule reset.
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const clears = vi.fn<(cleared: boolean) => void>();
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => {
+            const repository = createRepository(db);
+            return {
+              ...repository,
+              clearStepSignature: async (input) => {
+                const cleared = await repository.clearStepSignature(input);
+                clears(cleared);
+                await getDb(env)
+                  .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+                  .bind(new Date(Date.now() + 1000).toISOString(), created.id)
+                  .run();
+                return cleared;
+              },
+            };
+          });
+        onTestFinished(() => repositorySpy.mockRestore());
+
+        const retry = await activate(created.id, crypto.randomUUID());
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(clears.mock.calls).toEqual([[true]]);
+        expect(await onlyActivationAttempt(created.id)).toEqual({
+          status: "processing",
+          stage: "authorize_subscription",
+          plan_creation_signature: planSignature,
+          authorization_setup_signature: null,
+          authorization_signature: subscribeSignature,
+          last_valid_block_height: "1000",
+        });
+        expect(await scheduleSignatures(created.id)).toEqual({
+          status: "activating",
+          plan_creation_signature: planSignature,
+          authorization_signature: null,
+        });
+      });
+
+      it("leaves an activation in flight when another run re-claimed it before its finalize lands, finalizing nothing", async () => {
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        // Another run re-claims the schedule once this run's finalize has activated the subscription.
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => {
+            const repository = createRepository(db);
+            return {
+              ...repository,
+              updateRecurringPaymentActivation: async (input) => {
+                if (input.status === "active") {
+                  await getDb(env)
+                    .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+                    .bind(new Date(Date.now() + 1000).toISOString(), created.id)
+                    .run();
+                }
+                return repository.updateRecurringPaymentActivation(input);
+              },
+            };
+          });
+        onTestFinished(() => repositorySpy.mockRestore());
+
+        const response = await activate(created.id, crypto.randomUUID());
+
+        expect(response.status).toBe(409);
+        expect(await errorCode(response)).toBe("CONFLICT");
+        const [planSignature, subscribeSignature] = poolSentSignatures();
+        expect(await onlyActivationAttempt(created.id)).toEqual({
+          status: "processing",
+          stage: "authorize_subscription",
+          plan_creation_signature: required(planSignature),
+          authorization_setup_signature: null,
+          authorization_signature: required(subscribeSignature),
+          last_valid_block_height: "1000",
+        });
+        expect(await scheduleSignatures(created.id)).toEqual({
+          status: "activating",
+          plan_creation_signature: required(planSignature),
+          authorization_signature: null,
+        });
+        expect(
+          await getDb(env)
+            .prepare(
+              `SELECT s.status, s.authorization_signature FROM payment_subscriptions s
+                 JOIN payment_recurring_payments rp ON rp.subscription_id = s.id
+                WHERE rp.id = ?`
+            )
+            .bind(created.id)
+            .first<{
+              status: PaymentSubscriptionStatus;
+              authorization_signature: string | null;
+            }>()
+        ).toEqual({ status: "pending_authorization", authorization_signature: null });
       });
 
       it("fails an activation whose setup send expired without landing back to pending_activation, clearing its setup signature", async () => {
