@@ -2096,10 +2096,13 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryByText("No active position")).toBeNull();
   });
 
-  it("counts an SDP-issued stablecoin the static catalogue cannot know", () => {
-    // The API prices what it treats as USD-stable at exactly 1, issued tokens
-    // included. Dropping those understated the float, and a wallet holding
-    // only them read $0.00 with a confident 100% deployed.
+  it("does not count an SDP-issued stablecoin the static catalogue cannot know", () => {
+    // The API prices only from Jupiter's mainnet market data, so an SDP-issued
+    // stablecoin — whose mint Jupiter has never heard of — arrives unpriced
+    // and is not cash: a self-issued "USDC" is not a dollar. The par price the
+    // old wallet-balances read stamped on such a row is fed here and must
+    // still be refused; a wallet holding only issued tokens reads $0.00
+    // available cash rather than a dollar figure no market ever said.
     mocks.walletBalances = [
       {
         token: "kUSDC",
@@ -2119,9 +2122,9 @@ describe("TreasurySolutionsWorkspace", () => {
     ];
     renderWorkspace();
 
-    expect(screen.getAllByText("$1,000.00").length).toBeGreaterThan(0);
-    expect(screen.queryByText("$0.00")).toBeNull();
-    expect(screen.queryByText("100.0%")).toBeNull();
+    expect(screen.queryByText("$1,000.00")).toBeNull();
+    expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("$130.50 in open vault positions")).toBeTruthy();
   });
 
   it("never claims an empty positions list over a holding it has no record of", () => {

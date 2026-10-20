@@ -92,23 +92,27 @@ describe("summarizeTreasuryAllocation figures", () => {
     expect(summary.deployedValue).toBe("3999.5");
   });
 
-  it("counts an SDP-issued stablecoin the static catalogue cannot know", () => {
-    // The API prices everything it treats as USD-stable at exactly 1, issued
-    // tokens included. Dropping those silently understated the float, and a
-    // wallet holding only them read a real $0 as an empty treasury.
+  it("does not count an SDP-issued stablecoin the static catalogue cannot know as cash", () => {
+    // The API prices only from Jupiter's mainnet market data, so an SDP-issued
+    // stablecoin — whose mint Jupiter has never heard of — arrives unpriced and
+    // is not cash: a self-issued "USDC" is not a dollar no matter what its
+    // label says. A market price at par would not vouch for it either, so the
+    // fixture carries one and the classification must still refuse it: a
+    // wallet holding only issued tokens reads a real $0 rather than a
+    // fabricated dollar figure no market ever stated.
     const summary = summarize({
       wallets: [
         wallet([
           { mint: ISSUED_MINT, uiAmount: "1000000", usdPrice: 1 },
           { mint: USDC_MINT, uiAmount: "100" },
-          // Priced, but not at a dollar: not cash.
+          // Priced, but not at a dollar: not cash either.
           { mint: UNKNOWN_MINT, uiAmount: "5", usdPrice: 173.42 },
         ]),
       ],
       positions: [],
     });
 
-    expect(summary.availableCash).toBe("1000100");
+    expect(summary.availableCash).toBe("100");
   });
 
   it("does not count one on-chain wallet twice when it has several custody rows", () => {
@@ -339,19 +343,33 @@ describe("a par intermediate left by a cancelled request", () => {
     tokenValue: "0",
     parIntermediate: { mint: WYLDS_MINT, amount: "2000", tokenValue: "2000" },
   });
+  // The cash netting can only engage a STABLE intermediate, because only a
+  // stable balance reaches it: no provider emits a stable par intermediate
+  // today (Hastra's is wYLDS, which the catalogue does not classify as
+  // stable), so these scenarios are the guard for a provider that ever does —
+  // without the netting, a stable par route would count the same tokens as
+  // deployed AND as cash.
+  const stableResidual = openPosition({
+    shares: "0",
+    tokenValue: "0",
+    parIntermediate: { mint: USDC_MINT, amount: "2000", tokenValue: "2000" },
+  });
 
   it("keeps a position with no shares open while its intermediate remains", () => {
     expect(isOpenVaultPosition(residual)).toBe(true);
     expect(isOpenVaultPosition(openPosition({ shares: "0", tokenValue: "0" }))).toBe(false);
   });
 
-  it("counts it as deployed and never again as cash, even at a $1 price", () => {
+  it("counts it as deployed and never as cash, whatever a market price says", () => {
     const summary = summarize({
       wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "50" },
+          // wYLDS is not catalogue-stable, so the held wYLDS is not cash —
+          // not even at a market price of exactly par.
           { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
         ]),
+        wallet([{ mint: WYLDS_MINT, uiAmount: "500", usdPrice: 1 }], "wallet-b"),
       ],
       positions: [residual, openPosition({ tokenValue: "100" })],
     });
@@ -359,18 +377,16 @@ describe("a par intermediate left by a cancelled request", () => {
     expect(summary.deployedValue).toBe("2100");
     expect(summary.availableCash).toBe("50");
     expect(summary.cashByWalletId.get("wallet-a")).toBe("50");
+    expect(summary.cashByWalletId.get("wallet-b")).toBe("0");
   });
 
-  it("nets it out of the owning wallet only, never another wallet's same mint", () => {
+  it("nets the intermediate out of the owning wallet's cash only", () => {
     const summary = summarize({
       wallets: [
-        wallet([
-          { mint: USDC_MINT, uiAmount: "50" },
-          { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
-        ]),
-        wallet([{ mint: WYLDS_MINT, uiAmount: "500", usdPrice: 1 }], "wallet-b"),
+        wallet([{ mint: USDC_MINT, uiAmount: "2050" }]),
+        wallet([{ mint: USDC_MINT, uiAmount: "500" }], "wallet-b"),
       ],
-      positions: [residual],
+      positions: [stableResidual],
     });
 
     expect(summary.deployedValue).toBe("2000");
@@ -382,10 +398,10 @@ describe("a par intermediate left by a cancelled request", () => {
   it("nets only the recorded amount, and never below zero", () => {
     const summary = summarize({
       wallets: [
-        wallet([{ mint: WYLDS_MINT, uiAmount: "2500.5", usdPrice: 1 }]),
-        wallet([{ mint: WYLDS_MINT, uiAmount: "1500", usdPrice: 1 }], "wallet-b"),
+        wallet([{ mint: USDC_MINT, uiAmount: "2500.5" }]),
+        wallet([{ mint: USDC_MINT, uiAmount: "1500" }], "wallet-b"),
       ],
-      positions: [residual, { ...residual, custodyWalletId: "wallet-b" }],
+      positions: [stableResidual, { ...stableResidual, custodyWalletId: "wallet-b" }],
     });
 
     expect(summary.cashByWalletId.get("wallet-a")).toBe("500.5");
@@ -394,16 +410,13 @@ describe("a par intermediate left by a cancelled request", () => {
   });
 
   it("nets once per address when several custody rows describe the wallet", () => {
-    const balances: TreasuryAllocationBalance[] = [
-      { mint: USDC_MINT, uiAmount: "50" },
-      { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
-    ];
+    const balances: TreasuryAllocationBalance[] = [{ mint: USDC_MINT, uiAmount: "2050" }];
     const summary = summarize({
       wallets: [
         wallet(balances, "wallet-org", "pk-shared"),
         wallet(balances, "wallet-project", "pk-shared"),
       ],
-      positions: [{ ...residual, custodyWalletId: "wallet-org" }],
+      positions: [{ ...stableResidual, custodyWalletId: "wallet-org" }],
     });
 
     expect(summary.availableCash).toBe("50");
@@ -415,16 +428,9 @@ describe("a par intermediate left by a cancelled request", () => {
     const summary = summarize({
       wallets: [
         wallet(undefined, "wallet-org", "pk-shared"),
-        wallet(
-          [
-            { mint: USDC_MINT, uiAmount: "50" },
-            { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
-          ],
-          "wallet-project",
-          "pk-shared"
-        ),
+        wallet([{ mint: USDC_MINT, uiAmount: "2050" }], "wallet-project", "pk-shared"),
       ],
-      positions: [{ ...residual, custodyWalletId: "wallet-org" }],
+      positions: [{ ...stableResidual, custodyWalletId: "wallet-org" }],
     });
 
     expect(summary.cashByWalletId.get("wallet-org")).toBeUndefined();
@@ -435,14 +441,14 @@ describe("a par intermediate left by a cancelled request", () => {
   it("makes the owning wallet's cash unavailable when the recorded amount is malformed", () => {
     const summary = summarize({
       wallets: [
-        wallet([{ mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 }]),
+        wallet([{ mint: USDC_MINT, uiAmount: "2000" }]),
         wallet([{ mint: USDC_MINT, uiAmount: "10" }], "wallet-b"),
       ],
       positions: [
         openPosition({
           shares: "0",
           tokenValue: "0",
-          parIntermediate: { mint: WYLDS_MINT, amount: "2,000", tokenValue: "2000" },
+          parIntermediate: { mint: USDC_MINT, amount: "2,000", tokenValue: "2000" },
         }),
       ],
     });

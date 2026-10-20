@@ -47,9 +47,11 @@ export interface TreasuryAllocationBalance {
   mint: string;
   uiAmount: string;
   /**
-   * The API's own price for this balance, `1` for anything it treats as
-   * USD-stable. That includes SDP-ISSUED stablecoins, which a static catalogue
-   * cannot know about, so this is the authority on what counts as cash.
+   * The API's market price for this balance, from Jupiter on mainnet only. It
+   * is a market fact, not a stablecoin vouch: a price at or near par says
+   * nothing about who issued the token or what promises behind it, and a mint
+   * Jupiter has never heard of arrives without one. Classification reads the
+   * catalogue's `isUsdStable` below; this field is not consulted here.
    */
   usdPrice?: number;
 }
@@ -151,14 +153,15 @@ export interface TreasuryAllocation {
 /**
  * Is this balance a dollar of treasury cash?
  *
- * The static catalogue is not the authority. The API prices everything it
- * treats as USD-stable at exactly `1`, including SDP-issued stablecoins loaded
- * from `issued_tokens`, and returns no price at all for volatile or
- * unrecognized tokens. So `usdPrice` CLASSIFIES while the summed amount stays
- * the decimal string: no `Number` touches an amount.
+ * The catalogue's `isUsdStable` flag is the authority. The API prices balances
+ * only from Jupiter's mainnet market data — a symbol, a stablecoin template or
+ * a peg is not a market price, and anyone can mint a token called "USDC" — so
+ * a market price at or near par does not vouch for a token either, even one
+ * that prints exactly `1`. Anything the catalogue cannot vouch for is not
+ * cash, whatever a market printed.
  */
 function isUsdStableBalance(balance: TreasuryAllocationBalance): boolean {
-  return WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint)?.isUsdStable === true || balance.usdPrice === 1;
+  return WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint)?.isUsdStable === true;
 }
 
 /**
@@ -235,6 +238,12 @@ function parIntermediateAmounts(
  * the mint and nowhere else: the same mint in another wallet is still cash.
  * A balance short of the recorded amount (the two reads landed at different
  * moments) floors at zero rather than overstating cash.
+ *
+ * The netting can only engage a STABLE intermediate, since only a stable
+ * balance reaches it: no provider emits a stable par intermediate today
+ * (Hastra's is wYLDS, which the catalogue does not classify as stable), so
+ * today it nets nothing — it stays because a stable par route would otherwise
+ * count the same tokens as deployed AND as cash.
  */
 function walletStableCash(
   wallet: TreasuryAllocationWallet,
