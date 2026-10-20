@@ -8,6 +8,7 @@
     "dev:worker": "node scripts/dev-worker.mjs",
     "dev:db": "pnpm -w db:postgres:up && pnpm -w db:postgres:logs",
     "dev:webhook": "bash scripts/dev-webhook.sh",
+    "dev:kora": "bash ../../scripts/kora-local/logs.sh",
     "build": "node scripts/build-node.mjs",
     "db:migrate:local": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/migrate-postgres.mjs",
     "db:migrate:test": "node scripts/migrate-postgres-test.mjs",

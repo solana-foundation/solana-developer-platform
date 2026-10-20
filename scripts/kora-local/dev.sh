@@ -10,4 +10,4 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 "${ROOT_DIR}/scripts/kora-local/up.sh"
-turbo run dev dev:worker dev:db dev:webhook --env-mode=loose --continue=always
+turbo run dev dev:worker dev:db dev:webhook dev:kora --env-mode=loose --continue=always
