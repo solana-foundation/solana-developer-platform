@@ -26,7 +26,6 @@ const SECRET_FLASH: ApiKeyFlash = {
   level: "success",
   message: "API key created",
   key: "sk_test_generated_secret",
-  apiKeyId: "key_123",
   keyPrefix: "sk_test_gen",
 };
 

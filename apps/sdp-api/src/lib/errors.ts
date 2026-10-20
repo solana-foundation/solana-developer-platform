@@ -3,6 +3,7 @@
  */
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
+import type { Action } from "@sdp/types/actions";
 import type { CountryCode } from "@sdp/types/countries";
 import type { IdempotencyErrorCode } from "@sdp/types/idempotency";
 import type { RampDirection } from "@sdp/types/payments";
@@ -252,6 +253,17 @@ export function unauthorized(message?: string): AppError {
 
 export function insufficientPermissions(message?: string): AppError {
   return new AppError("INSUFFICIENT_PERMISSIONS", message);
+}
+
+/**
+ * The refusal for a caller that lacks an action: what `requireAction` answers,
+ * and what a waist or handler check of the same action must answer too.
+ *
+ * @param reason - Why the action is needed here, appended to the message.
+ */
+export function missingAction(action: Action, reason?: string): AppError {
+  const message = `Missing action: ${action}${reason === undefined ? "" : ` (${reason})`}`;
+  return new AppError("INSUFFICIENT_PERMISSIONS", message, { action });
 }
 
 export function forbidden(message?: string, details?: Record<string, unknown>): AppError {

@@ -5,11 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import {
-  clearStoredApiKeySecrets,
-  getStoredApiKeySecret,
-  storeApiKeySecret,
-} from "@/lib/playground-api-keys";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { SelectExistingOrganizationPanel } from "./select-existing-organization-panel";
 
@@ -57,7 +52,6 @@ describe("SelectExistingOrganizationPanel", () => {
   beforeEach(() => {
     cleanup();
     resetDashboardNavigation();
-    clearStoredApiKeySecrets();
     mocks.isLoaded = true;
     mocks.memberships = [
       {
@@ -84,14 +78,12 @@ describe("SelectExistingOrganizationPanel", () => {
 
   it("activates the selected membership and refreshes the server layout", async () => {
     const user = userEvent.setup();
-    storeApiKeySecret({ value: "sk_test_previous_workspace", apiKeyId: "key_previous" });
     renderPanel();
 
     await user.click(screen.getByRole("button", { name: "Existing workspace" }));
 
     expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_existing" });
     expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
-    expect(getStoredApiKeySecret({ apiKeyId: "key_previous" })).toBeNull();
   });
 
   it("does not offer organization creation when no memberships exist", () => {

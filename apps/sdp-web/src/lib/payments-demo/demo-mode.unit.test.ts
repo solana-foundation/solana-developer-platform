@@ -145,7 +145,7 @@ describe("scope", () => {
   });
 
   it("never holds back the API playground's writes", async () => {
-    browser.pathname = "/api/playground/execute";
+    browser.pathname = "/api/playground/v1/counterparties";
     browser.jar.delete("sdp-payments-demo");
     browser.tabDemo = true;
     expect((await call("POST", "/v1/counterparties", { displayName: "Real" })).status).toBeNull();

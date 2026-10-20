@@ -7,10 +7,7 @@ import {
   fetchIssuanceTokensPage,
 } from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
 import { IssuanceWorkspace } from "@/app/dashboard/[projectId]/issuance/issuance-workspace";
-import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/[projectId]/playground-api-data";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { assetProfiles } from "@/flags";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
@@ -141,7 +138,7 @@ async function IssuancePage({ searchParams }: IssuancePageProps) {
     const apiClient = await trace.step("create_sdp_api_client", () =>
       createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
-    const [templatesResult, tokensPage, facets, apiKeysResult] = await Promise.all([
+    const [templatesResult, tokensPage, facets] = await Promise.all([
       trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
       trace.step("fetch_tokens", () =>
         fetchIssuanceTokensPage(apiClient.request, listQuery, {
@@ -151,7 +148,6 @@ async function IssuancePage({ searchParams }: IssuancePageProps) {
       // Facet counts drive the filter options and the "no assets yet" vs "no
       // matches" distinction, so they must not be narrowed by the active filters.
       trace.step("fetch_token_facets", () => fetchIssuanceTokenFacets(apiClient.request)),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
     ]);
 
     const tokens = assetProfilesEnabled
@@ -159,7 +155,6 @@ async function IssuancePage({ searchParams }: IssuancePageProps) {
           attachIssuanceAssetProfiles(apiClient.request, tokensPage.tokens)
         )
       : tokensPage.tokens;
-    const apiKeys = apiKeysResult.data ?? [];
     const templatesError = resolveTemplatesError(templatesResult, t);
 
     trace.log({
@@ -170,7 +165,6 @@ async function IssuancePage({ searchParams }: IssuancePageProps) {
       page: tokensPage.page,
       pageSize: tokensPage.pageSize,
       templateCount: templatesResult.data?.length ?? 0,
-      apiKeyCount: apiKeys.length,
     });
 
     return (
@@ -181,7 +175,6 @@ async function IssuancePage({ searchParams }: IssuancePageProps) {
         initialTotal={tokensPage.total}
         facets={facets}
         templates={templatesResult.data ?? []}
-        apiKeys={apiKeys}
         apiBaseUrl={apiBaseUrl}
         templatesError={templatesError}
         tokensNotice={tokensPage.error ? resolveTokenListNotice(tokensPage.status, t) : null}

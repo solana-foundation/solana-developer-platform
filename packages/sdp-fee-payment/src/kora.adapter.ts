@@ -5,18 +5,12 @@
  * The platform sponsors all transaction fees via Kora's fee payer.
  */
 
-import {
-  type Address,
-  getSignatureFromTransaction,
-  getTransactionDecoder,
-  type Signature,
-} from "@solana/kit";
+import { type Address, assertIsAddress } from "@solana/kit";
 import {
   type Config,
   type FeePayerPolicy,
   KoraClient,
   type KoraClientOptions,
-  type SignAndSendTransactionRequest,
   type SignTransactionRequest,
 } from "@solana/kora";
 import type { FeePaymentPort, SponsorshipProviderConfiguration } from "./port";
@@ -29,9 +23,6 @@ interface KoraClientTransport {
     payerSigner?: string;
   }>;
   signTransaction(request: SignTransactionRequest): Promise<{ signed_transaction: string }>;
-  signAndSendTransaction(
-    request: SignAndSendTransactionRequest
-  ): Promise<{ signature?: string; signed_transaction: string }>;
   estimateTransactionFee(request: {
     transaction: string;
     fee_token: string;
@@ -64,6 +55,18 @@ export type KoraAdapterConfig = KoraClientOptions & {
   client?: KoraClientTransport;
 };
 
+/** How long a Kora's fee-payer address is trusted before it is read again. */
+const FEE_PAYER_ADDRESS_TTL_MS = 5 * 60_000;
+
+/**
+ * Kora endpoint URL to its fee-payer address, shared by every per-request adapter so one
+ * `getPayerSigner` serves an endpoint for `FEE_PAYER_ADDRESS_TTL_MS`.
+ */
+const feePayerAddresses = createProcessCache<Address>(() => Date.now() + FEE_PAYER_ADDRESS_TTL_MS);
+
+/** Cloud Run audience to its identity token, refreshed a minute before it expires. */
+const identityTokens = createProcessCache<string>((token) => resolveTokenRefreshAt(token));
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation
 // ═══════════════════════════════════════════════════════════════════════════
@@ -72,8 +75,9 @@ export class KoraAdapter implements FeePaymentPort {
   readonly providerId = "kora";
 
   private client: KoraClientTransport;
+  private readonly endpointUrl: string;
   private readonly userId: string;
-  private cachedFeePayer: Address | null = null;
+  private pinnedFeePayer: Promise<Address> | null = null;
   private cachedFeeToken: string | null = null;
 
   constructor(config: KoraAdapterConfig) {
@@ -102,33 +106,44 @@ export class KoraAdapter implements FeePaymentPort {
           })
         : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
     this.client = withCallTimeouts(this.client, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    this.endpointUrl = rpcUrl;
     this.userId = userId;
   }
 
   /**
-   * Get the platform's fee payer address (Kora's signer).
-   * Cached after first call.
+   * Kora's signer address, shared process-wide per Kora endpoint for `FEE_PAYER_ADDRESS_TTL_MS`.
+   * After a signer rotation the first sign naming the old address is refused, which drops it, so
+   * a rotation costs one refused request per process and the next read returns the new signer.
    */
-  async getFeePayer(): Promise<Address> {
-    if (this.cachedFeePayer) {
-      return this.cachedFeePayer;
+  getFeePayer(): Promise<Address> {
+    if (this.pinnedFeePayer === null) {
+      // Pinned per adapter (one request) so the message it builds and the sign it asks for name
+      // the same address, even when the process cache refreshes in between.
+      const pinned = feePayerAddresses.get(this.endpointUrl, () => this.readFeePayer());
+      this.pinnedFeePayer = pinned;
+      pinned.catch(() => {
+        if (this.pinnedFeePayer === pinned) this.pinnedFeePayer = null;
+      });
     }
+    return this.pinnedFeePayer;
+  }
 
+  private async readFeePayer(): Promise<Address> {
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const response = await this.client.getPayerSigner();
         const feePayer =
-          (response as { signer_address?: string }).signer_address ??
-          (response as { payment_address?: string }).payment_address ??
-          (response as { payerSigner?: string }).payerSigner;
+          response.signer_address ?? response.payment_address ?? response.payerSigner;
 
         if (!feePayer) {
           throw new Error("Kora did not return a fee payer address");
         }
 
-        this.cachedFeePayer = feePayer as Address;
-        return this.cachedFeePayer;
+        // Parsed, not cast: the address is cached process-wide and every adapter on the endpoint
+        // builds against it.
+        assertIsAddress(feePayer);
+        return feePayer;
       } catch (error) {
         if (attempt < maxRetries && isRetryableGetFeePayerError(error)) {
           await sleep((attempt + 1) * 300);
@@ -148,60 +163,24 @@ export class KoraAdapter implements FeePaymentPort {
    * Returns the transaction bytes with the fee payer signature added.
    */
   async signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array> {
+    let signerKey: Address | undefined;
     try {
-      const base64Tx = encodeBase64(transaction);
-
+      signerKey = await this.getFeePayer();
       const { signed_transaction } = await this.client.signTransaction(
-        await this.buildSignRequest(base64Tx)
+        this.buildSignRequest(encodeBase64(transaction), signerKey)
       );
 
       return decodeBase64(signed_transaction);
     } catch (error) {
+      // A refusal may mean Kora rotated its signer: drop the address this request named, never a
+      // newer one another request already stored. Any JSON-RPC refusal drops it; one for another
+      // reason (policy, limits) costs the next request one extra `getPayerSigner`.
+      if (signerKey && extractRpcErrorCode(error) !== undefined) {
+        feePayerAddresses.forget(this.endpointUrl, signerKey);
+        this.pinnedFeePayer = null;
+      }
       throw this.wrapError(error, "Failed to sign transaction as fee payer");
     }
-  }
-
-  /**
-   * Sign a transaction with Kora's fee payer and submit to Solana.
-   * This is the primary method for gasless transaction submission.
-   */
-  async signAndSend(transaction: Uint8Array): Promise<Signature> {
-    const base64Tx = encodeBase64(transaction);
-
-    // Retry on transient failures:
-    //  - "Blockhash not found": Kora's RPC may lag behind on blockhash propagation.
-    //  - 502/503/Bad Gateway: The underlying RPC (e.g. Helius devnet) can return transient
-    //    HTTP gateway errors that resolve on the next attempt.
-    const maxRetries = 2;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const { signature: submittedSignature, signed_transaction } =
-          await this.client.signAndSendTransaction(await this.buildSendRequest(base64Tx));
-
-        if (submittedSignature) {
-          return submittedSignature as Signature;
-        }
-
-        // Decode the signed transaction using @solana/kit's decoder
-        const signedTxBytes = decodeBase64(signed_transaction);
-        const decodedTx = getTransactionDecoder().decode(signedTxBytes);
-
-        // Extract the signature (first signer's signature = transaction ID)
-        const signature = getSignatureFromTransaction(decodedTx);
-
-        return signature;
-      } catch (error) {
-        if (attempt < maxRetries && isRetryableSignAndSendError(error)) {
-          await sleep((attempt + 1) * 500);
-          continue;
-        }
-
-        throw this.wrapError(error, "Failed to sign and send transaction");
-      }
-    }
-
-    // Unreachable: loop always returns or throws.
-    throw new FeePaymentError("Failed to sign and send transaction", "NETWORK_ERROR");
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -274,13 +253,8 @@ export class KoraAdapter implements FeePaymentPort {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Always attach a quota identity to signing requests. */
-  private async buildSignRequest(transaction: string): Promise<SignTransactionRequest> {
-    return { transaction, user_id: this.userId, signer_key: await this.getFeePayer() };
-  }
-
-  /** Send requests additionally pin the earliest durable response milestone. */
-  private async buildSendRequest(transaction: string): Promise<SignAndSendTransactionRequest> {
-    return { ...(await this.buildSignRequest(transaction)), respond_after: "sent" };
+  private buildSignRequest(transaction: string, signerKey: Address): SignTransactionRequest {
+    return { transaction, user_id: this.userId, signer_key: signerKey };
   }
 
   private async resolveFeeToken(): Promise<string> {
@@ -319,6 +293,38 @@ export class KoraAdapter implements FeePaymentPort {
 // ═══════════════════════════════════════════════════════════════════════════
 // Utilities
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * A process-wide cache: a miss shares one in-flight load per key, and a failed load is never
+ * stored, so the next call loads again.
+ *
+ * @param expiresAt - When a freshly loaded value stops being served.
+ * @returns The cache.
+ */
+function createProcessCache<TValue>(expiresAt: (value: TValue) => number) {
+  const entries = new Map<string, { value: TValue; expiresAt: number }>();
+  const loads = new Map<string, Promise<TValue>>();
+  return {
+    get(key: string, load: () => Promise<TValue>): Promise<TValue> {
+      const entry = entries.get(key);
+      if (entry && Date.now() < entry.expiresAt) return Promise.resolve(entry.value);
+      const loadInFlight = loads.get(key);
+      if (loadInFlight) return loadInFlight;
+      const pendingLoad = load()
+        .then((value) => {
+          entries.set(key, { value, expiresAt: expiresAt(value) });
+          return value;
+        })
+        .finally(() => loads.delete(key));
+      loads.set(key, pendingLoad);
+      return pendingLoad;
+    },
+    /** Drop `key` only while it still holds `value` (compare-and-delete). */
+    forget(key: string, value: TValue): void {
+      if (entries.get(key)?.value === value) entries.delete(key);
+    },
+  };
+}
 
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -411,31 +417,6 @@ function extractRpcErrorCode(error: unknown): number | undefined {
   return Number.parseInt(match[1], 10);
 }
 
-function isRetryableSignAndSendError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    // Kora's RPC may lag behind on blockhash propagation
-    message.includes("blockhash not found") ||
-    message.includes("timeout") ||
-    message.includes("timed out") ||
-    // Transient HTTP gateway errors from the underlying RPC (e.g. Helius devnet)
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("bad gateway") ||
-    message.includes("service unavailable") ||
-    // Connection-level failures while a Kora instance is being replaced.
-    // Retrying is idempotent even when the first attempt may have reached
-    // Kora: the transaction bytes are fixed, ed25519 signing is
-    // deterministic, so a duplicate submit carries the same signature and
-    // the cluster deduplicates it.
-    message.includes("fetch failed") ||
-    message.includes("econnrefused") ||
-    message.includes("econnreset") ||
-    message.includes("socket hang up")
-  );
-}
-
 function isRetryableGetFeePayerError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
@@ -488,8 +469,6 @@ function withCallTimeouts(client: KoraClientTransport, timeoutMs: number): KoraC
     getPayerSigner: () => withTimeout(client.getPayerSigner(), timeoutMs, "getPayerSigner"),
     signTransaction: (request) =>
       withTimeout(client.signTransaction(request), timeoutMs, "signTransaction"),
-    signAndSendTransaction: (request) =>
-      withTimeout(client.signAndSendTransaction(request), timeoutMs, "signAndSendTransaction"),
     estimateTransactionFee: (request) =>
       withTimeout(client.estimateTransactionFee(request), timeoutMs, "estimateTransactionFee"),
     getSupportedTokens: () =>
@@ -536,13 +515,6 @@ class AuthorizedKoraClient implements KoraClientTransport {
   signTransaction(request: SignTransactionRequest) {
     return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["signTransaction"]>>>(
       "signTransaction",
-      request
-    );
-  }
-
-  signAndSendTransaction(request: SignAndSendTransactionRequest) {
-    return this.rpcRequest<Awaited<ReturnType<KoraClientTransport["signAndSendTransaction"]>>>(
-      "signAndSendTransaction",
       request
     );
   }
@@ -609,33 +581,38 @@ function createCloudRunIdentityTokenProvider(audience: string): () => Promise<st
     throw new Error("KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE cannot be empty");
   }
 
-  let cachedToken: string | undefined;
-  let refreshAt = 0;
-  return async () => {
-    if (cachedToken && Date.now() < refreshAt) {
-      return cachedToken;
-    }
+  return () =>
+    identityTokens.get(normalizedAudience, () => fetchCloudRunIdentityToken(normalizedAudience));
+}
 
-    const endpoint = new URL(
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
-    );
-    endpoint.searchParams.set("audience", normalizedAudience);
-    endpoint.searchParams.set("format", "full");
-    const response = await fetch(endpoint, {
-      headers: { "Metadata-Flavor": "Google" },
-    });
-    if (!response.ok) {
-      throw new Error(`Cloud Run identity token request failed with HTTP ${response.status}`);
-    }
+/**
+ * Mint a Google OIDC identity token for `audience` from the metadata server.
+ *
+ * @param audience - The private Cloud Run service the token authenticates to.
+ * @returns The token.
+ */
+async function fetchCloudRunIdentityToken(audience: string): Promise<string> {
+  const endpoint = new URL(
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
+  );
+  endpoint.searchParams.set("audience", audience);
+  endpoint.searchParams.set("format", "full");
+  // Bounded inside the shared load: a stalled fetch would otherwise hold the cache's in-flight
+  // entry, and every later request for the audience would wait on it. The signal also bounds the
+  // body read below.
+  const response = await fetch(endpoint, {
+    headers: { "Metadata-Flavor": "Google" },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`Cloud Run identity token request failed with HTTP ${response.status}`);
+  }
 
-    const token = (await response.text()).trim();
-    if (!token) {
-      throw new Error("Cloud Run identity token response was empty");
-    }
-    cachedToken = token;
-    refreshAt = resolveTokenRefreshAt(token);
-    return token;
-  };
+  const token = (await response.text()).trim();
+  if (!token) {
+    throw new Error("Cloud Run identity token response was empty");
+  }
+  return token;
 }
 
 function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): void {

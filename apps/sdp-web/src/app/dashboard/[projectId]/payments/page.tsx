@@ -1,10 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/[projectId]/playground-api-data";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
   dashboardWorkspaceOverviewPanelClassName,
@@ -32,8 +29,7 @@ async function PaymentsPlaygroundData({
   trace: Trace;
 }) {
   const [t, apiClient] = await Promise.all([getTranslations(), apiClientPromise]);
-  const [apiKeysResult, walletsResult, transfersResult] = await Promise.all([
-    trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+  const [walletsResult, transfersResult] = await Promise.all([
     trace.step("fetch_payments_wallet_summaries", () =>
       fetchPaymentsWallets(apiClient.request, { view: "summary" })
     ),
@@ -58,13 +54,11 @@ async function PaymentsPlaygroundData({
     ok: true,
     walletCount: wallets.length,
     transferCount: transfers.length,
-    apiKeyCount: apiKeysResult.data?.length ?? 0,
   });
 
   return (
     <PaymentsPlaygroundWorkspace
       apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-      apiKeys={apiKeysResult.data ?? []}
       wallets={wallets}
       walletsError={walletsError}
       transfers={transfers}

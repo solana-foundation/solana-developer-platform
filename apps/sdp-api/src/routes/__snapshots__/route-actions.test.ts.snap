@@ -10,7 +10,6 @@ exports[`route actions > pins each route's action 1`] = `
   "api_keys.read GET /v1/api-keys",
   "api_keys.read GET /v1/api-keys/:keyId",
   "api_keys.read GET /v1/projects/:projectId/api-keys",
-  "api_keys.read POST /internal/playground/api-key/verify",
   "compliance.execute POST /v1/compliance/address-screenings",
   "counterparties.execute PATCH /v1/counterparties/:counterpartyId/accounts/:counterpartyAccountId",
   "counterparties.execute POST /v1/counterparties/:counterpartyId/requirements",

@@ -42,7 +42,6 @@ import { supportedLocales } from "@/i18n/config";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
@@ -141,7 +140,6 @@ export function SidebarUserMenu({
         <DropdownMenuItem
           className="gap-2.5"
           onSelect={() => {
-            clearStoredApiKeySecrets();
             void signOut();
           }}
         >

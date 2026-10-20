@@ -42,7 +42,6 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
   type ReactNode,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -57,7 +56,6 @@ import {
   formatTimestamp,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { syncPlaygroundApiKeysForActiveTab } from "@/app/dashboard/[projectId]/payments/payments-playground-api-key-state";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
@@ -65,14 +63,10 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import {
-  type DashboardPlaygroundApiKeyOption,
-  useDashboardWorkspace,
-} from "@/contexts/dashboard-workspace-context";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -495,7 +489,6 @@ interface PaymentRequestsWorkspaceProps {
   initialError?: string;
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   apiBaseUrl: string | null;
-  apiKeys: DashboardPlaygroundApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
   counterparties: Counterparty[];
 }
@@ -509,19 +502,16 @@ export function PaymentRequestsWorkspace({
   initialError,
   initialLocalErrorCode,
   apiBaseUrl,
-  apiKeys,
   wallets,
   counterparties,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const { sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
-    useDashboardWorkspace();
+  const { sdpEnvironment } = useDashboardWorkspace();
   const tokens = useMemo(
     () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
     [sdpEnvironment]
   );
-  const isPlaygroundTab = useDashboardTab() === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
   // A request's pay link, from the create response or read on open, kept with
   // the request it belongs to so it is never shown on another one. It is built
@@ -536,14 +526,6 @@ export function PaymentRequestsWorkspace({
   const [createOpen, setCreateOpen] = useState(false);
   const requests = initialPaymentRequests;
 
-  useEffect(() => {
-    syncPlaygroundApiKeysForActiveTab(isPlaygroundTab, apiKeys, setPlaygroundApiKeys);
-  }, [apiKeys, isPlaygroundTab, setPlaygroundApiKeys]);
-
-  const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId),
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
   // Reads never carry the pay link (APE-849): opening a row reads its token, which the
   // API returns only to a member whose role may manage payment requests.
   const payLink = selected && selectedLink?.requestId === selected.id ? selectedLink.payLink : null;
@@ -752,8 +734,6 @@ export function PaymentRequestsWorkspace({
             content: (
               <PaymentRequestsPlayground
                 apiBaseUrl={apiBaseUrl}
-                apiKeyId={selectedPlaygroundApiKey?.id ?? null}
-                hasActiveApiKeys={apiKeys.length > 0}
                 wallets={wallets}
                 tokens={tokens}
               />

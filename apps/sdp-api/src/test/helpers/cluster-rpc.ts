@@ -340,6 +340,7 @@ export interface StubTokenAccount {
   amount: string;
   decimals: number;
   uiAmountString: string;
+  state: "initialized" | "frozen";
 }
 
 /**
@@ -367,6 +368,7 @@ export function tokenAccountsByOwnerResult(
                 decimals: tokenAccount.decimals,
                 uiAmountString: tokenAccount.uiAmountString,
               },
+              state: tokenAccount.state,
             },
           },
         },

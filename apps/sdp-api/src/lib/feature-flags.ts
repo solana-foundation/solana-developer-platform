@@ -1,4 +1,4 @@
-import { isFeePaymentConfiguredForCluster } from "@sdp/fee-payment";
+import { KORA_ENV_KEYS } from "@sdp/fee-payment";
 import type { FeePaymentEnv } from "@sdp/fee-payment/port";
 import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -189,8 +189,8 @@ export function isEarnHastraDexExitConfigured(
  * is the one failure ADR 0002 rules out.
  *
  * Which clusters are sponsored is CONFIGURATION, not a list in code: the flag
- * must be on AND the deployment must have a fee payer for the cluster
- * (`isFeePaymentConfiguredForCluster`: `KORA_MAINNET_URL` / `KORA_DEVNET_URL`). Opening
+ * must be on AND the deployment must have a Kora for the cluster (its
+ * `KORA_<CLUSTER>_URL`). Opening
  * mainnet is therefore wiring the mainnet Kora into the deployment, after its
  * `fee_payer_policy` is opened and `sbp_mainnet_global` is enabled (PRO-1738);
  * closing it is removing that wiring, with no code change either way.
@@ -203,7 +203,8 @@ export function isEarnVaultSponsorshipEnabled(
   cluster: SolanaCluster
 ): boolean {
   if (!isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED)) return false;
-  return isFeePaymentConfiguredForCluster(env, cluster);
+  // Keyed by cluster, not the scope: Earn's anonymous paths run without one (HOO-1881).
+  return Boolean(env[KORA_ENV_KEYS[cluster].serviceUrl]?.trim());
 }
 
 /**

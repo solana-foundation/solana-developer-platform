@@ -1,21 +1,37 @@
 // @vitest-environment jsdom
 
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-api-keys";
+import {
+  createIdempotencyKeyStore,
+  resetIdempotencyKeyStoresForTests,
+} from "@/lib/idempotency-key-store";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
 
-const mocks = vi.hoisted(() => ({
-  replaceSearchParams: vi.fn(),
-  searchParamGet: vi.fn(() => null as string | null),
+interface ShellTestMocks {
+  replaceSearchParams: ReturnType<typeof vi.fn>;
+  searchParamGet: ReturnType<typeof vi.fn<() => string | null>>;
+  /** The dashboard workspace the shell reads its release channel from; none by default. */
+  workspace: { flags: { releaseChannel: SdpReleaseChannel } } | undefined;
+}
+
+const mocks = vi.hoisted(
+  (): ShellTestMocks => ({
+    replaceSearchParams: vi.fn(),
+    searchParamGet: vi.fn<() => string | null>(() => null),
+    workspace: undefined,
+  })
+);
+
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => mocks.workspace,
 }));
 
 vi.mock("@/lib/dashboard-url-state", () => ({
@@ -41,7 +57,6 @@ const endpoint: ApiPlaygroundEndpointConfig = {
 
 describe("ApiPlaygroundShell", () => {
   beforeEach(() => {
-    clearStoredApiKeySecrets();
     window.sessionStorage.clear();
     resetIdempotencyKeyStoresForTests();
     mocks.replaceSearchParams.mockReset();
@@ -51,14 +66,13 @@ describe("ApiPlaygroundShell", () => {
 
   afterEach(() => {
     cleanup();
-    clearStoredApiKeySecrets();
+    mocks.workspace = undefined;
     restoreWindowLocation();
     vi.unstubAllGlobals();
   });
 
-  it("sends the request with the tab's Project and never renders the secret it rejects", async () => {
+  it("runs as the dashboard session for the tab's Project, and never renders a failure's text", async () => {
     const secret = ["sk", "test", "client", "error", "fixture"].join("_");
-    storeApiKeySecret({ value: secret, apiKeyId: "key-test" });
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
       throw new Error(`Rejected Bearer ${secret}`);
@@ -66,7 +80,7 @@ describe("ApiPlaygroundShell", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <ApiPlaygroundShell apiKeyId="key-test" endpoints={[endpoint]} productName="Test product" />
+        <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
       </I18nProvider>
     );
 
@@ -75,22 +89,108 @@ describe("ApiPlaygroundShell", () => {
     await waitFor(() => expect(view.container.textContent).toContain("Request execution failed."));
     expect(view.container.textContent).not.toContain(secret);
     const [proxyPath, proxyInit] = fetchMock.mock.calls[0];
-    expect(proxyPath).toBe("/api/playground/execute");
-    expect(new Headers(proxyInit.headers).get("x-project-id")).toBe(PRODUCTION_PROJECT.id);
+    expect(proxyPath).toBe("/api/playground/v1/test");
+    expect(proxyInit.method).toBe("GET");
+    expect(proxyInit.body).toBeUndefined();
+    const headers = new Headers(proxyInit.headers);
+    expect(headers.get("x-project-id")).toBe(PRODUCTION_PROJECT.id);
+    // No key and no bearer leave the browser: the proxy runs on the session.
+    expect(headers.has("Authorization")).toBe(false);
   });
 
-  it("sends a new Idempotency-Key with each Send of a POST, and none with a GET", async () => {
-    storeApiKeySecret({
-      value: ["sk", "test", "idempotency", "fixture"].join("_"),
-      apiKeyId: "key-test",
-    });
+  it("sends a write's own method, body and key to the playground proxy and shows the API's answer", async () => {
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init: RequestInit) =>
-        new Response(
-          JSON.stringify({ ok: true, status: 201, statusText: "Created", body: {}, headers: {} }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        )
+        new Response(JSON.stringify({ data: { id: "res_1" } }), {
+          status: 201,
+          statusText: "Created",
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          endpoints={[
+            {
+              ...endpoint,
+              id: "post-body",
+              method: "POST",
+              bodyFields: [{ key: "name", label: "Name", kind: "text", defaultValue: "Acme" }],
+            },
+          ]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+
+    await waitFor(() => expect(view.container.textContent).toContain("201 Created"));
+    expect(view.container.textContent).toContain("res_1");
+    const [proxyPath, proxyInit] = fetchMock.mock.calls[0];
+    expect(proxyPath).toBe("/api/playground/v1/test");
+    expect(proxyInit.method).toBe("POST");
+    expect(JSON.parse(String(proxyInit.body))).toEqual({ name: "Acme" });
+    const headers = new Headers(proxyInit.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  // Greptile (#2433): the previous build kept a lost write's key under a digest
+  // that named the pasted key, so no Send here retries it; it must not go out
+  // again unchecked under a new key.
+  it("holds writes after an update left an earlier write unanswered, until the user confirms", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    createIdempotencyKeyStore("sdp:playground:retry:idempotency:v1").claim("unsettled-send", () =>
+      JSON.stringify({ request: "digest-from-the-key-build", key: "key-from-the-key-build" })
+    );
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          endpoints={[{ ...endpoint, id: "post-after-update", method: "POST" }]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    const run = () => fireEvent.click(view.getByRole("button", { name: "Run request" }));
+
+    // Declined, twice: nothing goes out and the earlier write stays held.
+    run();
+    await waitFor(() => expect(view.container.textContent).toContain("Not sent."));
+    await waitFor(() =>
+      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+    );
+    run();
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Confirmed: this write goes out, and the next one is not asked about again.
+    confirm.mockReturnValue(true);
+    run();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+    );
+    run();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(confirm).toHaveBeenCalledTimes(3);
+  });
+
+  it("sends a new Idempotency-Key with each Send of a POST, and none with a GET", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })
     );
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -100,17 +200,11 @@ describe("ApiPlaygroundShell", () => {
     };
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <ApiPlaygroundShell
-          apiKeyId="key-test"
-          endpoints={[postEndpoint]}
-          productName="Test product"
-        />
+        <ApiPlaygroundShell endpoints={[postEndpoint]} productName="Test product" />
       </I18nProvider>
     );
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
 
     fireEvent.click(view.getByRole("button", { name: "Run request" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -130,7 +224,7 @@ describe("ApiPlaygroundShell", () => {
     fetchMock.mockClear();
     const getView = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <ApiPlaygroundShell apiKeyId="key-test" endpoints={[endpoint]} productName="Test product" />
+        <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
       </I18nProvider>
     );
     fireEvent.click(getView.getByRole("button", { name: "Run request" }));
@@ -141,21 +235,14 @@ describe("ApiPlaygroundShell", () => {
   // Jina (#2333): a Send after a lost answer used a new key, so the API ran the
   // write again instead of replaying the first attempt.
   it("resends a lost or 5xx-answered POST under its key, and a settled one under a new key", async () => {
-    storeApiKeySecret({
-      value: ["sk", "test", "idempotency", "fixture"].join("_"),
-      apiKeyId: "key-test",
-    });
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
-    const envelope = (status: number) =>
-      new Response(
-        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    const answers: (Response | "lost")[] = ["lost", envelope(503), envelope(201)];
+    const answer = (status: number) =>
+      new Response("{}", { status, headers: { "Content-Type": "application/json" } });
+    const answers: (Response | "lost")[] = ["lost", answer(503), answer(201)];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
-      const answer = answers.shift() ?? envelope(201);
-      if (answer === "lost") throw new TypeError("Failed to fetch");
-      return answer;
+      const next = answers.shift() ?? answer(201);
+      if (next === "lost") throw new TypeError("Failed to fetch");
+      return next;
     });
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -165,17 +252,11 @@ describe("ApiPlaygroundShell", () => {
     };
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <ApiPlaygroundShell
-          apiKeyId="key-test"
-          endpoints={[postEndpoint]}
-          productName="Test product"
-        />
+        <ApiPlaygroundShell endpoints={[postEndpoint]} productName="Test product" />
       </I18nProvider>
     );
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
     const send = async (calls: number) => {
       await waitFor(() =>
         expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
@@ -196,13 +277,58 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(3)).not.toBe(sentKey(2));
   });
 
+  // Greptile (#2440): an expired session answers a retry with the sign-in page,
+  // a followed redirect with status 200; that is not the API's answer.
+  it("keeps a POST's key when the answer is a followed redirect, so the retry still reuses it", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const signInPage = () => {
+      const response = new Response("<html>Sign in</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      });
+      Object.defineProperty(response, "redirected", { value: true });
+      return response;
+    };
+    const answers = [signInPage()];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        answers.shift() ??
+        new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          endpoints={[{ ...endpoint, id: "post-redirected", method: "POST" }]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+    const sentKey = (call: number) =>
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
+    const send = async (calls: number) => {
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+    };
+
+    await send(1);
+    // Not shown as the API's 200: the sign-in page is never the answer.
+    await waitFor(() => expect(view.container.textContent).toContain("Your session expired"));
+    expect(view.container.textContent).not.toContain("Sign in</html>");
+    await send(2);
+
+    expect(sentKey(0)).toEqual(expect.any(String));
+    expect(sentKey(1)).toBe(sentKey(0));
+  });
+
   // Jina (#2333): a money route went out under a key the browser would not
   // keep, so a reload and retry could send the payment again under a new key.
   it("does not send a transfer when the browser will not keep its retry key", async () => {
-    storeApiKeySecret({
-      value: ["sk", "test", "idempotency", "fixture"].join("_"),
-      apiKeyId: "key-test",
-    });
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init: RequestInit) => new Response("{}")
@@ -220,11 +346,7 @@ describe("ApiPlaygroundShell", () => {
       };
       const view = render(
         <I18nProvider locale="en" messages={getMessages("en")}>
-          <ApiPlaygroundShell
-            apiKeyId="key-test"
-            endpoints={[transferEndpoint]}
-            productName="Test product"
-          />
+          <ApiPlaygroundShell endpoints={[transferEndpoint]} productName="Test product" />
         </I18nProvider>
       );
       await waitFor(() =>
@@ -244,19 +366,14 @@ describe("ApiPlaygroundShell", () => {
   // Jina (#2333): the unsettled key lived only in module memory, so a reload
   // between a lost write and its retry sent the retry under a new key.
   it("keeps a lost POST's key across a reload, in session storage, so the retry still reuses it", async () => {
-    const secret = ["sk", "test", "idempotency", "fixture"].join("_");
-    storeApiKeySecret({ value: secret, apiKeyId: "key-test" });
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
-    const envelope = (status: number) =>
-      new Response(
-        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    const answers: (Response | "lost")[] = ["lost", envelope(201)];
+    const answer = (status: number) =>
+      new Response("{}", { status, headers: { "Content-Type": "application/json" } });
+    const answers: (Response | "lost")[] = ["lost", answer(201)];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
-      const answer = answers.shift() ?? envelope(201);
-      if (answer === "lost") throw new TypeError("Failed to fetch");
-      return answer;
+      const next = answers.shift() ?? answer(201);
+      if (next === "lost") throw new TypeError("Failed to fetch");
+      return next;
     });
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -272,7 +389,7 @@ describe("ApiPlaygroundShell", () => {
     ) => {
       const view = render(
         <Provider locale="en" messages={messages}>
-          <Shell apiKeyId="key-test" endpoints={[postEndpoint]} productName="Test product" />
+          <Shell endpoints={[postEndpoint]} productName="Test product" />
         </Provider>
       );
       await waitFor(() =>
@@ -285,9 +402,7 @@ describe("ApiPlaygroundShell", () => {
       cleanup();
     };
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
 
     await sendWith(ApiPlaygroundShell, I18nProvider, getMessages("en"), 1);
     // The reload: every module starts over; only session storage survives.
@@ -295,8 +410,6 @@ describe("ApiPlaygroundShell", () => {
     const reloaded = await import("./api-playground-shell");
     const reloadedI18n = await import("@/i18n/provider");
     const reloadedMessages = await import("@/i18n/messages");
-    const reloadedKeys = await import("@/lib/playground-api-keys");
-    reloadedKeys.storeApiKeySecret({ value: secret, apiKeyId: "key-test" });
     await sendWith(
       reloaded.ApiPlaygroundShell,
       reloadedI18n.I18nProvider,
@@ -306,27 +419,19 @@ describe("ApiPlaygroundShell", () => {
 
     expect(sentKey(0)).toEqual(expect.any(String));
     expect(sentKey(1)).toBe(sentKey(0));
-    expect(JSON.stringify({ ...window.sessionStorage })).not.toContain(secret);
   });
 
   // Greptile (#2333): a GET between a lost write and its retry cleared the
   // write's key, so the retry ran the write again under a new one.
   it("keeps a lost POST's key across a GET, so the retry still reuses it", async () => {
-    storeApiKeySecret({
-      value: ["sk", "test", "idempotency", "fixture"].join("_"),
-      apiKeyId: "key-test",
-    });
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
-    const envelope = (status: number) =>
-      new Response(
-        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    const answers: (Response | "lost")[] = ["lost", envelope(200), envelope(201)];
+    const answer = (status: number) =>
+      new Response("{}", { status, headers: { "Content-Type": "application/json" } });
+    const answers: (Response | "lost")[] = ["lost", answer(200), answer(201)];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
-      const answer = answers.shift() ?? envelope(201);
-      if (answer === "lost") throw new TypeError("Failed to fetch");
-      return answer;
+      const next = answers.shift() ?? answer(201);
+      if (next === "lost") throw new TypeError("Failed to fetch");
+      return next;
     });
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -342,7 +447,7 @@ describe("ApiPlaygroundShell", () => {
     const sendOn = async (config: ApiPlaygroundEndpointConfig, calls: number) => {
       const view = render(
         <I18nProvider locale="en" messages={getMessages("en")}>
-          <ApiPlaygroundShell apiKeyId="key-test" endpoints={[config]} productName="Test product" />
+          <ApiPlaygroundShell endpoints={[config]} productName="Test product" />
         </I18nProvider>
       );
       await waitFor(() =>
@@ -355,9 +460,7 @@ describe("ApiPlaygroundShell", () => {
       cleanup();
     };
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
 
     await sendOn(postEndpoint, 1);
     await sendOn(getEndpoint, 2);
@@ -380,7 +483,7 @@ describe("ApiPlaygroundShell refresh layout", () => {
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ThemeScopeProvider scope="refresh">
-          <ApiPlaygroundShell apiKeyId={null} endpoints={[endpoint]} productName="Test product" />
+          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
         </ThemeScopeProvider>
       </I18nProvider>
     );
@@ -394,48 +497,36 @@ describe("ApiPlaygroundShell refresh layout", () => {
     expect(panels[0].textContent).toContain("/v1/test");
   });
 
-  it("offers Create an API key instead of Run when the project has none", () => {
-    const view = render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <ThemeScopeProvider scope="refresh">
-          <ApiPlaygroundShell
-            apiKeyId={null}
-            endpoints={[endpoint]}
-            productName="Test product"
-            requiresApiKey
-            createApiKeyHref="/dashboard/api-keys/new"
-          />
-        </ThemeScopeProvider>
-      </I18nProvider>
-    );
-    expect(view.getByRole("link", { name: "Create an API key" }).getAttribute("href")).toBe(
-      "/dashboard/api-keys/new"
-    );
-    expect(view.queryByRole("button", { name: /Run request/ })).toBeNull();
-    expect(
-      view.queryByText("Create an API key first to enable live playground requests.")
-    ).toBeNull();
+  it("says the playground has nothing to run when no offered operation is published", () => {
+    mocks.workspace = { flags: { releaseChannel: "experimental" } };
+    try {
+      const view = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
+        </I18nProvider>
+      );
+      expect(
+        view.getByText(
+          "None of these operations are in the public API reference yet, so the playground has nothing to run here."
+        )
+      ).toBeTruthy();
+    } finally {
+      mocks.workspace = undefined;
+    }
   });
 
-  it("keeps Run waiting, and says why, for someone who cannot make a key", () => {
+  it("offers Run with no API key at all", () => {
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ThemeScopeProvider scope="refresh">
-          <ApiPlaygroundShell
-            apiKeyId={null}
-            endpoints={[endpoint]}
-            productName="Test product"
-            requiresApiKey
-          />
+          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
         </ThemeScopeProvider>
       </I18nProvider>
     );
     expect((view.getByRole("button", { name: /Run request/ }) as HTMLButtonElement).disabled).toBe(
-      true
+      false
     );
-    expect(
-      view.getByText("Create an API key first to enable live playground requests.")
-    ).toBeTruthy();
+    expect(view.queryByRole("link", { name: "Create an API key" })).toBeNull();
   });
 
   it("writes the call in the chosen language and wraps it instead of scrolling", async () => {
@@ -443,7 +534,7 @@ describe("ApiPlaygroundShell refresh layout", () => {
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ThemeScopeProvider scope="refresh">
-          <ApiPlaygroundShell apiKeyId={null} endpoints={[endpoint]} productName="Test product" />
+          <ApiPlaygroundShell endpoints={[endpoint]} productName="Test product" />
         </ThemeScopeProvider>
       </I18nProvider>
     );

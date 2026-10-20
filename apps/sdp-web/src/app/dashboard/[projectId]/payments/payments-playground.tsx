@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
-import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
 import { useTranslations } from "@/i18n/provider";
 import {
   buildPaymentsPlaygroundEndpointConfigs,
@@ -12,8 +11,6 @@ import {
 
 interface PaymentsPlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyId: string | null;
-  hasActiveApiKeys: boolean;
   transfers: PaymentsPlaygroundTransferView[];
   transfersError: string | null;
   wallets: PaymentsPlaygroundWalletView[];
@@ -22,8 +19,6 @@ interface PaymentsPlaygroundProps {
 
 export function PaymentsPlayground({
   apiBaseUrl,
-  apiKeyId,
-  hasActiveApiKeys,
   transfers,
   transfersError,
   wallets,
@@ -41,9 +36,6 @@ export function PaymentsPlayground({
       endpoints={endpoints}
       defaultEndpointId="execute-transfer"
       apiBaseUrl={apiBaseUrl}
-      apiKeyId={apiKeyId}
-      apiKeySelector={<PlaygroundApiKeySelector />}
-      requiresApiKey={!hasActiveApiKeys}
       leftMessages={[
         ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
         ...(transfersError ? [{ text: transfersError, tone: "critical" as const }] : []),

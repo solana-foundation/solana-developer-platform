@@ -353,7 +353,7 @@ export async function resolveIssuanceWallet(params: {
   }
   // The custody signer refuses a wallet outside the key's scope (HOO-2099);
   // refusing here as well stops the action before its token transaction row.
-  assertCallerWalletInScope(params.auth.walletAccess, wallet.custodyWalletId);
+  assertCallerWalletInScope(params.auth, wallet.custodyWalletId);
   return wallet;
 }
 
@@ -386,7 +386,7 @@ export async function resolveAuthorityWallet(params: {
   }
   const [wallet] = matches;
   // As above: refused before the token transaction row is written.
-  assertCallerWalletInScope(auth.walletAccess, wallet.custodyWalletId);
+  assertCallerWalletInScope(auth, wallet.custodyWalletId);
   return wallet;
 }
 

@@ -2231,6 +2231,9 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     );
 
     expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
     expect(createWithdrawal).not.toHaveBeenCalled();
 
     await expect(countMovements()).resolves.toBe(0);

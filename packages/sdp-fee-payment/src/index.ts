@@ -1,39 +1,14 @@
 /**
  * Fee Payment Adapters Registry
  *
- * Factory functions for creating fee payment adapters.
- * Kora is the primary provider for gasless transactions.
+ * Builds the Kora adapter for the open cluster scope. Kora is the only Fee Payer.
  */
 
-import { resolveDefaultCluster } from "@sdp/rpc/config";
+import { KORA_UPSTREAM_RPC_ENV_KEYS } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { KoraAdapter, type KoraAdapterConfig } from "./kora.adapter";
-import { NativeAdapter } from "./native.adapter";
-import { type FeePaymentEnv, FeePaymentError, type FeePaymentPort } from "./port";
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Types
-// ═══════════════════════════════════════════════════════════════════════════
-
-/** Supported fee payment provider types */
-export type FeePaymentProviderType = "kora" | "native";
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Factory Functions
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Create a fee payment adapter from environment variables.
- * Uses Kora if configured, falls back to native adapter.
- */
-export function resolveFeePaymentProvider(env: FeePaymentEnv): FeePaymentProviderType {
-  return (env.FEE_PAYMENT_PROVIDER ?? "kora") as FeePaymentProviderType;
-}
-
-/** The process default cluster (`SOLANA_NETWORK`): the one the native fee payer serves. */
-export function defaultFeePaymentCluster(env: FeePaymentEnv): SolanaCluster {
-  return resolveDefaultCluster(env);
-}
+import { type FeePaymentEnv, FeePaymentError } from "./port";
 
 /** One Kora service: where it is and how the adapter authenticates to it. */
 export interface KoraEndpoint {
@@ -42,92 +17,81 @@ export interface KoraEndpoint {
   identityTokenAudience?: string;
 }
 
+/** Each cluster's Kora env keys: the service the API calls and the Solana RPC that Kora reads. */
+export const KORA_ENV_KEYS = {
+  devnet: {
+    serviceUrl: "KORA_DEVNET_URL",
+    upstreamRpcUrl: KORA_UPSTREAM_RPC_ENV_KEYS.devnet,
+    apiKey: "KORA_DEVNET_API_KEY",
+    identityTokenAudience: "KORA_DEVNET_CLOUD_RUN_AUDIENCE",
+  },
+  "mainnet-beta": {
+    serviceUrl: "KORA_MAINNET_URL",
+    upstreamRpcUrl: KORA_UPSTREAM_RPC_ENV_KEYS["mainnet-beta"],
+    apiKey: "KORA_MAINNET_API_KEY",
+    identityTokenAudience: "KORA_MAINNET_CLOUD_RUN_AUDIENCE",
+  },
+} as const satisfies Record<SolanaCluster, Record<string, keyof FeePaymentEnv>>;
+
 /**
- * The Kora that sponsors on `cluster`, or null when none is configured for it.
+ * Boot check: each cluster's Kora is configured whole or not at all. The sponsor signs through
+ * `KORA_<CLUSTER>_URL` and the budget prices and settles through `KORA_<CLUSTER>_RPC_URL`, so one
+ * without the other refuses to start instead of failing sponsored requests after a deploy.
  *
- * One API process serves both clusters (a sandbox project is devnet, a
- * production project is mainnet-beta) and each cluster has its OWN Kora with
- * its own signer, policy and credentials, so the endpoint is selected by the
- * transaction's cluster, never by the process default: `KORA_DEVNET_*` or
- * `KORA_MAINNET_*`, nothing else. A cluster without its URL answers null so
- * callers fail closed to wallet-pays rather than signing through the wrong
- * paymaster. There is NO built-in default URL: a paymaster is money, and a
- * deployment reaches one only by naming it.
+ * @param env - Process environment naming each cluster's Kora.
+ * @throws Error naming the missing key when a cluster sets exactly one of the two.
  */
-export function resolveKoraEndpoint(
-  env: FeePaymentEnv,
-  cluster: SolanaCluster
-): KoraEndpoint | null {
-  const endpoint =
-    cluster === "mainnet-beta"
-      ? {
-          rpcUrl: env.KORA_MAINNET_URL?.trim(),
-          apiKey: env.KORA_MAINNET_API_KEY,
-          identityTokenAudience: env.KORA_MAINNET_CLOUD_RUN_AUDIENCE,
-        }
-      : {
-          rpcUrl: env.KORA_DEVNET_URL?.trim(),
-          apiKey: env.KORA_DEVNET_API_KEY,
-          identityTokenAudience: env.KORA_DEVNET_CLOUD_RUN_AUDIENCE,
-        };
-  if (!endpoint.rpcUrl) return null;
-  return {
-    rpcUrl: endpoint.rpcUrl,
-    apiKey: endpoint.apiKey,
-    identityTokenAudience: endpoint.identityTokenAudience,
-  };
-}
-
-/**
- * Whether this process can sponsor a transaction on `cluster` at all: Kora has
- * an endpoint for it, or the native fee payer serves it (the native adapter
- * signs on the process default cluster only). Feature gates read this so an
- * unconfigured cluster answers wallet-pays instead of a provider error.
- */
-export function isFeePaymentConfiguredForCluster(
-  env: FeePaymentEnv,
-  cluster: SolanaCluster
-): boolean {
-  return resolveFeePaymentProvider(env) === "native"
-    ? cluster === defaultFeePaymentCluster(env)
-    : resolveKoraEndpoint(env, cluster) !== null;
-}
-
-export function createFeePaymentAdapter(
-  env: FeePaymentEnv,
-  userId: string,
-  cluster: SolanaCluster
-): FeePaymentPort {
-  const provider = resolveFeePaymentProvider(env);
-
-  switch (provider) {
-    case "native":
-      if (cluster !== defaultFeePaymentCluster(env)) {
-        throw new FeePaymentError(
-          `The native fee payer serves ${defaultFeePaymentCluster(env)} only, not ${cluster}`,
-          "PROVIDER_NOT_AVAILABLE"
-        );
-      }
-      return new NativeAdapter(env);
-    default:
-      return createKoraAdapter(env, userId, cluster);
+export function assertKoraConfigured(env: FeePaymentEnv): void {
+  for (const [cluster, envKeys] of Object.entries(KORA_ENV_KEYS)) {
+    const serviceUrl = env[envKeys.serviceUrl]?.trim();
+    const upstreamRpcUrl = env[envKeys.upstreamRpcUrl]?.trim();
+    if (Boolean(serviceUrl) !== Boolean(upstreamRpcUrl)) {
+      const missingEnvKey = serviceUrl ? envKeys.upstreamRpcUrl : envKeys.serviceUrl;
+      throw new Error(`Kora is half-configured for ${cluster}: set ${missingEnvKey}`);
+    }
   }
 }
 
 /**
- * Create a Kora adapter for `cluster` from environment configuration.
- * SDP application callers must pass the server-derived identity from their
- * owned sponsorship boundary.
+ * The Kora that sponsors on the open scope's cluster, or null when none is configured for it.
+ *
+ * Each cluster has its own Kora with its own signer, policy and credentials, so the endpoint
+ * follows the scope's cluster, never the process default. There is no built-in default URL: a
+ * paymaster is money, and a deployment reaches one only by naming it. `assertKoraConfigured`
+ * guarantees at boot that a cluster with a URL also has its upstream RPC.
+ *
+ * @param env - API environment naming each cluster's Kora.
+ * @returns The scope's cluster's Kora, or null when its `KORA_<CLUSTER>_URL` is unset.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
-export function createKoraAdapter(
-  env: FeePaymentEnv,
-  userId: string,
-  cluster: SolanaCluster
-): KoraAdapter {
-  const endpoint = resolveKoraEndpoint(env, cluster);
+export function resolveKoraEndpoint(env: FeePaymentEnv): KoraEndpoint | null {
+  const envKeys = KORA_ENV_KEYS[currentClusterScope().cluster];
+  const serviceUrl = env[envKeys.serviceUrl]?.trim();
+  if (!serviceUrl) return null;
+  return {
+    rpcUrl: serviceUrl,
+    apiKey: env[envKeys.apiKey],
+    identityTokenAudience: env[envKeys.identityTokenAudience],
+  };
+}
+
+/**
+ * The Kora adapter for the open scope's cluster. Built per request because it carries the
+ * caller's `user_id`; SDP application callers pass the server-derived identity from their owned
+ * sponsorship boundary.
+ *
+ * @param env - API environment naming each cluster's Kora.
+ * @param userId - The Kora `user_id` the adapter forwards.
+ * @returns The adapter.
+ * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` when the scope's cluster has no Kora.
+ */
+export function createKoraAdapter(env: FeePaymentEnv, userId: string): KoraAdapter {
+  const endpoint = resolveKoraEndpoint(env);
   if (!endpoint) {
+    const { cluster } = currentClusterScope();
+    const envKeys = KORA_ENV_KEYS[cluster];
     throw new FeePaymentError(
-      `Kora is not configured for ${cluster}: set KORA_${cluster === "mainnet-beta" ? "MAINNET" : "DEVNET"}_URL`,
+      `Kora is not configured for ${cluster}: set ${envKeys.serviceUrl} and ${envKeys.upstreamRpcUrl}`,
       "PROVIDER_NOT_AVAILABLE"
     );
   }

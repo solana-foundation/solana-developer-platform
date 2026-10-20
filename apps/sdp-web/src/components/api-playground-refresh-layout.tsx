@@ -6,8 +6,7 @@ import { InfoHint } from "@sdp/ui/info-hint";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { StatusText } from "@sdp/ui/status-text";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { ChevronDown, ChevronsUpDown, Copy, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
-import Link from "next/link";
+import { ChevronDown, ChevronsUpDown, Copy, Loader2, Play, Sparkles, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type {
   ApiPlaygroundEndpointConfig,
@@ -461,11 +460,7 @@ function ResponseHeaders({
   return <PlainCode content={entries.map(([name, value]) => `${name}: ${value}`).join("\n")} />;
 }
 
-/**
- * The endpoint picker and Run, on one 60px line. With no key in the project, Run becomes
- * "Create an API key" for someone who may make one, as the design does: there is nothing to run
- * a request with until then.
- */
+/** The endpoint picker and Run, on one 60px line. */
 function EndpointLine({
   endpoints,
   activeEndpoint,
@@ -473,10 +468,9 @@ function EndpointLine({
   execution,
   runDisabled,
   onRun,
-  createApiKeyHref,
 }: Pick<
   ApiPlaygroundRefreshLayoutProps,
-  "endpoints" | "activeEndpoint" | "onEndpointChange" | "execution" | "onRun" | "createApiKeyHref"
+  "endpoints" | "activeEndpoint" | "onEndpointChange" | "execution" | "onRun"
 > & { runDisabled: boolean }) {
   const t = useTranslations();
   return (
@@ -506,65 +500,35 @@ function EndpointLine({
       </div>
       {/* The design's Run sits a pixel inside the picker's rule, top and bottom; on a phone it is
           a 36px full-width button under the picker, without the shortcut. */}
-      {createApiKeyHref ? (
-        <Button asChild className="!h-9 self-center rounded-control !px-5 sm:!h-[58px]">
-          <Link href={createApiKeyHref} data-playground-create-key="">
-            <Plus className="size-4" aria-hidden="true" />
-            {t("Shared.SharedComponents.createAnApiKey")}
-          </Link>
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          onClick={onRun}
-          disabled={runDisabled}
-          aria-keyshortcuts="Meta+Enter Control+Enter"
-          className="!h-9 !gap-0 self-center rounded-control !px-5 sm:!h-[58px]"
-        >
-          <span className="flex items-center whitespace-nowrap">
-            <span className="flex items-center gap-1.5">
-              {execution.state === "running" ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Play className="size-4" aria-hidden="true" />
-              )}
-              {t("Shared.SharedComponents.runRequest")}
-            </span>
-            <RunShortcut />
+      <Button
+        type="button"
+        onClick={onRun}
+        disabled={runDisabled}
+        aria-keyshortcuts="Meta+Enter Control+Enter"
+        className="!h-9 !gap-0 self-center rounded-control !px-5 sm:!h-[3.625rem]"
+      >
+        <span className="flex items-center whitespace-nowrap">
+          <span className="flex items-center gap-1.5">
+            {execution.state === "running" ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Play className="size-4" aria-hidden="true" />
+            )}
+            {t("Shared.SharedComponents.runRequest")}
           </span>
-        </Button>
-      )}
+          <RunShortcut />
+        </span>
+      </Button>
     </div>
   );
 }
 
-/** The key picker and the host the call goes to, on one quiet line under the endpoint. */
-function KeyAndHostLine({
-  apiKeySelector,
-  apiHost,
-}: {
-  apiKeySelector?: ReactNode;
-  apiHost: string | null;
-}) {
-  const t = useTranslations();
+/** The host the call goes to, on one quiet line under the endpoint. */
+function HostLine({ apiHost }: { apiHost: string | null }) {
+  if (!apiHost) return null;
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-meta text-secondary">
-      {apiKeySelector ? (
-        <>
-          <span>{t("Shared.SharedComponents.apiKeyLabel")}</span>
-          {apiKeySelector}
-        </>
-      ) : null}
-      {apiHost ? (
-        <>
-          {apiKeySelector ? (
-            <span aria-hidden="true" className="text-tertiary">
-              ·
-            </span>
-          ) : null}
-          <span className="font-mono">{apiHost}</span>
-        </>
-      ) : null}
+      <span className="font-mono">{apiHost}</span>
     </div>
   );
 }
@@ -610,9 +574,7 @@ export interface ApiPlaygroundRefreshLayoutProps {
   endpoints: ApiPlaygroundEndpointConfig[];
   activeEndpoint: ApiPlaygroundEndpointConfig;
   onEndpointChange: (endpointId: string) => void;
-  apiKeySelector?: ReactNode;
   apiHost: string | null;
-  requiresApiKey: boolean;
   messages: ApiPlaygroundMessage[];
   fieldValues: Record<string, string>;
   onFieldChange: (fieldKey: string, value: string) => void;
@@ -631,22 +593,18 @@ export interface ApiPlaygroundRefreshLayoutProps {
   onReset: () => void;
   onCopy: (text: string, action: "code" | "ai") => void;
   copiedAction: "code" | "ai" | null;
-  /** Where to make a key when the project has none; set only for someone who may make one. */
-  createApiKeyHref?: string;
 }
 
 /**
- * The playground as a refresh surface lays it out: the endpoint and Run on one line, the key
- * and host under it, then the request (form, raw HTTP or code) beside the response (body or
+ * The playground as a refresh surface lays it out: the endpoint and Run on one line, the host
+ * under it, then the request (form, raw HTTP or code) beside the response (body or
  * headers). ⌘↵ or Ctrl+↵ runs the request from anywhere on the page.
  */
 export function ApiPlaygroundRefreshLayout({
   endpoints,
   activeEndpoint,
   onEndpointChange,
-  apiKeySelector,
   apiHost,
-  requiresApiKey,
   messages,
   fieldValues,
   onFieldChange,
@@ -663,14 +621,12 @@ export function ApiPlaygroundRefreshLayout({
   onReset,
   onCopy,
   copiedAction,
-  createApiKeyHref,
 }: ApiPlaygroundRefreshLayoutProps) {
   const t = useTranslations();
   const [view, setView] = useState<RequestView>("form");
   const [responseView, setResponseView] = useState<ResponseView>("body");
   const [language, setLanguage] = useState<SnippetLanguage>("curl");
-  const runDisabled = execution.state === "running" || requiresApiKey;
-  const createKeyHref = requiresApiKey ? createApiKeyHref : undefined;
+  const runDisabled = execution.state === "running";
   useRunShortcut(onRun, runDisabled);
   const hasRun = execution.state === "done" || execution.state === "error";
 
@@ -683,16 +639,9 @@ export function ApiPlaygroundRefreshLayout({
         execution={execution}
         runDisabled={runDisabled}
         onRun={onRun}
-        createApiKeyHref={createKeyHref}
       />
 
-      <KeyAndHostLine apiKeySelector={apiKeySelector} apiHost={apiHost} />
-      {/* Someone who cannot make a key is told why Run waits; the others get the button. */}
-      {requiresApiKey && !createKeyHref ? (
-        <p className="mt-2 text-meta text-tertiary">
-          {t("Shared.SharedComponents.apiKeyRequired")}
-        </p>
-      ) : null}
+      <HostLine apiHost={apiHost} />
 
       <PlaygroundMessages messages={messages} />
 

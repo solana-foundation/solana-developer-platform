@@ -391,7 +391,7 @@ export async function extractEarnVaultDeposit(
   // The custody signer decides every signature; this is its refusal made
   // before the audit intent, eligibility, sponsorship, build and simulation
   // (ADR 0007 addendum).
-  assertCallerWalletInScope(auth.walletAccess, wallet.id);
+  assertCallerWalletInScope(auth, wallet.id);
 
   const resolved: EarnVaultDepositResolved = {
     strategy,
@@ -1048,6 +1048,10 @@ export async function extractEarnVaultWithdrawal(
     projectId,
   });
   const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
+  // The custody signer refuses a wallet outside the key's scope for exits too
+  // (ADR 0007 addendum); refusing here keeps the withdrawal from recording a
+  // movement it cannot sign, which its Idempotency-Key would then replay.
+  assertCallerWalletInScope(auth, wallet.id);
 
   const resolved: EarnVaultWithdrawalResolved = {
     position,

@@ -149,6 +149,6 @@ export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput)
   // handler answers that.
   const wallet = await findProjectOperationalWallet(c, walletId);
   if (wallet) {
-    assertCallerWalletInScope(getAuth(c).walletAccess, wallet.id);
+    assertCallerWalletInScope(getAuth(c), wallet.id);
   }
 }

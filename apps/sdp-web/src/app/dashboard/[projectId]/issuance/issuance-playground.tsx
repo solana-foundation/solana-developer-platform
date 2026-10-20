@@ -2,8 +2,6 @@
 
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
-import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
-import { usePlaygroundCreateKeyHref } from "@/components/use-playground-create-key-href";
 import { useTranslations } from "@/i18n/provider";
 import {
   buildIssuancePlaygroundEndpointConfigs,
@@ -13,8 +11,6 @@ import {
 
 interface IssuancePlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyId: string | null;
-  hasActiveApiKeys: boolean;
   templates: IssuancePlaygroundTemplateView[];
   templatesError: string | null;
   tokens: IssuancePlaygroundTokenView[];
@@ -22,14 +18,11 @@ interface IssuancePlaygroundProps {
 
 export function IssuancePlayground({
   apiBaseUrl,
-  apiKeyId,
-  hasActiveApiKeys,
   templates,
   templatesError,
   tokens,
 }: IssuancePlaygroundProps) {
   const t = useTranslations();
-  const createApiKeyHref = usePlaygroundCreateKeyHref();
   const endpoints = useMemo(
     () => buildIssuancePlaygroundEndpointConfigs({ templates, tokens, t }),
     [templates, tokens, t]
@@ -41,10 +34,6 @@ export function IssuancePlayground({
       endpoints={endpoints}
       defaultEndpointId="mint-execute"
       apiBaseUrl={apiBaseUrl}
-      apiKeyId={apiKeyId}
-      apiKeySelector={<PlaygroundApiKeySelector />}
-      createApiKeyHref={createApiKeyHref}
-      requiresApiKey={!hasActiveApiKeys}
       leftMessages={templatesError ? [{ text: templatesError, tone: "critical" }] : []}
     />
   );

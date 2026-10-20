@@ -1,9 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/[projectId]/playground-api-data";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
@@ -25,9 +22,8 @@ async function CounterpartyPage() {
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
 
   return withDashboardPageTrace("dashboard.counterparty.page", async ({ trace, apiClient }) => {
-    const [counterpartiesResult, apiKeysResult] = await Promise.all([
+    const [counterpartiesResult] = await Promise.all([
       trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
     ]);
 
     trace.log({
@@ -35,8 +31,6 @@ async function CounterpartyPage() {
       counterpartiesOk: counterpartiesResult.ok,
       counterpartiesCount: counterpartiesResult.data.length,
       counterpartiesTotal: counterpartiesResult.total,
-      apiKeysOk: apiKeysResult.ok,
-      apiKeysCount: apiKeysResult.data?.length ?? 0,
     });
 
     return (
@@ -44,7 +38,6 @@ async function CounterpartyPage() {
         <CounterpartyWorkspace
           initialCounterparties={counterpartiesResult.data}
           initialTotal={counterpartiesResult.total}
-          apiKeys={apiKeysResult.data ?? []}
           apiBaseUrl={apiBaseUrl}
         />
       </div>

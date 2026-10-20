@@ -481,6 +481,7 @@ describe("Payments routes — ramps", () => {
                     amount: "12500000",
                     decimals: usdc.decimals,
                     uiAmountString: "12.5",
+                    state: "initialized",
                   },
                 ]
               : []
