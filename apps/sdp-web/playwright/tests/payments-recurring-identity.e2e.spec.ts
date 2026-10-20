@@ -5,11 +5,14 @@ import { Client } from "pg";
 import { z } from "zod";
 import { recurringPaymentEnvelopeSchema } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
+import {
+  bootstrapLocalWalletFixtures,
+  gotoProjectPage,
+} from "@/playwright/support/local-dashboard-bootstrap";
 import {
   bootstrapWalletIdentityFixtures,
   walletIdentityDatabaseUrl,
-} from "../support/payments-wallet-identity";
+} from "@/playwright/support/payments-wallet-identity";
 
 const expect = playwrightExpect.configure({ timeout: 120_000 });
 const counterpartySchema = z.object({ id: z.string().min(1), displayName: z.string().min(1) });
@@ -107,6 +110,111 @@ test.describe
       } finally {
         await fixture?.cleanup();
       }
+    });
+
+    test("preserves existing organization settings when enabling local custody", async () => {
+      await withDatabase(async (db) => {
+        const organizationSchema = z.object({
+          id: z.string(),
+          settings: z.string().nullable(),
+          updated_at: z.string(),
+        });
+        const original = organizationSchema.parse(
+          (
+            await db.query(
+              `SELECT org.id, org.settings, org.updated_at FROM organizations org
+               JOIN projects project ON project.organization_id = org.id
+               WHERE project.id = $1`,
+              [fixture.projectId]
+            )
+          ).rows[0]
+        );
+        const topLevel = {
+          enableProductionProject: true,
+          defaultEnvironment: "sandbox",
+          customRateLimits: { requestsPerMinute: 1000 },
+        };
+        const providerSiblings = { ramps: { moonpay: false } };
+        const custodySiblings = { privy: false };
+        const enabled = {
+          ...topLevel,
+          providerOverrides: {
+            ...providerSiblings,
+            custody: { ...custodySiblings, local: true },
+          },
+        };
+        const cases = [
+          [
+            "missing provider overrides",
+            topLevel,
+            { ...topLevel, providerOverrides: { custody: { local: true } } },
+          ],
+          [
+            "missing custody overrides",
+            { ...topLevel, providerOverrides: providerSiblings },
+            { ...topLevel, providerOverrides: { ...providerSiblings, custody: { local: true } } },
+          ],
+          [
+            "missing local override",
+            { ...topLevel, providerOverrides: { ...providerSiblings, custody: custodySiblings } },
+            enabled,
+          ],
+          [
+            "disabled local override",
+            {
+              ...topLevel,
+              providerOverrides: {
+                ...providerSiblings,
+                custody: { ...custodySiblings, local: false },
+              },
+            },
+            enabled,
+          ],
+          ["already enabled", enabled, enabled],
+        ] as const;
+        const unchangedTimestamp = "2001-01-01 00:00:00";
+        try {
+          for (const [name, settings, expected] of cases) {
+            await test.step(name, async () => {
+              const savedSettings = JSON.stringify(settings);
+              await db.query(
+                "UPDATE organizations SET settings = $2, updated_at = $3 WHERE id = $1",
+                [original.id, savedSettings, unchangedTimestamp]
+              );
+              const retained = await bootstrapLocalWalletFixtures({
+                identity: fixture.admin.identity,
+                bearerToken: fixture.admin.getBearerToken,
+                provider: "local",
+                walletCount: 1,
+                fundSourceWallet: false,
+                preserveExistingFixtures: true,
+              });
+              expect(retained.wallets.map((wallet) => wallet.id)).toEqual([fixture.walletA.id]);
+              const current = organizationSchema.parse(
+                (
+                  await db.query(
+                    "SELECT id, settings, updated_at FROM organizations WHERE id = $1",
+                    [original.id]
+                  )
+                ).rows[0]
+              );
+              expect(z.json().parse(JSON.parse(z.string().parse(current.settings)))).toEqual(
+                expected
+              );
+              if (name === "already enabled") {
+                expect(current.settings).toBe(savedSettings);
+                expect(current.updated_at).toBe(unchangedTimestamp);
+              }
+            });
+          }
+        } finally {
+          await db.query("UPDATE organizations SET settings = $2, updated_at = $3 WHERE id = $1", [
+            original.id,
+            original.settings,
+            original.updated_at,
+          ]);
+        }
+      });
     });
 
     async function createPendingSchedule(page: Page, wallet: { id: string; label: string | null }) {

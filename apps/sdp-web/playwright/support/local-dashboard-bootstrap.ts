@@ -318,20 +318,19 @@ async function enableLocalCustodyForPlaywrightOrg(organizationId: string): Promi
   await withDatabaseClient(async (client) => {
     await client.query(
       `UPDATE organizations
-       SET settings = $2, updated_at = sdp_datetime_now()
+       SET settings = (
+         COALESCE(settings::jsonb, '{}'::jsonb) || jsonb_build_object(
+           'providerOverrides',
+           COALESCE(settings::jsonb -> 'providerOverrides', '{}'::jsonb) || jsonb_build_object(
+             'custody',
+             COALESCE(settings::jsonb #> '{providerOverrides,custody}', '{}'::jsonb)
+               || '{"local":true}'::jsonb
+           )
+         )
+       )::text, updated_at = sdp_datetime_now()
        WHERE id = $1
          AND settings::jsonb #>> '{providerOverrides,custody,local}' IS DISTINCT FROM 'true'`,
-      [
-        organizationId,
-        JSON.stringify({
-          ...PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS,
-          providerOverrides: {
-            custody: {
-              local: true,
-            },
-          },
-        }),
-      ]
+      [organizationId]
     );
   });
 }
