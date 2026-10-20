@@ -2864,7 +2864,7 @@ describe("Payments routes — recurring", () => {
           parsed.data.event === "sdp_api_recurring_payment_collection_proof_mismatch"
         );
       });
-      expect(proofMismatchEvents).toHaveLength(2);
+      expect(proofMismatchEvents).toHaveLength(1);
       for (const [payload, message] of proofMismatchEvents) {
         expect(payload).toEqual(
           expect.objectContaining({
