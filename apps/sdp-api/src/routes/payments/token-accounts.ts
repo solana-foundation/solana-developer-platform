@@ -1,6 +1,5 @@
 import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,
@@ -15,6 +14,10 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
+import {
+  loadPaymentAmountConverter,
+  type PaymentAmountConverter,
+} from "@/services/payments/token-amount";
 
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
@@ -41,6 +44,8 @@ export interface SourceTokenAccount {
 /** A source token account with its mint's token program, read once for a send to reuse. */
 export interface SplTransferSource extends SourceTokenAccount {
   tokenProgram: Address;
+  /** The funding check's converter; the build reuses it so both see one raw amount. */
+  toBaseUnits: PaymentAmountConverter;
 }
 
 function issuedTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string | null {
@@ -259,7 +264,9 @@ export async function buildSplTransferInstructions(
   const sourceTokenAccount =
     input.source ??
     (await resolveSourceTokenAccount(rpc, input.authority.address, input.mint, tokenProgram));
-  const transferAmount = parseDecimalAmount(input.amount, sourceTokenAccount.decimals);
+  const toBaseUnits =
+    input.source?.toBaseUnits ?? (await loadPaymentAmountConverter(rpc, input.mint));
+  const transferAmount = toBaseUnits(input.amount);
   if (transferAmount <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
   }

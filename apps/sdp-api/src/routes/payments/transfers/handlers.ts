@@ -104,6 +104,7 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
+import { loadPaymentAmountConverter } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -259,14 +260,12 @@ async function assertRampDepositFunded(
   const rpc = createClusterRpc();
   const mint = assertValidAddress(operation.token, "token");
   const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-  const source = await resolveSourceTokenAccount(
-    rpc,
-    address(operation.sourceWallet.publicKey),
-    mint,
-    tokenProgram
-  );
-  const needed = parseDecimalAmount(operation.amount, source.decimals);
-  if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram };
+  const [source, toBaseUnits] = await Promise.all([
+    resolveSourceTokenAccount(rpc, address(operation.sourceWallet.publicKey), mint, tokenProgram),
+    loadPaymentAmountConverter(rpc, mint),
+  ]);
+  const needed = toBaseUnits(operation.amount);
+  if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram, toBaseUnits };
 
   const token = resolveTokenLabel(mint);
   const held = formatDecimalAmount(source.amount, source.decimals);

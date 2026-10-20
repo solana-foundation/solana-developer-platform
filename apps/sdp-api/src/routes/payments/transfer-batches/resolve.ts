@@ -23,6 +23,10 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
+import {
+  loadPaymentAmountConverter,
+  type PaymentAmountConverter,
+} from "@/services/payments/token-amount";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
   CreateTransferBatchInput,
@@ -35,15 +39,21 @@ import type {
 
 /**
  * Parses a recipient amount into token base units, mapping amount-format
- * violations to a 400 response.
+ * violations to a 400 response. A positive UI amount can still convert to zero
+ * base units on an interest-bearing or scaled mint; that is refused too, so no
+ * recipient becomes a sponsored transfer that moves nothing.
  *
  * @param amount - Decimal amount string from the request body.
- * @param decimals - Decimal places of the batch token.
+ * @param toBaseUnits - The batch token's converter from UI amounts to base units.
  * @returns The amount in token base units.
  */
-function parseRecipientAmount(amount: string, decimals: number): bigint {
+function parseRecipientAmount(amount: string, toBaseUnits: PaymentAmountConverter): bigint {
   try {
-    return parseDecimalAmount(assertPositivePaymentAmount(amount), decimals);
+    const amountBaseUnits = toBaseUnits(assertPositivePaymentAmount(amount));
+    if (amountBaseUnits <= 0n) {
+      throw badRequest("Recipient amount must be greater than zero");
+    }
+    return amountBaseUnits;
   } catch (error) {
     if (error instanceof AmountError) {
       throw badRequest(error.message);
@@ -67,17 +77,20 @@ async function resolveTokenContext(
   sourceAddress: Address
 ): Promise<TokenContext> {
   if (isNativePaymentToken(token)) {
-    return { kind: "sol", token: SOL_MINT, decimals: SOL_DECIMALS };
+    return {
+      kind: "sol",
+      token: SOL_MINT,
+      decimals: SOL_DECIMALS,
+      toBaseUnits: (amount) => parseDecimalAmount(amount, SOL_DECIMALS),
+    };
   }
 
   const mintAddress = assertValidAddress(token, "token");
   const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
-  const sourceTokenAccount = await resolveSourceTokenAccount(
-    rpc,
-    sourceAddress,
-    mintAddress,
-    tokenProgram
-  );
+  const [sourceTokenAccount, toBaseUnits] = await Promise.all([
+    resolveSourceTokenAccount(rpc, sourceAddress, mintAddress, tokenProgram),
+    loadPaymentAmountConverter(rpc, mintAddress),
+  ]);
 
   return {
     kind: "spl",
@@ -86,6 +99,7 @@ async function resolveTokenContext(
     mintAddress,
     tokenProgram,
     sourceTokenAccount: sourceTokenAccount.tokenAccount,
+    toBaseUnits,
   };
 }
 
@@ -120,28 +134,31 @@ function readCryptoWalletAddress(account: CounterpartyAccountRow, index: number)
  *
  * @param params.recipients - Recipient inputs from the request body.
  * @param params.accounts - The named accounts, by id, as authorize loaded them.
- * @param params.decimals - Decimal places of the batch token.
+ * @param params.tokenContext - The batch token: its decimals and UI-amount converter.
  * @returns Recipients with resolved destination addresses and base-unit amounts.
  */
 function resolveRecipients(params: {
   recipients: TransferBatchRecipientInput[];
   accounts: ReadonlyMap<string, CounterpartyAccountRow>;
-  decimals: number;
+  tokenContext: TokenContext;
 }): ResolvedRecipient[] {
+  const { decimals, toBaseUnits } = params.tokenContext;
   return params.recipients.map((recipient, index) => {
     const account = params.accounts.get(recipient.counterpartyAccountId);
     if (account?.status !== "active") {
       throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
     }
 
-    const amountBaseUnits = parseRecipientAmount(recipient.amount, params.decimals);
+    // `amount` stays the requested UI amount in canonical form; an interest-bearing
+    // or scaled mint moves `amountBaseUnits` away from its static scaling.
+    const amountBaseUnits = parseRecipientAmount(recipient.amount, toBaseUnits);
     return {
       index,
       externalId: recipient.externalId ?? null,
       counterpartyId: account.counterparty_id,
       counterpartyAccountId: recipient.counterpartyAccountId,
       destinationAddress: readCryptoWalletAddress(account, index),
-      amount: formatDecimalAmount(amountBaseUnits, params.decimals),
+      amount: formatDecimalAmount(parseDecimalAmount(recipient.amount, decimals), decimals),
       amountBaseUnits,
     };
   });
@@ -213,7 +230,7 @@ export async function resolveBatchMovement(
   const recipients = resolveRecipients({
     recipients: input.recipients,
     accounts: authorized.accounts,
-    decimals: tokenContext.decimals,
+    tokenContext,
   });
   return {
     scope: authorized.scope,
