@@ -422,7 +422,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
-          admitCaller: () => assertCallerWalletInScope(auth.walletAccess, sourceWallet.id),
+          admitCaller: () => assertCallerWalletInScope(auth, sourceWallet.id),
           idempotencyKey: requiredIdempotency(c).key,
         })
       : await resumeRecurringPaymentRecord({
