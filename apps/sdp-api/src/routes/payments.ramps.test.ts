@@ -682,6 +682,7 @@ describe("Payments routes — ramps", () => {
     expect(hostedUrl.searchParams.get("currencyCode")).toBe("sol");
     expect(hostedUrl.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(hostedUrl.searchParams.get("lockAmount")).toBe("true");
+    expect(hostedUrl.searchParams.get("paymentMethod")).toBe("credit_debit_card");
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.transferId);
     assertMoonPaySignature(hostedUrl);

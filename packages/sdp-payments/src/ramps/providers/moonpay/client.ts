@@ -52,6 +52,12 @@ const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
+/**
+ * The buy widget opens on card and spends the amount it is given, fees
+ * included; buy quotes ask on the same terms so an estimate matches the charge.
+ */
+const MOONPAY_ONRAMP_PAYMENT_METHOD = "credit_debit_card";
+
 export const MOONPAY_DECLARED_RAIL_SUPPORT = {
   onramp: { entityTypes: ["individual"] },
   offramp: { entityTypes: ["individual"] },
@@ -558,6 +564,8 @@ export class MoonpayRampClient implements RampProvider {
     url.searchParams.set("apiKey", config.apiKey);
     url.searchParams.set("baseCurrencyCode", input.fiatCurrency.toLowerCase());
     url.searchParams.set("baseCurrencyAmount", input.fiatAmount);
+    url.searchParams.set("areFeesIncluded", "true");
+    url.searchParams.set("paymentMethod", MOONPAY_ONRAMP_PAYMENT_METHOD);
     const quote = await providerFetchJson(
       this.id,
       url.toString(),
@@ -572,7 +580,7 @@ export class MoonpayRampClient implements RampProvider {
       fiatAmount: String(quote.baseCurrencyAmount),
       cryptoAmount: String(quote.quoteCurrencyAmount),
       exchangeRate: String(quote.quoteCurrencyPrice),
-      // MoonPay charges its fees on top of the amount bought.
+      // The fees come out of what the customer gave: the base is what buys the crypto.
       totalFiatAmount:
         quote.totalAmount === undefined
           ? sumDecimalAmounts([
@@ -660,6 +668,7 @@ export class MoonpayRampClient implements RampProvider {
       currencyCode: moonpayCryptoCode(input.assetRail),
       walletAddress: input.destinationWalletAddress,
       lockAmount: "true",
+      paymentMethod: MOONPAY_ONRAMP_PAYMENT_METHOD,
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });

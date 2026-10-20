@@ -182,8 +182,12 @@ describe("MoonpayRampClient on-ramp total", () => {
     globalThis.fetch = async () => Response.json(body);
   }
 
-  it("prices what the customer pays in all, fees on top of the amount", async () => {
-    answerBuyQuote(QUOTE_RESPONSE);
+  it("prices the widget's charge: by card, its fees out of the amount", async () => {
+    let requested: URL | undefined;
+    globalThis.fetch = async (input) => {
+      requested = new URL(String(input));
+      return Response.json({ ...QUOTE_RESPONSE, baseCurrencyAmount: 48.4 });
+    };
 
     const estimate = await RAMP_PROVIDER_CLIENTS.moonpay.estimateOnramp(runtimeContext, {
       assetRail: "sol.solana",
@@ -191,8 +195,10 @@ describe("MoonpayRampClient on-ramp total", () => {
       fiatAmount: "50",
     });
 
-    assert.equal(estimate.fiatAmount, "50");
-    assert.equal(estimate.totalFiatAmount, "51.6");
+    assert.equal(requested?.searchParams.get("areFeesIncluded"), "true");
+    assert.equal(requested?.searchParams.get("paymentMethod"), "credit_debit_card");
+    assert.equal(estimate.fiatAmount, "48.4");
+    assert.equal(estimate.totalFiatAmount, "50");
   });
 
   it("takes MoonPay's own total when it sends one", async () => {
@@ -205,6 +211,17 @@ describe("MoonpayRampClient on-ramp total", () => {
     });
 
     assert.equal(estimate.totalFiatAmount, "51.61");
+  });
+
+  it("opens the buy widget on card, the method its estimate priced", async () => {
+    refuseProviderCalls();
+
+    const quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(
+      runtimeContext,
+      onrampInput
+    );
+
+    assert.equal(signedHostedUrl(quote).searchParams.get("paymentMethod"), "credit_debit_card");
   });
 });
 

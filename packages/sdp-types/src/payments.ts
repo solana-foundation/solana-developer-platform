@@ -1375,11 +1375,12 @@ export interface PaymentRampEstimate {
   direction: RampDirection;
   fiatCurrency: RampFiatCurrency;
   assetRail: CryptoRailId;
+  /** On-ramp: the fiat that buys the crypto, the provider's fees apart. Off-ramp: the payout. */
   fiatAmount: string;
   cryptoAmount: string;
   /** What one unit of the crypto costs in the fiat, in both directions. */
   exchangeRate: string;
-  /** On-ramp only: what the customer pays in all, the provider's fees on top of `fiatAmount`. */
+  /** On-ramp only: what the customer pays in all, `fiatAmount` plus the provider's fees. */
   totalFiatAmount?: string;
   fees: PaymentRampEstimateFees;
   minFiatAmount?: string;

@@ -18,7 +18,7 @@ const TRANSFER_ID = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
 
 /** A MoonPay v3 buy quote, as `GET /v3/currencies/sol/buy_quote` answers. */
 const BUY_QUOTE = {
-  baseCurrencyAmount: 50,
+  baseCurrencyAmount: 48.4,
   quoteCurrencyAmount: 0.3,
   quoteCurrencyPrice: 150,
   feeAmount: 1.5,
@@ -31,7 +31,12 @@ const BUY_QUOTE = {
 const BUY_QUOTE_EXCHANGE: RecordedExchange = {
   method: "GET",
   url: /^https:\/\/api\.moonpay\.com\/v3\/currencies\/sol\/buy_quote\?/,
-  query: { baseCurrencyCode: "usd", baseCurrencyAmount: "50" },
+  query: {
+    baseCurrencyCode: "usd",
+    baseCurrencyAmount: "50",
+    areFeesIncluded: "true",
+    paymentMethod: "credit_debit_card",
+  },
   status: 200,
   body: BUY_QUOTE,
 };
