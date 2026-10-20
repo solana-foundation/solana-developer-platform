@@ -1,6 +1,6 @@
 import { decideRecurringPaymentStep } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
@@ -431,10 +431,9 @@ export async function readRecurringPaymentStep(input: {
   lastValidBlockHeight: string | null;
   logContext: RecurringPaymentStepLogContext;
 }): Promise<RecurringPaymentStepRead> {
-  const rpc = createClusterRpc();
   let observed: Awaited<ReturnType<typeof observeRecurringPaymentStep>>;
   try {
-    observed = await observeRecurringPaymentStep(rpc, input.effect);
+    observed = await observeRecurringPaymentStep(input.effect);
   } catch (error) {
     getLogger().warn(
       { ...input.logContext, err: error },
@@ -482,16 +481,15 @@ export async function readRecurringPaymentStep(input: {
 /**
  * The block height and effect accounts one step read sees.
  *
- * @param rpc - The cluster pool.
  * @param effect - The step's effect.
  * @returns The `confirmed` block height, the effect accounts and whether they show the effect.
  * @throws When a read fails, the accounts come from a bank below the epoch read's slot, the
  *   answer lists a different number of accounts, or an account does not decode.
  */
 async function observeRecurringPaymentStep(
-  rpc: SolanaRpc,
   effect: RecurringPaymentStepEffect
 ): Promise<{ blockHeight: bigint; accounts: MaybeEncodedAccount[]; landed: boolean }> {
+  const rpc = createClusterRpc();
   const epochInfo = await rpc.getEpochInfo({ commitment: "confirmed" }).send();
   const response = await rpc
     .getMultipleAccounts(effect.addresses, {
