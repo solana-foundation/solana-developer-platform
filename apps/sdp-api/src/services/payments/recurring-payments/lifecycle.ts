@@ -33,7 +33,6 @@ import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
-import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
@@ -47,6 +46,7 @@ import {
   lazyRecurringPaymentStepSigner,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
+  type RecurringPaymentSourceWallet,
   RecurringPaymentStepFailedError,
   type RecurringPaymentStepLogContext,
   type RecurringPaymentStepPhase,
@@ -94,7 +94,7 @@ async function buildResumeInstruction(input: {
 function assertLifecyclePreconditions(input: {
   operation: RecurringPaymentLifecycleOperation;
   recurringPayment: PaymentRecurringPaymentRow;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   nowIso: string;
 }): void {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
@@ -390,7 +390,7 @@ async function runRecurringPaymentLifecycle(
     env: Env;
     organizationId: string;
     projectId: string;
-    sourceWallet: CustodyWallet;
+    sourceWallet: RecurringPaymentSourceWallet;
     recurringPayment: PaymentRecurringPaymentRow;
     /** The request's Idempotency-Key, written on the attempt it claims; null for the cron. */
     idempotencyKey: string | null;
@@ -449,19 +449,21 @@ async function runRecurringPaymentLifecycle(
     });
   }
 
-  await createSigningService(input.env).admitRuntimeExecution(
-    input.organizationId,
-    input.projectId,
-    input.sourceWallet.id
-  );
-
-  // A fresh resume is admitted before its claim commits: the job recovers a
-  // claimed resume as its mandate, so a claim must never exist for a caller
-  // the waist would refuse (HOO-2099). A stale one is admitted just before
-  // its first new signature, so a resume the chain shows landed finishes.
+  // A fresh run is refused before its claim when the wallet cannot sign, and a fresh resume is
+  // admitted before its claim commits: the job recovers a claimed resume as its mandate, so a
+  // claim must never exist for a caller the waist would refuse (HOO-2099). A stale run is neither:
+  // its saved step is read first, and the lazy signer decides just before a new send, so a step
+  // the chain shows landed finishes.
   const recoveringStaleLifecycle =
     collectionState.recurringPayment.status ===
     getRecurringPaymentLifecycleStatuses(input.operation).processingStatus;
+  if (!recoveringStaleLifecycle) {
+    await createSigningService(input.env).admitRuntimeExecution(
+      input.organizationId,
+      input.projectId,
+      input.sourceWallet.id
+    );
+  }
   if (input.operation === "resume" && !recoveringStaleLifecycle) {
     await input.admitStart();
   }
@@ -711,7 +713,7 @@ export async function cancelRecurringPayment(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   /** The request's Idempotency-Key, written on the attempt; null for the cron. */
   idempotencyKey: string | null;
@@ -776,7 +778,7 @@ export async function resumeRecurringPayment(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   /** Money admission (HOO-1955), run only if the resume still has to sign. */
   admitStart: () => Promise<void>;

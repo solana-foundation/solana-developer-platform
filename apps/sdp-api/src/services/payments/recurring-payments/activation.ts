@@ -54,7 +54,6 @@ import {
   resolveProjectSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
-import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
@@ -69,6 +68,7 @@ import {
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   planCreatedEffect,
+  type RecurringPaymentSourceWallet,
   RecurringPaymentStepFailedError,
   type RecurringPaymentStepLogContext,
   type RecurringPaymentStepPhase,
@@ -94,7 +94,7 @@ async function getOrCreateActivationPlan(input: {
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   destination: string;
   createdBy: string | null;
 }): Promise<PaymentSubscriptionPlanRow> {
@@ -354,7 +354,7 @@ async function checkActivationUnwind(input: {
 
 function assertActivationPreconditions(input: {
   recurringPayment: PaymentRecurringPaymentRow;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   nowIso: string;
 }): void {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
@@ -663,7 +663,7 @@ async function settleActivationPlan(input: {
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   phase: RecurringPaymentStepPhase;
   rpc: SolanaRpc;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
   owner: Address;
   destination: Address;
@@ -770,7 +770,7 @@ async function resolveActivationFeePayer(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
 }): Promise<Address> {
   return resolveSponsoredFeePayer(
     input.env,
@@ -804,7 +804,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   phase: RecurringPaymentStepPhase;
   rpc: SolanaRpc;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
   subscriptionAuthorityAddress: Address;
@@ -930,7 +930,7 @@ async function settleActivationSubscription(input: {
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   phase: RecurringPaymentStepPhase;
   rpc: SolanaRpc;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
   subscriptionAuthorityAddress: Address;
@@ -1034,7 +1034,7 @@ export async function activateRecurringPayment(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
   /**
@@ -1073,16 +1073,17 @@ export async function activateRecurringPayment(input: {
     return input.recurringPayment;
   }
 
-  await createSigningService(input.env).admitRuntimeExecution(
-    input.organizationId,
-    input.projectId,
-    input.sourceWallet.id
-  );
-
+  // A fresh activation is refused before its claim when the wallet cannot sign. A recovered one
+  // is not: its saved steps are read first, and the lazy signer decides just before a new send.
   const recoveringStaleActivation = isActivatingRecurringPaymentStatus(
     input.recurringPayment.status
   );
   if (!recoveringStaleActivation) {
+    await createSigningService(input.env).admitRuntimeExecution(
+      input.organizationId,
+      input.projectId,
+      input.sourceWallet.id
+    );
     await input.admitStart();
   }
   const activatedBy = currentMandateActivator();

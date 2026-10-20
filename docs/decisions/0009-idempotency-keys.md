@@ -126,7 +126,7 @@ answers; the pending-transfers job does the same for a batch over an hour old th
 Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
-`activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
+`activating`, `updating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Collection saves its signed transaction before
 broadcast. Activation, lifecycle and update save a step's signature and its last valid block
 height on the attempt row before the send, and clear both only when the send is provably refused
@@ -150,12 +150,17 @@ flight, never failed or reset, so recovery finishes it.
 
 A replay of activate, cancel, resume or collect finds the attempt its key claimed and returns the
 schedule as it stands now, which may still be mid-transition (the cron finishes it); clients poll
-GET. The cron does not recover an `updating`
-schedule, so an in-flight update attempt is never an answer: stored, it would hold the key on
-`updating` for 24 hours. A same-key PATCH retry that finds its attempt in flight gets 409
-`IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` (unstored) until the schedule goes stale, then runs
-the handler, which resumes the attempt under the same key; a settled update attempt replays its
-answer. Every keyed cancel, resume and PATCH that is answered leaves an attempt under its own key,
+GET. An in-flight update attempt is never an answer: stored, it would hold the key on `updating`
+for 24 hours. A same-key PATCH retry that finds its attempt in flight gets 409
+`IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` (unstored) until the schedule goes stale. Once it is
+stale, the cron and a same-key PATCH both resume the attempt: each claims it with the same
+compare-and-set on the stale `updating` row, the first claimant runs, and the other gets 409 (the
+cron counts it `skipped`). A confirmed update attempt replays its answer; a failed one answers
+nothing, so the retry runs again. The cron starts no update send: its mandate admits no
+`recurring.update`, so where the update needs a step it has not sent, the cron fails it back to
+`active` on its old terms with an error log instead of sending, while landed steps finish, a pending
+one waits, and the old subscription's cancel (an exit) is still sent. A same-key PATCH retry can
+send that step. Every keyed cancel, resume and PATCH that is answered leaves an attempt under its own key,
 so its retry past 24 hours never runs again over a later change: a no-op (a cancel of a canceled
 schedule, a resume of an active one, a PATCH that changes nothing) writes a confirmed attempt that
 changes nothing. An activate needs no no-op attempt: only a `pending_activation` schedule starts an
@@ -164,7 +169,7 @@ failed attempt answers no key, so a retry of that key not answered from the shar
 activation again, as a retry of a failed cancel or resume does. A request never finishes another key's
 in-flight attempt silently: activate, cancel, resume and collect refuse it as in flight (409,
 unstored), the claim rolls back, and the cron finishes it; a
-PATCH, which the cron does not recover, may finish it, and writes its own confirmed attempt in the
+PATCH may finish it before the cron does, and writes its own confirmed attempt in the
 same transaction as the finalize, so the update never lands without the record its retry is
 answered from.
 

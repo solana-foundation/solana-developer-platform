@@ -229,12 +229,19 @@ export function requireUpdatedSubscription(
   return subscription;
 }
 
+/**
+ * The source wallet fields a recurring flow reads: its custody record id, provider wallet id and
+ * address. A request passes the wallet it resolved; the cron passes the schedule's pin, so a
+ * wallet that can no longer sign still reaches the flow, whose signer decides.
+ */
+export type RecurringPaymentSourceWallet = Pick<CustodyWallet, "id" | "walletId" | "publicKey">;
+
 export function assertRecurringPaymentSourceWallet(
   recurringPayment: Pick<
     PaymentRecurringPaymentRow,
     "source_custody_wallet_id" | "source_wallet_id" | "source_address"
   >,
-  sourceWallet: Pick<CustodyWallet, "id" | "walletId" | "publicKey">
+  sourceWallet: RecurringPaymentSourceWallet
 ): void {
   if (!recurringPayment.source_custody_wallet_id) {
     throw conflict("Recurring payment source wallet is unresolved");
@@ -256,7 +263,7 @@ export async function sendSubscriptionInstructions(input: {
   movement: MovementId;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
@@ -877,7 +884,7 @@ export interface RecurringPaymentStepSend {
   recurringPaymentId: string;
   attemptId: string;
   movement: MovementId;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: TransactionSigner;
   feePayer?: Address;
   instructions: Instruction[];
@@ -1143,7 +1150,7 @@ export function lazyRecurringPaymentStepSigner(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  sourceWallet: CustodyWallet;
+  sourceWallet: RecurringPaymentSourceWallet;
   movement: MovementId;
   admitRecovered: (() => Promise<void>) | null;
   logContext: Pick<RecurringPaymentStepLogContext, "recurring_payment_id" | "attempt_id">;

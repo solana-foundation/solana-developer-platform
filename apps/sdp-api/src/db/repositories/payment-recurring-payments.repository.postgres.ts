@@ -47,7 +47,6 @@ import {
   type RecurringPaymentActivator,
   type RecurringPaymentStepSignatureSlot,
   type SetPaymentRecurringPaymentStepSignatureInput,
-  type StalePaymentRecurringPaymentUpdateRow,
   type UpdatePaymentRecurringPaymentActivationAttemptInput,
   type UpdatePaymentRecurringPaymentActivationInput,
   type UpdatePaymentRecurringPaymentCollectionInput,
@@ -188,14 +187,6 @@ const updateEventRowSchema = z.object({
   after_values: z.record(z.string(), z.unknown()),
   created_by: z.string().nullable(),
   created_at: z.string(),
-});
-const staleUpdateRowSchema = z.object({
-  id: z.string(),
-  organization_id: z.string(),
-  project_id: z.string(),
-  updated_at: z.string(),
-  oldest_updated_at: z.string(),
-  stale_count: z.number(),
 });
 
 function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringPaymentRow {
@@ -364,21 +355,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .bind(environment, [...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON], staleBefore, limit)
         .all<Record<string, unknown>>();
       return result.rows.map(mapRecurringPaymentRow);
-    },
-    async listStaleUpdatePayments({ environment, staleBefore, limit }) {
-      const result = await db
-        .prepare(
-          `SELECT rp.organization_id, rp.project_id, rp.id, rp.updated_at,
-                COUNT(*) OVER () AS stale_count, MIN(rp.updated_at) OVER () AS oldest_updated_at
-           FROM payment_recurring_payments rp JOIN projects p ON p.id = rp.project_id
-          WHERE p.environment = ? AND rp.status = 'updating' AND rp.updated_at <= ?
-          ORDER BY rp.updated_at DESC, rp.id DESC LIMIT ?`
-        )
-        .bind(environment, staleBefore, limit)
-        .all<Record<string, unknown>>();
-      return result.rows.map(
-        (row): StalePaymentRecurringPaymentUpdateRow => staleUpdateRowSchema.parse(row)
-      );
     },
     async listRecoverableCollectionPayments({ environment, staleBefore, limit }) {
       const result = await db

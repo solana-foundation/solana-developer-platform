@@ -610,15 +610,6 @@ export interface ListPaymentRecurringPaymentsResult {
   total: number;
 }
 
-export interface StalePaymentRecurringPaymentUpdateRow {
-  id: string;
-  organization_id: string;
-  project_id: string;
-  updated_at: string;
-  oldest_updated_at: string;
-  stale_count: number;
-}
-
 export interface PaymentRecurringPaymentsRepository {
   listStaleLifecyclePayments(params: {
     /** Only rows whose project is in this environment, so one job run reads one cluster. */
@@ -626,12 +617,6 @@ export interface PaymentRecurringPaymentsRepository {
     staleBefore: string;
     limit: number;
   }): Promise<PaymentRecurringPaymentRow[]>;
-  listStaleUpdatePayments(params: {
-    /** Only rows whose project is in this environment, so one job run reads one cluster. */
-    environment: SdpEnvironment;
-    staleBefore: string;
-    limit: number;
-  }): Promise<StalePaymentRecurringPaymentUpdateRow[]>;
   listRecoverableCollectionPayments(params: {
     /** Only rows whose project is in this environment, so one job run reads one cluster. */
     environment: SdpEnvironment;

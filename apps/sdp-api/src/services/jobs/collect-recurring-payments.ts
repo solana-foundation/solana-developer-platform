@@ -1,9 +1,5 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
-import {
-  isActivatingRecurringPaymentStatus,
-  RECURRING_PAYMENT_COLLECTION_CONFIG,
-  recurringPaymentInFlightLifecycleOperation,
-} from "@sdp/types/payments";
+import { RECURRING_PAYMENT_COLLECTION_CONFIG } from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import type {
   CollectibleRecurringPaymentRow,
@@ -34,6 +30,8 @@ import {
   cancelRecurringPayment,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments/lifecycle";
+import type { RecurringPaymentSourceWallet } from "@/services/payments/recurring-payments/shared";
+import { resumeRecurringPaymentUpdate } from "@/services/payments/recurring-payments/update";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -116,11 +114,16 @@ async function skipRefusedPeriod(
   }
 }
 
-async function resolveSourceWallet(
-  env: Env,
-  row: PaymentRecurringPaymentRow
-): Promise<CustodyWallet | null> {
-  if (!row.source_custody_wallet_id) {
+/**
+ * The schedule's source wallet as its row pins it, for a flow that resolves the signer itself
+ * only when it needs a new send, so a wallet that can no longer sign still finishes what landed.
+ * A schedule with no exact source wallet is logged and has none.
+ *
+ * @param row - The schedule.
+ * @returns The pinned wallet, or null when the schedule pins no exact custody wallet.
+ */
+function pinnedSourceWallet(row: PaymentRecurringPaymentRow): RecurringPaymentSourceWallet | null {
+  if (row.source_custody_wallet_id === null) {
     getLogger().warn(
       {
         organization_id: row.organization_id,
@@ -132,6 +135,21 @@ async function resolveSourceWallet(
     );
     return null;
   }
+  return {
+    id: row.source_custody_wallet_id,
+    walletId: row.source_wallet_id,
+    publicKey: row.source_address,
+  };
+}
+
+async function resolveSourceWallet(
+  env: Env,
+  row: PaymentRecurringPaymentRow
+): Promise<CustodyWallet | null> {
+  const pin = pinnedSourceWallet(row);
+  if (pin === null) {
+    return null;
+  }
 
   const wallet = await new CustodyRuntimeTargets(
     getDb(env),
@@ -140,19 +158,15 @@ async function resolveSourceWallet(
   ).findOperationalWalletById({
     organizationId: row.organization_id,
     projectId: row.project_id,
-    custodyWalletId: row.source_custody_wallet_id,
+    custodyWalletId: pin.id,
   });
-  if (
-    !wallet ||
-    wallet.walletId !== row.source_wallet_id ||
-    wallet.publicKey !== row.source_address
-  ) {
+  if (!wallet || wallet.walletId !== pin.walletId || wallet.publicKey !== pin.publicKey) {
     getLogger().warn(
       {
         organization_id: row.organization_id,
         project_id: row.project_id,
         recurring_payment_id: row.id,
-        custody_wallet_id: row.source_custody_wallet_id,
+        custody_wallet_id: pin.id,
         reason: "source_wallet_mismatch",
       },
       "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
@@ -232,13 +246,25 @@ async function collectRow(
   }
 }
 
+/**
+ * Recovers one stale in-flight schedule through its flow, which reads each saved step from the
+ * chain before it sends anything: landed steps finish, a pending one waits for the next tick, and
+ * a step that needs a new send the wallet or the mandate cannot make fails the flow back to its
+ * last stable status with an error log (`activating` to `pending_activation`, `updating` to
+ * `active`, `canceling` to `active`, `resuming` to `canceled`).
+ *
+ * @param env - The environment.
+ * @param row - The stale schedule.
+ * @returns `ok` when the flow finished, `skipped` when it is pending, held by another run or
+ *   failed back (CONFLICT), `refused` when money admission refused it, and `failed` otherwise.
+ */
 async function recoverLifecycleRow(
   env: Env,
   row: PaymentRecurringPaymentRow
 ): Promise<CollectionRowOutcome> {
   try {
-    const sourceWallet = await resolveSourceWallet(env, row);
-    if (!sourceWallet) {
+    const sourceWallet = pinnedSourceWallet(row);
+    if (sourceWallet === null) {
       return "failed";
     }
     const input = {
@@ -250,35 +276,53 @@ async function recoverLifecycleRow(
       // The cron resumes a row under the key of the request that claimed it.
       idempotencyKey: null,
     };
-    if (isActivatingRecurringPaymentStatus(row.status)) {
-      const { scope, context, subject } = admissionFor(row, "recurring.activate");
-      await activateRecurringPayment({
-        ...input,
-        createdBy: row.created_by,
-        admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
-      });
-      return "ok";
+    switch (row.status) {
+      case "activating": {
+        const { scope, context, subject } = admissionFor(row, "recurring.activate");
+        await activateRecurringPayment({
+          ...input,
+          createdBy: row.created_by,
+          admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
+        });
+        return "ok";
+      }
+      case "updating":
+        await resumeRecurringPaymentUpdate({
+          env,
+          organizationId: row.organization_id,
+          projectId: row.project_id,
+          sourceWallet,
+          recurringPayment: row,
+        });
+        return "ok";
+      case "canceling":
+        // An exit: never refused, for deleted and unentitled organizations alike.
+        await cancelRecurringPayment({ ...input, admitCaller: null });
+        return "ok";
+      case "resuming": {
+        const { scope, context, subject } = admissionFor(row, "recurring.resume");
+        await resumeRecurringPayment({
+          ...input,
+          admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
+        });
+        return "ok";
+      }
+      case "pending_activation":
+      case "active":
+      case "paused":
+      case "expired":
+      case "canceled":
+        throw internalError(`Unhandled lifecycle status ${row.status}`);
+      default: {
+        const unreachable: never = row.status;
+        throw internalError(`Unhandled lifecycle status ${String(unreachable)}`);
+      }
     }
-    const operation = recurringPaymentInFlightLifecycleOperation(row.status);
-    if (operation === "cancel") {
-      // An exit: never refused, for deleted and unentitled organizations alike.
-      await cancelRecurringPayment({ ...input, admitCaller: null });
-      return "ok";
-    }
-    if (operation === "resume") {
-      const { scope, context, subject } = admissionFor(row, "recurring.resume");
-      await resumeRecurringPayment({
-        ...input,
-        admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
-      });
-      return "ok";
-    }
-    throw internalError(`Unhandled lifecycle status ${row.status}`);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     // The operation's own failure path already failed the attempt and reset
     // the row to a status the job does not select (activation:
-    // `pending_activation`, resume: `canceled`).
+    // `pending_activation`, update and cancel: `active`, resume: `canceled`).
     if (error instanceof MoneyMovementRefusedError) {
       return "refused";
     }
@@ -357,9 +401,10 @@ async function processRowsConcurrently<T extends PaymentRecurringPaymentRow>(
 }
 
 /**
- * Recover stale lifecycle operations and collections, then collect due recurring payments, for
- * the open cluster scope's environment only. The Worker registers it once per environment (a
- * `cluster` Cron Definition), so every row is built, sent and confirmed on its project's cluster.
+ * Recover stale in-flight operations (activation, update, cancel, resume) and collections, then
+ * collect due recurring payments, for the open cluster scope's environment only. The Worker
+ * registers it once per environment (a `cluster` Cron Definition), so every row is built, sent and
+ * confirmed on its project's cluster.
  *
  * @param env - Runtime environment for repository and signer construction.
  * @param now - Tick time anchoring the due, stale and retry windows.
@@ -389,30 +434,6 @@ export async function collectDueRecurringPayments(
   await processRowsConcurrently(result, staleLifecyclePayments, "recovered", (row) =>
     asMandate(row, () => recoverLifecycleRow(env, row))
   );
-
-  const staleUpdatePayments = await recurringPaymentsRepo.listStaleUpdatePayments({
-    environment,
-    staleBefore,
-    limit,
-  });
-  const newestStaleUpdate = staleUpdatePayments[0];
-  if (newestStaleUpdate) {
-    getLogger().warn(
-      {
-        oldest_updated_at: newestStaleUpdate.oldest_updated_at,
-        reason: "stale_recurring_payment_updates",
-        recurring_payments: staleUpdatePayments.map((row) => ({
-          organization_id: row.organization_id,
-          project_id: row.project_id,
-          recurring_payment_id: row.id,
-          updated_at: row.updated_at,
-        })),
-        stale_count: newestStaleUpdate.stale_count,
-        truncated: newestStaleUpdate.stale_count > staleUpdatePayments.length,
-      },
-      "collectDueRecurringPayments: recurring payment updates are stale; collections stay paused until callers retry the same updates"
-    );
-  }
 
   const staleCollectionPayments = await recurringPaymentsRepo.listRecoverableCollectionPayments({
     environment,

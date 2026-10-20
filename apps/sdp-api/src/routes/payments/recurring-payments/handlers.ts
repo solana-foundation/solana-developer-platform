@@ -210,14 +210,15 @@ export const findRecurringPaymentResumeReplay = findLifecycleReplay("resume");
 
 /**
  * PATCH, answered from its update attempt once that attempt has settled; the
- * same key with other terms is a 422. The cron never recovers an `updating`
- * schedule, so an in-flight attempt of this same request is never an answer:
- * stored, it would hold the key on `updating` for 24 hours. While the schedule
- * is not yet stale (the original may still be running, or another key may be
- * resuming it) the retry is a 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with Retry-After,
- * unstored; once it is stale (it crashed after its claim) the handler runs and
- * resumes the attempt under the same key, as another key with the same terms
- * would.
+ * same key with other terms is a 422. An in-flight attempt of this same
+ * request is never an answer: stored, it would hold the key on `updating` for
+ * 24 hours. While the schedule is not yet stale (the original may still be
+ * running, or another key or the cron may be resuming it) the retry is a 409
+ * `IDEMPOTENCY_KEY_IN_FLIGHT` with Retry-After, unstored; once it is stale (it
+ * crashed after its claim) the handler runs and resumes the attempt under the
+ * same key, as another key with the same terms would. The cron resumes a stale
+ * attempt too: whichever claims it first runs, and the other gets a 409. Unlike
+ * the cron, this retry may send a step the update has not sent yet.
  */
 export async function findRecurringPaymentUpdateReplay(
   c: AppContext,

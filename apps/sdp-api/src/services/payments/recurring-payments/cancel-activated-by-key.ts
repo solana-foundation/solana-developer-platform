@@ -8,6 +8,7 @@ import { cancelRecurringPayment } from "./lifecycle";
 
 export interface CancelActivatedByKeyResult {
   canceled: string[];
+  /** Not canceled: the cancel failed, or the schedule had an operation in flight. */
   failed: string[];
 }
 
@@ -17,9 +18,12 @@ export interface CancelActivatedByKeyResult {
  * Revoking a key never does this on its own, because a mandate outlives the
  * key that set it up; a person asks for it on revoke, and each cancel signs as
  * that person. Each runs on its own: one that fails is reported and leaves the
- * others canceled. One with an activation, update or resume in flight cannot
- * be canceled until it settles, so it is reported as failed rather than left
- * to become active unseen.
+ * others canceled. A cancel claims only an `active` schedule, so one with an
+ * activation, update, cancel or resume in flight is not canceled here; it is
+ * reported in `failed` rather than left to become active unseen. The cron
+ * finishes every in-flight operation, and once it has, the schedule can be
+ * canceled. An update stuck sending its old subscription's cancel because the
+ * old wallet cannot sign stays `updating` and is never canceled by this path.
  */
 export async function cancelRecurringPaymentsActivatedByKey(
   env: Env,
@@ -41,7 +45,7 @@ export async function cancelRecurringPaymentsActivatedByKey(
           recurring_payment_id: recurringPayment.id,
           status: recurringPayment.status,
         },
-        "A recurring payment the revoked key activated has an operation in flight; cancel it once it settles"
+        "A recurring payment the revoked key activated has an operation in flight; cancel it once the cron settles it"
       );
       result.failed.push(recurringPayment.id);
       continue;

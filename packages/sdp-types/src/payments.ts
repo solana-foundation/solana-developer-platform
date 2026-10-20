@@ -883,6 +883,7 @@ export const RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE = [
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export const RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON = [
   "activating",
+  "updating",
   ...RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE,
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export const RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION = [
@@ -958,7 +959,7 @@ export function isMoneyMovementStatus(status: string): status is MoneyMovementSt
  * transfer not yet in a terminal or successful status (pending, processing,
  * awaiting payment, settling; a batch and a collection attempt use the same
  * in-flight names), a recurring schedule mid-transition (the statuses the cron
- * recovers, plus the update's processing status), and a private-channel
+ * recovers), and a private-channel
  * transfer without a verdict (APE-593). While an answer shows one, a client
  * keeps the request's Idempotency-Key.
  */
@@ -968,7 +969,6 @@ export const NON_FINAL_MONEY_MOVEMENT_STATUSES: readonly MoneyMovementStatus[] =
       (status) => !isSuccessfulPaymentTransferStatus(status)
     ),
     ...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
-    RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
     ...PRIVATE_CHANNEL_TRANSACTION_STATUSES.filter(
       (status) => !isPrivateChannelDepositTerminal(status)
     ),
