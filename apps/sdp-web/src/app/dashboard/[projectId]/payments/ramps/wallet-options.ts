@@ -35,6 +35,17 @@ export function findWalletBalanceForToken(
   return wallet?.balances?.find((balance) => balance.token === token) ?? null;
 }
 
+/** Whether `amount` of `token` is more than the wallet holds; false until both are known. */
+export function exceedsWalletBalance(
+  wallet: PaymentsDashboardWallet | null,
+  token: string,
+  amount: string
+): boolean {
+  if (!wallet || amount.trim() === "") return false;
+  const held = findWalletBalanceForToken(wallet, token)?.uiAmount ?? "0";
+  return Number(amount) > Number(held);
+}
+
 export function walletBalanceAssetOptions(
   wallet: PaymentsDashboardWallet | null,
   issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,

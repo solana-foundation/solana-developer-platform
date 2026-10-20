@@ -386,6 +386,17 @@ export function useRampWizard<TId extends string>(
     setStepIndex((current) => Math.max(0, current - 1));
   };
 
+  // A finished transfer can't take another payment: drop its quote and resume from a step.
+  const startOver = (stepId: TId) => {
+    resetQuoteCreation();
+    setStepIndex(
+      Math.max(
+        0,
+        steps.findIndex((step) => step.id === stepId)
+      )
+    );
+  };
+
   const handlePairChange = (nextPair: SelectedRampPair) => {
     setSelectedRampPair(nextPair);
     const support = findRampPair(config.pairs, nextPair);
@@ -443,6 +454,7 @@ export function useRampWizard<TId extends string>(
     handlePrimary,
     handleSecondary,
     finish,
+    startOver,
     handlePairChange,
     handleCounterpartyCreated,
   };

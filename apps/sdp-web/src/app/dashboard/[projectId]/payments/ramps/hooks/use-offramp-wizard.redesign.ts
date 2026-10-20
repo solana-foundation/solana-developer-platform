@@ -24,6 +24,7 @@ import {
   withdrawAmountSchema,
   withdrawSelectionSchema,
 } from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import { exceedsWalletBalance } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   memoSummaryDetails,
   optionalDetail,
@@ -89,6 +90,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     trigger: triggerCreateTransfer,
     data: onchainSendResult,
     isMutating: onchainSendLoading,
+    error: onchainSendError,
     reset: resetCreateTransfer,
   } = useSWRMutation(
     paymentsQueryKeys.createTransfer(),
@@ -225,8 +227,16 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     );
   };
 
+  // The amount hint turns red over the balance; the step must not continue past it either.
+  const overBalance = exceedsWalletBalance(
+    wizard.selectedWallet,
+    offrampCryptoToken,
+    wizard.fields.amount
+  );
+
   return {
     ...wizard,
+    canProceed: wizard.canProceed && !(wizard.currentStepId === "WITHDRAW" && overBalance),
     sourceWalletHint:
       signingUnavailable && !onchainSendResult ? t("DashboardPayments.signingUnavailable") : null,
     summaryDetails,
@@ -238,6 +248,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     canSendOnchain,
     onchainSendLoading,
     onchainSendResult: onchainSendResult ?? null,
+    onchainSendError: onchainSendError instanceof Error ? onchainSendError.message : null,
     sendCryptoToDeposit,
   };
 }

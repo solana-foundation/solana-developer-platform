@@ -88,7 +88,7 @@
     "cancelTransaction": {
       "ariaLabel": "Cancel transaction",
       "title": "Cancel this transaction?",
-      "description": "This transaction has already been started. If you cancel now you'll leave the flow.",
+      "description": "This cancels the quote with the provider. Nothing has been sent yet, so no money moves.",
       "keepGoing": "Keep going",
       "cancel": "Cancel transaction"
     },
@@ -350,7 +350,17 @@
           "sellReportMismatch": "{provider}'s report doesn't match the deposit SDP sent. SDP is holding this payout for review.",
           "badge": "Needs review"
         }
-      }
+      },
+      "sendConfirm": {
+        "title": "Send {amount}?",
+        "description": "SDP signs this from the wallet and sends it to the deposit address {provider} gave for this sale. A sent deposit can't be recalled.",
+        "to": "To {provider}",
+        "from": "From",
+        "notYet": "Not yet"
+      },
+      "sendRefused": "Couldn't send the deposit",
+      "startNewPayout": "Start a new payout",
+      "cancelPayout": "Cancel payout"
     },
     "onchainSend": {
       "noAssets": "This wallet has no assets available to send.",
