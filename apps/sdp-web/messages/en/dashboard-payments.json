@@ -343,7 +343,7 @@
           "buyNotDelivered": "The transaction {provider} reported sent nothing to this wallet. SDP is holding this deposit for review.",
           "buyTransactionFailed": "The delivery transaction {provider} reported failed onchain. SDP is holding this deposit for review.",
           "buyPredatesTransfer": "{provider} reported a transaction from before this deposit started. SDP is holding it for review.",
-          "buyNotFound": "SDP can't find the transaction {provider} reported. It's holding this deposit for review.",
+          "buyNotFound": "SDP can't find the transaction {provider} reported yet. It keeps checking, and the deposit completes once it lands.",
           "buyReportMismatch": "{provider} reported a delivery to a different wallet. SDP is holding this deposit for review.",
           "sellTitle": "Payout needs review",
           "sellTransactionFailed": "The deposit SDP sent failed onchain, so nothing reached {provider}. SDP is holding this payout for review.",
