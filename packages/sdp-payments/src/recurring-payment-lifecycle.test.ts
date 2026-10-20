@@ -4,6 +4,7 @@ import { isCollectableRecurringPaymentStatus } from "@sdp/types/payments";
 import {
   decideRecurringPaymentActivationTransition,
   decideRecurringPaymentLifecycleTransition,
+  decideRecurringPaymentStep,
   decideRecurringPaymentUpdateTransition,
   firstRecurringPaymentDueAfter,
   getRecurringPaymentLifecycleStatuses,
@@ -210,5 +211,59 @@ describe("recurring payment schedule decisions", () => {
     );
     assert.equal(isCollectableRecurringPaymentStatus("active"), true);
     assert.equal(isCollectableRecurringPaymentStatus("canceled"), false);
+  });
+});
+
+describe("decideRecurringPaymentStep", () => {
+  it("lands a step whose effect shows, with or without a saved send", () => {
+    assert.equal(
+      decideRecurringPaymentStep({ landed: true, saved: null, blockHeight: 900n }),
+      "landed"
+    );
+    assert.equal(
+      decideRecurringPaymentStep({
+        landed: true,
+        saved: { lastValidBlockHeight: 500n },
+        blockHeight: 900n,
+      }),
+      "landed"
+    );
+  });
+
+  it("treats a step with no effect and no saved signature as unsent", () => {
+    assert.equal(
+      decideRecurringPaymentStep({ landed: false, saved: null, blockHeight: 900n }),
+      "unsent"
+    );
+  });
+
+  it("keeps a saved send with no stored expiry pending however far the chain has moved", () => {
+    assert.equal(
+      decideRecurringPaymentStep({
+        landed: false,
+        saved: { lastValidBlockHeight: null },
+        blockHeight: 18_446_744_073_709_551_615n,
+      }),
+      "pending"
+    );
+  });
+
+  it("keeps a saved send pending through its last valid block height and drops it one block later", () => {
+    assert.equal(
+      decideRecurringPaymentStep({
+        landed: false,
+        saved: { lastValidBlockHeight: 500n },
+        blockHeight: 500n,
+      }),
+      "pending"
+    );
+    assert.equal(
+      decideRecurringPaymentStep({
+        landed: false,
+        saved: { lastValidBlockHeight: 500n },
+        blockHeight: 501n,
+      }),
+      "dropped"
+    );
   });
 });
