@@ -3,6 +3,7 @@ import {
   isInFlightRecurringPaymentAttemptStatus,
   PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   type PaymentRecurringPaymentAttemptStatus,
+  type PaymentSubscriptionCollectionAttemptStatus,
 } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -1361,7 +1362,7 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
       return required(
         await getDb(env).queryOne<{
           signature: string | null;
-          status: string;
+          status: PaymentSubscriptionCollectionAttemptStatus;
           delegation_period_start_ts_before: number | null;
           delegation_amount_pulled_before: string | null;
           updated_at: string;

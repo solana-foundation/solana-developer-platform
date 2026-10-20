@@ -11,6 +11,7 @@ import {
   type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
+  type PaymentSubscriptionCollectionAttemptStatus,
   type PaymentTransferStatus,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
@@ -2800,57 +2801,61 @@ describe("Payments routes — recurring", () => {
         .first<{ next_collection_due_at: string }>();
       expect(recurringPayment?.next_collection_due_at).toBe(dueAt);
 
-      const createSubscriptionsRepository =
-        paymentSubscriptionsRepositoryPostgres.createPostgresPaymentSubscriptionsRepository;
-      const updateCollectionAttempt = vi
-        .fn()
-        .mockRejectedValue(new Error("collection journal unavailable"));
-      const subscriptionsRepositorySpy = vi
-        .spyOn(
-          paymentSubscriptionsRepositoryPostgres,
-          "createPostgresPaymentSubscriptionsRepository"
-        )
-        .mockImplementation((db) => ({
-          ...createSubscriptionsRepository(db),
-          updateCollectionAttempt,
-        }));
+      async function mismatchedCollectionRows() {
+        const recoveryAttempt = await getDb(env)
+          .prepare(
+            `SELECT status, error, signature, metadata, updated_at
+               FROM payment_subscription_collection_attempts
+              WHERE id = ?`
+          )
+          .bind(required(attempt).id)
+          .first<{
+            status: PaymentSubscriptionCollectionAttemptStatus;
+            error: string | null;
+            signature: string | null;
+            metadata: PaymentSubscriptionCollectionAttemptMetadata;
+            updated_at: string;
+          }>();
+        const recoveryTransfer = await getDb(env)
+          .prepare(
+            `SELECT status, error, signature, signed_transaction, submission_started_at, updated_at
+               FROM payment_transfers
+              WHERE id = ?`
+          )
+          .bind(required(attempt).transfer_id)
+          .first<{
+            status: PaymentTransferStatus;
+            error: string | null;
+            signature: string | null;
+            signed_transaction: string | null;
+            submission_started_at: string | null;
+            updated_at: string;
+          }>();
+        return { attempt: required(recoveryAttempt), transfer: required(recoveryTransfer) };
+      }
       // Recovered as the cron's unkeyed claim: another key never adopts it.
       await clearCollectionAttemptKeys(activated.subscriptionId);
-      let recoveryRes: Response;
-      try {
-        recoveryRes = await app.request(
-          `/v1/payments/recurring-payments/${activated.id}/collect`,
-          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-          env
-        );
-      } finally {
-        subscriptionsRepositorySpy.mockRestore();
-      }
+      const rowsBeforeRecovery = await mismatchedCollectionRows();
+
+      const recoveryRes = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
       expect(recoveryRes.status).toBe(409);
-      const recoveryBody = errorResponseSchema.parse(await recoveryRes.json());
-      expect(recoveryBody.error).toMatchObject({ code: "CONFLICT" });
-      expect(recoveryBody.error.message).toContain("does not prove");
-      expect(updateCollectionAttempt).toHaveBeenCalledOnce();
-      const recoveredAttempt = await getDb(env)
-        .prepare(
-          "SELECT status, signature, error FROM payment_subscription_collection_attempts WHERE id = ?"
-        )
-        .bind(attempt?.id)
-        .first<{ status: string; signature: string | null; error: string | null }>();
-      const recoveredTransfer = await getDb(env)
-        .prepare("SELECT status, signature, error FROM payment_transfers WHERE id = ?")
-        .bind(attempt?.transfer_id)
-        .first<{ status: string; signature: string | null; error: string | null }>();
-      expect(recoveredAttempt).toMatchObject({
-        status: "processing",
-        signature: attempt?.signature,
-        error: null,
-      });
-      expect(recoveredTransfer).toMatchObject({
-        status: "processing",
-        signature: attempt?.signature,
-        error: null,
-      });
+      expect(errorResponseSchema.parse(await recoveryRes.json()).error.code).toBe("CONFLICT");
+      expect(await mismatchedCollectionRows()).toEqual(rowsBeforeRecovery);
+      expect(
+        errorLog.mock.calls.filter(([payload]) => {
+          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+          return (
+            parsed.success &&
+            parsed.data.event ===
+              "sdp_api_recurring_payment_collection_instruction_mismatch_past_expiry"
+          );
+        })
+      ).toEqual([]);
       expect(sendTransactionMock).toHaveBeenCalledTimes(3);
       const proofMismatchEvents = errorLog.mock.calls.filter(([payload]) => {
         const parsed = recurringPaymentLogEventSchema.safeParse(payload);
@@ -3529,7 +3534,7 @@ describe("Payments routes — recurring", () => {
         )
         .bind(started.attemptId)
         .first<{
-          status: string;
+          status: PaymentSubscriptionCollectionAttemptStatus;
           error: string | null;
           signature: string | null;
           metadata: PaymentSubscriptionCollectionAttemptMetadata;
@@ -3541,7 +3546,7 @@ describe("Payments routes — recurring", () => {
         .prepare("SELECT status, error, signature, updated_at FROM payment_transfers WHERE id = ?")
         .bind(started.transferId)
         .first<{
-          status: string;
+          status: PaymentTransferStatus;
           error: string | null;
           signature: string | null;
           updated_at: string;
@@ -3612,6 +3617,7 @@ describe("Payments routes — recurring", () => {
     }
 
     async function collectOncePulledAt(slot: bigint) {
+      mockDistinctRecentBlockhashes();
       const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
       await setRecurringCollectionDue({
         recurringPaymentId: activated.id,
@@ -3858,7 +3864,7 @@ describe("Payments routes — recurring", () => {
     );
 
     it.each(PENDING_PAST_EXPIRY_PULLS)(
-      "answers 409 and writes nothing for a landed pull whose signature shows $reason past its expiry, logging it once",
+      "answers 409 for a landed pull whose signature shows $reason past its expiry, bumping only the attempt's updated_at and logging it once",
       async ({ event, answer }) => {
         const errors = logEvents("error");
         const started = await seedStartedCollection({
@@ -3879,13 +3885,89 @@ describe("Payments routes — recurring", () => {
         expect(response.status).toBe(409);
         expect(errorResponseSchema.parse(await response.json()).error.code).toBe("CONFLICT");
         expect(before.attempt.status).toBe("processing");
-        expect(await startedCollectionRows(started)).toEqual(before);
+        const after = await startedCollectionRows(started);
+        expect(after).toEqual({
+          attempt: { ...before.attempt, updated_at: after.attempt.updated_at },
+          transfer: before.transfer,
+        });
+        expect(new Date(after.attempt.updated_at).getTime()).toBeGreaterThan(
+          new Date(before.attempt.updated_at).getTime()
+        );
         expect(errors(event)).toEqual([
           [{ event, ...unprovenLogContext({ started, transferStatus: "processing" }) }, event],
         ]);
         expect(sendTransactionMock).toHaveBeenCalledTimes(2);
       }
     );
+
+    it("leaves an unindexed pull past its expiry out of the next cron tick while a sibling pull that can still land is read again", async () => {
+      const errors = logEvents("error");
+      const sibling = await seedStartedCollection({
+        attemptedAt: staleAt(),
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
+      });
+      const siblingSignature = testSignature(42);
+      // Attempt and transfer signatures are unique, and a later expiry keeps the sibling pending.
+      await getDb(env).batch([
+        getDb(env)
+          .prepare("UPDATE payment_subscription_collection_attempts SET signature = ? WHERE id = ?")
+          .bind(siblingSignature, sibling.attemptId),
+        getDb(env)
+          .prepare(
+            "UPDATE payment_transfers SET signature = ?, last_valid_block_height = 2000 WHERE id = ?"
+          )
+          .bind(siblingSignature, sibling.transferId),
+      ]);
+      const stuck = await seedStartedCollection({
+        attemptedAt: staleAt(),
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        absoluteSlot: 2_900,
+        blockHeight: 1_001,
+        delegation: (subscriptionPda) =>
+          subscriptionPda === stuck.subscriptionPda
+            ? delegationPulledOnce(0n)
+            : unpulledDelegation(0n),
+      });
+      getTransactionMock.mockResolvedValueOnce(null);
+      const siblingBefore = await startedCollectionRows(sibling);
+      const sends = sendTransactionMock.mock.calls.length;
+
+      expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 2,
+        refused: 0,
+      });
+      const stuckRotated = await startedCollectionRows(stuck);
+      expect(await startedCollectionRows(sibling)).toEqual(siblingBefore);
+      const readsBefore = stepReads().length;
+
+      expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 1,
+        refused: 0,
+      });
+      expect(await startedCollectionRows(stuck)).toEqual(stuckRotated);
+      expect(await startedCollectionRows(sibling)).toEqual(siblingBefore);
+      expect(stepReads()).toHaveLength(readsBefore + 2);
+      expect(getTransactionMock).not.toHaveBeenCalledWith(expect.anything(), siblingSignature);
+      expect(errors("sdp_api_recurring_payment_collection_unindexed_past_expiry")).toEqual([
+        [
+          {
+            event: "sdp_api_recurring_payment_collection_unindexed_past_expiry",
+            ...unprovenLogContext({ started: stuck, transferStatus: "processing" }),
+          },
+          "sdp_api_recurring_payment_collection_unindexed_past_expiry",
+        ],
+      ]);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sends);
+    });
 
     it.each(SUCCESSFUL_PAYMENT_TRANSFER_STATUSES)(
       "finalizes a dropped pull whose transfer is already %s once its signature proves the pull, advancing the period",
