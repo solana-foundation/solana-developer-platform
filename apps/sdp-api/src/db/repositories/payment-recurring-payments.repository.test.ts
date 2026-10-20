@@ -253,14 +253,18 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     ).toEqual(before);
   });
 
-  const PLAN_SLOT: RecurringPaymentStepSignatureSlot = {
+  const PLAN_SLOT = {
     row: "activation_attempt",
     column: "plan_creation_signature",
-  };
-  const SETUP_SLOT: RecurringPaymentStepSignatureSlot = {
+  } as const satisfies RecurringPaymentStepSignatureSlot;
+  const SETUP_SLOT = {
     row: "activation_attempt",
     column: "authorization_setup_signature",
-  };
+  } as const satisfies RecurringPaymentStepSignatureSlot;
+  const AUTHORIZATION_SLOT = {
+    row: "activation_attempt",
+    column: "authorization_signature",
+  } as const satisfies RecurringPaymentStepSignatureSlot;
   const SIBLING_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
   const STEP_UPDATED_AT = "2026-06-29T12:05:00.000Z";
   type ActivationSlotValues = {
@@ -753,7 +757,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
   describe("lockEmptyStepSlot", () => {
     const lockPlanSlot = (input: { id: string; recurringPaymentId: string; projectId: string }) =>
-      repo.lockEmptyStepSlot({ ...input, slot: PLAN_SLOT, organizationId: TEST_ORG.id });
+      repo.lockEmptyStepSlot({ ...input, slots: [PLAN_SLOT], organizationId: TEST_ORG.id });
 
     it("locks an in-flight attempt's empty slot while an earlier step's slot holds a signature", async () => {
       const attempt = await createUnsignedActivationAttempt("prpa_repo_lock_empty_slot");
@@ -765,7 +769,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
       expect(
         await repo.lockEmptyStepSlot({
-          slot: SETUP_SLOT,
+          slots: [SETUP_SLOT],
           id: attempt.id,
           recurringPaymentId: attempt.recurring_payment_id,
           organizationId: TEST_ORG.id,
@@ -848,6 +852,34 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       ).toBe(false);
     });
 
+    it("refuses a failed setup's unwind once a later run saved the authorization step", async () => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_lock_later_slot");
+      await fillActivationSlots(attempt.id, {
+        planCreationSignature: testSignature(1),
+        authorizationSetupSignature: null,
+        lastValidBlockHeight: "301",
+      });
+      const target = {
+        id: attempt.id,
+        recurringPaymentId: attempt.recurring_payment_id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      };
+      expect(
+        await repo.setStepSignature({
+          ...target,
+          slot: AUTHORIZATION_SLOT,
+          signature: testSignature(3),
+          lastValidBlockHeight: "303",
+          updatedAt: STEP_UPDATED_AT,
+        })
+      ).toBe(true);
+
+      expect(
+        await repo.lockEmptyStepSlot({ ...target, slots: [SETUP_SLOT, AUTHORIZATION_SLOT] })
+      ).toBe(false);
+    });
+
     it("holds a concurrent save into the slot until the failure settles the attempt, which then refuses it", async () => {
       const attempt = await createUnsignedActivationAttempt("prpa_repo_lock_holds_save");
       const locked = deferred<boolean>();
@@ -855,7 +887,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       const failure = getDb(env).transaction(async (tx) => {
         locked.resolve(
           await createPostgresPaymentRecurringPaymentsRepository(tx).lockEmptyStepSlot({
-            slot: PLAN_SLOT,
+            slots: [PLAN_SLOT],
             id: attempt.id,
             recurringPaymentId: attempt.recurring_payment_id,
             organizationId: TEST_ORG.id,

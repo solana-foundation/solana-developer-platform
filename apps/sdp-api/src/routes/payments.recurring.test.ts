@@ -38,7 +38,7 @@ import {
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import type { RecurringPaymentStepSignatureSlot } from "@/db/repositories/payment-recurring-payments.repository";
+import type { RecurringPaymentStepSignatureSlots } from "@/db/repositories/payment-recurring-payments.repository";
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
@@ -7951,7 +7951,7 @@ describe("Payments routes — recurring", () => {
         rejectPoolSendAfter(0, sendTransactionPreflightError());
         const createRepository =
           paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
-        const locks = vi.fn<(slot: RecurringPaymentStepSignatureSlot, locked: boolean) => void>();
+        const locks = vi.fn<(slots: RecurringPaymentStepSignatureSlots, locked: boolean) => void>();
         const repositorySpy = vi
           .spyOn(
             paymentRecurringPaymentsRepositoryPostgres,
@@ -7972,7 +7972,7 @@ describe("Payments routes — recurring", () => {
                   .bind(testSignature(9), input.id)
                   .run();
                 const locked = await repository.lockEmptyStepSlot(input);
-                locks(input.slot, locked);
+                locks(input.slots, locked);
                 return locked;
               },
             };
@@ -7988,7 +7988,7 @@ describe("Payments routes — recurring", () => {
           message: "Recurring payment step signature changed concurrently",
         });
         expect(locks.mock.calls).toEqual([
-          [{ row: "activation_attempt", column: "authorization_signature" }, false],
+          [[{ row: "activation_attempt", column: "authorization_signature" }], false],
         ]);
         expect(sent).toHaveBeenCalledTimes(1);
         expect(await onlyActivationAttempt(created.id)).toMatchObject({
