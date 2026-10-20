@@ -849,6 +849,93 @@ describe("DvP routes", () => {
       });
       expect(await fundingClaimCount("dvp_out_of_scope")).toBe(0);
     });
+
+    async function dvpRows(): Promise<Record<string, unknown[]>> {
+      const tables = [
+        "dvp_trades",
+        "dvp_settlement_wallets",
+        "dvp_leg_funding_claims",
+        "dvp_leg_action_requests",
+        "dvp_leg_transfers",
+      ] as const;
+      const db = getDb(env);
+      const entries = await Promise.all(
+        tables.map(
+          async (table) =>
+            [table, (await db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).results] as const
+        )
+      );
+      return Object.fromEntries(entries);
+    }
+
+    async function scopeKeyToNoWallets(): Promise<void> {
+      await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+    }
+
+    it.each([
+      { action: "reclaim", body: { side: "a" } },
+      { action: "settle", body: {} },
+      { action: "cancel", body: {} },
+    ])("refuses $action with wallet_out_of_scope, writing nothing", async ({ action, body }) => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+             VALUES (?, ?, ?)`
+        )
+        .bind(TEST_PROJECT.id, TEST_ORG.id, THIRD_WALLET.id)
+        .run();
+      await scopeKeyToNoWallets();
+      await seedTradeFor({ tradeId: `dvp_out_of_scope_${action}` });
+      const before = await dvpRows();
+
+      const res = await app.request(
+        `/v1/dvp/trades/dvp_out_of_scope_${action}/${action}`,
+        { method: "POST", headers: authHeaders(), body: JSON.stringify(body) },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+      });
+      expect(await dvpRows()).toEqual(before);
+    });
+
+    it.each([
+      { settlementWallet: "not yet provisioned", seed: false },
+      { settlementWallet: "unlisted", seed: true },
+    ])(
+      "refuses a create whose settlement wallet is $settlementWallet, provisioning and recording nothing",
+      async ({ seed }) => {
+        if (seed) {
+          await getDb(env)
+            .prepare(
+              `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+               VALUES (?, ?, ?)`
+            )
+            .bind(TEST_PROJECT.id, TEST_ORG.id, THIRD_WALLET.id)
+            .run();
+        }
+        await scopeKeyToNoWallets();
+        const before = await dvpRows();
+
+        const res = await app.request(
+          "/v1/dvp/trades",
+          { method: "POST", headers: authHeaders(), body: JSON.stringify(createBody()) },
+          env
+        );
+
+        expect(res.status).toBe(403);
+        await expect(res.json()).resolves.toMatchObject({
+          error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+        });
+        expect(await dvpRows()).toEqual(before);
+      }
+    );
   });
 
   // Reclaim is the same right as funding: the program only lets the leg's own

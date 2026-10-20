@@ -1048,6 +1048,10 @@ export async function extractEarnVaultWithdrawal(
     projectId,
   });
   const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
+  // The custody signer refuses a wallet outside the key's scope for exits too
+  // (ADR 0007 addendum); refusing here keeps the withdrawal from recording a
+  // movement it cannot sign, which its Idempotency-Key would then replay.
+  assertCallerWalletInScope(auth.walletAccess, wallet.id);
 
   const resolved: EarnVaultWithdrawalResolved = {
     position,

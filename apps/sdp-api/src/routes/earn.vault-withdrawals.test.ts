@@ -454,6 +454,73 @@ describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
   });
 });
 
+// HOO-2099: the custody signer refuses a wallet outside a selected key's scope
+// for exits too; these routes refuse it first, so no movement or request row
+// exists for the Idempotency-Key to replay once the scope is fixed.
+describe("vault exits outside the key's wallet scope", () => {
+  async function exitRows(): Promise<Record<string, unknown[]>> {
+    const db = getDb(env);
+    const entries = await Promise.all(
+      ["earn_movements", "earn_vault_withdrawal_requests"].map(
+        async (table) =>
+          [table, (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results] as const
+      )
+    );
+    return Object.fromEntries(entries);
+  }
+
+  async function scopeKeyToNoWallets(): Promise<void> {
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+  }
+
+  it("refuses a withdrawal with wallet_out_of_scope before recording a movement", async () => {
+    await seedAuth();
+    const positionId = await seedPosition();
+    await scopeKeyToNoWallets();
+    const before = await exitRows();
+
+    const response = await postVaultWithdrawal({ positionId, shares: "10" });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(withdrawFromVault).not.toHaveBeenCalled();
+    expect(await exitRows()).toEqual(before);
+  });
+
+  it("refuses a withdrawal request with wallet_out_of_scope before recording it", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "hastra" });
+    await scopeKeyToNoWallets();
+    const before = await exitRows();
+
+    const response = await app.request(
+      "/v1/earn/vault-withdrawal-requests",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "par-out-of-scope",
+        },
+        body: JSON.stringify({ positionId, mechanism: "operatorRedemption", shares: "10" }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(await exitRows()).toEqual(before);
+  });
+});
+
 describe("POST /v1/earn/vault-withdrawals — request validation", () => {
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
