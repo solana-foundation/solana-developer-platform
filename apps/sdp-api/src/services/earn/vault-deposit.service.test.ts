@@ -1038,7 +1038,7 @@ describe("earn vault project attribution", () => {
       resolveVaultSponsorship.mockResolvedValue({
         kind: "sponsored",
         sponsor: SPONSOR,
-        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn() },
       });
     }
 
@@ -1122,14 +1122,14 @@ describe("earn vault project attribution", () => {
       resolveVaultSponsorship.mockResolvedValue({
         kind: "sponsored",
         sponsor: SPONSOR,
-        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn() },
       });
       const first = await depositIntoVault(env, depositInput());
 
       resolveVaultSponsorship.mockResolvedValue({
         kind: "sponsored",
         sponsor: SPONSOR_LATER,
-        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+        feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn() },
       });
       signVaultPlan.mockResolvedValue({
         bytes: new Uint8Array([2]),
@@ -1173,7 +1173,7 @@ describe("earn vault project attribution", () => {
         return {
           kind: "sponsored",
           sponsor: resolvedCount === 1 ? SPONSOR : SPONSOR_ROTATED,
-          feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
+          feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn() },
         };
       });
       let buildCount = 0;

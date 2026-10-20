@@ -228,7 +228,6 @@ describe("isEarnVaultSponsorshipEnabled", () => {
   // cluster. Opening mainnet is wiring its Kora in, never a code change.
   const devnetOnly: Parameters<typeof isEarnVaultSponsorshipEnabled>[0] = {
     EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
-    SOLANA_NETWORK: "devnet",
     KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
   };
 
@@ -242,12 +241,6 @@ describe("isEarnVaultSponsorshipEnabled", () => {
     expect(isEarnVaultSponsorshipEnabled(devnetOnly, "mainnet-beta")).toBe(false);
     const both = { ...devnetOnly, KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid" };
     expect(isEarnVaultSponsorshipEnabled(both, "mainnet-beta")).toBe(true);
-  });
-
-  it("limits the native fee payer to the process default cluster", () => {
-    const env = { ...devnetOnly, FEE_PAYMENT_PROVIDER: "native" as const };
-    expect(isEarnVaultSponsorshipEnabled(env, "devnet")).toBe(true);
-    expect(isEarnVaultSponsorshipEnabled(env, "mainnet-beta")).toBe(false);
   });
 });
 

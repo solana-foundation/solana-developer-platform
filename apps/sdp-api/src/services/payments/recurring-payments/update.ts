@@ -82,6 +82,7 @@ import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
+  createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
@@ -979,16 +980,26 @@ async function runMetadataScheduleUpdate(input: {
         sourceWallet: input.sourceWallet,
         sourceSigner,
         instructions: [instruction],
-      });
-      attempt = requireUpdatedAttempt(
-        await recurringRepo.updateUpdateAttempt({
-          attemptId: attempt.id,
+        submissionStore: createSubscriptionStepStore({
+          env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          planUpdateSignature,
-          updatedAt: new Date().toISOString(),
-        })
-      );
+          save: async (signature) => {
+            attempt = requireUpdatedAttempt(
+              await recurringRepo.updateUpdateAttempt({
+                attemptId: attempt.id,
+                organizationId: input.organizationId,
+                projectId: input.projectId,
+                planUpdateSignature: signature,
+                updatedAt: new Date().toISOString(),
+              })
+            );
+          },
+          rows: [
+            { slot: { row: "update_attempt", column: "plan_update_signature" }, id: attempt.id },
+          ],
+        }),
+      });
       await confirmSubscriptionSignature(
         planUpdateSignature,
         "Recurring payment update failed on-chain"
@@ -1064,13 +1075,28 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
       ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
     ],
     feePayer: input.feePayer,
-  });
-  await input.recurringRepo.updateUpdateAttempt({
-    attemptId: input.attempt.id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    authorizationSetupSignature: initSignature,
-    updatedAt: new Date().toISOString(),
+    submissionStore: createSubscriptionStepStore({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      save: async (signature) => {
+        requireUpdatedAttempt(
+          await input.recurringRepo.updateUpdateAttempt({
+            attemptId: input.attempt.id,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            authorizationSetupSignature: signature,
+            updatedAt: new Date().toISOString(),
+          })
+        );
+      },
+      rows: [
+        {
+          slot: { row: "update_attempt", column: "authorization_setup_signature" },
+          id: input.attempt.id,
+        },
+      ],
+    }),
   });
   await confirmSubscriptionSignature(initSignature, "Recurring payment update failed on-chain");
 
@@ -1402,10 +1428,9 @@ async function runReplacementUpdate(input: {
   let planCreationSignature = parseNullableStoredSignature(attempt.plan_creation_signature);
   let authorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
   let oldCancelSignature = parseNullableStoredSignature(attempt.old_cancel_signature);
-  // A step's signature is saved only after its send returns, so on an attempt an
-  // earlier run started, a step with no signature may have landed (HOO-2044).
-  // Such a step reads the chain before it sends again; a fresh attempt
-  // (`claim`) has sent nothing and reads nothing extra.
+  // On an attempt an earlier run started, each step reads the chain before it
+  // sends again (HOO-2044): its saved signature or its effect may already be
+  // there. A fresh attempt (`claim`) has sent nothing and reads nothing extra.
   const resumedAttempt = attempt.stage !== "claim";
   const replacementPeriodStartAt = attempt.created_at;
   const requestedNextDue = replacementNextCollectionDueAt({
@@ -1511,16 +1536,26 @@ async function runReplacementUpdate(input: {
       sourceWallet: input.resolved.sourceWallet,
       sourceSigner,
       instructions: [createPlanInstruction],
-    });
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
+      submissionStore: createSubscriptionStepStore({
+        env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        planCreationSignature,
-        updatedAt: new Date().toISOString(),
-      })
-    );
+        save: async (signature) => {
+          attempt = requireUpdatedAttempt(
+            await recurringRepo.updateUpdateAttempt({
+              attemptId: attempt.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              planCreationSignature: signature,
+              updatedAt: new Date().toISOString(),
+            })
+          );
+        },
+        rows: [
+          { slot: { row: "update_attempt", column: "plan_creation_signature" }, id: attempt.id },
+        ],
+      }),
+    });
     await confirmSubscriptionSignature(
       planCreationSignature,
       "Recurring payment replacement plan creation failed on-chain"
@@ -1657,16 +1692,26 @@ async function runReplacementUpdate(input: {
       sourceSigner,
       instructions: [subscribeInstruction],
       feePayer,
-    });
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
+      submissionStore: createSubscriptionStepStore({
+        env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        authorizationSignature,
-        updatedAt: new Date().toISOString(),
-      })
-    );
+        save: async (signature) => {
+          attempt = requireUpdatedAttempt(
+            await recurringRepo.updateUpdateAttempt({
+              attemptId: attempt.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              authorizationSignature: signature,
+              updatedAt: new Date().toISOString(),
+            })
+          );
+        },
+        rows: [
+          { slot: { row: "update_attempt", column: "authorization_signature" }, id: attempt.id },
+        ],
+      }),
+    });
     await confirmSubscriptionSignature(
       authorizationSignature,
       "Recurring payment replacement authorization failed on-chain"
@@ -1726,16 +1771,24 @@ async function runReplacementUpdate(input: {
       sourceWallet: input.oldSourceWallet,
       sourceSigner: oldSourceSigner,
       instructions: [cancelInstruction],
-    });
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
+      submissionStore: createSubscriptionStepStore({
+        env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        oldCancelSignature,
-        updatedAt: new Date().toISOString(),
-      })
-    );
+        save: async (signature) => {
+          attempt = requireUpdatedAttempt(
+            await recurringRepo.updateUpdateAttempt({
+              attemptId: attempt.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              oldCancelSignature: signature,
+              updatedAt: new Date().toISOString(),
+            })
+          );
+        },
+        rows: [{ slot: { row: "update_attempt", column: "old_cancel_signature" }, id: attempt.id }],
+      }),
+    });
     await confirmSubscriptionSignature(
       oldCancelSignature,
       "Recurring payment old subscription cancellation failed on-chain"

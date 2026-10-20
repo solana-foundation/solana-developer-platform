@@ -1,4 +1,3 @@
-import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { SponsorshipReservationStatus } from "@sdp/types/sponsorship";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
@@ -24,7 +23,7 @@ import {
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
@@ -34,6 +33,7 @@ import {
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
+  testKoraAdapter,
 } from "@/test/helpers/payments-routes";
 import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
@@ -134,7 +134,7 @@ describe("Public payment request routes", () => {
       providerId: "test",
       getFeePayer: async () => TEST_MOCK_FEE_PAYER,
       signAsFeePayer: sponsorSignTestTransaction,
-      signAndSend: () => Promise.reject(new Error("not used")),
+      getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
       prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
     }));
   }
@@ -187,24 +187,20 @@ describe("Public payment request routes", () => {
     await expect(transactionResponse.json()).resolves.toMatchObject({
       error: { code: "CONFLICT" },
     });
-    expect(createFeePaymentAdapterMock).not.toHaveBeenCalled();
+    expect(createKoraAdapterMock).not.toHaveBeenCalled();
     expect(getRecentBlockhashMock).not.toHaveBeenCalled();
   });
 
   describe("sponsored transaction window", () => {
     it("retries a preflight failure on the same transaction and preserves existing commission accounting", async () => {
-      const provider = {
-        providerId: "mock",
+      const provider = testKoraAdapter({
         getFeePayer: vi.fn(async () => TEST_MOCK_FEE_PAYER),
         getSponsorshipConfiguration: vi
           .fn(async () => TEST_SPONSORSHIP_PROVIDER_CONFIG)
           .mockRejectedValueOnce(new Error("preflight temporarily unavailable")),
         signAsFeePayer: vi.fn(sponsorSignTestTransaction),
-        signAndSend: vi.fn(async () => {
-          throw new Error("Public pay does not send transactions");
-        }),
-      } satisfies FeePaymentPort;
-      createFeePaymentAdapterMock.mockReturnValue(provider);
+      });
+      createKoraAdapterMock.mockReturnValue(provider);
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       const repository = createSystemPaymentRequestsRepository(env);
       const reservations = () =>
@@ -253,7 +249,7 @@ describe("Public payment request routes", () => {
         expect((await postTransaction(request.public_token)).status).toBe(200);
         expect(sponsorship).toHaveBeenCalledWith(
           env,
-          expect.objectContaining({ environment, projectId: wallet.projectId }),
+          expect.objectContaining({ projectId: wallet.projectId }),
           "payments.pay_request"
         );
         expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
@@ -370,7 +366,7 @@ describe("Public payment request routes", () => {
         providerId: "test",
         getFeePayer: async () => TEST_MOCK_FEE_PAYER,
         signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
-        signAndSend: () => Promise.reject(new Error("not used")),
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
         prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
       }));
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);

@@ -44,7 +44,7 @@ pnpm test:integration -- --verbose
 ```
 
 **Notes:**
-- Surfpool-backed shards still configure SDP with `FEE_PAYMENT_PROVIDER=kora`; the harness swaps hosted Kora for a local Kora-compatible endpoint.
+- Surfpool-backed shards still sponsor through Kora; the harness swaps hosted Kora for a local Kora-compatible endpoint.
 - Live Kora smoke validates Kora connectivity and fee-payer balance up front so it fails fast if Kora is unreachable or underfunded.
 - The live smoke suite seeds tenant and API-key state, then initializes its own project-scoped Privy signer. Its signer-check simulation does not need a funded organization wallet. Other integration suites retain funded custody setup.
 
@@ -194,10 +194,10 @@ pnpm kora:surfpool:test
 pnpm kora:surfpool:down
 ```
 
-The test command still runs SDP through `FEE_PAYMENT_PROVIDER=kora` and
-`KORA_DEVNET_URL=http://127.0.0.1:18080`; only the JSON-RPC server behind that URL
-is local test infrastructure. It signs with a test-only fee payer and submits to
-the embedded Surfnet RPC URL written by `pnpm kora:surfpool:up`. Embedded
+The test command still runs SDP through `KORA_DEVNET_URL=http://127.0.0.1:18080`;
+only the JSON-RPC server behind that URL is local test infrastructure. It signs
+with a test-only fee payer; SDP sends the signed transaction to the embedded
+Surfnet RPC URL written by `pnpm kora:surfpool:up`. Embedded
 Surfnet uses the same managed Solana RPC selection as the integration test
 runner, including `SOLANA_RPC_CI_PREFERRED_PROVIDER`, as its
 `SURFPOOL_REMOTE_RPC_URL`; set `SURFPOOL_REMOTE_RPC_URL` directly to override it.

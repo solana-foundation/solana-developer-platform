@@ -33,8 +33,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
     selectedProjectId: "proj_test",
     sdpEnvironment: "sandbox",
-    selectedPlaygroundApiKeyId: null,
-    setPlaygroundApiKeys: () => {},
     flags: {},
   }),
   useOptionalDashboardWorkspace: () => null,
@@ -94,7 +92,6 @@ describe("PaymentRequestsWorkspace pay link", () => {
       <PaymentRequestsWorkspace
         initialPaymentRequests={[requestA, requestB]}
         apiBaseUrl={null}
-        apiKeys={[]}
         wallets={[]}
         counterparties={[]}
       />,

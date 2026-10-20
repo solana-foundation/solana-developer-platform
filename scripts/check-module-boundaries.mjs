@@ -125,7 +125,8 @@ const MODULE_METADATA = [
   {
     name: "@sdp/fee-payment",
     directory: "packages/sdp-fee-payment",
-    purpose: "Fee-payment port, Kora and native fee-payer adapters, and Kora endpoint selection.",
+    purpose:
+      "Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads.",
     allowedDependencies: ["@sdp/rpc", "@sdp/types"],
   },
   {
@@ -142,7 +143,7 @@ const MODULE_METADATA = [
     name: "@sdp/issuance",
     directory: "packages/sdp-issuance",
     purpose: "Token issuance domain services and Mosaic integration.",
-    allowedDependencies: ["@sdp/fee-payment", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/kamino",

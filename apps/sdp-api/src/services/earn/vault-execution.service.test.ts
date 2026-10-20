@@ -80,7 +80,7 @@ function feePayment(overrides: Partial<FeePaymentPort> = {}): FeePaymentPort {
     providerId: "test",
     getFeePayer: vi.fn().mockResolvedValue(feePayerAddress),
     signAsFeePayer: vi.fn().mockImplementation(async (bytes: Uint8Array) => bytes),
-    signAndSend: vi.fn().mockResolvedValue(signature),
+    getSponsorshipConfiguration: vi.fn(),
     ...overrides,
   } as FeePaymentPort;
 }
@@ -626,7 +626,6 @@ describe("vault signing lifecycle", () => {
   it("fully signs a sponsored transaction without sending it", async () => {
     const owner = await generateKeyPairSigner();
     const sponsor = await generateKeyPairSigner();
-    const signAndSend = vi.fn();
     const signAsFeePayer = vi.fn(async (ownerSignedBytes: Uint8Array) => {
       const ownerSigned = getTransactionDecoder().decode(ownerSignedBytes);
       expect(ownerSigned.signatures[owner.address]).not.toBeNull();
@@ -637,7 +636,6 @@ describe("vault signing lifecycle", () => {
     const fee = feePayment({
       getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
       signAsFeePayer,
-      signAndSend,
     });
 
     const result = await signVaultPlan(env, {
@@ -655,7 +653,6 @@ describe("vault signing lifecycle", () => {
     expect(decoded.signatures[sponsor.address]).not.toBeNull();
     expect(result.signature).toBe(getSignatureFromTransaction(decoded));
     expect(signAsFeePayer).toHaveBeenCalledOnce();
-    expect(signAndSend).not.toHaveBeenCalled();
     expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -667,7 +664,6 @@ describe("vault signing lifecycle", () => {
     const fee = feePayment({
       getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
       signAsFeePayer,
-      signAndSend: vi.fn(),
     });
 
     await expect(

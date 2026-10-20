@@ -440,6 +440,8 @@ export async function executeDvpFunding(
         },
         markStarted: async () => {},
         hasStarted: async () => plan.hasClaim(heldSignature),
+        // A refused send releases its claim in the caller.
+        clearSigned: async () => {},
       },
     });
   } catch (error) {

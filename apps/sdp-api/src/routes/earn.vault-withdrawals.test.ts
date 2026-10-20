@@ -9,6 +9,10 @@ import {
   type EarnMovementRow,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
+import {
+  type CreateSignedQueuedWithdrawalRequestInput,
+  createPostgresEarnVaultWithdrawalRequestsRepository,
+} from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { app } from "@/index";
 import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
@@ -451,6 +455,185 @@ describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
       },
     });
     expect(withdrawFromVault).not.toHaveBeenCalled();
+  });
+});
+
+// HOO-2099: the custody signer refuses a wallet outside a selected key's scope
+// for exits too; these routes refuse it first, so no movement or request row
+// exists for the Idempotency-Key to replay once the scope is fixed.
+describe("vault exits outside the key's wallet scope", () => {
+  async function exitRows(): Promise<Record<string, unknown[]>> {
+    const db = getDb(env);
+    const entries = await Promise.all(
+      [
+        "earn_movements",
+        "earn_vault_withdrawal_requests",
+        "earn_vault_withdrawal_request_actions",
+      ].map(
+        async (table) =>
+          [table, (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results] as const
+      )
+    );
+    return Object.fromEntries(entries);
+  }
+
+  async function scopeKeyToNoWallets(): Promise<void> {
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+  }
+
+  it("refuses a withdrawal with wallet_out_of_scope before recording a movement", async () => {
+    await seedAuth();
+    const positionId = await seedPosition();
+    await scopeKeyToNoWallets();
+    const before = await exitRows();
+
+    const response = await postVaultWithdrawal({ positionId, shares: "10" });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(withdrawFromVault).not.toHaveBeenCalled();
+    expect(await exitRows()).toEqual(before);
+  });
+
+  it("refuses a withdrawal request with wallet_out_of_scope before recording it", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "hastra" });
+    await scopeKeyToNoWallets();
+    const before = await exitRows();
+
+    const response = await app.request(
+      "/v1/earn/vault-withdrawal-requests",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "par-out-of-scope",
+        },
+        body: JSON.stringify({ positionId, mechanism: "operatorRedemption", shares: "10" }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(await exitRows()).toEqual(before);
+  });
+
+  it("refuses a narrowed key's replay of a recorded withdrawal with wallet_out_of_scope", async () => {
+    await seedAuth();
+    const positionId = await seedPosition();
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [CUSTODY_WALLET_ID],
+    });
+    // The real service records the movement under the Idempotency-Key; the
+    // stub does the same so the retry has a stored 200 to replay.
+    withdrawFromVault.mockImplementationOnce(async (_env, input) => {
+      const recorded = await recordConnectionWithdrawal(input.positionId, input.requestId);
+      return { position: { id: input.positionId }, movement: recorded.movement, replayed: false };
+    });
+    const first = await postVaultWithdrawal(
+      { positionId, shares: "10" },
+      { idempotencyKey: "narrowed-replay" }
+    );
+    expect(first.status).toBe(200);
+    await scopeKeyToNoWallets();
+    const before = await exitRows();
+
+    const replay = await postVaultWithdrawal(
+      { positionId, shares: "10" },
+      { idempotencyKey: "narrowed-replay" }
+    );
+
+    expect(replay.status).toBe(403);
+    await expect(replay.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+    expect(await exitRows()).toEqual(before);
+  });
+
+  it("refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "veda" });
+    const requests = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+    const input = {
+      requestId: "earn_vault_withdrawal_request_out_of_scope",
+      actionId: "earn_vault_withdrawal_action_out_of_scope",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      environment: "sandbox",
+      provider: "veda",
+      positionId,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      ownerAddress: WALLET_ADDRESS,
+      vaultAddress: VAULT,
+      tokenMint: USDC_MINT,
+      shareMint: SHARE_MINT,
+      requestAddress: "QueueRequestAddressOutOfScope1111111111111",
+      mechanism: "solver_queue",
+      shares: "10",
+      quotedAssets: "9.9",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      discountBps: 25,
+      maturityTimestamp: "1700000060",
+      deadlineTimestamp: "1700000120",
+      signature: "queued-request-signature-out-of-scope",
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "12345",
+      clientRequestId: "queued-request-out-of-scope",
+      idempotencyFingerprint: "queued-request-fingerprint-out-of-scope",
+      pdaLeaseToken: "earn_vault_withdrawal_reservation_out_of_scope",
+      createdBy: TEST_USER.id,
+    } as const satisfies CreateSignedQueuedWithdrawalRequestInput;
+    await requests.acquireRequestReservation({
+      id: input.pdaLeaseToken,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      environment: input.environment,
+      provider: input.provider,
+      vaultAddress: input.vaultAddress,
+      ownerAddress: input.ownerAddress,
+      requestAddress: input.requestAddress,
+      clientRequestId: input.clientRequestId,
+      idempotencyFingerprint: input.idempotencyFingerprint,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      mechanism: input.mechanism,
+    });
+    await requests.createSignedRequest(input);
+    await scopeKeyToNoWallets();
+    const before = await exitRows();
+
+    const response = await app.request(
+      `/v1/earn/vault-withdrawal-requests/${input.requestId}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "cancel-out-of-scope",
+        },
+        body: JSON.stringify({}),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(await exitRows()).toEqual(before);
   });
 });
 

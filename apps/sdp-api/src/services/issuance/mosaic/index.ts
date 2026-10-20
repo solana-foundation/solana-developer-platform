@@ -9,11 +9,8 @@ import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { MovementId } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
-import {
-  createSponsorshipFeePayment,
-  isKoraSponsorshipConfigured,
-  type SponsorshipScope,
-} from "@/services/sponsorship.service";
+import { createIssuanceSponsor } from "@/services/issuance/sponsored-submitter";
+import { isKoraSponsorshipConfigured, type SponsorshipScope } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type MosaicFeePayment = "sponsored" | "wallet";
@@ -42,8 +39,8 @@ export function createMosaicService(
   fee: MosaicFee
 ): MosaicService {
   const sponsor =
-    fee.mode === "sponsored" && isKoraSponsorshipConfigured(env, fee.scope)
-      ? createSponsorshipFeePayment(env, fee.scope, fee.movement)
+    fee.mode === "sponsored" && isKoraSponsorshipConfigured(env)
+      ? createIssuanceSponsor(env, fee.scope, fee.movement)
       : undefined;
   return new MosaicService(env, signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so

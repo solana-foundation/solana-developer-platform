@@ -1,7 +1,13 @@
 import type { MovementId } from "@sdp/types/movements";
 import { getDb } from "@/db/client";
 import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
-import { AppError, conflict, providerUnavailable, walletNotFound } from "@/lib/errors";
+import {
+  AppError,
+  conflict,
+  missingAction,
+  providerUnavailable,
+  walletNotFound,
+} from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -29,9 +35,7 @@ export async function resolvePrivateChannelCustodyWallet(
   allowAddress = false
 ): Promise<CustodyWallet> {
   if (!authMayPerform(auth, "private_channels.execute")) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
-      action: "private_channels.execute",
-    });
+    throw missingAction("private_channels.execute");
   }
   const candidates =
     wallets ?? (await listPrivateChannelCustodyWallets(env, auth.organizationId, projectId));
@@ -57,7 +61,7 @@ export async function resolvePrivateChannelCustodyWallet(
   // The custody signer refuses a wallet outside the key's scope for every
   // movement, withdrawals included (HOO-2099); refusing here as well stops the
   // flow before it records a movement or calls the gateway.
-  assertCallerWalletInScope(auth.walletAccess, wallet.id);
+  assertCallerWalletInScope(auth, wallet.id);
   return wallet;
 }
 

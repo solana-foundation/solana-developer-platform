@@ -148,7 +148,6 @@ export interface Env extends ManagedRpcEnv {
   | "ibm_haven"
   | "anchorage"
   | "utila";
-  FEE_PAYER_PRIVATE_KEY?: string;
 
   // Fireblocks configuration (@solana/keychain-fireblocks)
   FIREBLOCKS_API_KEY?: string;
@@ -218,7 +217,6 @@ export interface Env extends ManagedRpcEnv {
   UTILA_DESIGNATED_SIGNERS?: string;
 
   // Kora (gasless) configuration
-  FEE_PAYMENT_PROVIDER?: "kora" | "native";
   KORA_TIMEOUT_MS?: string;
   /** One Kora per cluster (see @sdp/fee-payment `resolveKoraEndpoint`). */
   KORA_DEVNET_URL?: string;

@@ -475,7 +475,6 @@ describe("Previous design requests", () => {
           <LegacyPaymentRequestsWorkspace
             initialPaymentRequests={[]}
             apiBaseUrl={null}
-            apiKeys={[]}
             wallets={[wallet]}
             counterparties={[]}
           />
@@ -535,7 +534,6 @@ describe("Previous design requests", () => {
       <LegacyPaymentRequestsWorkspace
         initialPaymentRequests={[]}
         apiBaseUrl={null}
-        apiKeys={[]}
         wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
         counterparties={[]}
       />,
@@ -596,7 +594,6 @@ describe("Previous design requests", () => {
         <LegacyPaymentRequestsWorkspace
           initialPaymentRequests={[request]}
           apiBaseUrl={null}
-          apiKeys={[]}
           wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
           counterparties={[]}
         />,

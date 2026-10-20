@@ -9,6 +9,7 @@
 
 import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
+import { assertKoraConfigured } from "@sdp/fee-payment";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 
 import { createApp } from "@/app";
@@ -114,6 +115,7 @@ export function assertRequiredEnv(env: Env): void {
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
+  assertKoraConfigured(env);
 }
 
 async function main(): Promise<void> {

@@ -159,7 +159,6 @@
   "POST /internal/dashboard/helius-rings/connections/:_/make-default": "helius_rings.configure",
   "POST /internal/dashboard/helius-rings/connections/:_/test": "helius_rings.configure",
   "POST /internal/dashboard/wallets/:_/faucet": "wallets.execute",
-  "POST /internal/playground/api-key/verify": "api_keys.read",
   "POST /v1/api-keys": "api_keys.manage",
   "POST /v1/api-keys/:_/rotate": "api_keys.manage",
   "POST /v1/compliance/address-screenings": "compliance.execute",

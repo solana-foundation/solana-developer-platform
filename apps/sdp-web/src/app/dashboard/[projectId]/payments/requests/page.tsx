@@ -2,10 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/[projectId]/playground-api-data";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
@@ -27,11 +24,10 @@ async function PaymentRequestsPage() {
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
-    const [result, walletsResult, counterpartiesResult, apiKeysResult] = await Promise.all([
+    const [result, walletsResult, counterpartiesResult] = await Promise.all([
       trace.step("fetch_payment_requests", () => fetchPaymentRequests(apiClient.request)),
       trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request)),
       trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
     ]);
 
     trace.log({ ok: result.ok, count: result.data.length, total: result.total });
@@ -45,7 +41,6 @@ async function PaymentRequestsPage() {
           initialError={result.error}
           initialLocalErrorCode={result.localErrorCode}
           apiBaseUrl={apiBaseUrl}
-          apiKeys={apiKeysResult.data ?? []}
           wallets={wallets}
           counterparties={counterpartiesResult.data}
         />

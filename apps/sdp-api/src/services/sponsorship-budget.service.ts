@@ -1,29 +1,26 @@
 import { createHash } from "node:crypto";
+import { sponsoredNetworkFee } from "@sdp/fee-payment/chain-reads";
 import {
   FeePaymentError,
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment/port";
-import { createRpc, getTransactionNetworkFee, type SolanaRpc } from "@sdp/rpc/solana";
+import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
 import {
   SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES,
   SPONSORSHIP_RESERVATION_SIGNING_ACCOUNTED_STATUSES,
   SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES,
-  SPONSORSHIP_RESERVATION_SUBMITTED_RESPONSE_STATUSES,
   type SponsorshipReservationStatus,
 } from "@sdp/types/sponsorship";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   assertIsFullySignedTransaction,
-  assertIsSignature,
   getBase64Decoder,
   getBase64Encoder,
   getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
-  type Signature,
   type Transaction,
 } from "@solana/kit";
 import { getDb } from "@/db/client";
@@ -51,7 +48,6 @@ import type {
   PreparedOwnedSubmission,
   SponsorshipFeePayment,
   SponsorshipMovementScope,
-  SponsorshipScope,
 } from "./sponsorship.service";
 import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./sponsorship-admission";
 
@@ -94,7 +90,6 @@ export interface BudgetedFeePaymentDependencies {
   now?: () => Date;
 }
 
-type AdmissionOperation = "sign" | "send";
 type AdmissionCancel = Parameters<SponsorshipBudgetRedis["cancel"]>[0];
 type AdmissionSettlement = Parameters<SponsorshipBudgetRedis["settle"]>[0];
 type AdmissionResult = {
@@ -121,62 +116,6 @@ type AdmissionContext = {
   hourBucket: string;
   dayBucket: string;
 };
-
-/**
- * The budget network a scope draws from: its project environment's cluster, never the process
- * default. A production movement on a devnet-default process must reserve against the mainnet
- * policies and trip the mainnet breaker, not devnet's.
- *
- * @param scope - The sponsorship scope.
- * @param scope.environment - The project environment that decides the cluster.
- * @returns The budget network.
- */
-function resolveNetwork(scope: Pick<SponsorshipScope, "environment">): SponsorshipNetwork {
-  return sponsorshipNetworkForCluster(CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
-}
-
-/** Each cluster's Kora upstream Solana RPC, the node that cluster's Kora simulates and sends on. */
-const KORA_RPC_URL_ENV_KEYS = {
-  devnet: "KORA_DEVNET_RPC_URL",
-  "mainnet-beta": "KORA_MAINNET_RPC_URL",
-} as const satisfies Record<SolanaCluster, keyof Env>;
-
-/**
- * The Solana RPC a cluster's Kora reads and sends on, so sponsorship prices and settles against
- * the same chain view the paymaster signs against. An unconfigured cluster refuses: it never
- * falls back to the process RPC or another cluster.
- *
- * @param env - API environment naming each cluster's `KORA_<CLUSTER>_RPC_URL`.
- * @param cluster - The cluster the sponsored transaction executes on.
- * @returns An RPC client for that cluster's Kora upstream.
- * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` when the cluster's Kora RPC is unset.
- */
-export function createKoraClusterRpc(env: Env, cluster: SolanaCluster): SolanaRpc {
-  const envKey = KORA_RPC_URL_ENV_KEYS[cluster];
-  const rpcUrl = env[envKey]?.trim();
-  if (!rpcUrl) {
-    throw new FeePaymentError(
-      `No Kora RPC is configured for ${cluster}: set ${envKey}`,
-      "PROVIDER_NOT_AVAILABLE"
-    );
-  }
-  return createRpc(env, { rpcUrl });
-}
-
-/**
- * The RPC that prices the network fee on the scope's cluster: that cluster's Kora upstream. A fee
- * quoted on the wrong chain is not a fee, and `getFeeForMessage` for a foreign blockhash answers
- * null anyway. An unconfigured cluster throws here and surfaces as "Sponsorship preflight is
- * unavailable", the same fail-closed answer as a dead RPC.
- *
- * @param env - API environment for RPC configuration.
- * @param scope - The sponsorship scope.
- * @param scope.environment - The project environment that decides the cluster.
- * @returns An RPC client for the scope's cluster.
- */
-function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "environment">) {
-  return createKoraClusterRpc(env, CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
-}
 
 function encodeBase64(value: Uint8Array): string {
   return getBase64Decoder().decode(value);
@@ -242,6 +181,8 @@ export function sponsorshipProviderConfigFingerprint(
 
 export class BudgetedFeePayment implements SponsorshipFeePayment {
   readonly providerId: string;
+  /** The open scope's environment and its cluster's budget network, read once at construction. */
+  private readonly environment: ClusterScope["environment"];
   private readonly network: SponsorshipNetwork;
   private readonly repository: BudgetRepository;
   private readonly budgetRedis: BudgetRedis;
@@ -255,18 +196,21 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     dependencies: BudgetedFeePaymentDependencies = {}
   ) {
     this.providerId = provider.providerId;
-    this.network = resolveNetwork(scope);
+    const { environment, cluster } = currentClusterScope();
+    this.environment = environment;
+    this.network = sponsorshipNetworkForCluster(cluster);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
-    this.getNetworkFee =
-      dependencies.getNetworkFee ??
-      (async (transaction) =>
-        getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
+    this.getNetworkFee = dependencies.getNetworkFee ?? sponsoredNetworkFee;
     this.now = dependencies.now ?? (() => new Date());
   }
 
   getFeePayer(): Promise<Address> {
     return this.provider.getFeePayer();
+  }
+
+  getSponsorshipConfiguration(): Promise<SponsorshipProviderConfiguration> {
+    return this.provider.getSponsorshipConfiguration();
   }
 
   private async verifySponsorResponse(
@@ -338,7 +282,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 
   async signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array> {
-    const reservation = await this.admit(transaction, "sign");
+    const reservation = await this.admit(transaction);
     if (reservation.replay?.signedTransaction) {
       return this.replayedSponsorTransaction(reservation);
     }
@@ -398,7 +342,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     transaction: Uint8Array,
     lifecycle: OwnedSubmissionLifecycle
   ): Promise<PreparedOwnedSubmission> {
-    const reservation = await this.admit(transaction, "sign");
+    const reservation = await this.admit(transaction);
     if (reservation.replay) {
       throw new FeePaymentError(
         "An identical owned submission is already in progress",
@@ -409,12 +353,26 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       signedTransaction = await this.provider.signAsFeePayer(transaction);
     } catch (error) {
+      // As in signAsFeePayer: a structured Kora verdict proves nothing was signed.
+      if (isStructuredProviderRejection(error)) {
+        await this.releaseDeterministic(reservation, error);
+        throw error;
+      }
       await this.markAmbiguous(reservation, error);
       throw error;
     }
     const decoded = await this.verifySponsorResponse(signedTransaction, reservation);
     let submission: PreparedOwnedSubmission;
     try {
+      // Before anything is persisted: a refusal here must not leave a saved signature behind on
+      // the caller's row, which only a definite send refusal clears.
+      const policies = await this.resolveEnabledPolicies(this.network);
+      if (policies.some((policy) => !policy.enabled)) {
+        throw new FeePaymentError(
+          "Sponsorship is disabled for this scope",
+          "PROVIDER_NOT_AVAILABLE"
+        );
+      }
       submission = {
         ...getFullySignedSubmission(decoded),
         releaseDefinitelyUnbroadcast: (error) =>
@@ -433,13 +391,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         );
       }
       await lifecycle.persistSigned(submission);
-      const policies = await this.resolveEnabledPolicies(this.network);
-      if (policies.some((policy) => !policy.enabled)) {
-        throw new FeePaymentError(
-          "Sponsorship is disabled for this scope",
-          "PROVIDER_NOT_AVAILABLE"
-        );
-      }
     } catch (error) {
       await this.releaseDeterministic(reservation, error);
       throw error;
@@ -494,58 +445,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     return submission;
   }
 
-  async signAndSend(transaction: Uint8Array): Promise<Signature> {
-    const reservation = await this.admit(transaction, "send");
-    if (reservation.replay?.signature) {
-      assertIsSignature(reservation.replay.signature);
-      return reservation.replay.signature;
-    }
-    let signature: Signature;
-    try {
-      signature = await this.provider.signAndSend(transaction);
-    } catch (error) {
-      if (isDeterministicProviderRejection(error)) {
-        await this.releaseDeterministic(reservation, error);
-      } else {
-        await this.markAmbiguous(reservation, error);
-      }
-      throw error;
-    }
-    let result: SignaturePersistResult;
-    try {
-      result = await this.repository.markSubmitted(reservation.id, reservation.attempt, signature);
-    } catch (error) {
-      return this.accountingUnavailable(
-        this.network,
-        "Submitted sponsorship outcome could not be persisted",
-        "Submitted sponsorship persistence failed",
-        error
-      );
-    }
-    if (result === "duplicate_signature") {
-      await this.releaseDuplicateSignature(reservation);
-      return signature;
-    }
-    if (
-      result !== "persisted" &&
-      !(await this.durablyAdvanced(
-        reservation,
-        SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES
-      ))
-    ) {
-      return this.accountingUnavailable(
-        this.network,
-        "Submitted sponsorship outcome could not be persisted",
-        "Submitted sponsorship outcome lost its durable state transition"
-      );
-    }
-    return signature;
-  }
-
-  private async admit(
-    transaction: Uint8Array,
-    operation: AdmissionOperation
-  ): Promise<AdmissionResult> {
+  private async admit(transaction: Uint8Array): Promise<AdmissionResult> {
     const context = await this.prepareAdmission(transaction);
     // Money admission (HOO-1955) is read alongside the reservation and decided
     // after replay: a sponsorship already signed is returned as it was, and only
@@ -554,27 +454,19 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       this.readReservation(context),
       readSponsorshipAdmissionFacts(this.env, this.scope),
     ]);
-    const durableReplay = this.resolveDurableReplay(context, operation, durableReservation);
+    const durableReplay = this.resolveDurableReplay(context, durableReservation);
     if (durableReplay) return durableReplay;
     assertSponsorshipAdmitted(this.scope, admissionFacts);
     const attempt =
       durableReservation?.status === "released"
         ? durableReservation.attempt + 1
         : (durableReservation?.attempt ?? 1);
-    return this.admitAgainstCurrentPolicy(context, operation, attempt);
+    return this.admitAgainstCurrentPolicy(context, attempt);
   }
 
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
-    if (!this.provider.getSponsorshipConfiguration) {
-      throw new FeePaymentError(
-        "Managed sponsorship provider does not expose fail-closed configuration",
-        "PROVIDER_NOT_AVAILABLE"
-      );
-    }
     const network = this.network;
-    let providerConfig: Awaited<
-      ReturnType<NonNullable<FeePaymentPort["getSponsorshipConfiguration"]>>
-    >;
+    let providerConfig: Awaited<ReturnType<FeePaymentPort["getSponsorshipConfiguration"]>>;
     let networkFee: bigint;
     try {
       [providerConfig, networkFee] = await Promise.all([
@@ -609,7 +501,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       .update(
         JSON.stringify({
           network,
-          productEnvironment: this.scope.environment,
+          productEnvironment: this.environment,
           organizationId: this.scope.organizationId,
           projectId: this.scope.projectId,
           actor: this.scope.actor,
@@ -635,19 +527,9 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private resolveDurableReplay(
     context: AdmissionContext,
-    operation: AdmissionOperation,
     durableReplay: SponsorshipReservation | null
   ): AdmissionResult | null {
-    const hasOperationResponse = durableReplay
-      ? reservationHasResponse(durableReplay, operation)
-      : false;
-    if (
-      durableReplay &&
-      SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
-        (status) => status === durableReplay.status
-      ) &&
-      hasOperationResponse
-    ) {
+    if (durableReplay && reservationHasResponse(durableReplay)) {
       return {
         id: context.id,
         attempt: durableReplay.attempt,
@@ -707,7 +589,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private async admitAgainstCurrentPolicy(
     context: AdmissionContext,
-    operation: AdmissionOperation,
     reservationAttempt: number
   ): Promise<AdmissionResult> {
     let durable: DurableAdmission | null = null;
@@ -715,12 +596,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       const policies = await this.resolveEnabledPolicies(context.network);
       await this.assertSponsorshipEnabled(context, policies, durable, reservationAttempt);
       if (!durable) {
-        durable = await this.persistReservationDurable(
-          context,
-          operation,
-          policies,
-          reservationAttempt
-        );
+        durable = await this.persistReservationDurable(context, policies, reservationAttempt);
         if (durable.kind === "replay") return durable.result;
         if (durable.kind === "in_progress") {
           throw new FeePaymentError(
@@ -807,7 +683,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private async persistReservationDurable(
     context: AdmissionContext,
-    operation: AdmissionOperation,
     policies: SponsorshipBudgetPolicy[],
     attempt: number
   ): Promise<DurableAdmission> {
@@ -815,7 +690,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const reservationInput: CreateSponsorshipReservationInput = {
       id: context.id,
       network: context.network,
-      productEnvironment: this.scope.environment,
+      productEnvironment: this.environment,
       organizationId: this.scope.organizationId,
       projectId: this.scope.projectId,
       actorType: this.scope.actor.type,
@@ -855,13 +730,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
           return owned();
         }
       }
-      if (
-        existing &&
-        SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
-          (status) => status === existing.status
-        ) &&
-        reservationHasResponse(existing, operation)
-      ) {
+      if (existing && reservationHasResponse(existing)) {
         return {
           kind: "replay",
           result: {
@@ -1093,41 +962,17 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 }
 
-function isDeterministicProviderRejection(error: unknown): boolean {
-  return (
-    error instanceof FeePaymentError &&
-    [
-      "PROVIDER_REJECTED",
-      "SIGNING_FAILED",
-      "TRANSACTION_TOO_LARGE",
-      "INSUFFICIENT_BALANCE",
-      "RATE_LIMITED",
-    ].includes(error.code)
-  );
-}
-
-// Narrower than the pre-send set above: only a structured provider verdict
-// proves that a sign-only request produced no signature. SIGNING_FAILED and
-// the balance/limit codes can also come from a custody exception after
-// signing, so they stay ambiguous on the sign-only path.
+// Only a structured provider verdict proves that a sign request produced no
+// signature. SIGNING_FAILED and the balance/limit codes can also come from a
+// custody exception after signing, so they stay ambiguous.
 function isStructuredProviderRejection(error: unknown): boolean {
   return error instanceof FeePaymentError && error.code === "PROVIDER_REJECTED";
 }
 
-function reservationHasResponse(
-  reservation: SponsorshipReservation,
-  operation: AdmissionOperation
-): boolean {
-  if (operation === "sign") {
-    return (
-      SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
-        (status) => status === reservation.status
-      ) && Boolean(reservation.signedTransaction)
-    );
-  }
+function reservationHasResponse(reservation: SponsorshipReservation): boolean {
   return (
-    SPONSORSHIP_RESERVATION_SUBMITTED_RESPONSE_STATUSES.some(
+    SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
       (status) => status === reservation.status
-    ) && Boolean(reservation.signature)
+    ) && Boolean(reservation.signedTransaction)
   );
 }

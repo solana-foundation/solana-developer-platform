@@ -12,7 +12,6 @@
  * - Decimal-aware amount conversion for minting
  */
 
-import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import {
   type ConfirmTransactionOptions,
   confirmTransaction,
@@ -20,6 +19,7 @@ import {
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -159,7 +159,7 @@ export async function deriveAblListAddress(authority: Address, mint: Address): P
 export class MosaicService {
   private env: MosaicIssuanceEnv;
   private signer: TransactionSigner;
-  private feePayment?: FeePaymentPort;
+  private feePayment?: SponsoredSubmitter;
   private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
   private transactionFailedError: (message: string) => Error;
   private invalidArgumentError: (message: string) => Error;
@@ -167,7 +167,7 @@ export class MosaicService {
   constructor(
     env: MosaicIssuanceEnv,
     signer: TransactionSigner,
-    feePayment?: FeePaymentPort,
+    feePayment?: SponsoredSubmitter,
     options?: MosaicServiceOptions
   ) {
     this.env = env;
@@ -1210,13 +1210,17 @@ export class MosaicService {
   ): Promise<MosaicTransactionResult> {
     const feePayment = this.feePayment;
     if (feePayment) {
-      // Two-signer flow: custody signs locally, Kora adds fee payer + submits
+      // Two-signer flow: custody signs locally, Kora adds the fee payer signature
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
       await onBeforeSubmit?.();
-      const signature = await feePayment.signAndSend(txBytes);
+      const signature = await feePayment.submitSponsored({
+        transaction: txBytes,
+        lastValidBlockHeight: fullTx.lifetimeConstraint.lastValidBlockHeight,
+        rpc: this.rpc,
+      });
       return this.confirmSubmitted(signature);
     }
 

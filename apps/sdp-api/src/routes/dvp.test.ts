@@ -1,10 +1,26 @@
 import { hashString } from "@sdp/payments/hash";
-import { getAddressDecoder } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  blockhash,
+  getAddressDecoder,
+  getBase58Codec,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  partiallySignTransaction,
+} from "@solana/kit";
+import { generateKeyPairSigner } from "@solana/signers";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
 import { app } from "@/index";
+import * as dvpMintInspector from "@/services/dvp/inspect-mint";
+import * as dvpMints from "@/services/dvp/mints";
+import * as dvpObservation from "@/services/dvp/observe-now";
+import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
@@ -848,6 +864,190 @@ describe("DvP routes", () => {
         error: { details: { reason: "wallet_out_of_scope" } },
       });
       expect(await fundingClaimCount("dvp_out_of_scope")).toBe(0);
+    });
+
+    async function dvpRows(): Promise<Record<string, unknown[]>> {
+      const tables = [
+        "dvp_trades",
+        "dvp_settlement_wallets",
+        "dvp_leg_funding_claims",
+        "dvp_leg_action_requests",
+        "dvp_leg_transfers",
+      ] as const;
+      const db = getDb(env);
+      const entries = await Promise.all(
+        tables.map(
+          async (table) =>
+            [table, (await db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).results] as const
+        )
+      );
+      return Object.fromEntries(entries);
+    }
+
+    async function scopeKeyToNoWallets(): Promise<void> {
+      await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+    }
+
+    it.each([
+      { action: "reclaim", body: { side: "a" } },
+      { action: "settle", body: {} },
+      { action: "cancel", body: {} },
+    ])("refuses $action with wallet_out_of_scope, writing nothing", async ({ action, body }) => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+             VALUES (?, ?, ?)`
+        )
+        .bind(TEST_PROJECT.id, TEST_ORG.id, THIRD_WALLET.id)
+        .run();
+      await scopeKeyToNoWallets();
+      await seedTradeFor({ tradeId: `dvp_out_of_scope_${action}` });
+      const before = await dvpRows();
+
+      const res = await app.request(
+        `/v1/dvp/trades/dvp_out_of_scope_${action}/${action}`,
+        { method: "POST", headers: authHeaders(), body: JSON.stringify(body) },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+      });
+      expect(await dvpRows()).toEqual(before);
+    });
+
+    it.each([
+      { settlementWallet: "not yet provisioned", seed: false },
+      { settlementWallet: "unlisted", seed: true },
+    ])(
+      "refuses a create whose settlement wallet is $settlementWallet, provisioning and recording nothing",
+      async ({ seed }) => {
+        if (seed) {
+          await getDb(env)
+            .prepare(
+              `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+               VALUES (?, ?, ?)`
+            )
+            .bind(TEST_PROJECT.id, TEST_ORG.id, THIRD_WALLET.id)
+            .run();
+        }
+        await scopeKeyToNoWallets();
+        const before = await dvpRows();
+
+        const res = await app.request(
+          "/v1/dvp/trades",
+          { method: "POST", headers: authHeaders(), body: JSON.stringify(createBody()) },
+          env
+        );
+
+        expect(res.status).toBe(403);
+        await expect(res.json()).resolves.toMatchObject({
+          error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+        });
+        expect(await dvpRows()).toEqual(before);
+      }
+    );
+
+    it("creates a trade with a selected key that lists the settlement wallet", async () => {
+      const db = getDb(env);
+      await db.execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+        JSON.stringify({ providerOverrides: { custody: { local: true } } }),
+        TEST_ORG.id,
+      ]);
+      await db
+        .prepare(
+          `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+             VALUES (?, ?, ?)`
+        )
+        .bind(TEST_PROJECT.id, TEST_ORG.id, THIRD_WALLET.id)
+        .run();
+      await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        walletScope: "selected",
+        walletIds: [THIRD_WALLET.id],
+      });
+      const sponsor = await generateKeyPairSigner();
+      // Untyped like services/dvp/create.test.ts: the stub implements only what create calls.
+      const createSponsorshipFeePayment = vi.fn();
+      createSponsorshipFeePayment.mockImplementation(() => ({
+        getFeePayer: async () => sponsor.address,
+        prepareOwnedSubmission: async (
+          bytes: Uint8Array,
+          lifecycle: Parameters<SponsorshipFeePayment["prepareOwnedSubmission"]>[1]
+        ) => {
+          const signed = await partiallySignTransaction(
+            [sponsor.keyPair],
+            getTransactionDecoder().decode(bytes)
+          );
+          const submission = {
+            signedTransaction: new Uint8Array(getTransactionEncoder().encode(signed)),
+            signature: getSignatureFromTransaction(signed),
+            releaseDefinitelyUnbroadcast: async () => {},
+          };
+          await lifecycle.persistSigned(submission);
+          await lifecycle.markStarted();
+          return submission;
+        },
+      }));
+      vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(
+        createSponsorshipFeePayment
+      );
+      vi.spyOn(dvpMints, "validateDvpMints").mockResolvedValue([]);
+      vi.spyOn(dvpMintInspector, "inspectDvpMint").mockImplementation(async (_rpc, mint) => ({
+        mint,
+        tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        decimals: 6,
+        name: null,
+        symbol: null,
+        eligible: true,
+        blockedBy: null,
+      }));
+      vi.spyOn(dvpObservation, "observeDvpTradeNow").mockResolvedValue(null);
+      vi.spyOn(solanaRpc, "getRecentBlockhash").mockResolvedValue({
+        blockhash: blockhash(getBase58Codec().decode(new Uint8Array(32).fill(7))),
+        lastValidBlockHeight: 100n,
+      });
+      const sendTransaction = vi
+        .spyOn(solanaRpc, "sendTransaction")
+        .mockImplementation(async (_rpc, bytes) =>
+          getSignatureFromTransaction(getTransactionDecoder().decode(bytes))
+        );
+      onTestFinished(() => {
+        vi.restoreAllMocks();
+      });
+
+      const res = await app.request(
+        "/v1/dvp/trades",
+        { method: "POST", headers: authHeaders(), body: JSON.stringify(createBody()) },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      const { trade } = z
+        .object({
+          data: z.object({ trade: z.object({ id: z.string(), settlementAuthority: z.string() }) }),
+        })
+        .parse(await res.json()).data;
+      expect(trade.settlementAuthority).toBe(UNRELATED_ADDRESS);
+      expect(sendTransaction).toHaveBeenCalledOnce();
+      expect(
+        await db.queryMany(
+          "SELECT id, settlement_authority, user_a, user_b, create_signature IS NOT NULL AS signed FROM dvp_trades"
+        )
+      ).toEqual([
+        {
+          id: trade.id,
+          settlement_authority: UNRELATED_ADDRESS,
+          user_a: PARTY_A_ADDRESS,
+          user_b: PARTY_B_EXTERNAL,
+          signed: true,
+        },
+      ]);
     });
   });
 

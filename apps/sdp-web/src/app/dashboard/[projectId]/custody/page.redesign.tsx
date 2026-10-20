@@ -7,10 +7,7 @@ import {
   type KnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/[projectId]/playground-api-data";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons.redesign";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -110,10 +107,9 @@ export async function CurrentCustodyPage() {
       );
     }
 
-    const [configsResult, walletsResult, apiKeysResult] = await Promise.all([
+    const [configsResult, walletsResult] = await Promise.all([
       trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
       trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
     ]);
 
     const connectedProviders = configsResult.ok
@@ -125,21 +121,18 @@ export async function CurrentCustodyPage() {
     );
     const walletsError = settledError(walletsResult, t("DashboardCustody.unableToLoadWallets"));
     const wallets = walletsResult.ok ? walletsResult.value : [];
-    const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
       walletCount: wallets.length,
-      apiKeyCount: apiKeys.length,
     });
 
     return (
       <Suspense fallback={<WalletsOverviewSkeleton />}>
         <WalletsWorkspace
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-          apiKeys={apiKeys}
           connectedProviders={connectedProviders}
           configsError={configsError}
           wallets={wallets}

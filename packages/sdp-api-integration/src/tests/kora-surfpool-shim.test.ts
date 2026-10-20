@@ -1,5 +1,10 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import {
+  confirmTransaction,
+  createRpc,
+  getRecentBlockhash,
+  sendTransaction,
+} from "@sdp/rpc/solana";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -21,7 +26,7 @@ const koraSurfpoolShim = (env as { KORA_SURFPOOL_SHIM?: string }).KORA_SURFPOOL_
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
 
 describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Surfpool shim", () => {
-  it("signs and sends a fee-payer transaction through the regular Kora adapter", async () => {
+  it("fee-payer signs, through the regular Kora adapter, a transaction the cluster confirms", async () => {
     const { rpcUrl } = requireKoraEndpoint();
     const adapter = new KoraAdapter({
       rpcUrl,
@@ -47,41 +52,9 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
       getTransactionEncoder().encode(compileTransaction(message))
     );
 
-    const signature = await adapter.signAndSend(transactionBytes);
+    const signature = await sendTransaction(rpc, await adapter.signAsFeePayer(transactionBytes));
     const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
 
     expect(confirmation.err).toBeNull();
-  });
-
-  it("answers a duplicate submit with the original signature, as the cluster does", async () => {
-    const { rpcUrl } = requireKoraEndpoint();
-    const adapter = new KoraAdapter({
-      rpcUrl,
-      userId: "sdp:v1:system:integration-kora-surfpool-shim",
-    });
-    const rpc = createRpc(env);
-    const feePayer = await adapter.getFeePayer();
-    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-    const instruction = {
-      programAddress: MEMO_PROGRAM_ADDRESS,
-      accounts: [],
-      data: new TextEncoder().encode(`kora surfpool shim duplicate ${Date.now()}`),
-    };
-    const message = pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayer(feePayer, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-      (m) => appendTransactionMessageInstructions([instruction], m)
-    );
-    const transactionBytes = new Uint8Array(
-      getTransactionEncoder().encode(compileTransaction(message))
-    );
-
-    const signature = await adapter.signAndSend(transactionBytes);
-    await confirmTransaction(rpc, signature, { commitment: "confirmed" });
-
-    const replayed = await adapter.signAndSend(transactionBytes);
-
-    expect(replayed).toBe(signature);
   });
 });

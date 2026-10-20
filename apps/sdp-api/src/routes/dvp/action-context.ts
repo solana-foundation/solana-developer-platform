@@ -99,7 +99,7 @@ export async function resolveLegAction(
   }
   // The custody signer refuses a wallet outside the key's scope (HOO-2099);
   // refusing here as well stops the action before it records anything.
-  assertCallerWalletInScope(auth.walletAccess, custodyWalletId);
+  assertCallerWalletInScope(auth, custodyWalletId);
   return {
     trade,
     actor: dvpTradeAuditActor(auth),
@@ -147,7 +147,7 @@ export async function resolveCloseAction(
   if (settlement === null) {
     throw notFound("DvP settlement wallet not found for this trade's project");
   }
-  assertCallerWalletInScope(auth.walletAccess, settlement.custodyWalletId);
+  assertCallerWalletInScope(auth, settlement.custodyWalletId);
 
   return { trade, actor: dvpTradeAuditActor(auth), settlement, projectId };
 }

@@ -8,7 +8,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
@@ -279,7 +279,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       },
     });
     expect(rpc.calls).toHaveLength(0);
-    expect(createFeePaymentAdapterMock).not.toHaveBeenCalled();
+    expect(createKoraAdapterMock).not.toHaveBeenCalled();
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 

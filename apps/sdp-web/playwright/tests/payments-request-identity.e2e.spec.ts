@@ -331,14 +331,15 @@ test.describe
       if (!(await usesNewRequestDesign(page))) await expect(playground).toBeVisible();
       if ((await playground.count()) > 0) {
         await playground.click();
-        await page
-          .getByRole("combobox", { name: "Select API endpoint" })
-          .selectOption("create-payment-request");
-        const selector = page.getByLabel(/^custodyWalletId(?:\s+\*)?$/);
-        await expect(selector).toBeVisible();
-        for (const wallet of wallets) {
-          await expect(selector.locator(`option[value="${wallet.id}"]`)).toHaveText(wallet.label);
-        }
+        // Requests stay outside Foundation's published playground catalog.
+        await expect(
+          page.getByText(
+            "None of these operations are in the public API reference yet, so the playground has nothing to run here.",
+            { exact: true }
+          )
+        ).toBeVisible();
+        await expect(page.getByRole("combobox", { name: "Select API endpoint" })).toHaveCount(0);
+        await expect(page.getByLabel(/^custodyWalletId(?:\s+\*)?$/)).toHaveCount(0);
         await expect(page.getByLabel(/^walletId(?:\s+\*)?$/)).toHaveCount(0);
       }
       await gotoProjectPage(page, otherProjectId, REQUESTS_PATH);
