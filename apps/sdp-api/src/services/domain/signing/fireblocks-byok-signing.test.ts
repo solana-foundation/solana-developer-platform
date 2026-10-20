@@ -12,7 +12,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "@/types/env";
+import { env as testEnv } from "@/test/helpers/env";
 import { createFireblocksAdapterFromCredential } from "./provider-adapter-factory";
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -24,11 +24,12 @@ const publicKey = address(
 );
 const apiSecretPem = rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const env = {
+  ...testEnv,
   SDP_RELEASE_CHANNEL: "beta",
   FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
   FIREBLOCKS_API_KEY: "deployment-key",
   FIREBLOCKS_API_SECRET: "deployment-secret",
-} as Env;
+};
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -87,7 +88,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
       },
     });
     for (const [url, init] of fetch.mock.calls) {
-      expect(String(url).startsWith(env.FIREBLOCKS_API_BASE_URL as string)).toBe(true);
+      expect(String(url).startsWith(env.FIREBLOCKS_API_BASE_URL)).toBe(true);
       expect(new Headers(init?.headers).get("X-API-Key")).toBe("tenant-key");
     }
     expect(await adapter.getTransactionSigner("fb_42", publicKey)).toBe(signer);

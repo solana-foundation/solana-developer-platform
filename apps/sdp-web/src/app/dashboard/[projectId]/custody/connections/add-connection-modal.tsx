@@ -1,6 +1,6 @@
 "use client";
 
-import { type CustodyProvider, isByokCustodyProvider } from "@sdp/types/custody";
+import { isByokCustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
@@ -62,7 +62,7 @@ export function AddConnectionModal({
     );
   };
 
-  if (!isByokCustodyProvider(provider as CustodyProvider)) return null;
+  if (!isByokCustodyProvider(provider)) return null;
 
   return (
     <Modal
@@ -81,7 +81,7 @@ export function AddConnectionModal({
         </div>
 
         <ByokCredentialForm
-          provider={provider as "privy" | "fireblocks"}
+          provider={provider}
           formId={formId}
           onSuccess={handleSuccess}
           onReadyChange={setReady}

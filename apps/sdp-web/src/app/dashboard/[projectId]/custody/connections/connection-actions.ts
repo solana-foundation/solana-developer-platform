@@ -135,7 +135,7 @@ export async function rotateCredentialsAction(
       {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ fields }),
+        body: JSON.stringify({ provider: custodyProvider, fields }),
       }
     );
   } catch (error) {

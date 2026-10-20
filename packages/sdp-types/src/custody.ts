@@ -37,7 +37,7 @@ export type ByokCustodyProvider = (typeof BYOK_CUSTODY_PROVIDERS)[number];
  * @param provider - The custody provider to classify.
  * @returns True when a custody connection may name `provider`.
  */
-export function isByokCustodyProvider(provider: CustodyProvider): provider is ByokCustodyProvider {
+export function isByokCustodyProvider(provider: string): provider is ByokCustodyProvider {
   return BYOK_CUSTODY_PROVIDERS.some((byokProvider) => byokProvider === provider);
 }
 

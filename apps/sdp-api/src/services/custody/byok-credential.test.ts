@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { SignerError, SignerErrorCode } from "@solana/keychain-core";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "@/types/env";
+import { env as testEnv } from "@/test/helpers/env";
 import { checkByokCredential, credentialPayload, parseByokCredential } from "./byok-credential";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -11,7 +11,7 @@ const fields = {
   apiSecretPem: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
   vaultAccountId: "0",
 };
-const env = { FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test" } as Env;
+const env = { ...testEnv, FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test" };
 const address = "11111111111111111111111111111111";
 
 afterEach(() => vi.restoreAllMocks());

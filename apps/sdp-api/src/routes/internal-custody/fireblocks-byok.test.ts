@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { verify } from "node:crypto";
 import { type Context, Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { verifyClerkJwt } from "@/lib/clerk-token";
@@ -84,7 +85,9 @@ async function connect(projectId = PROJECT_ID) {
   const completed = await request(`/connections/${data.connectionId}/complete`, {}, projectId);
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
-  return data as { connectionId: string; providerCredential: { id: string } };
+  return z
+    .object({ connectionId: z.string(), providerCredential: z.object({ id: z.string() }) })
+    .parse(data);
 }
 
 async function newRegistration(projectId = PROJECT_ID) {
@@ -132,8 +135,9 @@ beforeEach(async () => {
     await next();
   });
   app.route("/internal/dashboard/custody", internalCustody);
-  app.onError((error, c) => {
-    if (error instanceof AppError) return c.json(error.toResponse(), error.statusCode as 400);
+  app.onError((error) => {
+    if (error instanceof AppError)
+      return Response.json(error.toResponse(), { status: error.statusCode });
     throw error;
   });
   fields.signingKeyId = (await newRegistration()).signingKeyId;
@@ -165,7 +169,10 @@ describe("Fireblocks BYOK lifecycle", () => {
       ["/fireblocks/vaults", discoveryFields],
       ["/provider-credentials", body],
       [`/connections/${pendingId}/complete`, {}],
-      [`/provider-credentials/${connected.providerCredential.id}/rotate`, { fields: registration }],
+      [
+        `/provider-credentials/${connected.providerCredential.id}/rotate`,
+        { provider: "fireblocks", fields: registration },
+      ],
     ] as const) {
       const response = await request(path, payload);
       expect(response.status, await response.clone().text()).toBe(403);
@@ -281,6 +288,29 @@ describe("Fireblocks BYOK lifecycle", () => {
     ).toEqual([]);
   });
 
+  it("requires an explicit matching rotation provider before credential I/O", async () => {
+    const fetch = providerResponse();
+    const connected = await connect();
+    fetch.mockClear();
+    for (const payload of [
+      { fields: { appId: "app", appSecret: "secret" } },
+      { provider: "fireblocks", fields: { appId: "app", appSecret: "secret" } },
+      { provider: "privy", fields: { appId: "app", appSecret: "secret" } },
+    ]) {
+      const response = await request(
+        `/provider-credentials/${connected.providerCredential.id}/rotate`,
+        payload
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    const credentials = await getDb(env).queryMany(
+      "SELECT id FROM provider_credentials WHERE organization_id = ?",
+      [ORGANIZATION_ID]
+    );
+    expect(credentials).toHaveLength(1);
+  });
+
   it("rotates only within the pinned vault and can roll back to the prior credential", async () => {
     const fetch = providerResponse();
     const connected = await connect();
@@ -289,7 +319,7 @@ describe("Fireblocks BYOK lifecycle", () => {
     );
     const rejected = await request(
       `/provider-credentials/${connected.providerCredential.id}/rotate`,
-      { fields: { ...(await newRegistration()), apiKey: "foreign-key" } }
+      { provider: "fireblocks", fields: { ...(await newRegistration()), apiKey: "foreign-key" } }
     );
     expect((await rejected.json()).data.rotation).toEqual({
       status: "failed",
@@ -298,7 +328,10 @@ describe("Fireblocks BYOK lifecycle", () => {
     fetch.mockImplementation(async () => Response.json({ addresses: [{ address: ADDRESS }] }));
     const rotated = await request(
       `/provider-credentials/${connected.providerCredential.id}/rotate`,
-      { fields: { ...(await newRegistration()), apiKey: "replacement-key" } }
+      {
+        provider: "fireblocks",
+        fields: { ...(await newRegistration()), apiKey: "replacement-key" },
+      }
     );
     const rotation = (await rotated.json()).data;
     expect(rotation.rotation.status).toBe("success");
@@ -516,7 +549,7 @@ describe("Fireblocks CSR security", () => {
     const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
     const jwt = headers.get("Authorization")?.replace(/^Bearer /, "");
     expect(jwt).toBeTruthy();
-    const [header, payload, signature] = (jwt as string).split(".");
+    const [header, payload, signature] = z.string().parse(jwt).split(".");
     expect(JSON.parse(Buffer.from(header, "base64url").toString()).alg).toBe("RS256");
     expect(
       verify(

@@ -1,5 +1,6 @@
 "use client";
 
+import { assertNever } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import { DownloadIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -26,6 +27,24 @@ interface RegistrationProps {
   primaryVaultId?: string;
   onReadyChange?: (ready: boolean) => void;
   onPendingChange?: (pending: boolean) => void;
+}
+function csrButtonLabel(
+  ready: boolean,
+  generating: boolean,
+  t: ReturnType<typeof useTranslations>
+) {
+  let action: "generate" | "download" | "generating" = ready ? "download" : "generate";
+  if (generating) action = "generating";
+  switch (action) {
+    case "generate":
+      return t("DashboardCustody.fireblocksCsrGenerate");
+    case "download":
+      return t("DashboardCustody.fireblocksCsrDownload");
+    case "generating":
+      return t("DashboardCustody.fireblocksCsrGenerating");
+    default:
+      return assertNever(action);
+  }
 }
 function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) {
   const t = useTranslations();
@@ -166,11 +185,7 @@ export function FireblocksCredentialFields(props: RegistrationProps) {
             )
           }
         >
-          {generating
-            ? t("DashboardCustody.fireblocksCsrGenerating")
-            : ready
-              ? t("DashboardCustody.fireblocksCsrDownload")
-              : t("DashboardCustody.fireblocksCsrGenerate")}
+          {csrButtonLabel(ready, generating, t)}
         </Button>
         <p className="text-sm leading-5 text-tertiary">
           {t("DashboardCustody.fireblocksKeyStorage")}

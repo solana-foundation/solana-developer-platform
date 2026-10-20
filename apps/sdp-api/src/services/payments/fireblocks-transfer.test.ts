@@ -2,6 +2,7 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
@@ -83,7 +84,9 @@ async function connect(projectId = PROJECT_ID) {
   const completed = await request(`/connections/${data.connectionId}/complete`, {}, projectId);
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
-  return data as { connectionId: string; providerCredential: { id: string } };
+  return z
+    .object({ connectionId: z.string(), providerCredential: z.object({ id: z.string() }) })
+    .parse(data);
 }
 
 async function newRegistration(projectId = PROJECT_ID) {
@@ -131,8 +134,9 @@ beforeEach(async () => {
     await next();
   });
   app.route("/internal/dashboard/custody", internalCustody);
-  app.onError((error, c) => {
-    if (error instanceof AppError) return c.json(error.toResponse(), error.statusCode as 400);
+  app.onError((error) => {
+    if (error instanceof AppError)
+      return Response.json(error.toResponse(), { status: error.statusCode });
     throw error;
   });
   fields.signingKeyId = (await newRegistration()).signingKeyId;

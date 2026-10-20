@@ -57,6 +57,7 @@ function useVaultPicker({
       setNextCursor(null);
     }
     startTransition(async () => {
+      let nextSelected = after ? selected : [];
       try {
         const result = await loadFireblocksVaultsAction({
           signingKeyId,
@@ -75,17 +76,17 @@ function useVaultPicker({
         ]);
         setNextCursor(result.nextCursor);
         setLoaded(true);
-        const choices = after ? selected : [];
-        const nextSelected =
-          primaryVaultId && result.vaults.some((vault) => vault.id === primaryVaultId)
-            ? [primaryVaultId]
-            : choices;
+        if (primaryVaultId && result.vaults.some((vault) => vault.id === primaryVaultId)) {
+          nextSelected = [primaryVaultId];
+        }
         form.setField("selected", nextSelected);
-        onReadyChange(vaultSelectionSchema.safeParse({ apiKey, selected: nextSelected }).success);
       } catch {
         if (generation.current === current) setError(t("DashboardCustody.fireblocksVaultsFailed"));
       } finally {
-        onPendingChange?.(false);
+        if (generation.current === current) {
+          onReadyChange(vaultSelectionSchema.safeParse({ apiKey, selected: nextSelected }).success);
+          onPendingChange?.(false);
+        }
       }
     });
   };
@@ -99,11 +100,8 @@ function useVaultPicker({
     setError(null);
   }
   function chooseVault(vaultId: string, checked: boolean) {
-    const choices = checked
-      ? multiple
-        ? [...selected, vaultId]
-        : [vaultId]
-      : selected.filter((value) => value !== vaultId);
+    let choices = selected.filter((value) => value !== vaultId);
+    if (checked) choices = multiple ? [...selected, vaultId] : [vaultId];
     form.setField("selected", choices);
     onReadyChange(vaultSelectionSchema.safeParse({ apiKey, selected: choices }).success);
   }

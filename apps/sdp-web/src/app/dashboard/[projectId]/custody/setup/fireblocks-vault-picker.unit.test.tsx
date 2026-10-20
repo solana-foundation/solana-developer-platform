@@ -53,7 +53,7 @@ it("keeps selections across pages and invalidates them when the API user changes
   await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
   await user.click(screen.getByRole("button", { name: "Load more vaults" }));
   await user.click(await screen.findByRole("checkbox", { name: /Operations/ }));
-  const form = screen.getByRole("form") as HTMLFormElement;
+  const form = screen.getByRole<HTMLFormElement>("form");
   expect(new FormData(form).getAll("fireblocksVaultAccountIds")).toEqual(["0", "7"]);
   expect(loadFireblocksVaultsAction).toHaveBeenLastCalledWith({
     signingKeyId: "fbcsr_test",
@@ -100,7 +100,7 @@ it("limits credential rotation to one original vault", async () => {
   await user.click(screen.getByRole("button", { name: "Load vaults" }));
   await user.click(await screen.findByRole("radio", { name: /Treasury/ }));
   await user.click(screen.getByRole("radio", { name: /Operations/ }));
-  const form = screen.getByRole("form") as HTMLFormElement;
+  const form = screen.getByRole<HTMLFormElement>("form");
   expect(new FormData(form).get("vaultAccountId")).toBe("7");
   expect(new FormData(form).getAll("fireblocksVaultAccountIds")).toEqual([]);
 });
@@ -126,7 +126,7 @@ it("clears old selections and lets users retry after a network failure", async (
     "textContent",
     "Could not load vaults. Check your connection and try again."
   );
-  expect(new FormData(screen.getByRole("form") as HTMLFormElement).get("vaultAccountId")).toBe("");
+  expect(new FormData(screen.getByRole<HTMLFormElement>("form")).get("vaultAccountId")).toBe("");
   expect(ready).toHaveBeenLastCalledWith(false);
   await user.click(screen.getByRole("button", { name: "Load vaults" }));
   await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
@@ -148,6 +148,38 @@ it("preselects the verification vault on rotation and prevents a different accou
   await user.click(screen.getByRole("button", { name: "Load vaults" }));
   expect(await screen.findByRole("radio", { name: /Operations/ })).toHaveProperty("checked", true);
   expect(screen.getByRole("radio", { name: /Treasury/ })).toHaveProperty("disabled", true);
-  expect(new FormData(screen.getByRole("form") as HTMLFormElement).get("vaultAccountId")).toBe("7");
+  expect(new FormData(screen.getByRole<HTMLFormElement>("form")).get("vaultAccountId")).toBe("7");
   expect(ready).toHaveBeenLastCalledWith(true);
 });
+
+it.each(["setup", "rotation"] as const)(
+  "retains readiness after a failed next page during %s",
+  async (mode) => {
+    vi.mocked(loadFireblocksVaultsAction)
+      .mockResolvedValueOnce({
+        status: "success",
+        vaults: [{ id: "7", name: "Treasury", hasSolanaWallet: true }],
+        nextCursor: "next",
+      })
+      .mockResolvedValueOnce({ status: "error", message: "Provider unavailable" })
+      .mockRejectedValueOnce(new Error("Disconnected"));
+    const user = userEvent.setup();
+    renderPicker(mode === "setup", mode === "rotation" ? "7" : undefined);
+    await user.type(screen.getByLabelText("API user ID"), "api-user");
+    await user.click(screen.getByRole("button", { name: "Load vaults" }));
+    if (mode === "setup")
+      await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
+    await waitFor(() => expect(ready).toHaveBeenLastCalledWith(true));
+    for (const message of [
+      "Provider unavailable",
+      "Could not load vaults. Check your connection and try again.",
+    ]) {
+      await user.click(screen.getByRole("button", { name: "Load more vaults" }));
+      expect(await screen.findByRole("alert")).toHaveProperty("textContent", message);
+      await waitFor(() => expect(ready).toHaveBeenLastCalledWith(true));
+      expect(new FormData(screen.getByRole<HTMLFormElement>("form")).get("vaultAccountId")).toBe(
+        "7"
+      );
+    }
+  }
+);

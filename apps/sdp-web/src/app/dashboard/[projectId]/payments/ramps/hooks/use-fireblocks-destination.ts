@@ -66,7 +66,7 @@ export function useFireblocksDestination({
       )
         return;
       offered.current.add(key);
-      toastId = toast(t("DashboardPayments.onchainSend.whitelistWarning"), {
+      toastId = toast.message(t("DashboardPayments.onchainSend.whitelistWarning"), {
         description: t("DashboardPayments.onchainSend.whitelistDescription", {
           address: `${address.slice(0, 6)}…${address.slice(-6)}`,
           asset: token === "SOL" || token === SOL_MINT ? "SOL" : "USDC",

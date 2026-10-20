@@ -18,8 +18,8 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import {
+  byokRegistrationSchema,
   fireblocksRegistrationSchema,
-  privyAuthenticationSchema,
 } from "@/services/custody/byok-credential";
 import {
   admitFireblocksRegistration,
@@ -58,11 +58,6 @@ import type { Env } from "@/types/env";
 
 const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
 const credentialParamsSchema = z.object({ credentialId: z.string().trim().min(1) }).strict();
-const rotationBodySchema = z
-  .object({
-    fields: z.union([privyAuthenticationSchema, fireblocksRegistrationSchema]),
-  })
-  .strict();
 const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
 // Rotation retries must not consume the budget for rollback or candidate cancellation.
 const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
@@ -277,7 +272,7 @@ internalCustody.post(
     if (!params.success) {
       throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
     }
-    const body = rotationBodySchema.safeParse(await c.req.json().catch(() => null));
+    const body = byokRegistrationSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) {
       throw badRequest("Invalid request body", {
         errors: z.flattenError(body.error).fieldErrors,
@@ -288,7 +283,7 @@ internalCustody.post(
     await enforceMeteredQuota(c, rotationQuota);
     return success(
       c,
-      await rotateProviderCredential(c, params.data.credentialId, body.data.fields, idempotencyKey)
+      await rotateProviderCredential(c, params.data.credentialId, body.data, idempotencyKey)
     );
   }
 );

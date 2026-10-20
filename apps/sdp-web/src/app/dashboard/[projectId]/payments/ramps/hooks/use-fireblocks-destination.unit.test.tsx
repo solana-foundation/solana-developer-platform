@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook } from "@testing-library/react";
+import * as sonner from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as dashboard from "@/lib/dashboard-fetch";
 import { useFireblocksDestination } from "./use-fireblocks-destination";
 
 const mocks = vi.hoisted(() => ({
@@ -8,13 +10,11 @@ const mocks = vi.hoisted(() => ({
   userId: "user-one",
   fetch: vi.fn(),
   toast: Object.assign(
-    vi.fn(() => "toast-book"),
+    vi.fn<(...args: Parameters<typeof import("sonner").toast>) => string>(() => "toast-book"),
     { dismiss: vi.fn(), error: vi.fn() }
   ),
   t: (key: string) => key,
 }));
-vi.mock("sonner", () => ({ toast: mocks.toast }));
-vi.mock("@/lib/dashboard-fetch", () => ({ dashboardFetch: mocks.fetch }));
 vi.mock("@/i18n/provider", () => ({ useTranslations: () => mocks.t }));
 vi.mock("@/lib/use-dashboard-project", () => ({ useProjectId: () => mocks.projectId }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -37,12 +37,27 @@ async function tick() {
   });
 }
 function action() {
-  return (mocks.toast.mock.calls[0] as unknown as [string, { action: { onClick: () => void } }])[1]
-    .action.onClick;
+  const action = mocks.toast.mock.calls[0][1]?.action;
+  if (!action || typeof action !== "object" || !("onClick" in action)) {
+    throw new Error("Expected a toast action");
+  }
+  return () => {
+    const button = render(
+      <button type="button" onClick={action.onClick}>
+        Suppress warning
+      </button>
+    );
+    fireEvent.click(button.getByRole("button", { name: "Suppress warning" }));
+    button.unmount();
+  };
 }
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  vi.spyOn(dashboard, "dashboardFetch").mockImplementation(mocks.fetch);
+  vi.spyOn(sonner.toast, "message").mockImplementation(mocks.toast);
+  vi.spyOn(sonner.toast, "dismiss").mockImplementation(mocks.toast.dismiss);
+  vi.spyOn(sonner.toast, "error").mockImplementation(mocks.toast.error);
   window.localStorage.clear();
   mocks.projectId = "project-one";
   mocks.userId = "user-one";
@@ -51,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 describe("Fireblocks destination warning", () => {
   it("only reads, and saves suppression across remounts without proposing anything", async () => {
@@ -59,9 +75,7 @@ describe("Fireblocks destination warning", () => {
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
     expect(mocks.fetch.mock.calls[0]?.[0]).toContain("/destination?");
     expect(mocks.toast).toHaveBeenCalledOnce();
-    await act(async () => {
-      action()();
-    });
+    action()();
     view.unmount();
     renderHook(() => useFireblocksDestination(selection));
     await tick();
@@ -75,9 +89,7 @@ describe("Fireblocks destination warning", () => {
   it("does not suppress warnings for another user or project", async () => {
     const view = renderHook(() => useFireblocksDestination(selection));
     await tick();
-    await act(async () => {
-      action()();
-    });
+    action()();
     mocks.projectId = "project-two";
     view.rerender();
     await tick();
@@ -127,9 +139,7 @@ describe("Fireblocks destination warning", () => {
     const oldAction = action();
     view.rerender({ ...selection, enabled: false });
     expect(mocks.toast.dismiss).toHaveBeenCalledWith("toast-book");
-    await act(async () => {
-      oldAction();
-    });
+    oldAction();
     expect(window.localStorage.length).toBe(0);
   });
   it("does not repeat reads on unrelated renders or for another provider", async () => {
@@ -150,9 +160,7 @@ describe("Fireblocks destination warning", () => {
     });
     renderHook(() => useFireblocksDestination(selection));
     await tick();
-    await act(async () => {
-      action()();
-    });
+    action()();
     expect(mocks.toast.error).toHaveBeenCalledWith(
       "DashboardPayments.fireblocksWarnings.saveFailed"
     );

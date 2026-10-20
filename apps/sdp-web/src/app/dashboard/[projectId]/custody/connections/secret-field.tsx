@@ -3,6 +3,7 @@
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
+import { Textarea } from "@sdp/ui/textarea";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
@@ -48,10 +49,14 @@ export function SecretField({
       <Label htmlFor={fieldId}>{label}</Label>
       <div className="flex items-center gap-2">
         {multiline ? (
-          <textarea
+          <Textarea
             id={fieldId}
             name={name}
-            className="min-h-32 min-w-0 flex-1 rounded-lg border border-border-default bg-fill-subtle px-3 py-2 text-sm text-primary outline-none focus:border-[var(--input-border-focus)]"
+            className={
+              shown
+                ? "min-h-32 min-w-0 flex-1"
+                : "min-h-32 min-w-0 flex-1 [-webkit-text-security:disc]"
+            }
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
@@ -59,7 +64,6 @@ export function SecretField({
             disabled={disabled}
             aria-describedby={hint ? hintId : undefined}
             value={value}
-            style={shown ? undefined : ({ WebkitTextSecurity: "disc" } as React.CSSProperties)}
             onChange={(event) => onChange(event.target.value)}
           />
         ) : (

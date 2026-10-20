@@ -8,7 +8,7 @@ import {
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
-import { isFireblocksTransactionFailed } from "@sdp/types/fireblocks";
+import { fireblocksPaymentStatus } from "@sdp/types/fireblocks";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { assertIsSignature } from "@solana/kit";
 import { z } from "zod";
@@ -73,9 +73,8 @@ export async function prepareFireblocksTransfer(
   if (access.publicKey !== operation.sourceAddress)
     throw conflict("Fireblocks source wallet changed");
   const network = currentClusterScope().cluster;
-  const expectedAsset =
-    network === "mainnet-beta" ? "SOL" : network === "devnet" ? "SOL_TEST" : null;
-  if (!expectedAsset || access.assetId !== expectedAsset)
+  const expectedAsset = network === "mainnet-beta" ? "SOL" : "SOL_TEST";
+  if (access.assetId !== expectedAsset)
     throw badRequest("Fireblocks connection does not match the Solana network");
   const native = isNativePaymentToken(operation.token);
   if (!native && operation.token !== wellKnownMint("USDC", network))
@@ -171,11 +170,7 @@ async function persistResult(
       /* An unavailable fee must not prevent recording a confirmed payment. */
     }
   }
-  const status = isFireblocksTransactionFailed(result.status)
-    ? "failed"
-    : completed
-      ? "confirmed"
-      : "processing";
+  const status = fireblocksPaymentStatus(result.status);
   return (
     (await repo.updateTransfer({
       transferId: row.id,

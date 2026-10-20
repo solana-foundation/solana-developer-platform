@@ -78,7 +78,10 @@ export async function readFireblocksAddressBook(
   const key = cacheKey(credentials);
   let cached = books.get(key);
   if (!cached || (!cached.pending && (fresh || cached.expires <= runtime.now()))) {
-    if (books.size >= 100) books.delete(books.keys().next().value as string);
+    if (books.size >= 100) {
+      // SAFETY: the size check guarantees a first entry; this synchronous read cannot interleave with another eviction.
+      books.delete(books.keys().next().value as string);
+    }
     const entries = Promise.all([
       fireblocksRequest(runtime, {
         ...credentials,

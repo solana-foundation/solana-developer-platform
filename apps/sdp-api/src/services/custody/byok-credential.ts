@@ -31,9 +31,12 @@ export const fireblocksRegistrationSchema = fireblocksAuthenticationSchema
   .extend({ signingKeyId: z.string().regex(/^fbcsr_[a-f0-9-]{36}$/) })
   .strict();
 
-export type ByokCredentialFields =
-  | z.infer<typeof privyAuthenticationSchema>
-  | z.infer<typeof fireblocksRegistrationSchema>;
+export const byokRegistrationSchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("privy"), fields: privyAuthenticationSchema }).strict(),
+  z.object({ provider: z.literal("fireblocks"), fields: fireblocksRegistrationSchema }).strict(),
+]);
+export type ByokRegistration = z.infer<typeof byokRegistrationSchema>;
+export type ByokCredentialFields = ByokRegistration["fields"];
 
 export type ByokCredentialSecretFields =
   | z.infer<typeof privyAuthenticationSchema>

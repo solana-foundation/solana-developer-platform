@@ -1,10 +1,15 @@
-import { isBlockhashValid, type SolanaRpc } from "@sdp/rpc/solana";
+import * as solana from "@sdp/rpc/solana";
+import { createRpcFromTransport, isBlockhashValid } from "@sdp/rpc/solana";
 import { blockhash } from "@solana/kit";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { signWithFreshBlockhash } from "./sign-with-fresh-blockhash";
 
-vi.mock("@sdp/rpc/solana", () => ({ isBlockhashValid: vi.fn() }));
-const rpc = {} as SolanaRpc;
+const rpc = createRpcFromTransport(async () => {
+  throw new Error("Unexpected RPC call");
+});
+beforeEach(() => {
+  vi.spyOn(solana, "isBlockhashValid");
+});
 const hash = blockhash("11111111111111111111111111111111");
 afterEach(() => vi.restoreAllMocks());
 

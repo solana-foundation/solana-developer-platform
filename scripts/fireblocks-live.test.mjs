@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -90,7 +90,7 @@ function transport(overrides = {}) {
                   subStatus: null,
                 },
               }
-            : transfer,
+            : { ...transfer, ...overrides.transfer },
         },
       });
     }
@@ -238,6 +238,86 @@ test("refuses a new API key against an existing receipt before submitting", asyn
       second.calls.filter((call) => call.url.endsWith("/v1/payments/transfers")).length,
       0
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("only explicit config and receipt fields reach local SDP; RPC never receives the SDP credential", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fireblocks-file-boundary-"));
+  try {
+    const receiptPath = join(dir, "payment.json");
+    const marker = "unexpected-private-file-content";
+    const input = {
+      ...config,
+      unexpected: marker,
+      payment: { ...config.payment, unexpected: marker },
+    };
+    const first = transport();
+    await runLive(input, "payment", { ...first, receiptPath, sendMainnet: true });
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    await writeFile(receiptPath, JSON.stringify({ ...receipt, unexpected: marker }));
+    const retry = transport();
+    await runLive(input, "payment", { ...retry, receiptPath, sendMainnet: true });
+    assert(!JSON.stringify(retry.calls).includes(marker));
+    for (const call of retry.calls) {
+      if (call.url === config.rpcUrl) {
+        assert(!JSON.stringify(call).includes(retry.apiKey));
+        assert.equal(call.headers.Authorization, undefined);
+      } else {
+        assert.equal(new URL(call.url).origin, config.baseUrl);
+        assert.equal(call.headers.Authorization, `Bearer ${retry.apiKey}`);
+      }
+    }
+    const result = JSON.parse(await readFile(`${receiptPath}.result.json`, "utf8"));
+    assert.deepEqual(result, { transferId: transfer.id });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("invalid network identifiers are never persisted to the result receipt", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fireblocks-response-boundary-"));
+  try {
+    const receiptPath = join(dir, "payment.json");
+    const t = transport({ transfer: { id: "../../untrusted-path" } });
+    await assert.rejects(
+      runLive(config, "payment", { ...t, receiptPath, sendMainnet: true }),
+      /Invalid transfer ID/
+    );
+    await assert.rejects(readFile(`${receiptPath}.result.json`), { code: "ENOENT" });
+    assert(JSON.parse(await readFile(receiptPath, "utf8")).idempotencyKey);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("response metadata is not copied into the local result receipt", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fireblocks-response-projection-"));
+  try {
+    const receiptPath = join(dir, "payment.json");
+    const t = transport({ transfer: { unexpected: "provider-secret-or-untrusted-data" } });
+    await runLive(config, "payment", { ...t, receiptPath, sendMainnet: true });
+    assert.deepEqual(JSON.parse(await readFile(`${receiptPath}.result.json`, "utf8")), {
+      transferId: transfer.id,
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("tampered status identifiers cannot change the local SDP request path", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fireblocks-status-boundary-"));
+  try {
+    const receiptPath = join(dir, "payment.json");
+    await runLive(config, "payment", { ...transport(), receiptPath, sendMainnet: true });
+    await writeFile(
+      `${receiptPath}.result.json`,
+      JSON.stringify({ transferId: "xfr_good/../../api-keys" })
+    );
+    const t = transport();
+    await assert.rejects(runLive(config, "status", { ...t, receiptPath }), /invalid transfer ID/);
+    assert(!t.calls.some((call) => call.url.includes("/v1/payments/transfers")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

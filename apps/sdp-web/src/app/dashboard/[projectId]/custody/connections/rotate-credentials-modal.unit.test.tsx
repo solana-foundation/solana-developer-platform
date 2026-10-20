@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { isByokCustodyProvider } from "@sdp/types/custody";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -69,13 +70,15 @@ function modal(
   currentLifecycle = lifecycle,
   canRotate = true
 ) {
+  const provider = currentLifecycle.providerCredential.provider;
+  if (!isByokCustodyProvider(provider)) throw new Error("Expected BYOK fixture");
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <RotateCredentialsModal
         isOpen
         onClose={onClose}
         lifecycle={currentLifecycle}
-        provider={currentLifecycle.providerCredential.provider as "privy" | "fireblocks"}
+        provider={provider}
         connectionId="cconn_1"
         canRotate={canRotate}
       />
@@ -178,7 +181,10 @@ describe("rotation recovery", () => {
       );
       expect(retry?.[0]).toBe(first?.[0]);
       expect(first?.[1]?.body).toBe(
-        JSON.stringify({ fields: { appId: "test-app-id", appSecret: "test-app-secret" } })
+        JSON.stringify({
+          provider: "privy",
+          fields: { appId: "test-app-id", appSecret: "test-app-secret" },
+        })
       );
       expect(retry?.[1]?.body).toBe(first?.[1]?.body);
       const originalKey = new Headers(first?.[1]?.headers).get("Idempotency-Key");
@@ -257,7 +263,10 @@ describe("rotation recovery", () => {
       const corrected = rotation.mock.calls[1]?.[1];
       expect(new Headers(corrected?.headers).get("Idempotency-Key")).not.toBe(originalKey);
       expect(corrected?.body).toBe(
-        JSON.stringify({ fields: { appId: "test-app-id", appSecret: "corrected-secret" } })
+        JSON.stringify({
+          provider: "privy",
+          fields: { appId: "test-app-id", appSecret: "corrected-secret" },
+        })
       );
     }
   );
@@ -460,7 +469,10 @@ describe("rotation recovery", () => {
     expect(replay?.body).toBe(original?.body);
     expect(new Headers(corrected?.headers).get("Idempotency-Key")).not.toBe(originalKey);
     expect(corrected?.body).toBe(
-      JSON.stringify({ fields: { appId: "test-app-id", appSecret: "corrected-secret" } })
+      JSON.stringify({
+        provider: "privy",
+        fields: { appId: "test-app-id", appSecret: "corrected-secret" },
+      })
     );
   });
 
@@ -502,6 +514,7 @@ it("rotates Fireblocks credentials using a generated key reference and the pinne
   await user.click(screen.getByRole("button", { name: "Rotate for 1 connections" }));
   await waitFor(() => expect(onClose).toHaveBeenCalledWith(false));
   expect(JSON.parse(String(rotation.mock.calls[0]?.[1]?.body))).toEqual({
+    provider: "fireblocks",
     fields: {
       apiKey: "next-api-user",
       signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",

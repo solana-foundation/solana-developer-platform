@@ -924,7 +924,7 @@ export class CustodyRuntimeTargets {
       });
     }
 
-    if (!isByokCustodyProvider(row.provider as CustodyProvider)) {
+    if (!isByokCustodyProvider(row.provider)) {
       getLogger().error(
         {
           organizationId: target.organizationId,

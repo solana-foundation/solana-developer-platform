@@ -92,7 +92,10 @@ export async function resolveFireblocksTransferAsset(
   const cacheKey = `${credentials.apiBaseUrl}:${credentials.apiKey}`;
   let entry = catalogues.get(cacheKey);
   if (!entry || entry.expires <= runtime.now()) {
-    if (catalogues.size >= 100) catalogues.delete(catalogues.keys().next().value as string);
+    if (catalogues.size >= 100) {
+      // SAFETY: the size check guarantees a first entry; this synchronous read cannot interleave with another eviction.
+      catalogues.delete(catalogues.keys().next().value as string);
+    }
     const value = fireblocksRequest<unknown>(runtime, {
       ...credentials,
       method: "GET",

@@ -6,6 +6,7 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
+  badRequest,
   conflict,
   forbidden,
   internalError,
@@ -27,6 +28,7 @@ import {
 import {
   type ByokCredentialAuthentication,
   type ByokCredentialFields,
+  type ByokRegistration,
   checkByokCredential,
   credentialDisplayMetadata,
   parseByokCredential,
@@ -150,7 +152,7 @@ export async function getProviderCredentialLifecycle(
 export async function rotateProviderCredential(
   c: Context<{ Bindings: Env }>,
   currentCredentialId: string,
-  fields: ByokCredentialFields,
+  registration: ByokRegistration,
   idempotencyKey: string
 ): Promise<ProviderCredentialRotationResult> {
   const context = createContext(c);
@@ -158,6 +160,10 @@ export async function rotateProviderCredential(
     context,
     await requireChannelScopedCredential(context, currentCredentialId)
   );
+  if (registration.provider !== target.credential.provider) {
+    throw badRequest("Rotation provider does not match the credential");
+  }
+  const { fields } = registration;
   const fingerprint = await rotationFingerprint(context, currentCredentialId, fields);
   const existing = await context.store.findReplayByKey(context.organizationId, idempotencyKey);
   if (existing) {
