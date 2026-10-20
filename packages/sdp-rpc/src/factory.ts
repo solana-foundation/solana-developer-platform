@@ -12,6 +12,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
 import { RpcTimeoutError, SdpRpcError } from "./errors";
 import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
@@ -211,6 +212,7 @@ function servedJsonRpcError(response: unknown) {
  * | ------------------------------------------ | -------- | -------- |
  * | Caller aborted                             | no       | no       |
  * | Never sent (`UnsentRequestError`)          | yes      | yes      |
+ * | `requestAirdrop` got HTTP 429              | no       | yes      |
  * | Read threw a transient error               | yes      | yes      |
  * | `sendTransaction` threw a transient error  | yes      | no       |
  * | Threw anything else                        | no       | no       |
@@ -226,6 +228,7 @@ function servedJsonRpcError(response: unknown) {
  * status) are about this request, not the node, and a cooldown applies to every request on the
  * cluster. An airdrop the node answered with an error did not happen, so the next provider's
  * faucet may try; the refusal is about that faucet (dry, rate-limited), not the node's health.
+ * A faucet that rate-limits with HTTP 429 instead of a served error is the same refusal.
  *
  * @param outcome - The attempt's outcome.
  * @param rpcRequest - The request the attempt sent.
@@ -240,6 +243,13 @@ function judgeAttempt<TResponse>(
   if (!outcome.ok) {
     if (rpcRequest.signal?.aborted) return { cooldown: false, tryNext: false };
     if (outcome.cause instanceof UnsentRequestError) return { cooldown: true, tryNext: true };
+    if (
+      method === "requestAirdrop" &&
+      isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+      outcome.cause.context.statusCode === 429
+    ) {
+      return { cooldown: false, tryNext: true };
+    }
     if (!isTransientRpcError(outcome.cause)) return { cooldown: false, tryNext: false };
     return { cooldown: true, tryNext: !isSend };
   }

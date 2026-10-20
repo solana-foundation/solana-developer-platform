@@ -25,7 +25,11 @@ import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import type { ManagedRpcEnv } from "./types";
 
-type Answer = { kind: "result" } | { kind: "jsonRpcError"; code: number } | { kind: "fetchFailed" };
+type Answer =
+  | { kind: "result" }
+  | { kind: "jsonRpcError"; code: number }
+  | { kind: "httpStatus"; status: number }
+  | { kind: "fetchFailed" };
 
 type GenesisAnswer = { kind: "hash"; genesisHash: string } | { kind: "fetchFailed" };
 
@@ -102,6 +106,13 @@ function devnetJsonRpcError(code: number): Endpoint {
   };
 }
 
+function devnetHttpStatus(status: number): Endpoint {
+  return {
+    genesis: { kind: "hash", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
+    answer: { kind: "httpStatus", status },
+  };
+}
+
 function readRequest(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1]
@@ -134,6 +145,9 @@ function stubEndpoints(endpoints: Readonly<Record<string, Endpoint>>): RpcCall[]
       return respond(request.id, { result: endpoint.genesis.genesisHash });
     }
     if (endpoint.answer.kind === "fetchFailed") throw new TypeError("fetch failed");
+    if (endpoint.answer.kind === "httpStatus") {
+      return new Response("Too Many Requests", { status: endpoint.answer.status });
+    }
     if (endpoint.answer.kind === "jsonRpcError") {
       return respond(request.id, {
         error: { code: endpoint.answer.code, message: "Node cannot serve this request yet" },
@@ -554,38 +568,49 @@ describe("createClusterRpc", () => {
     ]);
   });
 
-  it("fails a refused airdrop over to the next faucet without cooling the endpoint down", async () => {
-    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
-    const refusing = "https://devnet-faucet-refusing.example.test";
-    const funding = "https://devnet-faucet-funding.example.test";
-    configurePool({
-      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: refusing,
-      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: funding,
-    });
-    const refusedCalls = stubEndpoints({
-      [refusing]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR),
-      [funding]: SERVES_DEVNET,
-    });
-    // SAFETY: a sandbox scope resolves the devnet pool, whose nodes serve requestAirdrop; kit types
-    // the pooled client as every cluster's union, mainnet's without the method.
-    const rpc = runInClusterScope(SANDBOX, createClusterRpc) as Rpc<RequestAirdropApi & GetSlotApi>;
+  for (const { refusal, slug, refusingEndpoint } of [
+    {
+      refusal: "a served JSON-RPC error",
+      slug: "json-rpc",
+      refusingEndpoint: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR),
+    },
+    { refusal: "HTTP 429", slug: "http-429", refusingEndpoint: devnetHttpStatus(429) },
+  ]) {
+    it(`fails an airdrop refused with ${refusal} over to the next faucet without cooling the endpoint down`, async () => {
+      mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+      const refusing = `https://devnet-faucet-refusing-${slug}.example.test`;
+      const funding = `https://devnet-faucet-funding-${slug}.example.test`;
+      configurePool({
+        SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: refusing,
+        SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: funding,
+      });
+      const refusedCalls = stubEndpoints({
+        [refusing]: refusingEndpoint,
+        [funding]: SERVES_DEVNET,
+      });
+      // SAFETY: a sandbox scope resolves the devnet pool, whose nodes serve requestAirdrop; kit types
+      // the pooled client as every cluster's union, mainnet's without the method.
+      const rpc = runInClusterScope(SANDBOX, createClusterRpc) as Rpc<
+        RequestAirdropApi & GetSlotApi
+      >;
 
-    assert.equal(
-      await rpc.requestAirdrop(AIRDROP_RECIPIENT, lamports(1_000_000_000n)).send(),
-      BigInt(SLOT)
-    );
-    assert.deepEqual(refusedCalls, [
-      genesisProbe(refusing),
-      airdropRequest(refusing),
-      genesisProbe(funding),
-      airdropRequest(funding),
-    ]);
+      assert.equal(
+        await rpc.requestAirdrop(AIRDROP_RECIPIENT, lamports(1_000_000_000n)).send(),
+        BigInt(SLOT)
+      );
+      assert.deepEqual(refusedCalls, [
+        genesisProbe(refusing),
+        airdropRequest(refusing),
+        genesisProbe(funding),
+        airdropRequest(funding),
+      ]);
 
-    const nextCalls = stubEndpoints({ [refusing]: SERVES_DEVNET, [funding]: SERVES_DEVNET });
-    mock.timers.tick(1);
-    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
-    assert.deepEqual(nextCalls, [slotRead(refusing)]);
-  });
+      const nextCalls = stubEndpoints({ [refusing]: SERVES_DEVNET, [funding]: SERVES_DEVNET });
+      mock.timers.tick(1);
+      assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+      assert.deepEqual(nextCalls, [slotRead(refusing)]);
+    });
+  }
 
   it("cools an endpoint down when it answers a read as unhealthy", async () => {
     mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
