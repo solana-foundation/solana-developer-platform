@@ -489,6 +489,15 @@ export const RAMP_DELIVERY_MISMATCH_REASONS = [
 export type RampDeliveryMismatchReason = (typeof RAMP_DELIVERY_MISMATCH_REASONS)[number];
 
 /**
+ * Holds that record only missing evidence (the RPC found no transaction). The
+ * verifier keeps checking, and a later read that finds the delivery completes
+ * the transfer and clears the hold.
+ */
+export const RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS = [
+  "transaction_not_found",
+] as const satisfies readonly RampDeliveryMismatchReason[];
+
+/**
  * A provider-settled ramp the chain contradicts. SDP holds it in `settling`
  * for review instead of completing it, until the provider reports again.
  */

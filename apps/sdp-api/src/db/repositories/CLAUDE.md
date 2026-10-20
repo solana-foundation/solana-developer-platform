@@ -157,6 +157,9 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   settlement it judged, and the row leaves `listRampTransfersToVerify`. The
   next provider event clears it (`deliveryMismatch: null`). A finalized
   transaction never changes, so re-reading it each minute only spends RPC.
+  A transaction the RPC can't find is only missing evidence
+  (`RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS`): it is held for review but
+  stays in the queue, and the delivery that later lands clears the hold.
 - **Audited steps commit with their audit row.** A quote, a cancel, a settled,
   failed or expired event and a verified delivery write through
   `auditedRampWrite` (`AuditService.logWithin`) or, without a request,

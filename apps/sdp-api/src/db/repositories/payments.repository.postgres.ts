@@ -2,6 +2,7 @@ import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
   type PaymentTransferStatus,
   PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+  RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS,
   RAMP_TRANSFER_TRANSITIONS,
   RAMP_TRANSFER_TYPES,
   type RampTransferType,
@@ -764,11 +765,19 @@ export function createPostgresPaymentsRepository(
            WHERE p.environment = ? AND pt.status = 'settling'
              AND pt.type = ANY(?)
              AND jsonb_typeof(pt.provider_data->'providerSettlement') = 'object'
-             AND jsonb_typeof(pt.provider_data->'deliveryMismatch') IS DISTINCT FROM 'object'
+             AND (
+               jsonb_typeof(pt.provider_data->'deliveryMismatch') IS DISTINCT FROM 'object'
+               OR pt.provider_data->'deliveryMismatch'->>'reason' = ANY(?)
+             )
            ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
            LIMIT ?`
         )
-        .bind(environment, [...RAMP_TRANSFER_TYPES], limit)
+        .bind(
+          environment,
+          [...RAMP_TRANSFER_TYPES],
+          [...RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS],
+          limit
+        )
         .all<PaymentTransferProjectionRow>();
       return rows.results.map(mapTransferRow);
     },

@@ -23,6 +23,7 @@ import { auditedRampWriteSystem } from "@/services/payments/ramp-audit";
 import {
   currentProviderSettlement,
   type ProviderSettlement,
+  readDeliveryMismatch,
 } from "@/services/payments/ramp-provider-settlement";
 import type { Env } from "@/types/env";
 
@@ -179,8 +180,9 @@ function judgeOnrampDelivery(
 }
 
 /**
- * Holds a ramp the chain contradicts, so the verifier stops re-reading a
- * transaction that can never change; a new provider report releases it.
+ * Records why the chain doesn't confirm a ramp's delivery. A contradiction
+ * stops the re-reads, since that transaction can never change; a missing
+ * transaction stays checked. A new provider report releases either hold.
  */
 async function holdDelivery(
   repo: PaymentsRepository,
@@ -249,7 +251,8 @@ async function verifyOnramp(
   }
   const transaction = await chain.getTransaction(transactionSignature);
   if (!transaction) {
-    if (reportedLongAgo(transfer)) {
+    // An RPC behind on history answers null too, so this stays checked.
+    if (reportedLongAgo(transfer) && readDeliveryMismatch(transfer.provider_data) === undefined) {
       await holdDelivery(repo, transfer, settled, { reason: "transaction_not_found" });
     }
     return false;
@@ -278,6 +281,8 @@ async function verifyOnramp(
         destinationAddress: transfer.destination_address,
         amount,
       },
+      // A delivery the RPC couldn't find before has landed.
+      deliveryMismatch: null,
     },
     slot,
     blockTime: blockTimeIso(transaction.blockTime),

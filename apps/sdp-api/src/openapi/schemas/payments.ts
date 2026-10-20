@@ -259,7 +259,7 @@ const rampDeliveryMismatchSchema = z
   .object({
     reason: z.enum(RAMP_DELIVERY_MISMATCH_REASONS).openapi({
       description:
-        "Why the chain contradicts the provider: `provider_report_mismatch` (its report contradicts SDP's record), `transaction_failed`, `predates_transfer` (the transaction landed before the transfer), `not_delivered` (nothing of the quoted asset reached the quoted wallet), `amount_mismatch`, or `transaction_not_found` (no finalized transaction an hour after the report).",
+        "Why the chain contradicts the provider: `provider_report_mismatch` (its report contradicts SDP's record), `transaction_failed`, `predates_transfer` (the transaction landed before the transfer), `not_delivered` (nothing of the quoted asset reached the quoted wallet), `amount_mismatch`, or `transaction_not_found` (no finalized transaction an hour after the report; SDP keeps checking, and a later delivery completes the transfer).",
       example: "amount_mismatch",
     }),
     checkedAt: isoDateTimeSchema.openapi({

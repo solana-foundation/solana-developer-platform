@@ -624,6 +624,39 @@ describe("verifyRampDeliveries", () => {
       });
     });
 
+    it("keeps checking a missing transaction and completes once it lands", async () => {
+      await settleUsdc("xfr_late_rpc", "0.5");
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET updated_at = ? WHERE id = ?")
+        .bind(new Date(Date.now() - 61 * 60 * 1000).toISOString(), "xfr_late_rpc")
+        .run();
+      const updatedAt = async () =>
+        (
+          await getDb(env)
+            .prepare("SELECT updated_at FROM payment_transfers WHERE id = ?")
+            .bind("xfr_late_rpc")
+            .first<{ updated_at: string }>()
+        )?.updated_at;
+      getTransactionMock.mockResolvedValue(null);
+      await sweep();
+      expect((await row("xfr_late_rpc"))?.provider_data.deliveryMismatch).toMatchObject({
+        reason: "transaction_not_found",
+      });
+      const heldAt = await updatedAt();
+
+      // A second miss writes nothing new; the RPC catching up completes the buy.
+      await sweep();
+      expect(await updatedAt()).toBe(heldAt);
+      getTransactionMock.mockResolvedValue(landedToken("500000"));
+      await sweep();
+
+      expect(await row("xfr_late_rpc")).toMatchObject({
+        status: "completed",
+        provider_data: { deliveryMismatch: null },
+      });
+      expect(getTransactionMock).toHaveBeenCalledTimes(3);
+    });
+
     it("holds an off-ramp whose SDP deposit failed onchain", async () => {
       await seedTransfer({
         id: "xfr_failed_deposit",
