@@ -7267,6 +7267,50 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
       });
 
+      it("leaves a dropped authorization in flight when its slot changed before the failure clears it", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(oldSubscriptionPda, null, DEFAULT_RECURRING_CHAIN);
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await update()).status).toBe(409);
+        const authorizationSignature = poolSentSignatures()[3];
+        await leaveUpdateCrashedAt(activated.id, key);
+        await seedSavedSendExpiry(activated.id);
+        delegationsBesideActiveOld(oldSubscriptionPda, null, PAST_SAVED_EXPIRY);
+        // Another run changed the slot between this run's read and its clear.
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => ({
+            ...createRepository(db),
+            clearStepSignature: vi.fn(async () => false),
+          }));
+        onTestFinished(() => repositorySpy.mockRestore());
+
+        const retry = await update();
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: authorizationSignature,
+          error: null,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+      });
+
       it("finishes a stale activation whose subscription landed without sending it again", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const planId = `psp_${crypto.randomUUID()}`;
