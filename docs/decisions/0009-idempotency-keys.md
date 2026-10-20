@@ -128,15 +128,17 @@ Neither resumes or re-sends: a recipient with a transfer row is settled from tha
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Collection saves its signed transaction before
-broadcast. Activation, lifecycle and update save a step's signature only after its send returns,
-so a run that resumes a step an earlier run reached settles it from the step's account first
-(`settleResumedStep`, HOO-2044): the effect at `finalized` means it landed and is not sent again;
-only at `confirmed` means it is landing; a saved signature is looked up with transaction history,
-since recovery runs long after the status cache dropped it. A step the chain cannot settle yet
-(landing, not yet visible, or the read failed) answers 409 and leaves the attempt in flight, never
-failed or reset, so recovery finishes it.
-An activation reset after a failed save can be retried at once, before its earlier send lands;
-that duplicate fails on chain because the account exists, and the next retry finds it.
+broadcast. Activation, lifecycle and update save a step's signature and its last valid block
+height on the attempt row before the send, and clear both only when the send is provably refused.
+A run that resumes a step an earlier run reached reads it through the step reader
+(`readRecurringPaymentStep`) in two RPC calls: the `confirmed` epoch info, then the step's effect
+accounts at `confirmed` from a bank at that slot or later. The step is in one of four states
+(`GLOSSARY.md`): landed when its effect shows, so it is not sent again; unsent when no signature is
+saved, so it is sent; dropped when a signature is saved, the effect is absent and the chain is past
+the saved expiry, so the send can never land and the step fails; pending otherwise. No signature
+status is read: the effect and the expiry decide, which also covers a send that failed on chain.
+A pending step (its send may still land, or the read failed) answers 409 and leaves the attempt in
+flight, never failed or reset, so recovery finishes it.
 
 A replay of activate, cancel, resume or collect finds the attempt its key claimed and returns the
 schedule as it stands now, which may still be mid-transition (the cron finishes it); clients poll

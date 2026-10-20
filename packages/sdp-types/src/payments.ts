@@ -764,6 +764,19 @@ export const PAYMENT_RECURRING_PAYMENT_TRANSITION_RESULTS = [
 ] as const;
 export type PaymentRecurringPaymentTransitionResult =
   (typeof PAYMENT_RECURRING_PAYMENT_TRANSITION_RESULTS)[number];
+/**
+ * What the chain says about one step of a recurring payment attempt (`GLOSSARY.md`, "Step
+ * states"): never broadcast, its effect on chain, its saved send past expiry with no effect, or
+ * a saved send that may still land (or a read that could not tell).
+ */
+export const PAYMENT_RECURRING_PAYMENT_STEP_STATES = [
+  "unsent",
+  "landed",
+  "dropped",
+  "pending",
+] as const;
+export type PaymentRecurringPaymentStepState =
+  (typeof PAYMENT_RECURRING_PAYMENT_STEP_STATES)[number];
 
 export const EDITABLE_RECURRING_PAYMENT_STATUSES = [
   "pending_activation",

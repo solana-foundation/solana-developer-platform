@@ -63,7 +63,13 @@ export interface PaymentRecurringPaymentActivationAttemptRow {
   status: PaymentRecurringPaymentAttemptStatus;
   stage: PaymentRecurringPaymentActivationAttemptStage;
   plan_creation_signature: string | null;
+  authorization_setup_signature: string | null;
   authorization_signature: string | null;
+  /**
+   * The last block height at which this row's latest saved step signature can land, as a u64
+   * decimal string; null when no step signature is saved.
+   */
+  last_valid_block_height: string | null;
   error: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -81,6 +87,11 @@ export interface PaymentRecurringPaymentLifecycleAttemptRow {
   status: PaymentRecurringPaymentAttemptStatus;
   stage: PaymentRecurringPaymentLifecycleAttemptStage;
   signature: string | null;
+  /**
+   * The last block height at which this row's latest saved step signature can land, as a u64
+   * decimal string; null when no step signature is saved.
+   */
+  last_valid_block_height: string | null;
   error: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -107,6 +118,11 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   authorization_setup_signature: string | null;
   authorization_signature: string | null;
   old_cancel_signature: string | null;
+  /**
+   * The last block height at which this row's latest saved step signature can land, as a u64
+   * decimal string; null when no step signature is saved.
+   */
+  last_valid_block_height: string | null;
   changed_fields: string[];
   before_values: Record<string, unknown>;
   after_values: Record<string, unknown>;

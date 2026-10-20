@@ -60,14 +60,17 @@ import {
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
+  delegationCreatedEffect,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
+  planCreatedEffect,
   ResumedStepUnsettledError,
+  readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  requireActionableStep,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
   sendSubscriptionInstructions,
-  settleStepIfResumed,
   subscriptionProgramMetadataUri,
 } from "./shared";
 
@@ -502,6 +505,69 @@ async function confirmActivationSubscription(input: {
   });
 }
 
+/**
+ * Reads the plan step an earlier run reached.
+ *
+ * @param input - The claimed schedule, its attempt, the plan's address and the saved signature.
+ * @returns The plan when the step landed; null when it was never sent, so this run sends it.
+ * @throws AppError TRANSACTION_FAILED when the step is dropped.
+ * @throws ResumedStepUnsettledError when the step is pending.
+ */
+async function readResumedActivationPlan(input: {
+  claimed: PaymentRecurringPaymentRow;
+  attempt: PaymentRecurringPaymentActivationAttemptRow;
+  planPda: Address;
+  planCreationSignature: Signature | null;
+}) {
+  const step = requireActionableStep(
+    await readRecurringPaymentStep({
+      effect: planCreatedEffect(input.planPda),
+      savedSignature: input.planCreationSignature,
+      lastValidBlockHeight: input.attempt.last_valid_block_height,
+      logContext: {
+        recurring_payment_id: input.claimed.id,
+        attempt_id: input.attempt.id,
+        step: "create_plan",
+      },
+    }),
+    ACTIVATION_FAILED_ON_CHAIN
+  );
+  return step.state === "landed" ? subscriptionsProgram.decodePlan(step.accounts[0]) : null;
+}
+
+/**
+ * Reads the subscribe step an earlier run reached.
+ *
+ * @param input - The claimed schedule, its attempt, the delegation's address and the saved
+ *   signature.
+ * @returns The delegation when the step landed; null when it was never sent, so this run sends it.
+ * @throws AppError TRANSACTION_FAILED when the step is dropped.
+ * @throws ResumedStepUnsettledError when the step is pending.
+ */
+async function readResumedActivationSubscription(input: {
+  claimed: PaymentRecurringPaymentRow;
+  attempt: PaymentRecurringPaymentActivationAttemptRow;
+  subscriptionPda: Address;
+  authorizationSignature: Signature | null;
+}) {
+  const step = requireActionableStep(
+    await readRecurringPaymentStep({
+      effect: delegationCreatedEffect(input.subscriptionPda),
+      savedSignature: input.authorizationSignature,
+      lastValidBlockHeight: input.attempt.last_valid_block_height,
+      logContext: {
+        recurring_payment_id: input.claimed.id,
+        attempt_id: input.attempt.id,
+        step: "authorize_subscription",
+      },
+    }),
+    ACTIVATION_FAILED_ON_CHAIN
+  );
+  return step.state === "landed"
+    ? subscriptionsProgram.decodeSubscriptionDelegation(step.accounts[0])
+    : null;
+}
+
 async function prepareSubscriptionAuthorityForActivation(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -751,25 +817,12 @@ export async function activateRecurringPayment(input: {
     });
     // A step's address and signature are recorded before its send, so either one
     // is a send that may have landed, whether that run died or was reset
-    // (HOO-2044); a provably refused send clears its signature. A reset
-    // activation can be retried at once: it is stale only when recovered from
-    // `activating`.
-    let onChainPlan = await settleStepIfResumed(
-      claimed.plan_pda !== null || planCreationSignature !== null,
-      {
-        rpc,
-        read: (commitment) => subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment }),
-        landed: (onChain) => onChain.exists,
-        savedSignature: planCreationSignature,
-        stale: recoveringStaleActivation,
-        failureMessage: ACTIVATION_FAILED_ON_CHAIN,
-        logContext: {
-          recurring_payment_id: claimed.id,
-          attempt_id: attempt.id,
-          step: "create_plan",
-        },
-      }
-    );
+    // (HOO-2044); a provably refused send clears its signature. The step reader
+    // settles it from the chain and the saved expiry, never from the claim's age.
+    let onChainPlan =
+      claimed.plan_pda !== null || planCreationSignature !== null
+        ? await readResumedActivationPlan({ claimed, attempt, planPda, planCreationSignature })
+        : null;
     if (!onChainPlan) {
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
@@ -873,25 +926,15 @@ export async function activateRecurringPayment(input: {
       updatedAt: authorizationUpdatedAt,
     });
 
-    let onChainSubscription = await settleStepIfResumed(
-      claimed.subscription_pda !== null || authorizationSignature !== null,
-      {
-        rpc,
-        read: (commitment) =>
-          subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, {
-            commitment,
-          }),
-        landed: (onChain) => onChain.exists,
-        savedSignature: authorizationSignature,
-        stale: recoveringStaleActivation,
-        failureMessage: ACTIVATION_FAILED_ON_CHAIN,
-        logContext: {
-          recurring_payment_id: claimed.id,
-          attempt_id: attempt.id,
-          step: "authorize_subscription",
-        },
-      }
-    );
+    let onChainSubscription =
+      claimed.subscription_pda !== null || authorizationSignature !== null
+        ? await readResumedActivationSubscription({
+            claimed,
+            attempt,
+            subscriptionPda,
+            authorizationSignature,
+          })
+        : null;
     if (!onChainSubscription) {
       let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,

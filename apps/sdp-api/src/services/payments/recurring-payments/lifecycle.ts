@@ -44,13 +44,15 @@ import {
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
-  isSubscriptionDelegationCanceled,
+  delegationCanceledEffect,
+  delegationResumedEffect,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
+  readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  requireActionableStep,
   sendSubscriptionInstructions,
-  settleResumedStep,
 } from "./shared";
 
 /** The movement each lifecycle operation signs for: cancel is an exit, resume a start. */
@@ -607,28 +609,25 @@ async function runRecurringPaymentLifecycle(
 
     const planPda = assertValidAddress(claimed.plan_pda, "planPda");
     const subscriptionPda = assertValidAddress(claimed.subscription_pda, "subscriptionPda");
-    const rpc = createClusterRpc();
-    const readDelegation = (commitment: "finalized" | "confirmed") =>
-      subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment });
     let onChainSubscription: MaybeAccount<SubscriptionDelegation> | null = null;
     if (resumedAtSubmit) {
-      const step = await settleResumedStep({
-        rpc,
-        read: readDelegation,
-        // Resume clears the expiry, so only an existing delegation shows it landed.
-        landed: (delegation) =>
-          delegation.exists &&
-          isSubscriptionDelegationCanceled(delegation) === (input.operation === "cancel"),
-        savedSignature: signature,
-        stale: true,
-        failureMessage: lifecycleConfirmationMessage(input.operation),
-        logContext: {
-          recurring_payment_id: claimed.id,
-          attempt_id: attempt.id,
-          step: input.operation,
-        },
-      });
-      if (step.kind === "landed") {
+      const step = requireActionableStep(
+        await readRecurringPaymentStep({
+          effect:
+            input.operation === "cancel"
+              ? delegationCanceledEffect(subscriptionPda)
+              : delegationResumedEffect(subscriptionPda),
+          savedSignature: signature,
+          lastValidBlockHeight: attempt.last_valid_block_height,
+          logContext: {
+            recurring_payment_id: claimed.id,
+            attempt_id: attempt.id,
+            step: input.operation,
+          },
+        }),
+        lifecycleConfirmationMessage(input.operation)
+      );
+      if (step.state === "landed") {
         confirmedOnChain = true;
         return await finalizeRecurringPaymentLifecycle({
           env: input.env,
@@ -641,7 +640,7 @@ async function runRecurringPaymentLifecycle(
           signature,
         });
       }
-      onChainSubscription = step.account;
+      onChainSubscription = subscriptionsProgram.decodeSubscriptionDelegation(step.accounts[0]);
     }
 
     // A fresh resume was admitted before its claim. A recovered one is
@@ -691,7 +690,11 @@ async function runRecurringPaymentLifecycle(
             tokenMint,
             onChainSubscription:
               onChainSubscription === null
-                ? await readDelegation("confirmed")
+                ? await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+                    createClusterRpc(),
+                    subscriptionPda,
+                    { commitment: "confirmed" }
+                  )
                 : onChainSubscription,
           });
 

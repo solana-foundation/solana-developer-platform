@@ -1,15 +1,15 @@
+import { decideRecurringPaymentStep } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import {
-  confirmTransaction,
-  getRecentBlockhash,
-  getSignatureStatuses,
-  type SolanaRpc,
-} from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
-import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
+import {
+  assertNever,
+  type PaymentRecurringPaymentStepState,
+  type PreparedPaymentSubscriptionTransaction,
+} from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,
@@ -21,15 +21,19 @@ import {
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
   type Instruction,
-  type MaybeAccount,
+  isSome,
+  type MaybeEncodedAccount,
+  parseBase64RpcAccount,
   partiallySignTransactionMessageWithSigners,
   pipe,
+  removeNullCharacters,
   type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
 } from "@solana/kit";
-import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
+import { decodePlan, decodeSubscriptionDelegation, findPlanPda } from "@solana/subscriptions";
+import { decodeToken } from "@solana-program/token-2022";
 import type { DatabaseExecutor } from "@/db/client";
 import type {
   PaymentRecurringPaymentRow,
@@ -57,6 +61,7 @@ import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
 import {
   isNativePaymentToken,
@@ -351,23 +356,13 @@ export function createSubscriptionStepStore(step: {
   };
 }
 
-/**
- * Whether a subscription delegation is canceled on chain: `cancelSubscription`
- * sets `expiresAtTs` to the end of the current period and `resumeSubscription`
- * clears it to 0.
- */
-export function isSubscriptionDelegationCanceled(
-  delegation: MaybeAccount<SubscriptionDelegation>
-): boolean {
-  return delegation.exists && delegation.data.expiresAtTs !== 0n;
-}
-
-/** What the warning names when a step is found on chain without its saved signature. */
-export interface ResumedStepLogContext {
+/** What a step's logs name. */
+export interface RecurringPaymentStepLogContext {
   recurring_payment_id: string;
   attempt_id: string;
   step:
     | "create_plan"
+    | "authorization_setup"
     | "authorize_subscription"
     | "update_plan"
     | "cancel_old_subscription"
@@ -376,33 +371,36 @@ export interface ResumedStepLogContext {
 }
 
 /**
- * What the chain says about a step an earlier run reached (HOO-2044): `landed`
- * when its effect is on chain at `finalized`, so it is not sent again; `absent`
- * when there is no effect and no saved send, so it is sent (`account` is the
- * `finalized` read, for building it).
+ * A step's effect: the accounts whose state proves the step landed, and the test over them, in
+ * the order of `addresses`. Only the attempt causes its effect, so the effect settles a saved
+ * send without reading the signature's status.
  */
-export type ResumedStep<T> = { kind: "landed" | "absent"; account: T };
+export interface RecurringPaymentStepEffect {
+  addresses: readonly Address[];
+  landed: (accounts: readonly MaybeEncodedAccount[]) => boolean;
+}
 
 /**
- * Settles a step an earlier run reached before this run sends it. A step's
- * signature is saved before its send and cleared only when the send is
- * provably refused, so a saved signature alone cannot say whether that send
- * landed; the step's account can, because only this attempt causes its effect.
- *
- * - The effect at `finalized`: landed.
- * - The effect at `confirmed` only: it is landing, or the `finalized` view lags
- *   (stale attempts too), so this throws for a retry instead of sending.
- * - No effect, no saved signature: absent. A stale attempt's earlier send can no
- *   longer land; a fresh retry's still could, and a duplicate then fails on chain.
- * - No effect, saved signature: looked up with transaction history, since
- *   recovery runs long after the status cache dropped it. Failed, or unknown on a
- *   stale attempt (its blockhash expired), fails the step; succeeded but not yet
- *   visible throws for a retry; unknown on a fresh retry waits for it.
+ * A step as the chain shows it at `confirmed`. A pending step carries no accounts, since nothing
+ * acts on it; the others carry the effect accounts, for the caller to decode what its next
+ * transaction needs.
  */
+export type RecurringPaymentStepRead =
+  | { state: "pending" }
+  | {
+      state: Exclude<PaymentRecurringPaymentStepState, "pending">;
+      accounts: readonly MaybeEncodedAccount[];
+    };
+
+/** A resumed step the flow acts on now: it landed, or it was never sent. */
+export interface ActionableRecurringPaymentStep {
+  state: "landed" | "unsent";
+  accounts: readonly MaybeEncodedAccount[];
+}
+
 /**
- * The chain cannot settle a resumed step yet: it is landing but not final, its
- * saved send succeeded but is not visible, or the read itself failed. The step
- * may be on chain, so the attempt stays in flight for the next run instead of
+ * The chain cannot settle a resumed step yet: its saved send may still land, or the read itself
+ * failed. The step may be on chain, so the attempt stays in flight for the next run instead of
  * failing or resetting; the request answers 409.
  */
 export class ResumedStepUnsettledError extends AppError {
@@ -412,97 +410,269 @@ export class ResumedStepUnsettledError extends AppError {
   }
 }
 
-export async function settleResumedStep<T extends { exists: boolean }>(input: {
-  rpc: SolanaRpc;
-  read: (commitment: "finalized" | "confirmed") => Promise<T>;
-  /** Whether the account shows the step's effect. */
-  landed: (account: T) => boolean;
-  /** The signature an earlier run saved for this step, if it got that far. */
+/**
+ * Reads a step an earlier run reached, in two RPC calls on the cluster pool: the `confirmed`
+ * epoch info (slot S and block height c), then every effect account in one `getMultipleAccounts`
+ * at `confirmed` from a bank at slot S or later, so the accounts include every block up to c.
+ * The step is landed when the effect shows; otherwise unsent with no saved signature, dropped
+ * once c is past the saved send's expiry, and pending before it. A failed read, an answer from a
+ * bank below S, or an effect that does not decode is pending. A saved signature with no stored
+ * expiry is pending and logged: it may be a live transaction, so it is never sent again.
+ *
+ * @param input - The step to read.
+ * @param input.effect - The accounts that show the step's effect, and the test over them.
+ * @param input.savedSignature - The signature saved in the step's slot, or null when none was.
+ * @param input.lastValidBlockHeight - The attempt row's stored expiry (a u64 decimal string),
+ *   which belongs to its latest saved step; earlier steps landed before the next one saved.
+ * @param input.logContext - What the step's logs name.
+ * @returns The step's state, with the effect accounts unless it is pending.
+ */
+export async function readRecurringPaymentStep(input: {
+  effect: RecurringPaymentStepEffect;
   savedSignature: Signature | null;
-  /** The attempt is past the operation's stale window, so any earlier send's blockhash expired. */
-  stale: boolean;
-  /** The TRANSACTION_FAILED message when the step's saved send failed. */
-  failureMessage: string;
-  logContext: ResumedStepLogContext;
-}): Promise<ResumedStep<T>> {
+  lastValidBlockHeight: string | null;
+  logContext: RecurringPaymentStepLogContext;
+}): Promise<RecurringPaymentStepRead> {
+  const rpc = createClusterRpc();
+  let observed: Awaited<ReturnType<typeof observeRecurringPaymentStep>>;
   try {
-    return await readResumedStep(input);
+    observed = await observeRecurringPaymentStep(rpc, input.effect);
   } catch (error) {
-    if (
-      error instanceof ResumedStepUnsettledError ||
-      (error instanceof AppError && error.code === "TRANSACTION_FAILED")
-    ) {
-      throw error;
-    }
     getLogger().warn(
       { ...input.logContext, err: error },
       "Recurring payment step could not be read on chain"
     );
-    throw new ResumedStepUnsettledError("Recurring payment step could not be read on chain; retry");
-  }
-}
-
-async function readResumedStep<T extends { exists: boolean }>(
-  input: Parameters<typeof settleResumedStep<T>>[0]
-): Promise<ResumedStep<T>> {
-  const finalized = await input.read("finalized");
-  if (input.landed(finalized)) {
-    if (input.savedSignature === null) {
-      getLogger().warn(
-        input.logContext,
-        "Recurring payment step found on chain without its saved signature"
-      );
-    }
-    return { kind: "landed", account: finalized };
-  }
-  if (input.landed(await input.read("confirmed"))) {
-    throw stepStillLanding();
-  }
-  if (input.savedSignature === null) {
-    return { kind: "absent", account: finalized };
+    return { state: "pending" };
   }
 
-  const [status] = await getSignatureStatuses(input.rpc, [input.savedSignature], {
-    searchTransactionHistory: true,
+  const state = decideRecurringPaymentStep({
+    landed: observed.landed,
+    saved:
+      input.savedSignature === null
+        ? null
+        : {
+            lastValidBlockHeight:
+              input.lastValidBlockHeight === null ? null : BigInt(input.lastValidBlockHeight),
+          },
+    blockHeight: observed.blockHeight,
   });
-  if (status === null || status === undefined) {
-    if (input.stale) {
-      throw transactionFailed(input.failureMessage);
-    }
-    const confirmation = await confirmTransaction(input.rpc, input.savedSignature, {
-      commitment: "confirmed",
+  if (state === "landed" && input.savedSignature === null) {
+    getLogger().warn(
+      input.logContext,
+      "Recurring payment step found on chain without its saved signature"
+    );
+  }
+  if (state === "pending" && input.savedSignature !== null && input.lastValidBlockHeight === null) {
+    logEvent("warn", {
+      event: "sdp_api_recurring_payment_step_expiry_missing",
+      ...input.logContext,
+      signature: input.savedSignature,
     });
-    if (confirmation.err) {
-      throw transactionFailed(input.failureMessage);
-    }
-    throw stepStillLanding();
   }
-  if (status.err) {
-    throw transactionFailed(input.failureMessage);
-  }
-  throw stepStillLanding();
+  return state === "pending" ? { state } : { state, accounts: observed.accounts };
 }
 
 /**
- * {@link settleResumedStep} for a step only some runs resume: null when this run
- * starts the step, or when the chain says to send it; the account when it landed.
+ * The block height and effect accounts one step read sees.
+ *
+ * @param rpc - The cluster pool.
+ * @param effect - The step's effect.
+ * @returns The `confirmed` block height, the effect accounts and whether they show the effect.
+ * @throws When a read fails, the accounts come from a bank below the epoch read's slot, the
+ *   answer lists a different number of accounts, or an account does not decode.
  */
-export async function settleStepIfResumed<T extends { exists: boolean }>(
-  resumed: boolean,
-  input: Parameters<typeof settleResumedStep<T>>[0]
-): Promise<T | null> {
-  if (!resumed) {
-    return null;
+async function observeRecurringPaymentStep(
+  rpc: SolanaRpc,
+  effect: RecurringPaymentStepEffect
+): Promise<{ blockHeight: bigint; accounts: MaybeEncodedAccount[]; landed: boolean }> {
+  const epochInfo = await rpc.getEpochInfo({ commitment: "confirmed" }).send();
+  const response = await rpc
+    .getMultipleAccounts(effect.addresses, {
+      commitment: "confirmed",
+      minContextSlot: epochInfo.absoluteSlot,
+      encoding: "base64",
+    })
+    .send();
+  // The pool does not check the answering bank's slot, so it is checked here.
+  if (response.context.slot < epochInfo.absoluteSlot) {
+    throw new Error(
+      `getMultipleAccounts answered from slot ${response.context.slot}, below ${epochInfo.absoluteSlot}`
+    );
   }
-  const step = await settleResumedStep(input);
-  return step.kind === "landed" ? step.account : null;
+  if (response.value.length !== effect.addresses.length) {
+    throw new Error(
+      `getMultipleAccounts returned ${response.value.length} accounts for ${effect.addresses.length} addresses`
+    );
+  }
+  const accounts = effect.addresses.map((address, index) =>
+    parseBase64RpcAccount(address, response.value[index])
+  );
+  return { blockHeight: epochInfo.blockHeight, accounts, landed: effect.landed(accounts) };
 }
 
-/** A step that landed, or may have, but is not final or not visible yet: retry it. */
-function stepStillLanding(): ResumedStepUnsettledError {
-  return new ResumedStepUnsettledError(
-    "Recurring payment step has landed but is not final on chain yet; retry"
-  );
+/**
+ * What today's flows do with a resumed step: landed and unsent go back to the flow, dropped
+ * fails the step as a definite on-chain failure, and pending keeps the attempt in flight.
+ *
+ * @param step - The step as read.
+ * @param failureMessage - The TRANSACTION_FAILED message for a dropped step.
+ * @returns The step, when it landed or was never sent.
+ * @throws AppError TRANSACTION_FAILED with `failureMessage` when the step is dropped.
+ * @throws ResumedStepUnsettledError when the step is pending.
+ */
+export function requireActionableStep(
+  step: RecurringPaymentStepRead,
+  failureMessage: string
+): ActionableRecurringPaymentStep {
+  switch (step.state) {
+    case "landed":
+    case "unsent":
+      return { state: step.state, accounts: step.accounts };
+    case "dropped":
+      throw transactionFailed(failureMessage);
+    case "pending":
+      throw new ResumedStepUnsettledError(
+        "Recurring payment step is not settled on chain yet; retry"
+      );
+    default:
+      return assertNever(step);
+  }
+}
+
+/**
+ * Plan creation's effect: the plan account exists. It is unique to the attempt because the
+ * program plan id is fresh per attempt.
+ *
+ * @param planPda - The plan's address.
+ * @returns The effect.
+ */
+export function planCreatedEffect(planPda: Address): RecurringPaymentStepEffect {
+  return { addresses: [planPda], landed: ([plan]) => plan.exists };
+}
+
+/**
+ * Subscribe's effect: the subscription delegation exists.
+ *
+ * @param subscriptionPda - The delegation's address.
+ * @returns The effect.
+ */
+export function delegationCreatedEffect(subscriptionPda: Address): RecurringPaymentStepEffect {
+  return { addresses: [subscriptionPda], landed: ([delegation]) => delegation.exists };
+}
+
+/**
+ * Cancel's effect: the delegation carries an expiry (`cancelSubscription` sets `expiresAtTs` to
+ * the end of the current period), or it is closed, which only revoking it after an earlier
+ * landed cancel does.
+ *
+ * @param subscriptionPda - The delegation's address.
+ * @returns The effect.
+ */
+export function delegationCanceledEffect(subscriptionPda: Address): RecurringPaymentStepEffect {
+  return {
+    addresses: [subscriptionPda],
+    landed: ([delegation]) =>
+      !delegation.exists || decodeSubscriptionDelegation(delegation).data.expiresAtTs !== 0n,
+  };
+}
+
+/**
+ * Resume's effect: the delegation exists with its expiry cleared to 0.
+ *
+ * @param subscriptionPda - The delegation's address.
+ * @returns The effect.
+ */
+export function delegationResumedEffect(subscriptionPda: Address): RecurringPaymentStepEffect {
+  return {
+    addresses: [subscriptionPda],
+    landed: ([delegation]) =>
+      delegation.exists && decodeSubscriptionDelegation(delegation).data.expiresAtTs === 0n,
+  };
+}
+
+/**
+ * Update plan's effect, a three-way compare of the plan's `createdAt` and metadata URI: the
+ * target is landed; the pre-image is not landed, and a resend is safe because the program's
+ * `expected_*` arguments refuse a plan that changed; anything else is not landed and logged as
+ * a plan changed outside this attempt. `endTs` and pullers have no stored pre-image, and only
+ * SDP's key can change them.
+ *
+ * @param input - The plan and the values to compare.
+ * @param input.planPda - The plan's address.
+ * @param input.preImage - The plan as the claimed schedule recorded it.
+ * @param input.preImage.createdAt - The schedule's `plan_created_at`, or null when unrecorded.
+ * @param input.preImage.metadataUri - The schedule's metadata URI as the program stores it.
+ * @param input.targetMetadataUri - The metadata URI this attempt writes, as the program stores it.
+ * @param input.logContext - What the mismatch log names.
+ * @returns The effect.
+ */
+export function planMetadataUpdatedEffect(input: {
+  planPda: Address;
+  preImage: { createdAt: string | null; metadataUri: string };
+  targetMetadataUri: string;
+  logContext: RecurringPaymentStepLogContext;
+}): RecurringPaymentStepEffect {
+  return {
+    addresses: [input.planPda],
+    landed: ([account]) => {
+      const plan = account.exists ? decodePlan(account).data.data : null;
+      if (plan !== null && plan.terms.createdAt.toString() === input.preImage.createdAt) {
+        // The on-chain field is fixed at 128 bytes, padded with NULs.
+        const metadataUri = removeNullCharacters(plan.metadataUri);
+        if (metadataUri === input.targetMetadataUri) return true;
+        if (metadataUri === input.preImage.metadataUri) return false;
+      }
+      logEvent("error", {
+        event: "sdp_api_recurring_payment_plan_changed_outside_attempt",
+        ...input.logContext,
+        plan_pda: input.planPda,
+        plan_exists: plan !== null,
+        observed_created_at: plan === null ? null : plan.terms.createdAt.toString(),
+        expected_created_at: input.preImage.createdAt,
+      });
+      return false;
+    },
+  };
+}
+
+/**
+ * Authorization setup's effect: the subscription authority exists and the source token account,
+ * owned by the mint's token program for this mint and owner, delegates to it.
+ *
+ * @param input - The setup's accounts.
+ * @param input.subscriptionAuthorityAddress - The subscription authority PDA for the owner and mint.
+ * @param input.sourceTokenAccount - The owner's token account for the mint.
+ * @param input.owner - The source wallet.
+ * @param input.mint - The plan's mint.
+ * @param input.tokenProgram - The mint's token program.
+ * @returns The effect.
+ */
+export function authorizationSetupEffect(input: {
+  subscriptionAuthorityAddress: Address;
+  sourceTokenAccount: Address;
+  owner: Address;
+  mint: Address;
+  tokenProgram: Address;
+}): RecurringPaymentStepEffect {
+  return {
+    addresses: [input.subscriptionAuthorityAddress, input.sourceTokenAccount],
+    landed: ([authority, tokenAccount]) => {
+      if (
+        !authority.exists ||
+        !tokenAccount.exists ||
+        tokenAccount.programAddress !== input.tokenProgram
+      ) {
+        return false;
+      }
+      const token = decodeToken(tokenAccount).data;
+      return (
+        token.mint === input.mint &&
+        token.owner === input.owner &&
+        isSome(token.delegate) &&
+        token.delegate.value === input.subscriptionAuthorityAddress
+      );
+    },
+  };
 }
 
 export async function confirmSubscriptionSignature(
