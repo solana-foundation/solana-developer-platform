@@ -132,12 +132,16 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   observation revives.
 - **Every ramp status write goes through it** (HOO-2087): settlement, cancel,
   MoonPay quote fill and failure, MoonPay failed-buy recovery, and the off-ramp
-  deposit claim and outcome, plus chain-verified delivery and the status
-  sweep's abandoned-checkout expiry (`checkout_abandoned`).
+  deposit claim, outcome and release, plus chain-verified delivery and the
+  status sweep's abandoned-checkout expiry (`checkout_abandoned`).
   `updateTransfer` with a `status` matches no ramp row. The deposit claim adds
   its deposit-instruction preconditions to the same compare-and-swap inside
   the repository, and a landed deposit moves to `settling`, never `confirmed`
-  (`OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS`). The inventory is in
+  (`OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS`). A deposit that fails before SDP
+  records signed bytes is released (`offramp_deposit_released`, back to
+  `awaiting_payment`) only while the row holds no signed bytes, signature or
+  submission start, and the release clears the claim's idempotency key. The
+  inventory is in
   `../../services/payments/ramp-transfer-transitions.test.ts`; it counts
   guarded writes per file, so a new call fails it even in a listed file.
 - **Add a transition to the table, not a source set to a call site.** Mirror
@@ -147,6 +151,12 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   provider observation and row signature in the same guarded write. Quoted
   values stay fixed; provider amounts and addresses live in `provider_data`.
   Every new provider follows `docs/contributing/ramp-provider-safety.md`.
+- **A delivery the chain contradicts is held, not retried.** When a finalized
+  transaction (or the provider's own report) disproves the settlement, the
+  verifier writes `provider_data.deliveryMismatch` once, guarded on the
+  settlement it judged, and the row leaves `listRampTransfersToVerify`. The
+  next provider event clears it (`deliveryMismatch: null`). A finalized
+  transaction never changes, so re-reading it each minute only spends RPC.
 
 ## Ramps: status pull queue
 
