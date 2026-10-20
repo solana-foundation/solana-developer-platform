@@ -31,6 +31,7 @@ import type {
   GetLatestPaymentRecurringPaymentActivationAttemptInput,
   GetLatestPaymentRecurringPaymentLifecycleAttemptInput,
   GetLatestPaymentRecurringPaymentUpdateAttemptInput,
+  GetPaymentRecurringPaymentStepSignatureInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
   PaymentRecurringPaymentActivationAttemptRow,
@@ -168,6 +169,10 @@ const updateAttemptRowSchema = z.object({
   previous_activator: z
     .object({ apiKeyId: z.string().nullable(), userId: z.string().nullable() })
     .nullable(),
+});
+const stepSignatureRowSchema = z.object({
+  signature: z.string().nullable(),
+  last_valid_block_height: z.string().nullable(),
 });
 const updateEventRowSchema = z.object({
   id: z.string(),
@@ -950,7 +955,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+              AND (?::boolean = false OR status = ?)`
         )
         .bind(
           input.status === undefined ? null : input.status,
@@ -965,7 +971,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.attemptId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.expectedStatus !== undefined,
+          input.expectedStatus === undefined ? null : input.expectedStatus
         )
         .run();
 
@@ -1083,6 +1091,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
+              AND (?::boolean = false OR status = ?)
           RETURNING *`
         )
         .bind(
@@ -1098,7 +1107,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.attemptId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.expectedStatus !== undefined,
+          input.expectedStatus === undefined ? null : input.expectedStatus
         )
         .first<Record<string, unknown>>();
 
@@ -1289,6 +1300,29 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .run();
       return rowsAffected > 0;
+    },
+
+    async getStepSignature(input: GetPaymentRecurringPaymentStepSignatureInput) {
+      const table = STEP_SIGNATURE_TABLES[input.slot.row];
+      const { column } = input.slot;
+      // Table and column come from the typed slot, never from caller text.
+      const row = await db
+        .prepare(
+          `SELECT ${column} AS signature, last_valid_block_height
+             FROM ${table}
+            WHERE id = ?
+              AND recurring_payment_id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = ANY(?::text[])`
+        )
+        .bind(input.id, input.recurringPaymentId, input.organizationId, input.projectId, [
+          ...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+        ])
+        .first<Record<string, unknown>>();
+      if (!row) return null;
+      const saved = stepSignatureRowSchema.parse(row);
+      return { signature: saved.signature, lastValidBlockHeight: saved.last_valid_block_height };
     },
 
     async updateUpdateAttempt(input: UpdatePaymentRecurringPaymentUpdateAttemptInput) {

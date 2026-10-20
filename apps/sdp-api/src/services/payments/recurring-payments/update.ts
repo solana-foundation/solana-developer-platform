@@ -8,7 +8,6 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { MovementId } from "@sdp/types/movements";
 import {
   assertNever,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
@@ -25,8 +24,6 @@ import {
 import {
   type Address,
   createNoopSigner,
-  type Instruction,
-  type MaybeEncodedAccount,
   type Signature,
   type TransactionSigner,
 } from "@solana/kit";
@@ -54,14 +51,7 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import {
-  AppError,
-  badRequest,
-  conflict,
-  internalError,
-  notFound,
-  transactionFailed,
-} from "@/lib/errors";
+import { badRequest, conflict, internalError, notFound, transactionFailed } from "@/lib/errors";
 import { normalizeDecimalString } from "@/lib/idempotency";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -87,25 +77,26 @@ import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   authorizationSetupEffect,
-  confirmSubscriptionSignature,
-  createSubscriptionStepStore,
   delegationCanceledEffect,
   delegationCreatedEffect,
   derivePlanAddresses,
+  insideRecurringPaymentStepPhase,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   planCreatedEffect,
   planMetadataUpdatedEffect,
   type RecurringPaymentPlanMetadataPreImage,
-  type RecurringPaymentStepEffect,
+  RecurringPaymentStepFailedError,
   type RecurringPaymentStepLogContext,
+  type RecurringPaymentStepPhase,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
+  readSavedRecurringPaymentStep,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
-  sendSubscriptionInstructions,
+  sendRecurringPaymentStep,
   subscriptionProgramMetadataUri,
 } from "./shared";
 
@@ -929,84 +920,6 @@ type UpdateAttemptStepSlot = Extract<RecurringPaymentStepSignatureSlot, { row: "
 type UpdateAttemptStepColumn = UpdateAttemptStepSlot["column"];
 
 /**
- * An update step that cannot land, raised inside the steps that unwind (a metadata update through
- * its plan update; a replacement through its authorization): refused at preflight, dropped past
- * its expiry, or failed with nothing in flight. The update fails back to `active` on the terms
- * and mandate it had, in one transaction that also clears `clear`'s saved signature, only while
- * its slot still holds it. The request answers with `failure`.
- */
-class RecurringPaymentUpdateStepFailedError extends AppError {
-  readonly failure: Error;
-  readonly clear: { slot: UpdateAttemptStepSlot; signature: Signature } | null;
-
-  /**
-   * @param input - The failure and the saved signature to clear.
-   * @param input.failure - The error the request answers with.
-   * @param input.clear - A dropped step's slot and saved signature, or null when nothing is saved.
-   */
-  constructor(input: {
-    failure: Error;
-    clear: { slot: UpdateAttemptStepSlot; signature: Signature } | null;
-  }) {
-    super("TRANSACTION_FAILED", recurringPaymentErrorMessage(input.failure));
-    // biome-ignore lint/security/noSecrets: the error class name, not a secret.
-    this.name = "RecurringPaymentUpdateStepFailedError";
-    this.failure = input.failure;
-    this.clear = input.clear;
-  }
-}
-
-/**
- * One run's unwinding steps. `unreadSavedStep` is the latest step an earlier run saved a signature
- * for, until this run reads it landed: its send may still land, so until then a failure leaves
- * the attempt in flight instead of failing it. Only the latest saved step can be in flight; every
- * earlier one landed before it saved.
- */
-interface UpdatePhase {
-  unreadSavedStep: UpdateAttemptStepColumn | null;
-}
-
-/**
- * Runs an update's unwinding steps. Inside them any error but a pending step becomes
- * `RecurringPaymentUpdateStepFailedError`, once no saved step is unread: the step runner settles
- * every send before it returns or throws, so nothing this run sent can still land. Every step
- * failure, raised or converted, passes `beforeUnwind` first, which may refuse the unwind.
- *
- * @param phase - The run's unwinding steps.
- * @param run - The steps.
- * @param beforeUnwind - The chain check an unwind must pass, or null when it needs none.
- * @returns What the steps return.
- * @throws ResumedStepUnsettledError when a step is pending, or `beforeUnwind` refuses the unwind.
- * @throws RecurringPaymentUpdateStepFailedError when a step fails with nothing in flight.
- */
-async function insideUpdatePhase<T>(
-  phase: UpdatePhase,
-  run: () => Promise<T>,
-  beforeUnwind: ((stepFailure: RecurringPaymentUpdateStepFailedError) => Promise<void>) | null
-): Promise<T> {
-  let stepFailure: RecurringPaymentUpdateStepFailedError;
-  try {
-    return await run();
-  } catch (error) {
-    if (
-      !(error instanceof Error) ||
-      error instanceof ResumedStepUnsettledError ||
-      (phase.unreadSavedStep !== null && !(error instanceof RecurringPaymentUpdateStepFailedError))
-    ) {
-      throw error;
-    }
-    stepFailure =
-      error instanceof RecurringPaymentUpdateStepFailedError
-        ? error
-        : new RecurringPaymentUpdateStepFailedError({ failure: error, clear: null });
-  }
-  if (beforeUnwind !== null) {
-    await beforeUnwind(stepFailure);
-  }
-  throw stepFailure;
-}
-
-/**
  * Refuses to unwind a replacement whose new delegation is on chain. A replacement never returns
  * to `active` on the old mandate while the new delegation exists: both would be live. The new
  * delegation is derived from the attempt's replacement plan, so the check holds however far this
@@ -1028,7 +941,7 @@ async function assertReplacementDelegationAbsent(input: {
   organizationId: string;
   projectId: string;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  stepFailure: RecurringPaymentUpdateStepFailedError;
+  stepFailure: RecurringPaymentStepFailedError;
 }): Promise<void> {
   if (input.attempt.new_plan_id === null) {
     return;
@@ -1080,313 +993,6 @@ async function assertReplacementDelegationAbsent(input: {
 }
 
 /**
- * Reads an unwinding step an earlier run saved a signature for, and acts on it: landed goes on
- * (and settles the phase when it was the unread step), pending keeps the attempt in flight, and
- * dropped fails the update and clears the saved signature with it. A saved step never reads as
- * unsent; the reader's unsent arm is kept in flight with pending.
- *
- * @param input - The saved step.
- * @param input.phase - The run's unwinding steps.
- * @param input.slot - The step's signature slot.
- * @param input.signature - The signature saved in the slot.
- * @param input.lastValidBlockHeight - The attempt row's stored expiry.
- * @param input.effect - The step's effect.
- * @param input.failureMessage - The TRANSACTION_FAILED message a dropped step answers with.
- * @param input.logContext - What the step's logs name.
- * @returns The landed step's effect accounts.
- * @throws ResumedStepUnsettledError when the step is pending.
- * @throws RecurringPaymentUpdateStepFailedError when the step is dropped.
- */
-async function readSavedUnwindStep(input: {
-  phase: UpdatePhase;
-  slot: UpdateAttemptStepSlot;
-  signature: Signature;
-  lastValidBlockHeight: string | null;
-  effect: RecurringPaymentStepEffect;
-  failureMessage: string;
-  logContext: RecurringPaymentStepLogContext;
-}): Promise<readonly MaybeEncodedAccount[]> {
-  const step = await readRecurringPaymentStep({
-    effect: input.effect,
-    savedSignature: input.signature,
-    lastValidBlockHeight: input.lastValidBlockHeight,
-    logContext: input.logContext,
-  });
-  switch (step.state) {
-    case "landed":
-      if (input.phase.unreadSavedStep === input.slot.column) {
-        input.phase.unreadSavedStep = null;
-      }
-      return step.accounts;
-    case "unsent":
-    case "pending":
-      throw new ResumedStepUnsettledError();
-    case "dropped":
-      throw new RecurringPaymentUpdateStepFailedError({
-        failure: transactionFailed(input.failureMessage),
-        clear: { slot: input.slot, signature: input.signature },
-      });
-    default:
-      return assertNever(step);
-  }
-}
-
-/** A step send as settled: sent and confirmed now, or found landed after its send failed. */
-type SettledUpdateStep =
-  | {
-      state: "sent";
-      signature: Signature;
-      /** The slot the send confirmed in; reads after it ask for a bank at least this new. */
-      confirmedSlot: bigint;
-    }
-  | {
-      state: "landed";
-      /** Null when the send was refused as already done, which cleared its slot. */
-      signature: Signature | null;
-      accounts: readonly MaybeEncodedAccount[];
-    };
-
-/**
- * What a step that cannot land does to its update: `unwind` fails it back to `active`; the old
- * subscription's cancel, past the unwinding steps, leaves it in flight to send again.
- */
-type UpdateStepFailureOutcome =
-  | { outcome: "unwind" }
-  | { outcome: "stay_in_flight"; oldSubscriptionPda: Address };
-
-interface UpdateStepSend {
-  env: Env;
-  organizationId: string;
-  projectId: string;
-  recurringPaymentId: string;
-  attemptId: string;
-  movement: MovementId;
-  sourceWallet: CustodyWallet;
-  sourceSigner: TransactionSigner;
-  feePayer?: Address;
-  instructions: Instruction[];
-  slot: UpdateAttemptStepSlot;
-  effect: RecurringPaymentStepEffect;
-  /**
-   * The program error a resend raises when an earlier send of this step may already have landed,
-   * and what a re-read that does not show the effect means: `pending` when the error proves the
-   * effect exists (the reading endpoint lags the simulating one), `failed` when the error also
-   * fires without it.
-   */
-  alreadyDone: {
-    code: subscriptionsProgram.SubscriptionsError;
-    notLanded: "pending" | "failed";
-  } | null;
-  onFailure: UpdateStepFailureOutcome;
-  failureMessage: string;
-  logContext: RecurringPaymentStepLogContext;
-}
-
-/**
- * Sends one update step and settles it before returning, so no caller acts on a send in flight.
- * A send confirmed now is sent. A preflight refusal cleared the step's slot and nothing left; it
- * fails the step, unless the program refused it as already done, which re-reads the effect. Any
- * other error reloads the step's slot: an empty one means nothing was saved, so nothing left and
- * the step fails; a saved signature (an ambiguous send, a confirmation timeout, an on-chain error
- * at `processed`) reads the step: landed goes on, pending keeps the attempt in flight, and dropped
- * fails the step. The read costs two RPC calls, only on these error paths.
- *
- * @param input - The step's send.
- * @returns The step as settled.
- * @throws ResumedStepUnsettledError when the step is pending.
- * @throws RecurringPaymentUpdateStepFailedError when an unwinding step fails.
- * @throws The send's error when the old subscription's cancel fails.
- */
-async function sendUpdateStep(input: UpdateStepSend): Promise<SettledUpdateStep> {
-  try {
-    const signature = await sendSubscriptionInstructions({
-      movement: input.movement,
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWallet: input.sourceWallet,
-      sourceSigner: input.sourceSigner,
-      instructions: input.instructions,
-      feePayer: input.feePayer,
-      submissionStore: createSubscriptionStepStore({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        slot: input.slot,
-        recurringPaymentId: input.recurringPaymentId,
-        attemptId: input.attemptId,
-      }),
-    });
-    const confirmedSlot = await confirmSubscriptionSignature(signature, input.failureMessage);
-    return { state: "sent", signature, confirmedSlot };
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    if (error instanceof SponsoredSendRefusedError) {
-      if (
-        input.alreadyDone === null ||
-        !subscriptionsProgram.isSubscriptionsError(
-          error.refusal,
-          { instructions: input.instructions },
-          input.alreadyDone.code
-        )
-      ) {
-        return failUpdateStep(input, error, null);
-      }
-      return settleAlreadyDoneRefusal(input, input.alreadyDone.notLanded, error);
-    }
-    const saved = await reloadSavedUpdateStep(input);
-    // The store saves before the send, so an empty slot proves this run broadcast nothing.
-    if (saved.signature === null) {
-      return failUpdateStep(input, error, null);
-    }
-    return settleFailedUpdateStep(input, {
-      signature: saved.signature,
-      lastValidBlockHeight: saved.lastValidBlockHeight,
-    });
-  }
-}
-
-/**
- * The step's slot as the store left it after a failed send: the local attempt row predates the
- * save. A failed read cannot tell whether the send left, so it is pending.
- *
- * @param input - The step's send.
- * @returns The saved signature, or null when none is saved, and the row's stored expiry.
- * @throws ResumedStepUnsettledError when the attempt cannot be read, or is no longer this run's
- *   in-flight attempt.
- */
-async function reloadSavedUpdateStep(
-  input: UpdateStepSend
-): Promise<{ signature: Signature | null; lastValidBlockHeight: string | null }> {
-  let latest: PaymentRecurringPaymentUpdateAttemptRow | null;
-  try {
-    latest = await createPaymentRecurringPaymentsRepository(
-      input.env,
-      createTenantScope(input)
-    ).getLatestUpdateAttempt({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      recurringPaymentId: input.recurringPaymentId,
-      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
-    });
-  } catch (readError) {
-    logEvent("warn", {
-      event: "sdp_api_recurring_payment_step_reload_failed",
-      ...input.logContext,
-      ...describeError(readError),
-    });
-    throw new ResumedStepUnsettledError();
-  }
-  if (latest === null || latest.id !== input.attemptId) {
-    throw new ResumedStepUnsettledError();
-  }
-  return {
-    signature: parseNullableStoredSignature(latest[input.slot.column]),
-    lastValidBlockHeight: latest.last_valid_block_height,
-  };
-}
-
-/**
- * Reads a step whose resend the program refused as already done; the refusal cleared its slot,
- * so the read carries no saved signature. Landed goes on with no signature. Not landed is
- * pending or failed as the refusal's `notLanded` says: pending keeps the attempt in flight, and
- * the next run finds the slot empty and sends again.
- *
- * @param input - The step's send.
- * @param notLanded - What a read that does not show the effect means.
- * @param refusal - The refusal.
- * @returns The landed step.
- * @throws ResumedStepUnsettledError when the read is pending, or not landed and `notLanded` is
- *   `pending`.
- * @throws RecurringPaymentUpdateStepFailedError when an unwinding step is not landed and
- *   `notLanded` is `failed`.
- * @throws `refusal` when the old subscription's cancel is not landed and `notLanded` is `failed`.
- */
-async function settleAlreadyDoneRefusal(
-  input: UpdateStepSend,
-  notLanded: "pending" | "failed",
-  refusal: SponsoredSendRefusedError
-): Promise<SettledUpdateStep> {
-  const step = await readRecurringPaymentStep({
-    effect: input.effect,
-    savedSignature: null,
-    lastValidBlockHeight: null,
-    logContext: input.logContext,
-  });
-  switch (step.state) {
-    case "landed":
-      return { state: "landed", signature: null, accounts: step.accounts };
-    case "pending":
-      throw new ResumedStepUnsettledError();
-    case "unsent":
-    case "dropped":
-      switch (notLanded) {
-        case "pending":
-          throw new ResumedStepUnsettledError();
-        case "failed":
-          return failUpdateStep(input, refusal, null);
-        default:
-          return assertNever(notLanded);
-      }
-    default:
-      return assertNever(step);
-  }
-}
-
-/**
- * Reads a step whose send failed after the store saved its signature, and acts on it. A saved
- * step never reads as unsent; the reader's unsent arm is kept in flight with pending.
- *
- * @param input - The step's send.
- * @param saved - The step's saved signature and the row's stored expiry.
- * @param saved.signature - The saved signature.
- * @param saved.lastValidBlockHeight - The stored expiry.
- * @returns The landed step.
- * @throws ResumedStepUnsettledError when the step is pending.
- * @throws RecurringPaymentUpdateStepFailedError when an unwinding step is dropped.
- * @throws A TRANSACTION_FAILED error when the old subscription's cancel is dropped, after its
- *   signature is cleared.
- */
-async function settleFailedUpdateStep(
-  input: UpdateStepSend,
-  saved: { signature: Signature; lastValidBlockHeight: string | null }
-): Promise<SettledUpdateStep> {
-  const step = await readRecurringPaymentStep({
-    effect: input.effect,
-    savedSignature: saved.signature,
-    lastValidBlockHeight: saved.lastValidBlockHeight,
-    logContext: input.logContext,
-  });
-  switch (step.state) {
-    case "landed":
-      return { state: "landed", signature: saved.signature, accounts: step.accounts };
-    case "unsent":
-    case "pending":
-      throw new ResumedStepUnsettledError();
-    case "dropped": {
-      if (input.onFailure.outcome === "stay_in_flight") {
-        await clearDroppedOldCancel({
-          env: input.env,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          recurringPaymentId: input.recurringPaymentId,
-          attemptId: input.attemptId,
-          signature: saved.signature,
-          oldSubscriptionPda: input.onFailure.oldSubscriptionPda,
-          logContext: input.logContext,
-        });
-      }
-      return failUpdateStep(input, transactionFailed(input.failureMessage), {
-        slot: input.slot,
-        signature: saved.signature,
-      });
-    }
-    default:
-      return assertNever(step);
-  }
-}
-
-/**
  * Clears a dropped old-subscription cancel's saved signature, only while its slot still holds
  * it, and logs it, so the next send of the cancel starts from an empty slot.
  *
@@ -1434,30 +1040,6 @@ async function clearDroppedOldCancel(input: {
   });
 }
 
-/**
- * Fails a step that cannot land, as its outcome says.
- *
- * @param input - The step's send.
- * @param failure - The error the request answers with.
- * @param clear - A dropped step's slot and saved signature, or null.
- * @throws RecurringPaymentUpdateStepFailedError for an unwinding step.
- * @throws `failure` for the old subscription's cancel.
- */
-function failUpdateStep(
-  input: UpdateStepSend,
-  failure: Error,
-  clear: { slot: UpdateAttemptStepSlot; signature: Signature } | null
-): never {
-  switch (input.onFailure.outcome) {
-    case "unwind":
-      throw new RecurringPaymentUpdateStepFailedError({ failure, clear });
-    case "stay_in_flight":
-      throw failure;
-    default:
-      return assertNever(input.onFailure);
-  }
-}
-
 async function runMetadataScheduleUpdate(input: {
   env: Env;
   organizationId: string;
@@ -1478,7 +1060,7 @@ async function runMetadataScheduleUpdate(input: {
   const rpc = createClusterRpc();
   let attempt = input.attempt;
   const planUpdateSignature = parseNullableStoredSignature(attempt.plan_update_signature);
-  const phase: UpdatePhase = {
+  const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: planUpdateSignature === null ? null : "plan_update_signature",
   };
 
@@ -1541,7 +1123,7 @@ async function runMetadataScheduleUpdate(input: {
     // A signature saved in the step's slot means an earlier run reached the send (HOO-2044): the
     // plan's metadata settles whether it landed.
     if (planUpdateSignature !== null) {
-      await readSavedUnwindStep({
+      await readSavedRecurringPaymentStep({
         phase,
         slot,
         signature: planUpdateSignature,
@@ -1581,7 +1163,7 @@ async function runMetadataScheduleUpdate(input: {
       pullers: onChainPlan.data.data.pullers,
       status: parsePlanStatus(onChainPlan.data.status),
     });
-    await sendUpdateStep({
+    await sendRecurringPaymentStep({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1603,7 +1185,7 @@ async function runMetadataScheduleUpdate(input: {
     });
     return resolvedNextDueAt;
   };
-  const nextDueAt = await insideUpdatePhase(phase, metadataSteps, null);
+  const nextDueAt = await insideRecurringPaymentStepPhase(phase, metadataSteps, null);
 
   return finalizeMetadataScheduleUpdate({
     env: input.env,
@@ -1629,13 +1211,13 @@ async function runMetadataScheduleUpdate(input: {
  * @param input - The setup's accounts, signers and attempt.
  * @returns The subscription authority as read after setup.
  * @throws ResumedStepUnsettledError when the setup is pending.
- * @throws RecurringPaymentUpdateStepFailedError when the setup is dropped or cannot land.
+ * @throws RecurringPaymentStepFailedError when the setup is dropped or cannot land.
  */
 async function prepareSubscriptionAuthorityForUpdate(input: {
   env: Env;
   recurringPaymentId: string;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  phase: UpdatePhase;
+  phase: RecurringPaymentStepPhase;
   organizationId: string;
   projectId: string;
   rpc: SolanaRpc;
@@ -1669,7 +1251,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     input.attempt.authorization_setup_signature
   );
   if (savedSetupSignature !== null) {
-    const accounts = await readSavedUnwindStep({
+    const accounts = await readSavedRecurringPaymentStep({
       phase: input.phase,
       slot,
       signature: savedSetupSignature,
@@ -1704,7 +1286,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
         mint: input.mint,
         tokenProgram: input.tokenProgram,
       });
-  const settled = await sendUpdateStep({
+  const settled = await sendRecurringPaymentStep({
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -2085,7 +1667,7 @@ async function readSavedOldCancel(input: {
  * @returns The attempt after its stage write, the plan creation signature (null when the send was
  *   refused as already done) and the plan as read.
  * @throws ResumedStepUnsettledError when the plan creation is pending.
- * @throws RecurringPaymentUpdateStepFailedError when it cannot land.
+ * @throws RecurringPaymentStepFailedError when it cannot land.
  */
 async function sendReplacementPlanCreation(input: {
   env: Env;
@@ -2128,7 +1710,7 @@ async function sendReplacementPlanCreation(input: {
     pullers: [input.owner],
     tokenProgram: input.tokenProgram,
   });
-  const settled = await sendUpdateStep({
+  const settled = await sendRecurringPaymentStep({
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -2169,7 +1751,7 @@ async function sendReplacementPlanCreation(input: {
  * @returns The attempt after its stage write, and the authorization signature (null when the
  *   subscribe was refused as already done).
  * @throws ResumedStepUnsettledError when the setup or subscribe is pending.
- * @throws RecurringPaymentUpdateStepFailedError when either cannot land.
+ * @throws RecurringPaymentStepFailedError when either cannot land.
  */
 async function sendReplacementAuthorization(input: {
   env: Env;
@@ -2177,7 +1759,7 @@ async function sendReplacementAuthorization(input: {
   projectId: string;
   recurringRepo: PaymentRecurringPaymentsRepository;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  phase: UpdatePhase;
+  phase: RecurringPaymentStepPhase;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
@@ -2253,7 +1835,7 @@ async function sendReplacementAuthorization(input: {
     subscriber: input.sourceSigner,
     tokenMint: input.mint,
   });
-  const settled = await sendUpdateStep({
+  const settled = await sendRecurringPaymentStep({
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -2304,7 +1886,7 @@ async function runReplacementUpdate(input: {
   const savedAuthorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
   const savedOldCancelSignature = parseNullableStoredSignature(attempt.old_cancel_signature);
   const replacementPeriodStartAt = attempt.created_at;
-  const phase: UpdatePhase = { unreadSavedStep: latestSavedReplacementStep(attempt) };
+  const phase: RecurringPaymentStepPhase = { unreadSavedStep: latestSavedReplacementStep(attempt) };
 
   const replacementSteps = async () => {
     if (
@@ -2405,7 +1987,7 @@ async function runReplacementUpdate(input: {
     const landedPlanAccounts =
       savedPlanCreationSignature === null
         ? null
-        : await readSavedUnwindStep({
+        : await readSavedRecurringPaymentStep({
             phase,
             slot: planSlot,
             signature: savedPlanCreationSignature,
@@ -2496,7 +2078,7 @@ async function runReplacementUpdate(input: {
       step: "authorize_subscription",
     };
     if (savedAuthorizationSignature !== null) {
-      await readSavedUnwindStep({
+      await readSavedRecurringPaymentStep({
         phase,
         slot: authorizeSlot,
         signature: savedAuthorizationSignature,
@@ -2550,14 +2132,17 @@ async function runReplacementUpdate(input: {
       authorizationSignature,
     };
   };
-  const replacement = await insideUpdatePhase(phase, replacementSteps, (stepFailure) =>
-    assertReplacementDelegationAbsent({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      attempt,
-      stepFailure,
-    })
+  const replacement = await insideRecurringPaymentStepPhase(
+    phase,
+    replacementSteps,
+    (stepFailure) =>
+      assertReplacementDelegationAbsent({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        attempt,
+        stepFailure,
+      })
   );
 
   const cancelOldLogContext: RecurringPaymentStepLogContext = {
@@ -2602,7 +2187,7 @@ async function runReplacementUpdate(input: {
           subscriber: oldSourceSigner,
           subscriptionPda: replacement.oldSubscriptionPda,
         });
-      const settledCancel = await sendUpdateStep({
+      const settledCancel = await sendRecurringPaymentStep({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -2620,7 +2205,17 @@ async function runReplacementUpdate(input: {
         },
         onFailure: {
           outcome: "stay_in_flight",
-          oldSubscriptionPda: replacement.oldSubscriptionPda,
+          onDropped: (signature) =>
+            clearDroppedOldCancel({
+              env: input.env,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              recurringPaymentId: input.claimed.id,
+              attemptId: attempt.id,
+              signature,
+              oldSubscriptionPda: replacement.oldSubscriptionPda,
+              logContext: cancelOldLogContext,
+            }),
         },
         failureMessage: "Recurring payment old subscription cancellation failed on-chain",
         logContext: cancelOldLogContext,
@@ -2697,7 +2292,7 @@ async function failRecurringPaymentUpdate(input: {
   projectId: string;
   claimed: PaymentRecurringPaymentRow;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  stepFailure: RecurringPaymentUpdateStepFailedError;
+  stepFailure: RecurringPaymentStepFailedError;
 }): Promise<void> {
   const failedAt = new Date().toISOString();
   await getDb(input.env).transaction(async (tx) => {
@@ -3085,7 +2680,7 @@ export async function updateRecurringPayment(input: {
     }
   } catch (error) {
     if (!(error instanceof Error)) throw error;
-    const stepFailure = error instanceof RecurringPaymentUpdateStepFailedError ? error : null;
+    const stepFailure = error instanceof RecurringPaymentStepFailedError ? error : null;
     getLogger().error(
       {
         err: stepFailure === null ? error : stepFailure.failure,

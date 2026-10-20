@@ -136,10 +136,11 @@ A run that resumes a step an earlier run reached reads it through the step reade
 accounts at `confirmed` from a bank at that slot or later. The step is in one of four states
 (`GLOSSARY.md`): landed when its effect shows, so it is not sent again; unsent when no signature is
 saved, so it is sent; dropped when a signature is saved, the effect is absent and the chain is past
-the saved expiry, so the send can never land; pending otherwise. In an update, a dropped step's
-signature is cleared and the step takes its failure action: its plan, setup, authorization or plan
-update fails the update back to `active` on what it had, and its old subscription's cancel is sent
-again. Activation and lifecycle keep failing a dropped step without clearing it until HOO-2192. No signature
+the saved expiry, so the send can never land; pending otherwise. A dropped step's signature is
+cleared in the same transaction as its failure action: an update's plan, setup, authorization or
+plan update fails it back to `active` on what it had, and its old subscription's cancel is sent
+again; an activation's plan, setup or subscribe fails it back to `pending_activation`, never while
+its delegation is on chain; a cancel fails back to `active` and a resume to `canceled`. No signature
 status is read: the effect and the expiry decide, which also covers a send that failed on chain.
 A pending step (its send may still land, or the read failed) answers 409 and leaves the attempt in
 flight, never failed or reset, so recovery finishes it.
@@ -154,8 +155,10 @@ the handler, which resumes the attempt under the same key; a settled update atte
 answer. Every keyed cancel, resume and PATCH that is answered leaves an attempt under its own key,
 so its retry past 24 hours never runs again over a later change: a no-op (a cancel of a canceled
 schedule, a resume of an active one, a PATCH that changes nothing) writes a confirmed attempt that
-changes nothing. An activate needs no no-op attempt: a schedule never returns to
-`pending_activation`, so a retry cannot activate again. A request never finishes another key's
+changes nothing. An activate needs no no-op attempt: only a `pending_activation` schedule starts an
+activation, and a schedule returns there only when an activation fails, which fails its attempt. A
+failed attempt answers no key, so a retry of that key not answered from the shared record runs the
+activation again, as a retry of a failed cancel or resume does. A request never finishes another key's
 in-flight attempt silently: activate, cancel, resume and collect refuse it as in flight (409,
 unstored), the claim rolls back, and the cron finishes it; a
 PATCH, which the cron does not recover, may finish it, and writes its own confirmed attempt in the

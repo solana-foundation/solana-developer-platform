@@ -408,6 +408,22 @@ export interface ClearPaymentRecurringPaymentStepSignatureInput {
   updatedAt: string;
 }
 
+export interface GetPaymentRecurringPaymentStepSignatureInput {
+  slot: RecurringPaymentStepSignatureSlot;
+  /** The attempt's id. */
+  id: string;
+  /** The parent schedule's id; the attempt is read only under it. */
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+}
+
+/** A step's saved signature and its attempt row's stored expiry, both as stored. */
+export interface PaymentRecurringPaymentStepSignature {
+  signature: string | null;
+  lastValidBlockHeight: string | null;
+}
+
 export interface GetLatestPaymentRecurringPaymentUpdateAttemptInput {
   organizationId: string;
   projectId: string;
@@ -459,6 +475,8 @@ export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
    * is answered from the attempt instead of running the action again.
    */
   adoptIdempotencyKey?: string | null;
+  /** When set, the write applies only while the attempt still has this status. */
+  expectedStatus?: PaymentRecurringPaymentAttemptStatus;
   updatedAt: string;
 }
 
@@ -493,6 +511,8 @@ export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
    * is answered from the attempt instead of running the action again.
    */
   adoptIdempotencyKey?: string | null;
+  /** When set, the write applies only while the attempt still has this status. */
+  expectedStatus?: PaymentRecurringPaymentAttemptStatus;
   updatedAt: string;
 }
 
@@ -681,6 +701,15 @@ export interface PaymentRecurringPaymentsRepository {
    * @returns False when the slot no longer holds it.
    */
   clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
+  /**
+   * Read a step's saved signature and the attempt row's stored expiry, only while the attempt is
+   * still in flight.
+   *
+   * @returns Null when the attempt is not in flight under the schedule.
+   */
+  getStepSignature(
+    input: GetPaymentRecurringPaymentStepSignatureInput
+  ): Promise<PaymentRecurringPaymentStepSignature | null>;
   getLatestUpdateAttempt(
     input: GetLatestPaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
