@@ -406,7 +406,8 @@ export const transferSchema = z
       example: "USD",
     }),
     fiatAmount: tokenAmountSchema.optional().openapi({
-      description: "Fiat amount for the ramp leg when known.",
+      description:
+        "Quoted fiat amount for the ramp leg: what the customer pays on an on-ramp, the payout quoted on an off-ramp. It never changes after the quote; an off-ramp's final payout is `fiatPayout`.",
       example: "100.00",
     }),
     settlement: rampTransferSettlementSchema.optional().openapi({
