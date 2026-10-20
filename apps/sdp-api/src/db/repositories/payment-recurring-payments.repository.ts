@@ -358,12 +358,6 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   updatedAt: string;
 }
 
-/** The attempt rows a subscription step saves its signature on. */
-export type RecurringPaymentStepSignatureRow =
-  | "activation_attempt"
-  | "update_attempt"
-  | "lifecycle_attempt";
-
 /**
  * Each attempt row's step signature columns in the order its flow saves them; a step saves only
  * after every earlier one landed. An update attempt is either a metadata update (`plan_update_signature`
@@ -383,15 +377,15 @@ export const RECURRING_PAYMENT_STEP_SLOT_ORDER = {
     "old_cancel_signature",
   ],
   lifecycle_attempt: ["signature"],
-} as const satisfies Record<
-  RecurringPaymentStepSignatureRow,
-  readonly [`${string}signature`, ...`${string}signature`[]]
->;
+} as const satisfies Record<string, readonly [`${string}signature`, ...`${string}signature`[]]>;
 
 type RecurringPaymentStepSlotOrder = typeof RECURRING_PAYMENT_STEP_SLOT_ORDER;
 
+/** The attempt rows a subscription step saves its signature on. */
+export type RecurringPaymentStepSignatureRow = keyof RecurringPaymentStepSlotOrder;
+
 /** One attempt row's step signature slot. */
-type RecurringPaymentStepSignatureSlotOf<TRow extends keyof RecurringPaymentStepSlotOrder> = {
+type RecurringPaymentStepSignatureSlotOf<TRow extends RecurringPaymentStepSignatureRow> = {
   row: TRow;
   column: RecurringPaymentStepSlotOrder[TRow][number];
 };
@@ -401,16 +395,27 @@ type RecurringPaymentStepSignatureSlotOf<TRow extends keyof RecurringPaymentStep
  * signatures are written once the step lands.
  */
 export type RecurringPaymentStepSignatureSlot = {
-  [TRow in keyof RecurringPaymentStepSlotOrder]: RecurringPaymentStepSignatureSlotOf<TRow>;
-}[keyof RecurringPaymentStepSlotOrder];
+  [TRow in RecurringPaymentStepSignatureRow]: RecurringPaymentStepSignatureSlotOf<TRow>;
+}[RecurringPaymentStepSignatureRow];
+
+/**
+ * The step signature columns its attempt row saves after `slot`'s, in order.
+ *
+ * @param slot - A step's slot.
+ * @returns The row's later columns, empty for its last step.
+ */
+export function laterStepSignatureColumns(slot: RecurringPaymentStepSignatureSlot): string[] {
+  const order: readonly string[] = RECURRING_PAYMENT_STEP_SLOT_ORDER[slot.row];
+  return order.slice(order.indexOf(slot.column) + 1);
+}
 
 /** One or more step slots of the same attempt row. */
 export type RecurringPaymentStepSignatureSlots = {
-  [TRow in keyof RecurringPaymentStepSlotOrder]: readonly [
+  [TRow in RecurringPaymentStepSignatureRow]: readonly [
     RecurringPaymentStepSignatureSlotOf<TRow>,
     ...RecurringPaymentStepSignatureSlotOf<TRow>[],
   ];
-}[keyof RecurringPaymentStepSlotOrder];
+}[RecurringPaymentStepSignatureRow];
 
 export interface SetPaymentRecurringPaymentStepSignatureInput {
   slot: RecurringPaymentStepSignatureSlot;
@@ -737,10 +742,13 @@ export interface PaymentRecurringPaymentsRepository {
    */
   setStepSignature(input: SetPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
   /**
-   * Null a step's saved signature and expiry after its send was provably refused, only while the
-   * slot still holds that signature.
+   * Null a step's saved signature and expiry after its send was provably refused or dropped, only
+   * while the slot still holds that signature, the attempt is in flight, and every later slot of
+   * the row is empty: the expiry belongs to the latest saved step, so a later saved step's is
+   * never nulled with it.
    *
-   * @returns False when the slot no longer holds it.
+   * @returns False when the slot no longer holds it, the attempt has settled, or a later slot
+   *   holds a signature.
    */
   clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
   /**

@@ -641,17 +641,14 @@ export async function fenceRecurringPaymentStepFailure(input: {
 
 /**
  * Records an error on a run's attempt that leaves it in flight, only while it is still
- * `processing`. An attempt another run already settled is logged and left as it is. A failed
- * write is attached to `error` as its cause, keeping any cause it carried, so the request still
- * answers with `error`.
+ * `processing`. An attempt another run already settled is logged and left as it is, and a failed
+ * write is logged as an error; either way the request still answers with its own error.
  *
- * @param input - The error, the write and what the log names.
- * @param input.error - The error the request answers with.
+ * @param input - The write and what the log names.
  * @param input.write - The attempt's error-only write, fenced to `processing`.
  * @param input.logContext - The schedule and attempt the log names.
  */
 export async function journalInFlightRecurringPaymentAttempt<TAttempt>(input: {
-  error: Error;
   write: () => Promise<TAttempt | null>;
   logContext: Pick<RecurringPaymentStepLogContext, "recurring_payment_id" | "attempt_id">;
 }): Promise<void> {
@@ -659,13 +656,10 @@ export async function journalInFlightRecurringPaymentAttempt<TAttempt>(input: {
   try {
     journaled = await input.write();
   } catch (journalError) {
-    input.error.cause =
-      input.error.cause === undefined
-        ? journalError
-        : new AggregateError(
-            [input.error.cause, journalError],
-            "Recurring payment attempt journal failed"
-          );
+    getLogger().error(
+      { ...input.logContext, err: journalError },
+      "Recurring payment attempt error could not be journaled"
+    );
     return;
   }
   if (journaled === null) {
@@ -682,14 +676,10 @@ export async function journalInFlightRecurringPaymentAttempt<TAttempt>(input: {
  * the attempt in flight instead of failing it. Only the latest saved step can be in flight; every
  * earlier one landed before it saved. `step` is the step the run is working toward, which the flow
  * moves forward as each step settles: a failure no step names fails that step, fenced on its slot.
- * `lastStepLanded` is set once the unwind check found the phase's last step on chain with no
- * signature this attempt holds: the steps then run again and the last one is taken as landed
- * without a send.
  */
 export interface RecurringPaymentStepPhase {
   unreadSavedStep: RecurringPaymentStepSignatureSlot["column"] | null;
   step: RecurringPaymentStepSignatureSlot;
-  lastStepLanded: boolean;
 }
 
 /**
@@ -699,29 +689,42 @@ export interface RecurringPaymentStepPhase {
 export type RecurringPaymentUnwindCheck = "unwind" | "last_step_landed";
 
 /**
+ * What a flow checks before it unwinds, and how it continues when the check finds its last step
+ * already on chain.
+ */
+export interface RecurringPaymentStepUnwindCheck<T> {
+  /** The chain check an unwind must pass. */
+  check: (stepFailure: RecurringPaymentStepFailedError) => Promise<RecurringPaymentUnwindCheck>;
+  /**
+   * What the steps would have returned, read back from the rows the first pass recorded: the
+   * landed last step proves every earlier one landed, so nothing is read on chain as a step again
+   * and nothing is sent.
+   */
+  continueFromLanded: () => Promise<T>;
+}
+
+/**
  * Runs a flow's unwinding steps. Inside them any error but a pending step becomes
  * `RecurringPaymentStepFailedError`, once no saved step is unread: the step runner settles every
  * send before it returns or throws, so nothing this run sent can still land. Every step failure,
- * raised or converted, passes `beforeUnwind` first. When it finds the phase's last step on chain,
- * the flow never unwinds: the steps run once more with `lastStepLanded` set, so the last step is
- * taken as landed without a send, and any failure of that run leaves the attempt in flight.
+ * raised or converted, passes the unwind check first. When it finds the phase's last step on
+ * chain, the flow never unwinds: it continues from the landed step through `continueFromLanded`,
+ * whose failures leave the attempt in flight.
  *
  * @param phase - The run's unwinding steps.
  * @param run - The steps.
- * @param beforeUnwind - The chain check an unwind must pass, or null when it needs none.
- * @returns What the steps return.
- * @throws ResumedStepUnsettledError when a step is pending, or `beforeUnwind` cannot read the
+ * @param unwindCheck - The unwind check and the landed continuation, or null when an unwind needs
+ *   no check.
+ * @returns What the steps return, or what the landed continuation reads back.
+ * @throws ResumedStepUnsettledError when a step is pending, or the unwind check cannot read the
  *   chain.
  * @throws RecurringPaymentStepFailedError when a step fails with nothing in flight and its last
  *   step is not on chain.
- * @throws The failure itself, never a step failure, when the run after a landed last step fails.
  */
 export async function insideRecurringPaymentStepPhase<T>(
   phase: RecurringPaymentStepPhase,
   run: () => Promise<T>,
-  beforeUnwind:
-    | ((stepFailure: RecurringPaymentStepFailedError) => Promise<RecurringPaymentUnwindCheck>)
-    | null
+  unwindCheck: RecurringPaymentStepUnwindCheck<T> | null
 ): Promise<T> {
   let stepFailure: RecurringPaymentStepFailedError;
   try {
@@ -743,21 +746,15 @@ export async function insideRecurringPaymentStepPhase<T>(
             droppedSignature: null,
           });
   }
-  if (beforeUnwind === null) {
+  if (unwindCheck === null) {
     throw stepFailure;
   }
-  const check = await beforeUnwind(stepFailure);
+  const check = await unwindCheck.check(stepFailure);
   switch (check) {
     case "unwind":
       throw stepFailure;
     case "last_step_landed":
-      phase.lastStepLanded = true;
-      try {
-        return await run();
-      } catch (error) {
-        // The last step is on chain, so nothing may unwind now: the attempt stays in flight.
-        throw error instanceof RecurringPaymentStepFailedError ? error.failure : error;
-      }
+      return unwindCheck.continueFromLanded();
     default:
       return assertNever(check);
   }

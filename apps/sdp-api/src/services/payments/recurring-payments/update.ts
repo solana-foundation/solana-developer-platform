@@ -1076,7 +1076,6 @@ async function runMetadataScheduleUpdate(input: {
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: planUpdateSignature === null ? null : "plan_update_signature",
     step: { row: "update_attempt", column: "plan_update_signature" },
-    lastStepLanded: false,
   };
 
   const metadataSteps = async () => {
@@ -1876,6 +1875,126 @@ async function sendReplacementAuthorization(input: {
   return { attempt, signature: settled.signature };
 }
 
+/** What a replacement's steps leave for its old cancel and finalize. */
+interface SettledReplacementSteps {
+  oldPlanPda: Address;
+  oldSubscriptionPda: Address;
+  oldSubscription: PaymentSubscriptionRow;
+  requestedNextDue: string | null;
+  plan: PaymentSubscriptionPlanRow;
+  planPda: Address;
+  planCreatedAt: string;
+  /** Null when the plan's resend was refused as already done. */
+  planCreationSignature: Signature | null;
+  subscription: PaymentSubscriptionRow;
+  subscriptionPda: Address;
+  subscriptionAuthorityAddress: Address;
+  /** Null when the authorization landed with no signature this attempt holds. */
+  authorizationSignature: Signature | null;
+}
+
+/**
+ * A replacement's new mandate as its landed authorization leaves it, read back from the schedule
+ * and the attempt, for the old cancel. The new delegation on chain proves the plan and setup
+ * landed and the attempt recorded the new plan and subscription before the authorization, so no
+ * step is read or sent: a setup whose token approval was revoked since can never hold the update
+ * in flight. One plan account read supplies the plan's creation time, which nothing records
+ * before finalize. The signatures are the attempt's, null when it holds none (the trace gap ADR
+ * 0009 accepts).
+ *
+ * @param input - The run's repositories, RPC, tenant, schedule and attempt.
+ * @param input.recurringRepo - The recurring payments repository.
+ * @param input.subscriptionsRepo - The subscriptions repository.
+ * @param input.rpc - The cluster RPC.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.recurringPaymentId - The schedule.
+ * @param input.attemptId - The run's attempt.
+ * @returns The attempt as re-read, and the new mandate's settled steps.
+ * @throws AppError CONFLICT when the schedule is no longer `updating` or the attempt is no longer
+ *   this run's in-flight attempt.
+ * @throws AppError INTERNAL_ERROR when the attempt lacks the new plan or subscription it recorded
+ *   before the authorization, their rows or addresses are missing, or the plan is not on chain.
+ */
+async function readLandedReplacement(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  rpc: SolanaRpc;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  attemptId: string;
+}): Promise<{
+  attempt: PaymentRecurringPaymentUpdateAttemptRow;
+  steps: Omit<
+    SettledReplacementSteps,
+    "oldPlanPda" | "oldSubscriptionPda" | "oldSubscription" | "requestedNextDue"
+  >;
+}> {
+  const tenant = { organizationId: input.organizationId, projectId: input.projectId };
+  const [schedule, attempt] = await Promise.all([
+    input.recurringRepo.getRecurringPaymentById({
+      ...tenant,
+      recurringPaymentId: input.recurringPaymentId,
+    }),
+    input.recurringRepo.getLatestUpdateAttempt({
+      ...tenant,
+      recurringPaymentId: input.recurringPaymentId,
+      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+    }),
+  ]);
+  if (
+    schedule === null ||
+    !isUpdatingRecurringPaymentStatus(schedule.status) ||
+    attempt === null ||
+    attempt.id !== input.attemptId
+  ) {
+    throw conflict("Recurring payment update changed concurrently");
+  }
+  if (attempt.new_plan_id === null || attempt.new_subscription_id === null) {
+    throw internalError("Recurring payment replacement landed without its recorded plan");
+  }
+  const [plan, subscription] = await Promise.all([
+    input.subscriptionsRepo.getPlanById({ ...tenant, planId: attempt.new_plan_id }),
+    input.subscriptionsRepo.getSubscriptionById({
+      ...tenant,
+      subscriptionId: attempt.new_subscription_id,
+    }),
+  ]);
+  if (
+    plan === null ||
+    plan.plan_pda === null ||
+    subscription === null ||
+    subscription.subscription_pda === null ||
+    subscription.subscription_authority_address === null
+  ) {
+    throw internalError("Recurring payment replacement plan or subscription was not recorded");
+  }
+  const planPda = assertValidAddress(plan.plan_pda, "planPda");
+  const onChainPlan = await subscriptionsProgram.fetchMaybePlan(input.rpc, planPda, {
+    commitment: "confirmed",
+  });
+  if (!onChainPlan.exists) {
+    throw internalError("Recurring payment replacement plan was not found on-chain");
+  }
+  return {
+    attempt,
+    steps: {
+      plan,
+      planPda,
+      planCreatedAt: onChainPlan.data.data.terms.createdAt.toString(),
+      planCreationSignature: parseNullableStoredSignature(attempt.plan_creation_signature),
+      subscription,
+      subscriptionPda: assertValidAddress(subscription.subscription_pda, "subscriptionPda"),
+      subscriptionAuthorityAddress: assertValidAddress(
+        subscription.subscription_authority_address,
+        "subscriptionAuthorityAddress"
+      ),
+      authorizationSignature: parseNullableStoredSignature(attempt.authorization_signature),
+    },
+  };
+}
+
 async function runReplacementUpdate(input: {
   env: Env;
   organizationId: string;
@@ -1906,10 +2025,9 @@ async function runReplacementUpdate(input: {
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: latestSavedReplacementStep(attempt),
     step: { row: "update_attempt", column: "plan_creation_signature" },
-    lastStepLanded: false,
   };
 
-  const replacementSteps = async () => {
+  const resolveOldMandate = async () => {
     if (
       !input.claimed.plan_pda ||
       !input.claimed.subscription_id ||
@@ -1917,11 +2035,6 @@ async function runReplacementUpdate(input: {
     ) {
       throw conflict("Recurring payment is missing on-chain subscription records");
     }
-    const oldPlanPda = assertValidAddress(input.claimed.plan_pda, "planPda");
-    const oldSubscriptionPda = assertValidAddress(
-      input.claimed.subscription_pda,
-      "subscriptionPda"
-    );
     const oldSubscription =
       input.subscription ??
       (await subscriptionsRepo.getSubscriptionById({
@@ -1932,15 +2045,24 @@ async function runReplacementUpdate(input: {
     if (!oldSubscription) {
       throw notFound("Subscription");
     }
+    return {
+      oldPlanPda: assertValidAddress(input.claimed.plan_pda, "planPda"),
+      oldSubscriptionPda: assertValidAddress(input.claimed.subscription_pda, "subscriptionPda"),
+      oldSubscription,
+      requestedNextDue: replacementNextCollectionDueAt({
+        requested: input.request.nextCollectionDueAt,
+        periodStartAt: replacementPeriodStartAt,
+        periodHours: input.resolved.periodHours,
+        clampToMinimum: Boolean(
+          savedPlanCreationSignature || savedAuthorizationSignature || savedOldCancelSignature
+        ),
+      }),
+    };
+  };
 
-    const requestedNextDue = replacementNextCollectionDueAt({
-      requested: input.request.nextCollectionDueAt,
-      periodStartAt: replacementPeriodStartAt,
-      periodHours: input.resolved.periodHours,
-      clampToMinimum: Boolean(
-        savedPlanCreationSignature || savedAuthorizationSignature || savedOldCancelSignature
-      ),
-    });
+  const replacementSteps = async (): Promise<SettledReplacementSteps> => {
+    const { oldPlanPda, oldSubscriptionPda, oldSubscription, requestedNextDue } =
+      await resolveOldMandate();
 
     const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
@@ -2111,9 +2233,7 @@ async function runReplacementUpdate(input: {
       });
     }
     let authorizationSignature = savedAuthorizationSignature;
-    // After the unwind check found the new delegation on chain, the authorization is taken as
-    // landed with no signature this attempt holds.
-    if (savedAuthorizationSignature === null && !phase.lastStepLanded) {
+    if (savedAuthorizationSignature === null) {
       const authorized = await sendReplacementAuthorization({
         env: input.env,
         organizationId: input.organizationId,
@@ -2156,18 +2276,29 @@ async function runReplacementUpdate(input: {
       authorizationSignature,
     };
   };
-  const replacement = await insideRecurringPaymentStepPhase(
-    phase,
-    replacementSteps,
-    (stepFailure) =>
+  const replacement = await insideRecurringPaymentStepPhase(phase, replacementSteps, {
+    check: (stepFailure) =>
       checkReplacementUnwind({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
         attempt,
         stepFailure,
-      })
-  );
+      }),
+    continueFromLanded: async () => {
+      const landed = await readLandedReplacement({
+        recurringRepo,
+        subscriptionsRepo,
+        rpc,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.claimed.id,
+        attemptId: attempt.id,
+      });
+      attempt = landed.attempt;
+      return { ...(await resolveOldMandate()), ...landed.steps };
+    },
+  });
 
   const cancelOldLogContext: RecurringPaymentStepLogContext = {
     recurring_payment_id: attempt.recurring_payment_id,
@@ -2724,7 +2855,6 @@ export async function updateRecurringPayment(input: {
     // Anything else may leave a step in flight: the attempt keeps its status and records only
     // the error, so a concurrent finalize is never flipped back.
     await journalInFlightRecurringPaymentAttempt({
-      error,
       write: () =>
         recurringRepo.updateUpdateAttempt({
           attemptId: attempt.id,

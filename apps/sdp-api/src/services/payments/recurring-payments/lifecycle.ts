@@ -512,7 +512,6 @@ async function runRecurringPaymentLifecycle(
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: savedSignature === null ? null : slot.column,
     step: slot,
-    lastStepLanded: false,
   };
   const failureMessage = lifecycleConfirmationMessage(input.operation);
   const sourceSigner = lazyRecurringPaymentStepSigner({
@@ -692,7 +691,6 @@ async function runRecurringPaymentLifecycle(
     // Anything else may leave a step in flight: the attempt keeps its status and records only
     // the error, so a concurrent finalize is never flipped back.
     await journalInFlightRecurringPaymentAttempt({
-      error,
       write: () =>
         recurringRepo.updateLifecycleAttempt({
           attemptId: attempt.id,

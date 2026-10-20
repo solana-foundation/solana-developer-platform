@@ -18,42 +18,43 @@ import {
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";
-import type {
-  ClaimPaymentRecurringPaymentLifecycleInput,
-  ClaimPaymentRecurringPaymentUpdateInput,
-  ClearPaymentRecurringPaymentStepSignatureInput,
-  CollectibleRecurringPaymentRow,
-  CreatePaymentRecurringPaymentActivationAttemptInput,
-  CreatePaymentRecurringPaymentInput,
-  CreatePaymentRecurringPaymentLifecycleAttemptInput,
-  CreatePaymentRecurringPaymentUpdateAttemptInput,
-  CreatePaymentRecurringPaymentUpdateEventInput,
-  GetLatestPaymentRecurringPaymentActivationAttemptInput,
-  GetLatestPaymentRecurringPaymentLifecycleAttemptInput,
-  GetLatestPaymentRecurringPaymentUpdateAttemptInput,
-  GetPaymentRecurringPaymentStepSignatureInput,
-  ListPaymentRecurringPaymentsInput,
-  ListPaymentRecurringPaymentsResult,
-  LockPaymentRecurringPaymentEmptyStepSlotsInput,
-  PaymentRecurringPaymentActivationAttemptRow,
-  PaymentRecurringPaymentLifecycleAttemptRow,
-  PaymentRecurringPaymentRow,
-  PaymentRecurringPaymentsRepository,
-  PaymentRecurringPaymentUpdateAttemptRow,
-  PaymentRecurringPaymentUpdateEventRow,
-  RecoverableCollectionRecurringPaymentRow,
-  RecurringPaymentActivator,
-  RecurringPaymentStepSignatureSlot,
-  SetPaymentRecurringPaymentStepSignatureInput,
-  StalePaymentRecurringPaymentUpdateRow,
-  UpdatePaymentRecurringPaymentActivationAttemptInput,
-  UpdatePaymentRecurringPaymentActivationInput,
-  UpdatePaymentRecurringPaymentCollectionInput,
-  UpdatePaymentRecurringPaymentDestinationTokenAccountInput,
-  UpdatePaymentRecurringPaymentInput,
-  UpdatePaymentRecurringPaymentLifecycleAttemptInput,
-  UpdatePaymentRecurringPaymentLifecycleInput,
-  UpdatePaymentRecurringPaymentUpdateAttemptInput,
+import {
+  type ClaimPaymentRecurringPaymentLifecycleInput,
+  type ClaimPaymentRecurringPaymentUpdateInput,
+  type ClearPaymentRecurringPaymentStepSignatureInput,
+  type CollectibleRecurringPaymentRow,
+  type CreatePaymentRecurringPaymentActivationAttemptInput,
+  type CreatePaymentRecurringPaymentInput,
+  type CreatePaymentRecurringPaymentLifecycleAttemptInput,
+  type CreatePaymentRecurringPaymentUpdateAttemptInput,
+  type CreatePaymentRecurringPaymentUpdateEventInput,
+  type GetLatestPaymentRecurringPaymentActivationAttemptInput,
+  type GetLatestPaymentRecurringPaymentLifecycleAttemptInput,
+  type GetLatestPaymentRecurringPaymentUpdateAttemptInput,
+  type GetPaymentRecurringPaymentStepSignatureInput,
+  type ListPaymentRecurringPaymentsInput,
+  type ListPaymentRecurringPaymentsResult,
+  type LockPaymentRecurringPaymentEmptyStepSlotsInput,
+  laterStepSignatureColumns,
+  type PaymentRecurringPaymentActivationAttemptRow,
+  type PaymentRecurringPaymentLifecycleAttemptRow,
+  type PaymentRecurringPaymentRow,
+  type PaymentRecurringPaymentsRepository,
+  type PaymentRecurringPaymentUpdateAttemptRow,
+  type PaymentRecurringPaymentUpdateEventRow,
+  type RecoverableCollectionRecurringPaymentRow,
+  type RecurringPaymentActivator,
+  type RecurringPaymentStepSignatureSlot,
+  type SetPaymentRecurringPaymentStepSignatureInput,
+  type StalePaymentRecurringPaymentUpdateRow,
+  type UpdatePaymentRecurringPaymentActivationAttemptInput,
+  type UpdatePaymentRecurringPaymentActivationInput,
+  type UpdatePaymentRecurringPaymentCollectionInput,
+  type UpdatePaymentRecurringPaymentDestinationTokenAccountInput,
+  type UpdatePaymentRecurringPaymentInput,
+  type UpdatePaymentRecurringPaymentLifecycleAttemptInput,
+  type UpdatePaymentRecurringPaymentLifecycleInput,
+  type UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
 
 type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
@@ -1278,7 +1279,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     async clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput) {
       const table = STEP_SIGNATURE_TABLES[input.slot.row];
       const { column } = input.slot;
-      // Table and column come from the typed slot, never from caller text.
+      // Table and columns come from the typed slot and its row's step order, never caller text.
+      const laterSlotsEmpty = laterStepSignatureColumns(input.slot)
+        .map((laterColumn) => `AND ${laterColumn} IS NULL`)
+        .join(" ");
       const rowsAffected = await db
         .prepare(
           `UPDATE ${table}
@@ -1289,7 +1293,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND recurring_payment_id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND ${column} = ?`
+              AND status = ANY(?::text[])
+              AND ${column} = ?
+              ${laterSlotsEmpty}`
         )
         .bind(
           input.updatedAt,
@@ -1297,6 +1303,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
+          [...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES],
           input.signature
         )
         .run();

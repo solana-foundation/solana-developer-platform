@@ -528,6 +528,103 @@ async function settleActiveActivationAttempt(input: {
 
 const ACTIVATION_FAILED_ON_CHAIN = "Recurring payment activation failed on-chain";
 
+/** What an activation's steps leave for its finalize. */
+interface SettledActivationSteps {
+  plan: PaymentSubscriptionPlanRow;
+  planPda: Address;
+  planCreatedAt: string;
+  /** Null when the plan's resend was refused as already done. */
+  planCreationSignature: Signature | null;
+  subscription: PaymentSubscriptionRow;
+  subscriptionPda: Address;
+  subscriptionAuthorityAddress: Address;
+  /** Null when subscribe landed with no signature this attempt holds. */
+  authorizationSignature: Signature | null;
+}
+
+/**
+ * An activation's steps as its landed subscribe leaves them, read back from the schedule and the
+ * attempt, for finalize. The delegation on chain proves the plan and setup landed and the schedule
+ * recorded the plan and subscription before subscribe, so nothing is read on chain or sent: a
+ * setup whose token approval was revoked since can never hold the activation in flight. The
+ * subscribe signature is the attempt's, null when it holds none (the trace gap ADR 0009 accepts).
+ *
+ * @param input - The run's repositories, tenant, schedule and attempt.
+ * @param input.recurringRepo - The recurring payments repository.
+ * @param input.subscriptionsRepo - The subscriptions repository.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.recurringPaymentId - The schedule.
+ * @param input.attemptId - The run's attempt.
+ * @returns The settled steps.
+ * @throws AppError CONFLICT when the schedule is no longer `activating` or the attempt is no
+ *   longer this run's in-flight attempt.
+ * @throws AppError INTERNAL_ERROR when the schedule lacks the plan or subscription it recorded
+ *   before subscribe, or their rows are missing.
+ */
+async function readLandedActivation(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  attemptId: string;
+}): Promise<SettledActivationSteps> {
+  const tenant = { organizationId: input.organizationId, projectId: input.projectId };
+  const [schedule, attempt] = await Promise.all([
+    input.recurringRepo.getRecurringPaymentById({
+      ...tenant,
+      recurringPaymentId: input.recurringPaymentId,
+    }),
+    input.recurringRepo.getLatestActivationAttempt({
+      ...tenant,
+      recurringPaymentId: input.recurringPaymentId,
+      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+    }),
+  ]);
+  if (
+    schedule === null ||
+    !isActivatingRecurringPaymentStatus(schedule.status) ||
+    attempt === null ||
+    attempt.id !== input.attemptId
+  ) {
+    throw conflict("Recurring payment activation changed concurrently");
+  }
+  if (
+    schedule.plan_id === null ||
+    schedule.plan_pda === null ||
+    schedule.plan_created_at === null ||
+    schedule.subscription_id === null ||
+    schedule.subscription_pda === null ||
+    schedule.subscription_authority_address === null
+  ) {
+    throw internalError("Recurring payment activation landed without its recorded plan");
+  }
+  const [plan, subscription] = await Promise.all([
+    input.subscriptionsRepo.getPlanById({ ...tenant, planId: schedule.plan_id }),
+    input.subscriptionsRepo.getSubscriptionById({
+      ...tenant,
+      subscriptionId: schedule.subscription_id,
+    }),
+  ]);
+  if (plan === null || subscription === null) {
+    throw internalError("Recurring payment activation plan or subscription row was not found");
+  }
+  return {
+    plan,
+    planPda: assertValidAddress(schedule.plan_pda, "planPda"),
+    planCreatedAt: schedule.plan_created_at,
+    planCreationSignature: parseNullableStoredSignature(schedule.plan_creation_signature),
+    subscription,
+    subscriptionPda: assertValidAddress(schedule.subscription_pda, "subscriptionPda"),
+    subscriptionAuthorityAddress: assertValidAddress(
+      schedule.subscription_authority_address,
+      "subscriptionAuthorityAddress"
+    ),
+    authorizationSignature: parseNullableStoredSignature(attempt.authorization_signature),
+  };
+}
+
 /**
  * The latest step an earlier run saved a signature for on the attempt. Steps save in order and
  * each lands before the next saves, so only this one can still be in flight.
@@ -864,11 +961,6 @@ async function settleActivationSubscription(input: {
     });
     return savedSignature;
   }
-  // The unwind check found the delegation on chain: subscribe landed with no signature this
-  // attempt holds, so nothing is set up or sent.
-  if (input.phase.lastStepLanded) {
-    return null;
-  }
 
   let feePayerResolution: Promise<Address> | null = null;
   const resolveFeePayer = () => {
@@ -1037,7 +1129,6 @@ export async function activateRecurringPayment(input: {
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: latestSavedActivationStep(attempt),
     step: { row: "activation_attempt", column: "plan_creation_signature" },
-    lastStepLanded: false,
   };
   const sourceSigner = lazyRecurringPaymentStepSigner({
     env: input.env,
@@ -1050,7 +1141,7 @@ export async function activateRecurringPayment(input: {
   });
   let activationPlanId = claimed.plan_id;
 
-  const activationSteps = async () => {
+  const activationSteps = async (): Promise<SettledActivationSteps> => {
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");
     const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
     const mint = assertValidAddress(claimed.token, "token");
@@ -1217,10 +1308,8 @@ export async function activateRecurringPayment(input: {
   };
 
   try {
-    const activation = await insideRecurringPaymentStepPhase(
-      phase,
-      activationSteps,
-      (stepFailure) =>
+    const activation = await insideRecurringPaymentStepPhase(phase, activationSteps, {
+      check: (stepFailure) =>
         checkActivationUnwind({
           env: input.env,
           organizationId: input.organizationId,
@@ -1229,8 +1318,17 @@ export async function activateRecurringPayment(input: {
           attemptId: attempt.id,
           planId: activationPlanId,
           stepFailure,
-        })
-    );
+        }),
+      continueFromLanded: () =>
+        readLandedActivation({
+          recurringRepo,
+          subscriptionsRepo,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: claimed.id,
+          attemptId: attempt.id,
+        }),
+    });
 
     const activatedAt = new Date().toISOString();
     const scheduleRequest =
@@ -1333,7 +1431,6 @@ export async function activateRecurringPayment(input: {
     // Anything else may leave a step in flight: the attempt keeps its status and records only
     // the error, so a concurrent finalize is never flipped back.
     await journalInFlightRecurringPaymentAttempt({
-      error,
       write: () =>
         recurringRepo.updateActivationAttempt({
           attemptId: attempt.id,

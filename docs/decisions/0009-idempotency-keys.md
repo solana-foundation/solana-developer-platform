@@ -140,7 +140,10 @@ the saved expiry, so the send can never land; pending otherwise. A dropped step'
 cleared in the same transaction as its unwind: an update's plan, setup, authorization or plan
 update fails it back to `active` on what it had, and a dropped old cancel is cleared, then sent
 again; an activation's plan, setup or subscribe fails it back to `pending_activation`, never while
-its delegation is on chain; a cancel fails back to `active` and a resume to `canceled`. No signature
+its delegation is on chain; a cancel fails back to `active` and a resume to `canceled`. When an
+unwind instead finds the final step (subscribe, or a replacement's authorization) landed with no
+saved signature, the flow finishes from it with a null signature on the row, an accepted trace gap,
+rather than waiting for a send nothing would make. No signature
 status is read: the effect and the expiry decide, which also covers a send that failed on chain.
 A pending step (its send may still land, or the read failed) answers 409 and leaves the attempt in
 flight, never failed or reset, so recovery finishes it.
