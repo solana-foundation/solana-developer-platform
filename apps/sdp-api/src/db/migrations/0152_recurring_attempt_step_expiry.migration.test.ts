@@ -16,11 +16,11 @@ const RECURRING_PAYMENT_ID = "rp_0152";
 interface AttemptTable {
   table: string;
   constraint: string;
-  fixedColumns: Record<string, string>;
+  fixedColumns: Readonly<Record<string, string>>;
   signatureSlots: readonly string[];
 }
 
-const ACTIVATION_ATTEMPTS: AttemptTable = {
+const ACTIVATION_ATTEMPTS = {
   table: "payment_recurring_payment_activation_attempts",
   constraint: "payment_recurring_activation_attempts_expiry_signature_check",
   fixedColumns: { stage: "claim" },
@@ -29,8 +29,8 @@ const ACTIVATION_ATTEMPTS: AttemptTable = {
     "authorization_setup_signature",
     "authorization_signature",
   ],
-};
-const UPDATE_ATTEMPTS: AttemptTable = {
+} as const satisfies AttemptTable;
+const UPDATE_ATTEMPTS = {
   table: "payment_recurring_payment_update_attempts",
   constraint: "payment_recurring_update_attempts_expiry_signature_check",
   fixedColumns: { mode: "replacement", status: "processing", stage: "claim" },
@@ -41,34 +41,47 @@ const UPDATE_ATTEMPTS: AttemptTable = {
     "authorization_signature",
     "old_cancel_signature",
   ],
-};
-const LIFECYCLE_ATTEMPTS: AttemptTable = {
+} as const satisfies AttemptTable;
+const LIFECYCLE_ATTEMPTS = {
   table: "payment_recurring_payment_lifecycle_attempts",
   constraint: "payment_recurring_lifecycle_attempts_expiry_signature_check",
   fixedColumns: { operation: "cancel", status: "processing", stage: "claim" },
   signatureSlots: ["signature"],
-};
+} as const satisfies AttemptTable;
 const ATTEMPT_TABLES = [ACTIVATION_ATTEMPTS, UPDATE_ATTEMPTS, LIFECYCLE_ATTEMPTS];
+
+type AttemptTableFixture = (typeof ATTEMPT_TABLES)[number];
+type KeysOf<T> = T extends unknown ? keyof T : never;
+type AttemptColumn =
+  | "id"
+  | "organization_id"
+  | "project_id"
+  | "recurring_payment_id"
+  | "last_valid_block_height"
+  | KeysOf<AttemptTableFixture["fixedColumns"]>
+  | AttemptTableFixture["signatureSlots"][number];
 
 let client: Client;
 let tenant: Awaited<ReturnType<typeof seedOrgProject>>;
 
-async function insertAttempt(attempt: {
-  attemptTable: AttemptTable;
+async function insertAttempt<Table extends AttemptTableFixture>(attempt: {
+  attemptTable: Table;
   id: string;
-  signatureSlot: string | null;
+  signatureSlot: Table["signatureSlots"][number] | null;
   lastValidBlockHeight: string;
 }) {
-  const columns: Record<string, string> = {
+  const fixedColumns: AttemptTableFixture["fixedColumns"] = attempt.attemptTable.fixedColumns;
+  const signatureSlot: AttemptTableFixture["signatureSlots"][number] | null = attempt.signatureSlot;
+  const columns: Partial<Record<AttemptColumn, string>> = {
     id: attempt.id,
     organization_id: tenant.organizationId,
     project_id: tenant.projectId,
     recurring_payment_id: RECURRING_PAYMENT_ID,
-    ...attempt.attemptTable.fixedColumns,
+    ...fixedColumns,
     last_valid_block_height: attempt.lastValidBlockHeight,
   };
-  if (attempt.signatureSlot !== null) {
-    columns[attempt.signatureSlot] = `sig_${attempt.id}`;
+  if (signatureSlot !== null) {
+    columns[signatureSlot] = `sig_${attempt.id}`;
   }
   const names = Object.keys(columns);
   return client.query(
