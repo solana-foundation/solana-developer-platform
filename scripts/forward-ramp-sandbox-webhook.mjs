@@ -49,7 +49,7 @@ export const stripeEnvSchema = z.object({
  * Every buy or every sale MoonPay holds for one external id. Only the fields
  * this script reads are checked, as the API's MoonPay schemas check them
  * (packages/sdp-payments/src/ramps/providers/moonpay/event-status-mapping.ts).
- * The rest pass through untouched, so SDP receives MoonPay's record as is.
+ * The rest pass through unchanged, so SDP receives every field MoonPay sent.
  */
 export const moonpayLookupSchema = z.array(
   z.looseObject({
