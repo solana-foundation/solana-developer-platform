@@ -6604,6 +6604,45 @@ describe("Payments routes — recurring", () => {
         ]);
       });
 
+      it("fails a resumed cancel back to active when its wallet can no longer sign the send it needs", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const cancel = (key: string) =>
+          app.request(
+            actionPath(activated.id, "cancel"),
+            { method: "POST", headers: keyed(key), body: "{}" },
+            env
+          );
+        const key = crypto.randomUUID();
+        expect((await cancel(key)).status).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "cancel", key });
+        createOrgSignerForCustodyWalletMock.mockRejectedValue(new Error("signer unavailable"));
+        const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+        onTestFinished(() => errorLog.mockRestore());
+        const sent = sends();
+
+        const retry = await cancel(crypto.randomUUID());
+
+        expect(retry.status).toBe(500);
+        expect(sent).not.toHaveBeenCalled();
+        expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
+          { status: "failed", stage: "submit", signature: null },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+        const unsendable = errorLog.mock.calls.filter(([payload]) => {
+          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+          return (
+            parsed.success && parsed.data.event === "sdp_api_recurring_payment_step_unsendable"
+          );
+        });
+        expect(unsendable).toHaveLength(1);
+        expect(required(unsendable[0])[0]).toEqual(
+          expect.objectContaining({
+            recurring_payment_id: activated.id,
+            movement: "recurring.cancel",
+          })
+        );
+      });
+
       it("fails a resume whose saved send expired over a delegation that does not exist, back to canceled", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const lifecycle = (action: PaymentRecurringPaymentLifecycleOperation, key: string) =>
@@ -7873,6 +7912,26 @@ describe("Payments routes — recurring", () => {
             subscription_pda: required(recorded.subscription_pda),
           })
         );
+      });
+
+      it("waits on a resumed activation's pending subscribe without asking a wallet that can no longer sign", async () => {
+        const { created, subscribeSignature } = await leaveSubscribeInFlight();
+        createOrgSignerForCustodyWalletMock.mockRejectedValue(new Error("signer unavailable"));
+        const signerCalls = createOrgSignerForCustodyWalletMock.mock.calls.length;
+        const sent = sends();
+
+        const retry = await activate(created.id, crypto.randomUUID());
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: subscribeSignature,
+        });
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
       });
 
       it("fails an activation whose setup send expired without landing back to pending_activation, clearing its setup signature", async () => {
