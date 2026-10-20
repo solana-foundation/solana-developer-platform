@@ -136,7 +136,7 @@ const WALLET_SCOPE_ROUTES = {
     refusedEarly: { file: RECURRING, test: RECURRING_ACTIVE },
   },
   "POST /v1/payments/recurring-payments/:id/cancel": {
-    gap: "cancelling an active mandate is an exit the claim does not scope (lockLiveActivatingKey reads no key for a cancel): it claims the lifecycle before the custody signer refuses",
+    refusedEarly: { file: RECURRING, test: RECURRING_ACTIVE },
   },
   "POST /v1/payments/subscription-plans": { exempt: SPONSOR_ONLY },
   "PATCH /v1/payments/subscription-plans/:planId": { exempt: SPONSOR_ONLY },
@@ -384,7 +384,6 @@ describe("wallet-scope route inventory", () => {
         .filter(([, classification]) => "gap" in classification)
         .map(([route]) => route)
     ).toEqual([
-      "POST /v1/payments/recurring-payments/:id/cancel",
       "POST /v1/issuance/tokens/:tokenId/deploy/prepare",
       "POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata",
       "POST /v1/issuance/tokens/:tokenId/deploy/confirm",

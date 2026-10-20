@@ -262,7 +262,7 @@ async function recoverLifecycleRow(
     const operation = recurringPaymentInFlightLifecycleOperation(row.status);
     if (operation === "cancel") {
       // An exit: never refused, for deleted and unentitled organizations alike.
-      await cancelRecurringPayment(input);
+      await cancelRecurringPayment({ ...input, admitCaller: null });
       return "ok";
     }
     if (operation === "resume") {

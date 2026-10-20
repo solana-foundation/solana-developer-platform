@@ -4894,6 +4894,15 @@ describe("Payments routes — recurring", () => {
       }),
     },
     {
+      route: "cancel",
+      prepare: async () => {},
+      request: (id: string) => ({
+        path: `/v1/payments/recurring-payments/${id}/cancel`,
+        method: "POST",
+        body: {},
+      }),
+    },
+    {
       route: "an amount change",
       prepare: async () => {},
       request: (id: string) => ({
