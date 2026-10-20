@@ -6,7 +6,6 @@ import {
   getBase58Codec,
   getBase64Codec,
   getBase64EncodedWireTransaction,
-  getSignatureFromTransaction,
   getTransactionDecoder,
   partiallySignTransaction,
 } from "@solana/kit";
@@ -15,16 +14,6 @@ const host = process.env.KORA_SHIM_HOST ?? "127.0.0.1";
 const port = Number.parseInt(process.env.KORA_SHIM_PORT ?? "8080", 10);
 const solanaRpcUrl = process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
 const solanaRpcTimeoutMs = Number.parseInt(process.env.KORA_SHIM_RPC_TIMEOUT_MS ?? "120000", 10);
-const sendTransactionTimeoutMs = Number.parseInt(
-  process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",
-  10
-);
-const sendTransactionStatusWaitMs = Number.parseInt(
-  process.env.KORA_SHIM_SEND_STATUS_WAIT_MS ?? "3000",
-  10
-);
-const sendTransactionStatusPollMs = 250;
-const resubmissionTimeoutMs = 3_000;
 const privateKey = process.env.SIGNER_PRIVATE_KEY;
 
 // Mirrors `allowed_tokens` in infra/kora/kora.toml, in the same order: wrapped
@@ -128,87 +117,9 @@ async function handleRpc(method, params) {
         signer_pubkey: signerAddress,
       };
     }
-    case "signAndSendTransaction": {
-      const signedTransaction = await signTransaction(params.transaction);
-      const signature = await sendTransactionWithRetry(signedTransaction);
-      return {
-        signature,
-        signed_transaction: signedTransaction,
-        signer_pubkey: signerAddress,
-      };
-    }
     default:
       throw new Error(`Unsupported Kora shim method: ${method}`);
   }
-}
-
-function isAlreadyProcessed(error) {
-  return error instanceof Error && error.message.includes("already been processed");
-}
-
-function signatureOf(signedTransaction) {
-  return getSignatureFromTransaction(
-    getTransactionDecoder().decode(base64.encode(signedTransaction))
-  );
-}
-
-async function sendTransactionWithRetry(signedTransaction) {
-  const params = [
-    signedTransaction,
-    {
-      encoding: "base64",
-      skipPreflight: true,
-      preflightCommitment: "confirmed",
-    },
-  ];
-  let signature;
-  try {
-    signature = await solanaRpc("sendTransaction", params, {
-      timeoutMs: sendTransactionTimeoutMs,
-    });
-  } catch (error) {
-    if (!isAlreadyProcessed(error)) {
-      throw error;
-    }
-    return signatureOf(signedTransaction);
-  }
-
-  if (await waitForTransactionStatus(signature)) {
-    return signature;
-  }
-
-  console.warn(
-    `Transaction ${signature} was not observed after ${sendTransactionStatusWaitMs}ms; resubmitting.`
-  );
-  try {
-    const resentSignature = await solanaRpc("sendTransaction", params, {
-      timeoutMs: resubmissionTimeoutMs,
-    });
-    if (resentSignature !== signature) {
-      throw new Error("Resubmitted transaction returned a different signature");
-    }
-  } catch (error) {
-    if (isAlreadyProcessed(error)) {
-      return signature;
-    }
-    console.warn("Transaction resubmission did not complete; continuing confirmation.", error);
-  }
-
-  return signature;
-}
-
-async function waitForTransactionStatus(signature) {
-  const deadline = Date.now() + sendTransactionStatusWaitMs;
-
-  while (Date.now() < deadline) {
-    const statuses = await solanaRpc("getSignatureStatuses", [[signature]]);
-    if (statuses?.value?.[0]) {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, sendTransactionStatusPollMs));
-  }
-
-  return false;
 }
 
 async function signTransaction(base64Transaction) {
@@ -247,7 +158,7 @@ function getConfig() {
       get_payer_signer: true,
       get_supported_tokens: true,
       liveness: true,
-      sign_and_send_transaction: true,
+      sign_and_send_transaction: false,
       sign_transaction: true,
       transfer_transaction: false,
     },

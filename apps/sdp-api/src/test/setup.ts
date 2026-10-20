@@ -3,9 +3,9 @@ import { closeDatabasePools } from "@/db/client";
 import { setDefaultDatabaseIdentityForTesting } from "@/db/identity";
 import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
-import { MANAGED_POOL_ENV_KEYS } from "@/test/helpers/managed-pool-env";
+import { KORA_UPSTREAM_ENV_KEYS, MANAGED_POOL_ENV_KEYS } from "@/test/helpers/managed-pool-env";
 
-for (const envKey of MANAGED_POOL_ENV_KEYS) {
+for (const envKey of [...MANAGED_POOL_ENV_KEYS, ...KORA_UPSTREAM_ENV_KEYS]) {
   process.env[envKey] = "";
 }
 

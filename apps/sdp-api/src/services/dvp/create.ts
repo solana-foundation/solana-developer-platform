@@ -571,6 +571,8 @@ export async function createDvpTrade(
           );
           return current !== null && current.createSignature !== null;
         },
+        // A refused create is released in the caller.
+        clearSigned: async () => {},
       },
     });
   } catch (error) {

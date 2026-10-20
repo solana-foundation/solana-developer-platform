@@ -657,9 +657,6 @@ importers:
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
-      '@solana/codecs':
-        specifier: 'catalog:'
-        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -745,9 +742,6 @@ importers:
 
   packages/sdp-issuance:
     dependencies:
-      '@sdp/fee-payment':
-        specifier: workspace:*
-        version: link:../sdp-fee-payment
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc

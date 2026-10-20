@@ -1,4 +1,3 @@
-import type { createFeePaymentAdapter } from "@sdp/fee-payment";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   generateKeyPairSigner,
@@ -16,7 +15,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   enableMainnetSponsorship,
@@ -31,6 +30,7 @@ import {
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_WALLET_ID,
+  testKoraAdapter,
 } from "@/test/helpers/payments-routes";
 import {
   countTransferRows,
@@ -42,7 +42,7 @@ import {
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
 import { required } from "@/test/helpers/required";
-import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
 
 function testProjectPaymentsRepository() {
   return createPostgresPaymentsRepository(
@@ -670,16 +670,13 @@ describe("Payments routes — on-chain transfers", () => {
   });
 
   it("marks the transfer as failed when execution throws and returns 502", async () => {
-    createFeePaymentAdapterMock.mockReturnValueOnce({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: vi.fn(),
-    } as ReturnType<typeof createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValueOnce(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      })
+    );
 
     const res = await postTransfer(
       {
@@ -708,16 +705,6 @@ describe("Payments routes — on-chain transfers", () => {
         "Failed to send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x11"
       )
     );
-    createFeePaymentAdapterMock.mockReturnValueOnce({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: vi.fn(),
-    } as ReturnType<typeof createFeePaymentAdapter>);
 
     const res = await postTransfer(
       {

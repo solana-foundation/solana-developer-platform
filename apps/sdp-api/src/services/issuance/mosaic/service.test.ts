@@ -9,10 +9,10 @@
  * tests, so this is the only place the fee-payer resolution is asserted.
  */
 
-import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
 import * as RpcModule from "@sdp/rpc/solana";
+import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
 import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
@@ -24,7 +24,14 @@ import { env } from "@/test/helpers/env";
 
 // Sentinels — the SDK template builder is stubbed, so its concrete return value
 // is irrelevant; we only care which arguments the service hands it.
-const FAKE_FULL_TX = { __sentinel: "full-tx", instructions: [] } as const;
+const FAKE_FULL_TX = {
+  __sentinel: "full-tx",
+  instructions: [],
+  lifetimeConstraint: {
+    blockhash: Kit.blockhash("11111111111111111111111111111111"),
+    lastValidBlockHeight: 321n,
+  },
+} as const;
 const FAKE_LIST_ADDRESS = "List1111111111111111111111111111111111111" as Address;
 // Structurally-valid placeholder addresses for helper defaults, so callers that
 // don't override these still get a well-formed CreateTokenOptions.
@@ -70,20 +77,11 @@ type PacketSizeProto = {
   exceedsPacketSize: (fullTx: unknown) => Promise<boolean>;
 };
 
-function makeFeePayment(koraAddress: Address): {
-  port: FeePaymentPort;
-  getFeePayer: ReturnType<typeof vi.fn>;
-  signAndSend: ReturnType<typeof vi.fn>;
-} {
-  const getFeePayer = vi.fn().mockResolvedValue(koraAddress);
-  const signAndSend = vi.fn();
-  const port: FeePaymentPort = {
-    providerId: "test-kora",
-    getFeePayer,
-    signAsFeePayer: vi.fn(),
-    signAndSend,
-  };
-  return { port, getFeePayer, signAndSend };
+function makeSponsor(koraAddress: Address) {
+  const getFeePayer = vi.fn<SponsoredSubmitter["getFeePayer"]>().mockResolvedValue(koraAddress);
+  const submitSponsored = vi.fn<SponsoredSubmitter["submitSponsored"]>();
+  const submitter: SponsoredSubmitter = { getFeePayer, submitSponsored };
+  return { submitter, getFeePayer, submitSponsored };
 }
 
 function stablecoinOptions(overrides: Partial<CreateTokenOptions> = {}): CreateTokenOptions {
@@ -106,17 +104,17 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
   let signer: TransactionSigner;
   let koraAddress: Address;
   let service: MosaicService;
-  let fee: ReturnType<typeof makeFeePayment>;
+  let fee: ReturnType<typeof makeSponsor>;
   let builderSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     signer = await Kit.generateKeyPairSigner();
     koraAddress = (await Kit.generateKeyPairSigner()).address;
-    fee = makeFeePayment(koraAddress);
+    fee = makeSponsor(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
       signer,
-      fee.port,
+      fee.submitter,
       // Mirror the createMosaicService factory wiring so on-chain failures
       // surface as AppError("TRANSACTION_FAILED").
       { transactionFailedError: transactionFailed }
@@ -349,44 +347,75 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       expect(submitSpy.mock.calls[0]).toHaveLength(2);
     });
 
-    it("submits via the Kora two-signer path (signAndSend), not direct RPC", async () => {
-      const koraSignature = "kora-sig" as Signature;
-      fee.signAndSend.mockResolvedValue(koraSignature);
-
-      // Stub the signing/encoding primitives so no real transaction is needed.
+    function stubSponsoredSubmission(sentSignature: Signature) {
       const partialSpy = vi
         .spyOn(Signers, "partiallySignTransactionMessageWithSigners")
         .mockResolvedValue({ __sentinel: "partial-tx" } as never);
       vi.spyOn(Kit, "getTransactionEncoder").mockReturnValue({
         encode: () => new Uint8Array([1, 2, 3]),
       } as never);
+      fee.submitSponsored.mockResolvedValue(sentSignature);
+      return { partialSpy };
+    }
+
+    it("submits a custody-signed mint through the sponsor on the service's RPC after onBeforeSubmit", async () => {
+      const createRpcSpy = vi.spyOn(RpcModule, "createRpcForSdk");
+      const sponsored = new MosaicService(
+        env as ConstructorParameters<typeof MosaicService>[0],
+        signer,
+        fee.submitter,
+        { transactionFailedError: transactionFailed }
+      );
+      const koraSignature = "kora-sig" as Signature;
+      const { partialSpy } = stubSponsoredSubmission(koraSignature);
+      const tokenAccount = (await Kit.generateKeyPairSigner()).address;
+      const mintTx = Kit.pipe(
+        Kit.createTransactionMessage({ version: 0 }),
+        (tx) => Kit.setTransactionMessageFeePayer(koraAddress, tx),
+        (tx) => Kit.setTransactionMessageLifetimeUsingBlockhash(FAKE_FULL_TX.lifetimeConstraint, tx)
+      );
+      vi.spyOn(MosaicSdk, "createMintToTransaction").mockResolvedValue(mintTx);
+      vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+        tokenAccount,
+        isInitialized: true,
+        isFrozen: false,
+        balance: 0n,
+        uiBalance: 0,
+      });
       const confirmSpy = vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
         signature: koraSignature,
         slot: 7n,
         confirmationStatus: "confirmed",
         err: null,
       } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
+      const onBeforeSubmit = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
-      const result = await service.createToken(srfc37Options());
+      const result = await sponsored.mintTo(
+        {
+          mint: (await Kit.generateKeyPairSigner()).address,
+          destination: (await Kit.generateKeyPairSigner()).address,
+          amount: 1,
+          mintAuthority: signer.address,
+          feePayer: signer.address,
+        },
+        onBeforeSubmit
+      );
 
-      expect(partialSpy).toHaveBeenCalledWith(FAKE_FULL_TX);
-      expect(fee.signAndSend).toHaveBeenCalledTimes(1);
-      expect(fee.signAndSend).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
+      expect(partialSpy).toHaveBeenCalledWith(mintTx);
+      expect(onBeforeSubmit).toHaveBeenCalledOnce();
+      expect(onBeforeSubmit).toHaveBeenCalledBefore(fee.submitSponsored);
+      expect(fee.submitSponsored).toHaveBeenCalledOnce();
+      const [{ transaction, lastValidBlockHeight, rpc }] = fee.submitSponsored.mock.calls[0];
+      expect(transaction).toEqual(new Uint8Array([1, 2, 3]));
+      expect(lastValidBlockHeight).toBe(mintTx.lifetimeConstraint.lastValidBlockHeight);
+      expect(rpc).toBe(createRpcSpy.mock.results[0].value);
       expect(confirmSpy).toHaveBeenCalledTimes(1);
-      expect(result.signature).toBe(koraSignature);
-      expect(result.slot).toBe(7n);
+      expect(result).toEqual({ signature: koraSignature, slot: 7n, tokenAccount });
     });
 
     it("throws TRANSACTION_FAILED carrying the on-chain error when confirmation reports failure", async () => {
       const koraSignature = "kora-sig" as Signature;
-      fee.signAndSend.mockResolvedValue(koraSignature);
-
-      vi.spyOn(Signers, "partiallySignTransactionMessageWithSigners").mockResolvedValue({
-        __sentinel: "partial-tx",
-      } as never);
-      vi.spyOn(Kit, "getTransactionEncoder").mockReturnValue({
-        encode: () => new Uint8Array([1, 2, 3]),
-      } as never);
+      stubSponsoredSubmission(koraSignature);
       const onChainError = { InstructionError: [0, { Custom: 6001 }] };
       vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
         signature: koraSignature,
@@ -537,7 +566,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
   let mint: Address;
   let destination: Address;
   let service: MosaicService;
-  let fee: ReturnType<typeof makeFeePayment>;
+  let fee: ReturnType<typeof makeSponsor>;
   let mintToSpy: ReturnType<typeof vi.spyOn>;
   let transferSpy: ReturnType<typeof vi.spyOn>;
   let submitSpy: ReturnType<typeof vi.spyOn>;
@@ -548,11 +577,11 @@ describe("MosaicService mint and transfer — fee payer", () => {
     koraAddress = (await Kit.generateKeyPairSigner()).address;
     mint = (await Kit.generateKeyPairSigner()).address;
     destination = (await Kit.generateKeyPairSigner()).address;
-    fee = makeFeePayment(koraAddress);
+    fee = makeSponsor(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
       signer,
-      fee.port,
+      fee.submitter,
       {
         transactionFailedError: transactionFailed,
       }

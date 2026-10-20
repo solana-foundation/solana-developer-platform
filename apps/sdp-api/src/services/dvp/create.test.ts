@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { FeePaymentError } from "@sdp/fee-payment/port";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
@@ -86,6 +87,12 @@ const COUNTERPARTY_ADDRESS = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const CONNECTION_APP_SECRET = "dvp-connection-secret";
 
 const EXPIRY_TIMESTAMP = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+function createTradeInSandbox(input: Parameters<typeof createDvpTrade>[2]) {
+  return runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, () =>
+    createDvpTrade(env, auditContext, input)
+  );
+}
 
 function acceptSend(): void {
   sendTransaction.mockImplementation(async (_rpc: unknown, bytes: Uint8Array) =>
@@ -324,9 +331,7 @@ describe("createDvpTrade", () => {
       createSponsorshipFeePayment.mockImplementationOnce(() => {
         throw new Error("Sponsor unavailable");
       });
-      await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
-        "Sponsor unavailable"
-      );
+      await expect(createTradeInSandbox(tradeInput())).rejects.toThrow("Sponsor unavailable");
       expect(provider).toHaveBeenCalledOnce();
       const audit = await db.queryOne<{
         user_id: string;
@@ -407,7 +412,7 @@ describe("createDvpTrade", () => {
   );
   it("creates with an admitted Connection authority", async () => {
     await seedConnectionAuthority();
-    const trade = await createDvpTrade(env, auditContext, tradeInput());
+    const trade = await createTradeInSandbox(tradeInput());
     expect(trade.settlementAuthority).toBe(SETTLEMENT_AUTHORITY);
     expect(sendTransaction).toHaveBeenCalledOnce();
     expect(createSponsorshipFeePayment).toHaveBeenCalledWith(
@@ -419,12 +424,10 @@ describe("createDvpTrade", () => {
   it("replays the recorded create after BYOK leaves the release channel without sponsoring again", async () => {
     await seedConnectionAuthority();
     const input = { ...tradeInput(), idempotencyKey: "byok-replay" };
-    const original = await createDvpTrade(env, auditContext, input);
+    const original = await createTradeInSandbox(input);
     custodyReleaseChannel.outOfChannelMode = "byok";
-    expect((await createDvpTrade(env, auditContext, input)).id).toBe(original.id);
-    await expect(
-      createDvpTrade(env, auditContext, { ...input, amountA: 2000n })
-    ).rejects.toMatchObject({
+    expect((await createTradeInSandbox(input)).id).toBe(original.id);
+    await expect(createTradeInSandbox({ ...input, amountA: 2000n })).rejects.toMatchObject({
       statusCode: 409,
     });
     expect(await rowsInDb()).toHaveLength(1);
@@ -437,11 +440,9 @@ describe("createDvpTrade", () => {
     createSponsorshipFeePayment.mockImplementationOnce(() => {
       throw new Error("Sponsor unavailable");
     });
-    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow("Sponsor unavailable");
+    await expect(createTradeInSandbox(input)).rejects.toThrow("Sponsor unavailable");
     custodyReleaseChannel.outOfChannelMode = "byok";
-    await expect(createDvpTrade(env, auditContext, input)).rejects.toMatchObject(
-      byokChannelRefusal()
-    );
+    await expect(createTradeInSandbox(input)).rejects.toMatchObject(byokChannelRefusal());
     expect(await rowsInDb()).toMatchObject([{ status: "create_failed" }]);
     expect(createSponsorshipFeePayment).toHaveBeenCalledOnce();
     expect(sendTransaction).not.toHaveBeenCalled();
@@ -452,7 +453,7 @@ describe("createDvpTrade", () => {
       rowsAtSendTime = await rowsInDb();
       return getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
     });
-    const trade = await createDvpTrade(env, auditContext, tradeInput());
+    const trade = await createTradeInSandbox(tradeInput());
     expect(sendTransaction).toHaveBeenCalledTimes(1);
     expect(rowsAtSendTime).toHaveLength(1);
     expect(rowsAtSendTime[0].status).toBe("creating");
@@ -467,7 +468,7 @@ describe("createDvpTrade", () => {
       ...tradeInput(),
       mintB: address(WELL_KNOWN_TOKENS.USDG.mints["mainnet-beta"].address),
     };
-    const trade = await createDvpTrade(env, auditContext, input);
+    const trade = await createTradeInSandbox(input);
     const rows = await rowsInDb();
     expect(trade.nameA).toBe("Circle Reserve Fund");
     expect(trade.nameB).toBe("Global Dollar");
@@ -475,7 +476,7 @@ describe("createDvpTrade", () => {
   });
   it("leaves the trade creating until chain observation confirms it", async () => {
     acceptSend();
-    const trade = await createDvpTrade(env, auditContext, tradeInput());
+    const trade = await createTradeInSandbox(tradeInput());
     expect(trade.status).toBe("creating");
     expect(trade.createSignature).toBeTruthy();
     expect(observeDvpTradeNow).toHaveBeenCalledOnce();
@@ -487,7 +488,7 @@ describe("createDvpTrade", () => {
       ...claimed,
       status: "created" as const,
     }));
-    const trade = await createDvpTrade(env, auditContext, tradeInput());
+    const trade = await createTradeInSandbox(tradeInput());
     expect(trade.status).toBe("created");
   });
   it("marks the trade create_failed when the RPC rejects it in preflight", async () => {
@@ -507,7 +508,7 @@ describe("createDvpTrade", () => {
         unitsConsumed: 0n,
       })
     );
-    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject({
+    await expect(createTradeInSandbox(tradeInput())).rejects.toMatchObject({
       code: "TRANSACTION_FAILED",
     } satisfies Partial<AppError>);
     const rows = await rowsInDb();
@@ -517,7 +518,7 @@ describe("createDvpTrade", () => {
   });
   it("leaves an ambiguously failed send at creating rather than guessing", async () => {
     sendTransaction.mockRejectedValue(new Error("socket hang up"));
-    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow("socket hang up");
+    await expect(createTradeInSandbox(tradeInput())).rejects.toThrow("socket hang up");
     const rows = await rowsInDb();
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("creating");
@@ -540,8 +541,8 @@ describe("createDvpTrade", () => {
   it("returns the original trade when a keyed request is retried", async () => {
     acceptSend();
     const input = { ...tradeInput(), idempotencyKey: "key-1" };
-    const first = await createDvpTrade(env, auditContext, input);
-    const retried = await createDvpTrade(env, auditContext, input);
+    const first = await createTradeInSandbox(input);
+    const retried = await createTradeInSandbox(input);
     expect(retried.id).toBe(first.id);
     expect(retried.swapDvp).toBe(first.swapDvp);
     expect(sendTransaction).toHaveBeenCalledTimes(1);
@@ -566,13 +567,13 @@ describe("createDvpTrade", () => {
         })
       );
       await expect(
-        createDvpTrade(env, auditContext, { ...tradeInput(), idempotencyKey: key })
+        createTradeInSandbox({ ...tradeInput(), idempotencyKey: key })
       ).rejects.toThrow();
     }
     it("lets the same key create the trade on a retry", async () => {
       await failOnceWith("key-retry");
       acceptSend();
-      const retried = await createDvpTrade(env, auditContext, {
+      const retried = await createTradeInSandbox({
         ...tradeInput(),
         idempotencyKey: "key-retry",
       });
@@ -581,7 +582,7 @@ describe("createDvpTrade", () => {
     it("keeps the failed attempt on the record rather than deleting it", async () => {
       await failOnceWith("key-retry");
       acceptSend();
-      await createDvpTrade(env, auditContext, { ...tradeInput(), idempotencyKey: "key-retry" });
+      await createTradeInSandbox({ ...tradeInput(), idempotencyKey: "key-retry" });
       const rows = await rowsInDb();
       expect(rows).toHaveLength(2);
       expect(rows.map((row) => row.status).sort()).toEqual(["create_failed", "creating"]);
@@ -589,11 +590,11 @@ describe("createDvpTrade", () => {
     it("frees the key from the failed row so only the live trade answers to it", async () => {
       await failOnceWith("key-retry");
       acceptSend();
-      const live = await createDvpTrade(env, auditContext, {
+      const live = await createTradeInSandbox({
         ...tradeInput(),
         idempotencyKey: "key-retry",
       });
-      const replayed = await createDvpTrade(env, auditContext, {
+      const replayed = await createTradeInSandbox({
         ...tradeInput(),
         idempotencyKey: "key-retry",
       });
@@ -604,10 +605,10 @@ describe("createDvpTrade", () => {
   it("does not free the key of a trade still stuck at creating", async () => {
     sendTransaction.mockRejectedValueOnce(new Error("rpc returned an unreadable response"));
     await expect(
-      createDvpTrade(env, auditContext, { ...tradeInput(), idempotencyKey: "key-ambiguous" })
+      createTradeInSandbox({ ...tradeInput(), idempotencyKey: "key-ambiguous" })
     ).rejects.toThrow("rpc returned an unreadable response");
     acceptSend();
-    const retried = await createDvpTrade(env, auditContext, {
+    const retried = await createTradeInSandbox({
       ...tradeInput(),
       idempotencyKey: "key-ambiguous",
     });
@@ -618,8 +619,8 @@ describe("createDvpTrade", () => {
     acceptSend();
     const input = { ...tradeInput(), idempotencyKey: "key-race" };
     const [first, second] = await Promise.all([
-      createDvpTrade(env, auditContext, input),
-      createDvpTrade(env, auditContext, input),
+      createTradeInSandbox(input),
+      createTradeInSandbox(input),
     ]);
     expect(second.id).toBe(first.id);
     await expect(rowsInDb()).resolves.toHaveLength(1);
@@ -630,11 +631,11 @@ describe("createDvpTrade", () => {
   });
   it("creates separate trades for different keys", async () => {
     acceptSend();
-    const first = await createDvpTrade(env, auditContext, {
+    const first = await createTradeInSandbox({
       ...tradeInput(),
       idempotencyKey: "key-a",
     });
-    const second = await createDvpTrade(env, auditContext, {
+    const second = await createTradeInSandbox({
       ...tradeInput(),
       idempotencyKey: "key-b",
     });
@@ -643,8 +644,8 @@ describe("createDvpTrade", () => {
   });
   it("creates a new trade every time when no key is sent", async () => {
     acceptSend();
-    const first = await createDvpTrade(env, auditContext, tradeInput());
-    const second = await createDvpTrade(env, auditContext, tradeInput());
+    const first = await createTradeInSandbox(tradeInput());
+    const second = await createTradeInSandbox(tradeInput());
     expect(second.id).not.toBe(first.id);
   });
   it("resolves sponsorship after term validation", async () => {
@@ -661,7 +662,7 @@ describe("createDvpTrade", () => {
   });
   it("resolves a walletId slot to the wallet's address and stores null attribution", async () => {
     acceptSend();
-    const trade = await createDvpTrade(env, auditContext, tradeInput());
+    const trade = await createTradeInSandbox(tradeInput());
     expect(trade.userA).toBe(address(custodyWalletAddress));
     const rows = await rowsInDb();
     expect(rows[0].counterparty_account_id_a).toBeNull();
@@ -682,7 +683,7 @@ describe("createDvpTrade", () => {
       .bind(TEST_ORG.id, TEST_PROJECT_ID)
       .run();
     acceptSend();
-    const trade = await createDvpTrade(env, auditContext, {
+    const trade = await createTradeInSandbox({
       ...tradeInput(),
       partyA: { counterpartyAccountId: "cpa_resolve" },
       partyB: { address: address("GjupWG8a4BXmduuUQt7vP7QxJ5Kq5YhwKZNkFYp5KPr") },
@@ -765,7 +766,7 @@ describe("createDvpTrade", () => {
   });
   it("uses the sponsor as fee payer and instruction payer in one signature slot", async () => {
     acceptSend();
-    const trade = await createDvpTrade(env, auditContext, tradeInput());
+    const trade = await createTradeInSandbox(tradeInput());
     const [, bytes] = sendTransaction.mock.calls[0];
     const transaction = getTransactionDecoder().decode(bytes);
     const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
@@ -784,7 +785,6 @@ describe("createDvpTrade", () => {
     expect(createSponsorshipFeePayment).toHaveBeenCalledWith(
       env,
       {
-        environment: "sandbox",
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         actor: { type: "wallet", id: "cwlt_settlement" },
@@ -796,7 +796,7 @@ describe("createDvpTrade", () => {
     const refusal = new SponsorMessageMismatchError();
     prepareOwnedSubmission.mockRejectedValueOnce(refusal);
     const input = { ...tradeInput(), idempotencyKey: "key-port-integrity" };
-    await expect(createDvpTrade(env, auditContext, input)).rejects.toBe(refusal);
+    await expect(createTradeInSandbox(input)).rejects.toBe(refusal);
     await expect(rowsInDb()).resolves.toMatchObject([
       { status: "create_failed", create_signature: null },
     ]);
@@ -805,9 +805,9 @@ describe("createDvpTrade", () => {
     const denial = new FeePaymentError("Kora rate limit", "RATE_LIMITED");
     prepareOwnedSubmission.mockRejectedValueOnce(denial);
     const input = { ...tradeInput(), idempotencyKey: "key-kora-denial" };
-    await expect(createDvpTrade(env, auditContext, input)).rejects.toBe(denial);
+    await expect(createTradeInSandbox(input)).rejects.toBe(denial);
     await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
-    const retried = await createDvpTrade(env, auditContext, input);
+    const retried = await createTradeInSandbox(input);
     expect(retried.status).toBe("creating");
     await expect(rowsInDb()).resolves.toHaveLength(2);
   });

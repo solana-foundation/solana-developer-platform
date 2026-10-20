@@ -30,8 +30,12 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
-import type { DatabaseExecutor } from "@/db/client";
-import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
+import { type DatabaseExecutor, getDb } from "@/db/client";
+import type {
+  PaymentRecurringPaymentRow,
+  RecurringPaymentStepSignatureSlot,
+} from "@/db/repositories/payment-recurring-payments.repository";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
@@ -239,7 +243,7 @@ export async function sendSubscriptionInstructions(input: {
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
-  submissionStore?: SignedSubmissionStore;
+  submissionStore: SignedSubmissionStore;
 }): Promise<Signature> {
   const signer =
     input.sourceSigner ??
@@ -276,15 +280,68 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return input.submissionStore
-    ? submitSponsoredTransaction({
-        feePayment,
-        rpc,
-        transaction: txBytes,
-        lastValidBlockHeight,
-        store: input.submissionStore,
-      })
-    : feePayment.signAndSend(txBytes);
+  return submitSponsoredTransaction({
+    feePayment,
+    rpc,
+    transaction: txBytes,
+    lastValidBlockHeight,
+    store: input.submissionStore,
+  });
+}
+
+/** A row holding one of a step's saved signatures. */
+export interface SubscriptionStepSignatureRow {
+  slot: RecurringPaymentStepSignatureSlot;
+  /** The recurring payment's id for `recurring_payment`, otherwise the attempt's. */
+  id: string;
+}
+
+/**
+ * The submission store every subscription step sends with. `save` writes the step's signature
+ * column(s) before the send; after a provably refused send, `rows` are cleared, each only while
+ * it still holds that signature, so a retry sends again instead of waiting on a transaction that
+ * never left. Recovery reads the saved signature and the chain, so there is no started marker.
+ *
+ * @param step - The step's tenant, signature writer and the rows `save` writes.
+ * @returns The store.
+ */
+export function createSubscriptionStepStore(step: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  save: (signature: Signature) => Promise<void>;
+  rows: readonly SubscriptionStepSignatureRow[];
+}): SignedSubmissionStore {
+  return {
+    persistSigned: ({ signature }) => step.save(signature),
+    markStarted: async () => {},
+    hasStarted: async () => false,
+    clearSigned: async (signature) => {
+      const updatedAt = new Date().toISOString();
+      await getDb(step.env).transaction(async (tx) => {
+        const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+        for (const row of step.rows) {
+          const cleared = await recurringRepo.clearStepSignature({
+            ...row,
+            organizationId: step.organizationId,
+            projectId: step.projectId,
+            signature,
+            updatedAt,
+          });
+          getLogger().info(
+            {
+              project_id: step.projectId,
+              row_id: row.id,
+              slot: `${row.slot.row}.${row.slot.column}`,
+              signature,
+              cleared,
+            },
+            "Recurring payment step signature cleared after a refused send"
+          );
+        }
+      });
+    },
+  };
 }
 
 /**
@@ -321,9 +378,9 @@ export type ResumedStep<T> = { kind: "landed" | "absent"; account: T };
 
 /**
  * Settles a step an earlier run reached before this run sends it. A step's
- * signature is saved only after its send returns, so the attempt alone cannot
- * say whether that send landed; the step's account can, because only this
- * attempt causes its effect.
+ * signature is saved before its send and cleared only when the send is
+ * provably refused, so a saved signature alone cannot say whether that send
+ * landed; the step's account can, because only this attempt causes its effect.
  *
  * - The effect at `finalized`: landed.
  * - The effect at `confirmed` only: it is landing, or the `finalized` view lags

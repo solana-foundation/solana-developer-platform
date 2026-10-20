@@ -5,7 +5,6 @@ import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
@@ -90,16 +89,53 @@ describe("ApiPlaygroundShell", () => {
     await waitFor(() => expect(view.container.textContent).toContain("Request execution failed."));
     expect(view.container.textContent).not.toContain(secret);
     const [proxyPath, proxyInit] = fetchMock.mock.calls[0];
-    expect(proxyPath).toBe("/api/playground/execute");
+    expect(proxyPath).toBe("/api/playground/v1/test");
+    expect(proxyInit.method).toBe("GET");
+    expect(proxyInit.body).toBeUndefined();
     const headers = new Headers(proxyInit.headers);
     expect(headers.get("x-project-id")).toBe(PRODUCTION_PROJECT.id);
-    // No key and no bearer leave the browser: the execute route runs on the session.
+    // No key and no bearer leave the browser: the proxy runs on the session.
     expect(headers.has("Authorization")).toBe(false);
-    expect(JSON.parse(String(proxyInit.body))).toEqual({
-      method: "GET",
-      path: "/v1/test",
-      body: null,
-    });
+  });
+
+  it("sends a write's own method, body and key to the playground proxy and shows the API's answer", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        new Response(JSON.stringify({ data: { id: "res_1" } }), {
+          status: 201,
+          statusText: "Created",
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          endpoints={[
+            {
+              ...endpoint,
+              id: "post-body",
+              method: "POST",
+              bodyFields: [{ key: "name", label: "Name", kind: "text", defaultValue: "Acme" }],
+            },
+          ]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+
+    await waitFor(() => expect(view.container.textContent).toContain("201 Created"));
+    expect(view.container.textContent).toContain("res_1");
+    const [proxyPath, proxyInit] = fetchMock.mock.calls[0];
+    expect(proxyPath).toBe("/api/playground/v1/test");
+    expect(proxyInit.method).toBe("POST");
+    expect(JSON.parse(String(proxyInit.body))).toEqual({ name: "Acme" });
+    const headers = new Headers(proxyInit.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   // Greptile (#2433): the previous build kept a lost write's key under a digest
@@ -112,10 +148,7 @@ describe("ApiPlaygroundShell", () => {
     );
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init: RequestInit) =>
-        new Response(
-          JSON.stringify({ ok: true, status: 201, statusText: "Created", body: {}, headers: {} }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        )
+        new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })
     );
     vi.stubGlobal("fetch", fetchMock);
     const view = render(
@@ -157,10 +190,7 @@ describe("ApiPlaygroundShell", () => {
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init: RequestInit) =>
-        new Response(
-          JSON.stringify({ ok: true, status: 201, statusText: "Created", body: {}, headers: {} }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        )
+        new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })
     );
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -174,9 +204,7 @@ describe("ApiPlaygroundShell", () => {
       </I18nProvider>
     );
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
 
     fireEvent.click(view.getByRole("button", { name: "Run request" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -208,16 +236,13 @@ describe("ApiPlaygroundShell", () => {
   // write again instead of replaying the first attempt.
   it("resends a lost or 5xx-answered POST under its key, and a settled one under a new key", async () => {
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
-    const envelope = (status: number) =>
-      new Response(
-        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    const answers: (Response | "lost")[] = ["lost", envelope(503), envelope(201)];
+    const answer = (status: number) =>
+      new Response("{}", { status, headers: { "Content-Type": "application/json" } });
+    const answers: (Response | "lost")[] = ["lost", answer(503), answer(201)];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
-      const answer = answers.shift() ?? envelope(201);
-      if (answer === "lost") throw new TypeError("Failed to fetch");
-      return answer;
+      const next = answers.shift() ?? answer(201);
+      if (next === "lost") throw new TypeError("Failed to fetch");
+      return next;
     });
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -231,9 +256,7 @@ describe("ApiPlaygroundShell", () => {
       </I18nProvider>
     );
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
     const send = async (calls: number) => {
       await waitFor(() =>
         expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
@@ -252,6 +275,55 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(1)).toBe(sentKey(0));
     expect(sentKey(2)).toBe(sentKey(0));
     expect(sentKey(3)).not.toBe(sentKey(2));
+  });
+
+  // Greptile (#2440): an expired session answers a retry with the sign-in page,
+  // a followed redirect with status 200; that is not the API's answer.
+  it("keeps a POST's key when the answer is a followed redirect, so the retry still reuses it", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const signInPage = () => {
+      const response = new Response("<html>Sign in</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      });
+      Object.defineProperty(response, "redirected", { value: true });
+      return response;
+    };
+    const answers = [signInPage()];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        answers.shift() ??
+        new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          endpoints={[{ ...endpoint, id: "post-redirected", method: "POST" }]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+    const sentKey = (call: number) =>
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
+    const send = async (calls: number) => {
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+    };
+
+    await send(1);
+    // Not shown as the API's 200: the sign-in page is never the answer.
+    await waitFor(() => expect(view.container.textContent).toContain("Your session expired"));
+    expect(view.container.textContent).not.toContain("Sign in</html>");
+    await send(2);
+
+    expect(sentKey(0)).toEqual(expect.any(String));
+    expect(sentKey(1)).toBe(sentKey(0));
   });
 
   // Jina (#2333): a money route went out under a key the browser would not
@@ -295,16 +367,13 @@ describe("ApiPlaygroundShell", () => {
   // between a lost write and its retry sent the retry under a new key.
   it("keeps a lost POST's key across a reload, in session storage, so the retry still reuses it", async () => {
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
-    const envelope = (status: number) =>
-      new Response(
-        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    const answers: (Response | "lost")[] = ["lost", envelope(201)];
+    const answer = (status: number) =>
+      new Response("{}", { status, headers: { "Content-Type": "application/json" } });
+    const answers: (Response | "lost")[] = ["lost", answer(201)];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
-      const answer = answers.shift() ?? envelope(201);
-      if (answer === "lost") throw new TypeError("Failed to fetch");
-      return answer;
+      const next = answers.shift() ?? answer(201);
+      if (next === "lost") throw new TypeError("Failed to fetch");
+      return next;
     });
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -333,9 +402,7 @@ describe("ApiPlaygroundShell", () => {
       cleanup();
     };
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
 
     await sendWith(ApiPlaygroundShell, I18nProvider, getMessages("en"), 1);
     // The reload: every module starts over; only session storage survives.
@@ -358,16 +425,13 @@ describe("ApiPlaygroundShell", () => {
   // write's key, so the retry ran the write again under a new one.
   it("keeps a lost POST's key across a GET, so the retry still reuses it", async () => {
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
-    const envelope = (status: number) =>
-      new Response(
-        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    const answers: (Response | "lost")[] = ["lost", envelope(200), envelope(201)];
+    const answer = (status: number) =>
+      new Response("{}", { status, headers: { "Content-Type": "application/json" } });
+    const answers: (Response | "lost")[] = ["lost", answer(200), answer(201)];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
-      const answer = answers.shift() ?? envelope(201);
-      if (answer === "lost") throw new TypeError("Failed to fetch");
-      return answer;
+      const next = answers.shift() ?? answer(201);
+      if (next === "lost") throw new TypeError("Failed to fetch");
+      return next;
     });
     vi.stubGlobal("fetch", fetchMock);
     const postEndpoint: ApiPlaygroundEndpointConfig = {
@@ -396,9 +460,7 @@ describe("ApiPlaygroundShell", () => {
       cleanup();
     };
     const sentKey = (call: number) =>
-      z
-        .object({ idempotencyKey: z.string().optional() })
-        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
 
     await sendOn(postEndpoint, 1);
     await sendOn(getEndpoint, 2);

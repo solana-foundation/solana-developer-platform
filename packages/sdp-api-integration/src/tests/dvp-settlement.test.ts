@@ -5,6 +5,9 @@
  */
 
 import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import { resolveDefaultCluster } from "@sdp/rpc/config";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SDP_ENVIRONMENT_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -145,16 +148,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
         custodyWallet.id,
         "issuance.authority"
       );
-      const mosaic = createMosaicService(env as ApiTestEnv, signer, {
-        mode: "sponsored",
-        scope: {
-          environment: TEST_PROJECT.environment,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-          actor: { type: "project", id: TEST_PROJECT.id },
-        },
-        movement: "issuance.authority",
-      });
 
       const wallet =
         localPartyWallet ??
@@ -167,39 +160,57 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
 
       // Fixture minting calls the service directly, so it runs as the admin a
       // request would carry; the trade below goes through the API.
-      const { asset, cash } = await asOrganizationAdmin(async () => {
-        // Distinct mints prove each direction funds the correct escrow.
-        const [asset, cash] = await Promise.all([
-          mosaic.createToken({
-            template: "custom",
-            feePayer: signer,
-            metadata: { name: "Settlement Asset", symbol: "SETA", uri: "" },
-            decimals: DECIMALS,
-            mintAuthority: signer,
-            freezeAuthority: null,
-          }),
-          mosaic.createToken({
-            template: "custom",
-            feePayer: signer,
-            metadata: { name: "Settlement Cash", symbol: "SETC", uri: "" },
-            decimals: DECIMALS,
-            mintAuthority: signer,
-            freezeAuthority: null,
-          }),
-        ]);
+      const { asset, cash } = await runInClusterScope(
+        {
+          projectId: TEST_PROJECT.id,
+          environment: SDP_ENVIRONMENT_BY_CLUSTER[resolveDefaultCluster(env)],
+        },
+        () => {
+          const mosaic = createMosaicService(env as ApiTestEnv, signer, {
+            mode: "sponsored",
+            scope: {
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+              actor: { type: "project", id: TEST_PROJECT.id },
+            },
+            movement: "issuance.authority",
+          });
+          return asOrganizationAdmin(async () => {
+            // Distinct mints prove each direction funds the correct escrow.
+            const [asset, cash] = await Promise.all([
+              mosaic.createToken({
+                template: "custom",
+                feePayer: signer,
+                metadata: { name: "Settlement Asset", symbol: "SETA", uri: "" },
+                decimals: DECIMALS,
+                mintAuthority: signer,
+                freezeAuthority: null,
+              }),
+              mosaic.createToken({
+                template: "custom",
+                feePayer: signer,
+                metadata: { name: "Settlement Cash", symbol: "SETC", uri: "" },
+                decimals: DECIMALS,
+                mintAuthority: signer,
+                freezeAuthority: null,
+              }),
+            ]);
 
-        if (!asset.mint || !cash.mint) throw new Error("Settlement fixture mints were not created");
+            if (!asset.mint || !cash.mint)
+              throw new Error("Settlement fixture mints were not created");
 
-        // Give the custody wallet exactly the tokens required for its leg.
-        await mosaic.mintTo({
-          mint: side === "a" ? asset.mint : cash.mint,
-          destination: address(wallet.publicKey),
-          amount: side === "a" ? ASSET_UNITS : CASH_UNITS,
-          mintAuthority: signer.address, // Matches the signer bound to MosaicService above.
-          feePayer: signer.address,
-        });
-        return { asset, cash };
-      });
+            // Give the custody wallet exactly the tokens required for its leg.
+            await mosaic.mintTo({
+              mint: side === "a" ? asset.mint : cash.mint,
+              destination: address(wallet.publicKey),
+              amount: side === "a" ? ASSET_UNITS : CASH_UNITS,
+              mintAuthority: signer.address, // Matches the signer bound to MosaicService above.
+              feePayer: signer.address,
+            });
+            return { asset, cash };
+          });
+        }
+      );
 
       // The external address is distinct from all custody wallets, including
       // the one-key local fixture, so the caller is principal on exactly one leg.

@@ -7,11 +7,15 @@ import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparti
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
-import { seedRecurringDatabaseTenant } from "@/test/helpers/recurring-payments";
+import { seedRecurringDatabaseTenant, testSignature } from "@/test/helpers/recurring-payments";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
-import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
+import type {
+  PaymentRecurringPaymentsRepository,
+  RecurringPaymentStepSignatureSlot,
+} from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
 
@@ -219,6 +223,107 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
       })
     ).toEqual(before);
+  });
+
+  it("clears a step's signature only while its slot still holds that signature", async () => {
+    const { account, counterparty } = await seedCounterpartyAccount();
+    const createdAt = "2026-06-29T12:00:00.000Z";
+    const created = required(
+      await repo.createRecurringPayment({
+        id: "recpay_repo_clear_signature",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceWalletId: TEST_PROVIDER_WALLET_ID,
+        sourceAddress: TEST_SOURCE_ADDRESS,
+        counterpartyId: counterparty.id,
+        counterpartyAccountId: account.id,
+        destinationAddress: "Destination111111111111111111111111111111",
+        token: "USDC",
+        amount: "10.00",
+        periodHours: 24,
+        firstCollectionAt: null,
+        metadataUri: null,
+        createdBy: TEST_USER.id,
+        createdAt,
+        updatedAt: createdAt,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      })
+    );
+    const attempt = required(
+      await repo.createActivationAttempt({
+        id: "prpa_repo_clear_signature",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        recurringPaymentId: created.id,
+        status: "processing",
+        stage: "authorize_subscription",
+        planCreationSignature: null,
+        authorizationSignature: null,
+        error: null,
+        metadata: { authorizationSetupSignature: testSignature(3) },
+        createdAt,
+        updatedAt: createdAt,
+      })
+    );
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET plan_creation_signature = ? WHERE id = ?")
+      .bind(testSignature(1), created.id)
+      .run();
+    const planSlot: RecurringPaymentStepSignatureSlot = {
+      row: "recurring_payment",
+      column: "plan_creation_signature",
+    };
+    const setupSlot: RecurringPaymentStepSignatureSlot = {
+      row: "activation_attempt",
+      column: "metadata.authorizationSetupSignature",
+    };
+    const clear = (input: {
+      slot: RecurringPaymentStepSignatureSlot;
+      id: string;
+      projectId: string;
+      signature: string;
+    }) =>
+      repo.clearStepSignature({
+        ...input,
+        organizationId: TEST_ORG.id,
+        updatedAt: "2026-06-29T12:05:00.000Z",
+      });
+    const savedSignatures = () =>
+      getDb(env)
+        .prepare(
+          `SELECT rp.plan_creation_signature,
+                  a.metadata ->> 'authorizationSetupSignature' AS setup_signature
+             FROM payment_recurring_payments rp
+             JOIN payment_recurring_payment_activation_attempts a ON a.recurring_payment_id = rp.id
+            WHERE rp.id = ?`
+        )
+        .bind(created.id)
+        .first<{ plan_creation_signature: string | null; setup_signature: string | null }>();
+
+    const planHeld = { slot: planSlot, id: created.id, projectId: TEST_PROJECT_ID };
+    const setupHeld = { slot: setupSlot, id: attempt.id, projectId: TEST_PROJECT_ID };
+    expect(await clear({ ...planHeld, signature: testSignature(2) })).toBe(false);
+    expect(await clear({ ...setupHeld, signature: testSignature(2) })).toBe(false);
+    expect(
+      await clear({
+        ...planHeld,
+        projectId: `${TEST_PROJECT_ID}_production`,
+        signature: testSignature(1),
+      })
+    ).toBe(false);
+    expect(await savedSignatures()).toEqual({
+      plan_creation_signature: testSignature(1),
+      setup_signature: testSignature(3),
+    });
+
+    expect(await clear({ ...planHeld, signature: testSignature(1) })).toBe(true);
+    expect(await clear({ ...setupHeld, signature: testSignature(3) })).toBe(true);
+    expect(await savedSignatures()).toEqual({
+      plan_creation_signature: null,
+      setup_signature: null,
+    });
   });
 });
 

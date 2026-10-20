@@ -1,4 +1,6 @@
 import * as feePaymentAdapters from "@sdp/fee-payment";
+import * as feePaymentChainReads from "@sdp/fee-payment/chain-reads";
+import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -11,9 +13,6 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
   type Signature,
-  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-  SolanaError,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
@@ -55,7 +54,20 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
   "getSplTokenAccountAddresses"
 );
 
-export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
+export const createKoraAdapterMock = vi.spyOn(feePaymentAdapters, "createKoraAdapter");
+
+export const sponsoredNetworkFeeMock = vi.spyOn(feePaymentChainReads, "sponsoredNetworkFee");
+
+export const TEST_SPONSORED_NETWORK_FEE_LAMPORTS = 5000n;
+
+export function testKoraAdapter(
+  methods: Pick<KoraAdapter, "getFeePayer" | "getSponsorshipConfiguration" | "signAsFeePayer">
+): KoraAdapter {
+  return Object.assign(
+    new KoraAdapter({ rpcUrl: "https://kora.payments.test", userId: "sdp:v1:test" }),
+    methods
+  );
+}
 
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaSigner,
@@ -112,31 +124,6 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
 } satisfies SponsorshipProviderConfiguration;
-
-export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
-  const cause =
-    customProgramErrorCode === undefined
-      ? undefined
-      : new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
-          code: customProgramErrorCode,
-          index: 0,
-        });
-  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
-    accounts: null,
-    fee: null,
-    loadedAccountsDataSize: null,
-    loadedAddresses: null,
-    logs: null,
-    postBalances: null,
-    postTokenBalances: null,
-    preBalances: null,
-    preTokenBalances: null,
-    replacementBlockhash: null,
-    returnData: null,
-    unitsConsumed: null,
-    ...(cause === undefined ? {} : { cause }),
-  });
-}
 
 const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
@@ -508,10 +495,8 @@ export function installPaymentsRouteTestHooks(): void {
       getTokenSupply: () => ({
         send: async () => ({ value: { decimals: 6 } }),
       }),
-      getFeeForMessage: () => ({
-        send: async () => ({ value: 5000n }),
-      }),
     } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
@@ -571,20 +556,13 @@ export function installPaymentsRouteTestHooks(): void {
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
       data: { expiresAtTs: 1_800_000_000n },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
-    createFeePaymentAdapterMock.mockReturnValue({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-        signerAddress: TEST_MOCK_FEE_PAYER,
-      }),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: vi
-        .fn()
-        .mockResolvedValue(
-          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
-        ),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValue(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      })
+    );
     createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );

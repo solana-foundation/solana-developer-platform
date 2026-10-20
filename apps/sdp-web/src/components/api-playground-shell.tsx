@@ -20,10 +20,16 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
+import { PLAYGROUND_PROXY_PREFIX, playgroundResponseHeaders } from "@/lib/api-playground-proxy";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { answerRetiresKey, apiErrorCode, storageFingerprint } from "@/lib/idempotency";
+import {
+  answerRetiresKey,
+  apiErrorCode,
+  IDEMPOTENCY_KEY_HEADER,
+  storageFingerprint,
+} from "@/lib/idempotency";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import { setNestedValue } from "@/lib/set-nested-value";
 import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
@@ -76,7 +82,7 @@ interface ExecutionResult {
   statusText: string;
   durationMs: number;
   body: unknown;
-  /** The response headers the proxy passes through (an allowlist). */
+  /** The response headers the proxy passes through (`PLAYGROUND_RESPONSE_HEADERS`). */
   headers: Record<string, string>;
 }
 
@@ -384,7 +390,7 @@ function getExecutionStatus(
   if (executionResult) {
     return {
       statusToneVariant: executionResult.ok ? "success" : "danger",
-      statusLabel: `${executionResult.status} ${executionResult.statusText}`,
+      statusLabel: `${executionResult.status} ${executionResult.statusText}`.trim(),
     };
   }
 
@@ -487,6 +493,17 @@ interface ExecutePlaygroundRequestOptions {
   t: (key: MessageKey, values?: TranslationValues) => string;
 }
 
+const jsonValueSchema = z.json();
+
+/** A response body as the playground shows it: parsed JSON, or the text itself. */
+function parseResponseBody(text: string): z.infer<typeof jsonValueSchema> {
+  try {
+    return jsonValueSchema.parse(JSON.parse(text));
+  } catch {
+    return text;
+  }
+}
+
 async function executePlaygroundRequest({
   activeEndpoint,
   fieldValues,
@@ -552,51 +569,54 @@ async function executePlaygroundRequest({
   setIsExecuting(true);
 
   try {
-    const proxyResponse = await dashboardRequest("/api/playground/execute", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        method: activeEndpoint.method,
-        path: resolvedPath,
-        body: requestBody,
-        idempotencyKey,
-      }),
+    // The dashboard proxies the call itself: same method, path, query and
+    // body, run as the session. The key is the one header it forwards.
+    const sentBody =
+      hasRequestBody(activeEndpoint.method) && requestBody !== null
+        ? JSON.stringify(requestBody)
+        : undefined;
+    const headers = new Headers();
+    if (sentBody !== undefined) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (idempotencyKey !== undefined) {
+      headers.set(IDEMPOTENCY_KEY_HEADER, idempotencyKey);
+    }
+    const response = await dashboardRequest(`${PLAYGROUND_PROXY_PREFIX}${resolvedPath}`, {
+      method: activeEndpoint.method,
+      headers,
+      body: sentBody,
     });
-
-    const envelope = (await proxyResponse.json()) as {
-      ok?: boolean;
-      status?: number;
-      statusText?: string;
-      body?: unknown;
-      headers?: Record<string, string>;
-    };
-
-    if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
-      onValidationError(t("Shared.SharedComponents.playgroundExecutionFailed"));
+    // A followed redirect is an expired session's sign-in page, not the API's
+    // answer: it settles nothing, so a write keeps its key for the retry.
+    if (response.redirected) {
+      onExecutionError(t("Shared.SharedComponents.playgroundSessionExpired"));
       return;
     }
+    const text = await response.text();
+    const body = text ? parseResponseBody(text) : {};
+    const responseHeaders = playgroundResponseHeaders(response.headers);
+
     // Only an answer to the write itself settles its key; a keyless read (say,
     // a GET checking whether the lost write landed) leaves it for the retry.
     if (
       claimed !== undefined &&
       answerRetiresKey({
-        status: envelope.status,
-        replayed: envelope.headers?.["idempotent-replayed"] === "true",
-        code: envelope.ok ? null : apiErrorCode(JSON.stringify(envelope.body ?? null)),
+        status: response.status,
+        replayed: responseHeaders["idempotent-replayed"] === "true",
+        code: response.ok ? null : apiErrorCode(text),
       })
     ) {
       playgroundRetryKeys.release(UNSETTLED_SEND, claimed.entry);
     }
 
     onResult({
-      ok: envelope.ok ?? false,
-      status: envelope.status,
-      statusText: envelope.statusText,
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
       durationMs: Date.now() - startedAt,
-      body: envelope.body ?? {},
-      headers: envelope.headers ?? {},
+      body,
+      headers: responseHeaders,
     });
   } catch {
     onExecutionError(t("Shared.SharedComponents.requestExecutionFailed"));

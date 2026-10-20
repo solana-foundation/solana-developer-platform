@@ -96,7 +96,7 @@ authenticated.
    pnpm db:postgres:up
 
    # Optional: local devnet + mainnet-fork Kora; writes the API's Kora env
-   # (FEE_PAYMENT_PROVIDER=kora) to .secrets/kora-local/api.env
+   # (KORA_<CLUSTER>_*) to .secrets/kora-local/api.env
    pnpm kora:local:up
 
    # API and cron worker with team/Doppler configuration (keep this process running)
@@ -130,10 +130,6 @@ SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 SIGNING_PROVIDER=local
 CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
 CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>
-
-# Native fee payment can reuse the local custody key in development
-FEE_PAYMENT_PROVIDER=native
-FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 ```
 
 Kora is a fee-payment provider, not a signing provider. `pnpm dev` starts
@@ -141,9 +137,10 @@ the stack with a devnet Kora (`127.0.0.1:18081`, real devnet RPC) and a mainnet
 Kora on a Surfpool mainnet fork (`127.0.0.1:18080`, upstream `SOLANA_MAINNET_RPC_URL`), and points the API at both
 via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. Without
 `SOLANA_MAINNET_RPC_URL` (Doppler dev has it) the mainnet Kora is skipped and
-only the devnet one runs. To
-use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and that cluster's
-`KORA_<CLUSTER>_URL` (`KORA_DEVNET_URL` / `KORA_MAINNET_URL`) instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
+only the devnet one runs. Kora is the only fee payer. To
+use a single Kora by hand, set that cluster's `KORA_<CLUSTER>_URL` and the Solana RPC
+it reads, `KORA_<CLUSTER>_RPC_URL`, instead: both or neither, since the API refuses to
+start when a cluster sets only one of them. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
 Keyless Earn requests map `ENVIRONMENT=development` to sandbox and
@@ -216,9 +213,9 @@ SIGNING_PROVIDER=local
 CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
 CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>  # required by EncryptionService
 
-# Fee payment — native avoids the public Kora dependency
-FEE_PAYMENT_PROVIDER=native
-FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
+# Fee payment — a Kora per cluster you sponsor on: its URL and the RPC it reads
+KORA_DEVNET_URL=<your Kora URL>
+KORA_DEVNET_RPC_URL=<the Solana RPC that Kora reads>
 
 # RPC — any single endpoint. The public devnet endpoint
 # (https://api.devnet.solana.com) returns 403 for getTokenAccountsByOwner,
@@ -228,17 +225,14 @@ FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 ```
 
-Generate `CUSTODY_PRIVATE_KEY` and `FEE_PAYER_PRIVATE_KEY` values:
+Generate `CUSTODY_PRIVATE_KEY` and `CUSTODY_ENCRYPTION_KEY` values:
 
 ```bash
 pnpm --filter @sdp/api keygen:local
 ```
 
 The script prints `PUBLIC_KEY=…`, `CUSTODY_PRIVATE_KEY=…`, and
-`CUSTODY_ENCRYPTION_KEY=…` lines you can paste straight into `.env.local`,
-plus a commented `# FEE_PAYER_PRIVATE_KEY=…` hint. Uncomment the hint to
-reuse the custody keypair as the fee payer in local dev (the same keypair
-can serve both roles); use distinct keys for any non-dev deployment. Add
+`CUSTODY_ENCRYPTION_KEY=…` lines you can paste straight into `.env.local`. Add
 `--quiet` to print only the custody secret (useful for piping into `pbcopy`).
 
 Provider access is organization-scoped in every deployment mode. Configured,

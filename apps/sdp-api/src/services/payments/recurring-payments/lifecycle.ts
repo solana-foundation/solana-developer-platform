@@ -29,12 +29,13 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
@@ -42,6 +43,7 @@ import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
+  createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
@@ -696,21 +698,29 @@ async function runRecurringPaymentLifecycle(
       sourceWallet: input.sourceWallet,
       sourceSigner,
       instructions: [instruction],
+      submissionStore: createSubscriptionStepStore({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        save: async (savedSignature) => {
+          const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+            attemptId: attempt.id,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            stage: currentStage,
+            signature: savedSignature,
+            error: null,
+            updatedAt: new Date().toISOString(),
+          });
+          if (updatedAttempt === null) {
+            throw conflict("Recurring payment lifecycle attempt changed concurrently");
+          }
+          attempt = updatedAttempt;
+          signature = savedSignature;
+        },
+        rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
+      }),
     });
-
-    const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: currentStage,
-      signature,
-      error: null,
-      updatedAt: new Date().toISOString(),
-    });
-    if (updatedAttempt === null) {
-      throw conflict("Recurring payment lifecycle attempt changed concurrently");
-    }
-    attempt = updatedAttempt;
 
     await confirmSubscriptionSignature(signature, lifecycleConfirmationMessage(input.operation));
     confirmedOnChain = true;
@@ -738,12 +748,13 @@ async function runRecurringPaymentLifecycle(
       "Recurring payment lifecycle operation failed"
     );
     const failedAt = new Date().toISOString();
-    const failedOnChain = error instanceof AppError && error.code === "TRANSACTION_FAILED";
+    // Failed on chain, or refused at preflight (its saved signature already cleared).
+    const definitelyFailed = isDefiniteSubmissionError(error);
 
     // Once the operation is on chain, or may be, a failure only leaves the attempt to finish.
     if (
       (signature || confirmedOnChain || error instanceof ResumedStepUnsettledError) &&
-      !failedOnChain
+      !definitelyFailed
     ) {
       await preserveRecoverableLifecycleAttempt({
         recurringRepo,
