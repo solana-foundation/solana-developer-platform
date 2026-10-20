@@ -182,6 +182,19 @@ describe("/api/playground/v1/[...path]", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  // Greptile (#2433): the API's router sends this to the dashboard-only accounts
+  // list, not to the published counterparty read whose template it fits.
+  it("refuses a path an unpublished literal API route would take, and runs the template's own", async () => {
+    const request = upstreamRequest().mockResolvedValue(upstreamOk());
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+
+    expect((await GET(playgroundRequest("GET", "/v1/counterparties/accounts"))).status).toBe(404);
+    expect(request).not.toHaveBeenCalled();
+
+    expect((await GET(playgroundRequest("GET", "/v1/counterparties/cpty_1"))).status).toBe(200);
+    expect(request).toHaveBeenCalledWith("/v1/counterparties/cpty_1", expect.anything());
+  });
+
   it("matches a literal segment before a path parameter", async () => {
     const request = upstreamRequest().mockResolvedValue(upstreamOk());
     mocks.createSdpApiClient.mockResolvedValue({ request });
