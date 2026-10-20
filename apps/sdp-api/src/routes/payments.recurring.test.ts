@@ -9741,6 +9741,79 @@ describe("Payments routes — recurring", () => {
         });
       });
 
+      it("records an activation's subscription with its attempt stage or not at all", async () => {
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        // The subscription's stage write finds its attempt changed, after the subscription row
+        // and the schedule's subscription fields were written in the same transaction.
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => {
+            const repository = createRepository(db);
+            return {
+              ...repository,
+              updateActivationAttempt: async (input) =>
+                input.stage === "authorize_subscription" && input.status === undefined
+                  ? null
+                  : repository.updateActivationAttempt(input),
+            };
+          });
+        onTestFinished(() => repositorySpy.mockRestore());
+
+        const response = await activate(created.id, crypto.randomUUID());
+
+        expect(response.status).toBe(409);
+        expect(await errorCode(response)).toBe("CONFLICT");
+        expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+        const planSignature = required(poolSentSignatures()[0]);
+        expect(await onlyActivationAttempt(created.id)).toEqual({
+          status: "failed",
+          stage: "create_plan",
+          plan_creation_signature: planSignature,
+          authorization_setup_signature: null,
+          authorization_signature: null,
+          last_valid_block_height: "1000",
+        });
+        expect(
+          await getDb(env)
+            .prepare(
+              `SELECT status, plan_creation_signature, subscription_id, subscription_pda,
+                      subscription_authority_address
+                 FROM payment_recurring_payments WHERE id = ?`
+            )
+            .bind(created.id)
+            .first<{
+              status: PaymentRecurringPaymentStatus;
+              plan_creation_signature: string | null;
+              subscription_id: string | null;
+              subscription_pda: string | null;
+              subscription_authority_address: string | null;
+            }>()
+        ).toEqual({
+          status: "pending_activation",
+          plan_creation_signature: planSignature,
+          subscription_id: null,
+          subscription_pda: null,
+          subscription_authority_address: null,
+        });
+        expect(
+          (
+            await getDb(env)
+              .prepare(
+                `SELECT s.id FROM payment_subscriptions s
+                   JOIN payment_recurring_payments rp ON rp.plan_id = s.plan_id
+                  WHERE rp.id = ?`
+              )
+              .bind(created.id)
+              .all<{ id: string }>()
+          ).results
+        ).toEqual([]);
+      });
+
       it("fails an activation whose setup send expired without landing back to pending_activation, clearing its setup signature", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         // No subscription authority yet, so the setup goes out between the plan and subscribe.
