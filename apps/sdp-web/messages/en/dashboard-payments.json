@@ -1511,7 +1511,11 @@
         "expired": "The quote expired before it was paid. Nothing moved."
       },
       "sdpTransactionId": "SDP transaction ID",
-      "saleOf": "for {amount}"
+      "saleOf": "for {amount}",
+      "openSale": {
+        "title": "Deposit",
+        "depositAmount": "Amount to send"
+      }
     },
     "requestDetail": {
       "paymentLink": "Payment link",
