@@ -66,8 +66,10 @@ export interface PaymentRecurringPaymentActivationAttemptRow {
   authorization_setup_signature: string | null;
   authorization_signature: string | null;
   /**
-   * The last block height at which this row's latest saved step signature can land, as a u64
-   * decimal string; null when no step signature is saved.
+   * The last valid block height of the blockhash this row's latest saved step signature was
+   * signed with, as a u64 decimal string; null when no step signature is saved. The chain admits
+   * the send through the following block, which a `blockHeight > last_valid_block_height`
+   * expiry test already covers.
    */
   last_valid_block_height: string | null;
   error: string | null;
@@ -88,8 +90,10 @@ export interface PaymentRecurringPaymentLifecycleAttemptRow {
   stage: PaymentRecurringPaymentLifecycleAttemptStage;
   signature: string | null;
   /**
-   * The last block height at which this row's latest saved step signature can land, as a u64
-   * decimal string; null when no step signature is saved.
+   * The last valid block height of the blockhash this row's latest saved step signature was
+   * signed with, as a u64 decimal string; null when no step signature is saved. The chain admits
+   * the send through the following block, which a `blockHeight > last_valid_block_height`
+   * expiry test already covers.
    */
   last_valid_block_height: string | null;
   error: string | null;
@@ -119,8 +123,10 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   authorization_signature: string | null;
   old_cancel_signature: string | null;
   /**
-   * The last block height at which this row's latest saved step signature can land, as a u64
-   * decimal string; null when no step signature is saved.
+   * The last valid block height of the blockhash this row's latest saved step signature was
+   * signed with, as a u64 decimal string; null when no step signature is saved. The chain admits
+   * the send through the following block, which a `blockHeight > last_valid_block_height`
+   * expiry test already covers.
    */
   last_valid_block_height: string | null;
   changed_fields: string[];

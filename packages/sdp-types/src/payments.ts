@@ -777,6 +777,13 @@ export const PAYMENT_RECURRING_PAYMENT_STEP_STATES = [
 ] as const;
 export type PaymentRecurringPaymentStepState =
   (typeof PAYMENT_RECURRING_PAYMENT_STEP_STATES)[number];
+/** The step states a flow acts on at once: a landed step moves on, an unsent one is sent. */
+export const ACTIONABLE_RECURRING_PAYMENT_STEP_STATES = [
+  "landed",
+  "unsent",
+] as const satisfies readonly PaymentRecurringPaymentStepState[];
+export type ActionableRecurringPaymentStepState =
+  (typeof ACTIONABLE_RECURRING_PAYMENT_STEP_STATES)[number];
 
 export const EDITABLE_RECURRING_PAYMENT_STATUSES = [
   "pending_activation",

@@ -101,14 +101,16 @@ export function decideRecurringPaymentUpdateTransition(input: {
 /**
  * Classifies one recurring payment step from what the chain showed at `confirmed`. The block
  * height must come from the same read as the effect (or an earlier one), so nothing can land
- * between them unseen. A saved send stays pending until the chain is past its expiry, since it
- * can still land up to then; a saved send with no stored expiry never becomes dropped.
+ * between them unseen. A saved send stays pending until the block height is past its blockhash
+ * lifetime's last valid height: the chain admits the send through the following block, which
+ * `blockHeight > lastValidBlockHeight` already covers, since that block's effect shows in the
+ * read. A saved send with no stored expiry never becomes dropped.
  *
  * @param input - The facts read for the step.
  * @param input.landed - Whether the step's effect is on chain.
  * @param input.saved - The step's saved send, or null when no signature was saved.
- * @param input.saved.lastValidBlockHeight - The saved send's last valid block height, or null
- *   when the attempt row stored none.
+ * @param input.saved.lastValidBlockHeight - The last valid block height of the saved send's
+ *   blockhash, or null when the attempt row stored none.
  * @param input.blockHeight - The chain's `confirmed` block height, read before the effect.
  * @returns The step's state.
  */

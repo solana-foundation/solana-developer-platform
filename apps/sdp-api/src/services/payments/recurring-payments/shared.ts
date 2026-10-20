@@ -6,8 +6,8 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
 import {
+  type ActionableRecurringPaymentStepState,
   assertNever,
-  type PaymentRecurringPaymentStepState,
   type PreparedPaymentSubscriptionTransaction,
 } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -380,23 +380,21 @@ export interface RecurringPaymentStepEffect {
   landed: (accounts: readonly MaybeEncodedAccount[]) => boolean;
 }
 
+/** A resumed step the flow acts on now: it landed, or it was never sent. */
+export interface ActionableRecurringPaymentStep {
+  state: ActionableRecurringPaymentStepState;
+  accounts: readonly MaybeEncodedAccount[];
+}
+
 /**
- * A step as the chain shows it at `confirmed`. A pending step carries no accounts, since nothing
- * acts on it; the others carry the effect accounts, for the caller to decode what its next
- * transaction needs.
+ * A step as the chain shows it at `confirmed`. Only an actionable step carries the effect
+ * accounts, for the caller to decode what its next transaction needs; nothing acts on a pending
+ * or dropped step's accounts.
  */
 export type RecurringPaymentStepRead =
   | { state: "pending" }
-  | {
-      state: Exclude<PaymentRecurringPaymentStepState, "pending">;
-      accounts: readonly MaybeEncodedAccount[];
-    };
-
-/** A resumed step the flow acts on now: it landed, or it was never sent. */
-export interface ActionableRecurringPaymentStep {
-  state: "landed" | "unsent";
-  accounts: readonly MaybeEncodedAccount[];
-}
+  | { state: "dropped" }
+  | ActionableRecurringPaymentStep;
 
 /**
  * The chain cannot settle a resumed step yet: its saved send may still land, or the read itself
@@ -469,7 +467,16 @@ export async function readRecurringPaymentStep(input: {
       signature: input.savedSignature,
     });
   }
-  return state === "pending" ? { state } : { state, accounts: observed.accounts };
+  switch (state) {
+    case "pending":
+    case "dropped":
+      return { state };
+    case "landed":
+    case "unsent":
+      return { state, accounts: observed.accounts };
+    default:
+      return assertNever(state);
+  }
 }
 
 /**
@@ -527,7 +534,7 @@ export function requireActionableStep(
   switch (step.state) {
     case "landed":
     case "unsent":
-      return { state: step.state, accounts: step.accounts };
+      return step;
     case "dropped":
       throw transactionFailed(failureMessage);
     case "pending":
@@ -590,17 +597,27 @@ export function delegationResumedEffect(subscriptionPda: Address): RecurringPaym
   };
 }
 
+/** The plan's update-guarded fields as the claimed schedule recorded them. */
+export interface RecurringPaymentPlanMetadataPreImage {
+  /** The plan's `terms.createdAt`, as a decimal string. */
+  createdAt: string;
+  /** The metadata URI as the program stores it, without its NUL padding. */
+  metadataUri: string;
+}
+
 /**
- * Update plan's effect, a three-way compare of the plan's `createdAt` and metadata URI: the
- * target is landed; the pre-image is not landed, and a resend is safe because the program's
- * `expected_*` arguments refuse a plan that changed; anything else is not landed and logged as
- * a plan changed outside this attempt. `endTs` and pullers have no stored pre-image, and only
- * SDP's key can change them.
+ * Update plan's effect, a three-way compare of the plan's `createdAt` and metadata URI. The
+ * target is landed. The pre-image is not landed. Any other existing plan is not landed and is
+ * logged as changed outside this attempt; an absent plan is not landed and not logged, since the
+ * caller fails it as not found. A resend after a not-landed read signs the pre-image as the
+ * program's `expected_created_at` and `expected_metadata_uri`, so the program refuses it unless
+ * the plan still holds the pre-image, and the refusal fails the step definitely. `endTs` and
+ * pullers have no stored pre-image, and only SDP's key can change them.
  *
  * @param input - The plan and the values to compare.
  * @param input.planPda - The plan's address.
  * @param input.preImage - The plan as the claimed schedule recorded it.
- * @param input.preImage.createdAt - The schedule's `plan_created_at`, or null when unrecorded.
+ * @param input.preImage.createdAt - The schedule's `plan_created_at`.
  * @param input.preImage.metadataUri - The schedule's metadata URI as the program stores it.
  * @param input.targetMetadataUri - The metadata URI this attempt writes, as the program stores it.
  * @param input.logContext - What the mismatch log names.
@@ -608,15 +625,17 @@ export function delegationResumedEffect(subscriptionPda: Address): RecurringPaym
  */
 export function planMetadataUpdatedEffect(input: {
   planPda: Address;
-  preImage: { createdAt: string | null; metadataUri: string };
+  preImage: RecurringPaymentPlanMetadataPreImage;
   targetMetadataUri: string;
   logContext: RecurringPaymentStepLogContext;
 }): RecurringPaymentStepEffect {
   return {
     addresses: [input.planPda],
     landed: ([account]) => {
-      const plan = account.exists ? decodePlan(account).data.data : null;
-      if (plan !== null && plan.terms.createdAt.toString() === input.preImage.createdAt) {
+      if (!account.exists) return false;
+      const plan = decodePlan(account).data.data;
+      const createdAt = plan.terms.createdAt.toString();
+      if (createdAt === input.preImage.createdAt) {
         // The on-chain field is fixed at 128 bytes, padded with NULs.
         const metadataUri = removeNullCharacters(plan.metadataUri);
         if (metadataUri === input.targetMetadataUri) return true;
@@ -626,8 +645,7 @@ export function planMetadataUpdatedEffect(input: {
         event: "sdp_api_recurring_payment_plan_changed_outside_attempt",
         ...input.logContext,
         plan_pda: input.planPda,
-        plan_exists: plan !== null,
-        observed_created_at: plan === null ? null : plan.terms.createdAt.toString(),
+        observed_created_at: createdAt,
         expected_created_at: input.preImage.createdAt,
       });
       return false;

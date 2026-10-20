@@ -88,6 +88,7 @@ import {
   parseNullableStoredSignature,
   planCreatedEffect,
   planMetadataUpdatedEffect,
+  type RecurringPaymentPlanMetadataPreImage,
   type RecurringPaymentStepLogContext,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
@@ -867,6 +868,25 @@ async function finalizeMetadataScheduleUpdate(input: {
   });
 }
 
+/**
+ * The plan's update-guarded fields as the claimed schedule recorded them, for a resumed update.
+ *
+ * @param claimed - The claimed active schedule.
+ * @returns Its plan's `createdAt` and metadata URI as the program stores them.
+ * @throws AppError INTERNAL_ERROR when the schedule has no recorded plan creation time.
+ */
+function planMetadataPreImage(
+  claimed: PaymentRecurringPaymentRow
+): RecurringPaymentPlanMetadataPreImage {
+  if (claimed.plan_created_at === null) {
+    throw internalError("Recurring payment is missing its on-chain plan creation time");
+  }
+  return {
+    createdAt: claimed.plan_created_at,
+    metadataUri: subscriptionProgramMetadataUri(claimed.metadata_uri),
+  };
+}
+
 async function runMetadataScheduleUpdate(input: {
   env: Env;
   organizationId: string;
@@ -931,16 +951,15 @@ async function runMetadataScheduleUpdate(input: {
       attempt_id: attempt.id,
       step: "update_plan",
     };
+    const preImage =
+      input.attempt.stage === "update_plan" ? planMetadataPreImage(input.claimed) : null;
     const step =
-      input.attempt.stage === "update_plan"
+      preImage !== null
         ? requireActionableStep(
             await readRecurringPaymentStep({
               effect: planMetadataUpdatedEffect({
                 planPda,
-                preImage: {
-                  createdAt: input.claimed.plan_created_at,
-                  metadataUri: subscriptionProgramMetadataUri(input.claimed.metadata_uri),
-                },
+                preImage,
                 targetMetadataUri,
                 logContext,
               }),
@@ -972,9 +991,13 @@ async function runMetadataScheduleUpdate(input: {
       );
       const instruction = await subscriptionsProgram.getUpdatePlanOverlayInstruction({
         endTs: onChainPlan.data.data.endTs,
-        expectedCreatedAt: onChainPlan.data.data.terms.createdAt,
+        // A resumed send signs the recorded pre-image, so the program refuses a plan changed
+        // outside this attempt instead of overwriting it; a fresh send signs the plan as read.
+        expectedCreatedAt:
+          preImage === null ? onChainPlan.data.data.terms.createdAt : BigInt(preImage.createdAt),
         expectedEndTs: onChainPlan.data.data.endTs,
-        expectedMetadataUri: onChainPlan.data.data.metadataUri,
+        expectedMetadataUri:
+          preImage === null ? onChainPlan.data.data.metadataUri : preImage.metadataUri,
         expectedPullers: onChainPlan.data.data.pullers,
         metadataUri: targetMetadataUri,
         owner: sourceSigner,
