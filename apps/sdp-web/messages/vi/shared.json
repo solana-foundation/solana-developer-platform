@@ -140,6 +140,7 @@
     "completeRequiredFields": "Điền các trường bắt buộc: {fields}",
     "invalidJsonField": "{field} phải chứa JSON hợp lệ.",
     "invalidApiKeyFormat": "Định dạng khóa API không hợp lệ. Dùng giá trị thô như sk_test_... hoặc sk_live_... với hậu tố hợp lệ.",
+    "playgroundExecutionFailed": "Thực thi Playground thất bại.",
     "requestExecutionFailed": "Thực thi request thất bại.",
     "unknownToken": "Không xác định",
     "sdpMintedToken": "SDP-Minted",

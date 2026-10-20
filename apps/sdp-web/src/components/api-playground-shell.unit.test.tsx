@@ -277,6 +277,52 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(3)).not.toBe(sentKey(2));
   });
 
+  // Greptile (#2440): an expired session answers a retry with the sign-in page,
+  // a followed redirect with status 200; that is not the API's answer.
+  it("keeps a POST's key when the answer is a followed redirect, so the retry still reuses it", async () => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const signInPage = () => {
+      const response = new Response("<html>Sign in</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      });
+      Object.defineProperty(response, "redirected", { value: true });
+      return response;
+    };
+    const answers = [signInPage()];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        answers.shift() ??
+        new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          endpoints={[{ ...endpoint, id: "post-redirected", method: "POST" }]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+    const sentKey = (call: number) =>
+      new Headers(fetchMock.mock.calls[call][1].headers).get("Idempotency-Key") ?? undefined;
+    const send = async (calls: number) => {
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+    };
+
+    await send(1);
+    await send(2);
+
+    expect(sentKey(0)).toEqual(expect.any(String));
+    expect(sentKey(1)).toBe(sentKey(0));
+  });
+
   // Jina (#2333): a money route went out under a key the browser would not
   // keep, so a reload and retry could send the payment again under a new key.
   it("does not send a transfer when the browser will not keep its retry key", async () => {

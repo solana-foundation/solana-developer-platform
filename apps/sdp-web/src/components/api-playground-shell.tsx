@@ -493,10 +493,12 @@ interface ExecutePlaygroundRequestOptions {
   t: (key: MessageKey, values?: TranslationValues) => string;
 }
 
+const jsonValueSchema = z.json();
+
 /** A response body as the playground shows it: parsed JSON, or the text itself. */
-function parseResponseBody(text: string): unknown {
+function parseResponseBody(text: string): z.infer<typeof jsonValueSchema> {
   try {
-    return JSON.parse(text) as unknown;
+    return jsonValueSchema.parse(JSON.parse(text));
   } catch {
     return text;
   }
@@ -590,9 +592,12 @@ async function executePlaygroundRequest({
     const responseHeaders = playgroundResponseHeaders(response.headers);
 
     // Only an answer to the write itself settles its key; a keyless read (say,
-    // a GET checking whether the lost write landed) leaves it for the retry.
+    // a GET checking whether the lost write landed) leaves it for the retry. A
+    // followed redirect (an expired session's sign-in page) is not the API's
+    // answer, so it keeps the key too.
     if (
       claimed !== undefined &&
+      !response.redirected &&
       answerRetiresKey({
         status: response.status,
         replayed: responseHeaders["idempotent-replayed"] === "true",

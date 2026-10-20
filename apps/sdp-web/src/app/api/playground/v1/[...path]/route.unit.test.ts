@@ -31,7 +31,7 @@ vi.mock("@/lib/request-tracing", () => ({
   logRouteResult: mocks.logRouteResult,
 }));
 
-import { DELETE, GET, POST } from "./route";
+import { DELETE, GET, PATCH, POST, PUT } from "./route";
 
 const PROJECT_ID = "prj_selected";
 const ORIGIN = "https://dashboard.example.com";
@@ -52,8 +52,23 @@ function playgroundRequest(
 }
 
 /** The route's handler for a method, as Next would dispatch it. */
-function handlerFor(method: string): (request: Request) => Promise<Response> {
-  return method === "GET" ? GET : method === "DELETE" ? DELETE : POST;
+function handlerFor(method: Method): (request: Request) => Promise<Response> {
+  switch (method) {
+    case "GET":
+      return GET;
+    case "POST":
+      return POST;
+    case "PUT":
+      return PUT;
+    case "PATCH":
+      return PATCH;
+    case "DELETE":
+      return DELETE;
+    default: {
+      const unreachable: never = method;
+      throw new Error(`Unsupported method: ${String(unreachable)}`);
+    }
+  }
 }
 
 function upstreamOk(body: unknown = { data: {} }, init: ResponseInit = {}): Response {
@@ -142,7 +157,7 @@ describe("/api/playground/v1/[...path]", () => {
 
   // `new URL` resolves dot segments and backslashes the way Next hands the
   // request to the route, so these arrive outside `/api/playground/v1/`.
-  it.each([
+  it.each<[string, Method, string]>([
     ["an internal mount", "POST", "/internal/dashboard/custody/wallets"],
     ["an admin mount", "POST", "/admin/allowlist"],
     ["a non-versioned path", "GET", "/health"],
@@ -159,7 +174,7 @@ describe("/api/playground/v1/[...path]", () => {
     const request = upstreamRequest();
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await handlerFor(method)(playgroundRequest(method as Method, path));
+    const response = await handlerFor(method)(playgroundRequest(method, path));
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
