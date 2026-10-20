@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import useSWR, { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,7 +46,7 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
 }
 
 function submittedKey(call: number): string {
-  const formData = vi.mocked(submitPrivyCredentialAction).mock.calls[call]?.[0] as FormData;
+  const formData = vi.mocked(submitPrivyCredentialAction).mock.calls[call][0];
   return String(formData.get("idempotencyKey"));
 }
 
@@ -137,10 +137,12 @@ describe("PrivyCredentialForm", () => {
     vi.mocked(generateFireblocksCsrAction)
       .mockResolvedValueOnce({ status: "success", csr: csrs[1] })
       .mockResolvedValueOnce({ status: "success", csr: csrs[2] });
-    vi.mocked(submitPrivyCredentialAction)
-      .mockResolvedValueOnce({ status: "failed", message: "Rejected", connectionId: "cconn_test" })
-      .mockResolvedValueOnce({ status: "failed", message: "Rejected", connectionId: "cconn_test" })
-      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
+    const submissions = csrs.map(() =>
+      Promise.withResolvers<Awaited<ReturnType<typeof submitPrivyCredentialAction>>>()
+    );
+    for (const submission of submissions) {
+      vi.mocked(submitPrivyCredentialAction).mockReturnValueOnce(submission.promise);
+    }
     vi.stubGlobal(
       "URL",
       class extends URL {
@@ -171,12 +173,29 @@ describe("PrivyCredentialForm", () => {
       await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
       await user.click(screen.getByRole("button", { name: "Connect and verify" }));
       await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(attempt + 1));
+      expect(screen.getByRole("button", { name: "Verifying credentials…" })).toHaveProperty(
+        "disabled",
+        true
+      );
       const payload = vi.mocked(submitPrivyCredentialAction).mock.calls[attempt][0];
       expect(payload.get("signingKeyId")).toBe(csrs[attempt].id);
       if (attempt > 0) {
         expect(payload.get("connectionId")).toBe("cconn_test");
         expect(submittedKey(attempt)).not.toBe(submittedKey(attempt - 1));
       }
+      // Finish the parent transition before interacting with the remounted CSR form.
+      // The action being called (or the child appearing) does not mean it has settled.
+      await act(async () => {
+        if (attempt < 2) {
+          submissions[attempt].resolve({
+            status: "failed",
+            message: "Rejected",
+            connectionId: "cconn_test",
+          });
+        } else {
+          submissions[attempt].resolve({ status: "success", connectionId: "cconn_test" });
+        }
+      });
     }
     await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
   });

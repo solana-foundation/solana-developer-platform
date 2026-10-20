@@ -170,7 +170,7 @@ async function persistResult(
       /* An unavailable fee must not prevent recording a confirmed payment. */
     }
   }
-  const status = fireblocksPaymentStatus(result.status);
+  const status = fireblocksPaymentStatus(result.status, completed);
   return (
     (await repo.updateTransfer({
       transferId: row.id,

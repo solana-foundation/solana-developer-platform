@@ -156,6 +156,7 @@ let providerStatus: string;
 let lostResponse = false;
 let readMissing = false;
 let createStatus = 200;
+let createResultPatch: Record<string, unknown> = {};
 let settlementPatch: Record<string, unknown> = {};
 async function ready(projectId = PROJECT_ID) {
   const mock = providerResponse();
@@ -170,6 +171,7 @@ async function ready(projectId = PROJECT_ID) {
   lostResponse = false;
   readMissing = false;
   createStatus = 200;
+  createResultPatch = {};
   settlementPatch = {};
   mock.mockImplementation(async (url, init) => {
     const path = String(url).replace(testEnv.FIREBLOCKS_API_BASE_URL ?? "", "");
@@ -197,7 +199,7 @@ async function ready(projectId = PROJECT_ID) {
       if (lostResponse) throw new Error("Timeout after provider accepted payment");
       if (createStatus !== 200)
         return Response.json({ message: "secret must not be echoed" }, { status: createStatus });
-      return Response.json({ id: "fb-proposal", status: providerStatus });
+      return Response.json({ id: "fb-proposal", status: providerStatus, ...createResultPatch });
     }
     if (path.startsWith("/v1/transactions/external_tx_id/") && init?.method === "GET") {
       if (readMissing) return Response.json({}, { status: 404 });
@@ -265,6 +267,39 @@ async function refresh(id: string) {
 }
 
 describe("native Fireblocks BYOK payment routes", () => {
+  it.each([undefined, SIG])(
+    "keeps a COMPLETED create response pending until a verified detail read (hash: %s)",
+    async (txHash) => {
+      const mock = await ready();
+      providerStatus = "COMPLETED";
+      createResultPatch = { txHash };
+      const response = await send();
+      expect(response.status).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      expect(transfer).toMatchObject({ status: "processing", signature: null });
+      expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    }
+  );
+
+  it.each([undefined, null])(
+    "keeps COMPLETED details without a signature recoverable (hash: %s)",
+    async (txHash) => {
+      const mock = await ready();
+      const response = await send();
+      const transfer = (await response.json()).data.transfer;
+      providerStatus = "COMPLETED";
+      settlementPatch = { txHash };
+      expect(await refresh(transfer.id)).toMatchObject({ status: "processing", signature: null });
+      // A later detailed response still has to pass settlement checks before confirmation.
+      settlementPatch = { destinationAddress: ADDRESS };
+      expect(await refresh(transfer.id)).toMatchObject({ status: "processing", signature: null });
+      settlementPatch = {};
+      expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    }
+  );
+
   it("blocks new payments in stable but still reconciles a payment submitted in beta", async () => {
     const mock = await ready();
     const response = await send();

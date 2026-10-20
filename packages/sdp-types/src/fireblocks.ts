@@ -19,11 +19,14 @@ export const FIREBLOCKS_ADDRESS_STATUSES = [
 ] as const;
 export type FireblocksAddressStatus = (typeof FIREBLOCKS_ADDRESS_STATUSES)[number];
 
-/** Native transfers complete only at COMPLETED; unfamiliar provider states remain pending. */
-export function fireblocksPaymentStatus(status: string): "failed" | "confirmed" | "processing" {
+/** COMPLETED requires verified settlement details; unfamiliar provider states remain pending. */
+export function fireblocksPaymentStatus(
+  status: string,
+  settlementVerified: boolean
+): "failed" | "confirmed" | "processing" {
   switch (status) {
     case "COMPLETED":
-      return "confirmed";
+      return settlementVerified ? "confirmed" : "processing";
     default:
       return isFireblocksTransactionFailed(status) ? "failed" : "processing";
   }
