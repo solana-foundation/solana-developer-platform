@@ -7702,24 +7702,34 @@ describe("Payments routes — recurring", () => {
           }>();
 
       /**
-       * Activates a new schedule under `key` whose subscribe send gets no answer while the chain
-       * shows no delegation below the send's expiry (1000), then leaves the run crashed long
-       * enough ago to recover: the schedule `activating` with its plan landed, and the attempt
-       * in flight with the subscribe's signature saved. The chain view stays as the run saw it.
+       * Activates a new schedule whose subscribe send gets no answer while the chain shows no
+       * delegation below the send's expiry (1000), then leaves the run crashed long enough ago
+       * to recover: the schedule `activating` with its plan landed, and the attempt in flight
+       * with the subscribe's signature saved. The attempt keeps no key, as a cron run leaves
+       * it, so a request under a new key adopts it. The chain view stays as the run saw it.
        */
-      async function leaveSubscribeInFlight(key: string) {
+      async function leaveSubscribeInFlight() {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         rejectPoolSendAfter(1, new Error("RPC response lost"));
         recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
-        const ambiguous = await activate(created.id, key);
+        const ambiguous = await activate(created.id, crypto.randomUUID());
         expect(ambiguous.status).toBe(409);
         expect(await errorCode(ambiguous)).toBe("CONFLICT");
         const [planSignature, subscribeSignature] = poolSentSignatures();
+        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
         await getDb(env)
           .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
-          .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), created.id)
+          .bind(staleAt, created.id)
           .run();
-        await crashIdempotencyKey(key);
+        const unkeyed = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_activation_attempts
+                SET idempotency_key = NULL, updated_at = ?
+              WHERE recurring_payment_id = ? AND status = 'processing'`
+          )
+          .bind(staleAt, created.id)
+          .run();
+        expect(unkeyed).toBe(1);
         return {
           created,
           planSignature: required(planSignature),
@@ -7728,9 +7738,7 @@ describe("Payments routes — recurring", () => {
       }
 
       it("keeps an activation whose subscribe send got no answer in flight while it can still land, and the cron finishes it once the delegation shows", async () => {
-        const { created, planSignature, subscribeSignature } = await leaveSubscribeInFlight(
-          crypto.randomUUID()
-        );
+        const { created, planSignature, subscribeSignature } = await leaveSubscribeInFlight();
         expect(await scheduleSignatures(created.id)).toEqual({
           status: "activating",
           plan_creation_signature: planSignature,
@@ -7755,6 +7763,41 @@ describe("Payments routes — recurring", () => {
           authorization_signature: subscribeSignature,
         });
         expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+      });
+
+      it("fails an activation whose saved subscribe expired without landing back to pending_activation, which then cancels without signing", async () => {
+        const { created } = await leaveSubscribeInFlight();
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          absoluteSlot: 2_900,
+          blockHeight: 1_001,
+          delegation: () => null,
+        });
+
+        const retry = await activate(created.id, crypto.randomUUID());
+
+        expect(retry.status).toBe(400);
+        expect(await errorCode(retry)).toBe("TRANSACTION_FAILED");
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "failed",
+          stage: "authorize_subscription",
+          authorization_signature: null,
+          last_valid_block_height: null,
+        });
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("pending_activation");
+        const sent = sends();
+
+        const cancel = await app.request(
+          actionPath(created.id, "cancel"),
+          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+          env
+        );
+
+        expect(cancel.status).toBe(200);
+        expect((await parseRecurringResponse(cancel)).data.recurringPayment.status).toBe(
+          "canceled"
+        );
+        expect(sent).not.toHaveBeenCalled();
       });
 
       it("finishes an activation whose subscribe is refused as already subscribed once the chain shows the delegation", async () => {
