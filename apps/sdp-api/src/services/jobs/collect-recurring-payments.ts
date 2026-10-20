@@ -30,7 +30,10 @@ import {
   cancelRecurringPayment,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments/lifecycle";
-import type { RecurringPaymentSourceWallet } from "@/services/payments/recurring-payments/shared";
+import {
+  type RecurringPaymentSourceWallet,
+  RecurringPaymentStepFailedError,
+} from "@/services/payments/recurring-payments/shared";
 import { resumeRecurringPaymentUpdate } from "@/services/payments/recurring-payments/update";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -255,8 +258,9 @@ async function collectRow(
  *
  * @param env - The environment.
  * @param row - The stale schedule.
- * @returns `ok` when the flow finished, `skipped` when it is pending, held by another run or
- *   failed back (CONFLICT), `refused` when money admission refused it, and `failed` otherwise.
+ * @returns `ok` when the flow finished or failed back to its last stable status, `refused` when it
+ *   failed back because money admission refused it, `skipped` when a step is pending or another
+ *   run holds or finished it (CONFLICT), and `failed` otherwise.
  */
 async function recoverLifecycleRow(
   env: Env,
@@ -320,9 +324,12 @@ async function recoverLifecycleRow(
     }
   } catch (error) {
     if (!(error instanceof Error)) throw error;
-    // The operation's own failure path already failed the attempt and reset
-    // the row to a status the job does not select (activation:
-    // `pending_activation`, update and cancel: `active`, resume: `canceled`).
+    // The flow's own failure path already failed the attempt, reset the row to a status the job
+    // does not select (activation: `pending_activation`, update and cancel: `active`, resume:
+    // `canceled`) and logged the failure.
+    if (error instanceof RecurringPaymentStepFailedError) {
+      return error.failure instanceof MoneyMovementRefusedError ? "refused" : "ok";
+    }
     if (error instanceof MoneyMovementRefusedError) {
       return "refused";
     }

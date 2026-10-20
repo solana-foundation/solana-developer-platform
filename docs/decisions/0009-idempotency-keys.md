@@ -127,7 +127,8 @@ Neither resumes or re-sends: a recipient with a transfer row is settled from tha
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `updating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
-its attempt recorded; it does not fail the row. Collection saves its signed transaction before
+its attempt recorded. It fails the row back to its last stable status only where a step cannot
+land or needs a send the cron does not make (below). Collection saves its signed transaction before
 broadcast. Activation, lifecycle and update save a step's signature and its last valid block
 height on the attempt row before the send, and clear both only when the send is provably refused
 or proven dropped.
@@ -155,8 +156,10 @@ for 24 hours. A same-key PATCH retry that finds its attempt in flight gets 409
 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` (unstored) until the schedule goes stale. Once it is
 stale, the cron and a same-key PATCH both resume the attempt: each claims it with the same
 compare-and-set on the stale `updating` row, the first claimant runs, and the other gets 409 (the
-cron counts it `skipped`). A confirmed update attempt replays its answer; a failed one answers
-nothing, so the retry runs again. The cron starts no update send: its mandate admits no
+cron counts it `skipped`). A resumer that finds no in-flight attempt refuses with 409 and its
+claim rolls back, never opening a fresh one: a stale PATCH retry that passed the replay check
+while the cron finished the update claims an `active` schedule and finds none. A confirmed update
+attempt replays its answer; a failed one answers nothing, so the retry runs again. The cron starts no update send: its mandate admits no
 `recurring.update`, so where the update needs a step it has not sent, the cron fails it back to
 `active` on its old terms with an error log instead of sending, while landed steps finish, a pending
 one waits, and the old subscription's cancel (an exit) is still sent. A same-key PATCH retry can

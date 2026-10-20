@@ -77,6 +77,7 @@ import {
   readRecurringPaymentStep,
   readSavedRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  recurringPaymentStepFailureAnswer,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
   sendRecurringPaymentStep,
@@ -1430,7 +1431,7 @@ export async function activateRecurringPayment(input: {
         attempt,
         stepFailure,
       });
-      throw stepFailure.failure;
+      throw recurringPaymentStepFailureAnswer(stepFailure);
     }
     // Anything else may leave a step in flight: the attempt keeps its status and records only
     // the error, so a concurrent finalize is never flipped back.

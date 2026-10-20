@@ -24,6 +24,7 @@ import {
 import {
   type Address,
   createNoopSigner,
+  type MaybeEncodedAccount,
   type Signature,
   type TransactionSigner,
 } from "@solana/kit";
@@ -104,6 +105,7 @@ import {
   readRecurringPaymentStep,
   readSavedRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  recurringPaymentStepFailureAnswer,
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
@@ -652,6 +654,37 @@ async function updatePendingRecurringPaymentRow(
   return updated;
 }
 
+/**
+ * The in-flight attempt a stale `updating` schedule resumes. An `updating` schedule always has
+ * one: its first claim opened it in the same transaction. None means another run finished the
+ * update; read inside a claim's transaction, it means the claim took a schedule that run left
+ * `active` (the claim also takes `active` rows). The resume is refused and a claim rolls back, so
+ * a resumer never opens a fresh attempt that nobody admitted.
+ *
+ * @param recurringRepo - The claim transaction's repository.
+ * @param input - The claimed schedule.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.recurringPaymentId - The claimed schedule.
+ * @returns The in-flight attempt.
+ * @throws AppError CONFLICT when the schedule has no in-flight update attempt.
+ */
+async function requireResumedUpdateAttempt(
+  recurringRepo: PaymentRecurringPaymentsRepository,
+  input: { organizationId: string; projectId: string; recurringPaymentId: string }
+): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
+  const attempt = await recurringRepo.getLatestUpdateAttempt({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
+    statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  });
+  if (attempt === null) {
+    throw conflict("Recurring payment update finished before it was resumed");
+  }
+  return attempt;
+}
+
 async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
@@ -671,36 +704,33 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   // A stale claim resumes the in-flight attempt under its original key, or
   // records this request's key and fingerprint on it when it has none.
   if (input.recoveringStaleUpdate) {
-    const existing = await input.recurringRepo.getLatestUpdateAttempt({
+    const existing = await requireResumedUpdateAttempt(input.recurringRepo, {
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: input.claimed.id,
-      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
     });
-    if (existing) {
-      if (
-        existing.mode !== input.mode ||
-        existing.new_source_custody_wallet_id !== input.newSourceCustodyWalletId ||
-        !updateAttemptMatchesRequest(existing, {
-          changedFields: input.changedFields,
-          beforeValues: input.beforeValues,
-          afterValues: input.afterValues,
-        })
-      ) {
-        throw conflict("Recurring payment update recovery must retry the same update");
-      }
-      return requireUpdatedAttempt(
-        await input.recurringRepo.updateUpdateAttempt({
-          attemptId: existing.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          error: null,
-          adoptIdempotencyKey: input.idempotency?.key ?? null,
-          adoptIdempotencyFingerprint: input.idempotency?.fingerprint ?? null,
-          updatedAt: input.nowIso,
-        })
-      );
+    if (
+      existing.mode !== input.mode ||
+      existing.new_source_custody_wallet_id !== input.newSourceCustodyWalletId ||
+      !updateAttemptMatchesRequest(existing, {
+        changedFields: input.changedFields,
+        beforeValues: input.beforeValues,
+        afterValues: input.afterValues,
+      })
+    ) {
+      throw conflict("Recurring payment update recovery must retry the same update");
     }
+    return requireUpdatedAttempt(
+      await input.recurringRepo.updateUpdateAttempt({
+        attemptId: existing.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        error: null,
+        adoptIdempotencyKey: input.idempotency?.key ?? null,
+        adoptIdempotencyFingerprint: input.idempotency?.fingerprint ?? null,
+        updatedAt: input.nowIso,
+      })
+    );
   }
 
   const attempt = await input.recurringRepo.createUpdateAttempt({
@@ -1120,6 +1150,48 @@ function updateStepSigner(input: {
   return async () => {
     throw refuseCronUpdateStepSend(input.logContext);
   };
+}
+
+/**
+ * Reads, for the cron, a replacement's plan creation that has no saved signature while a later
+ * step of the attempt does. A later step saves only after this one landed, so the plan landed
+ * through a send refused as already done, which cleared its slot; the cron sends nothing new, so
+ * it reads the plan's effect instead of sending again. Costs two RPC calls.
+ *
+ * @param input - The plan's address, slot and what the logs name.
+ * @param input.planPda - The replacement plan's address.
+ * @param input.slot - The plan creation's signature slot.
+ * @param input.logContext - What the step's logs name.
+ * @returns The landed plan's effect accounts.
+ * @throws ResumedStepUnsettledError when the read is pending.
+ * @throws RecurringPaymentStepFailedError with the cron's refusal when the plan is not on chain.
+ */
+async function readUnsentPlanCreationForCron(input: {
+  planPda: Address;
+  slot: UpdateAttemptStepSlot;
+  logContext: RecurringPaymentStepLogContext;
+}): Promise<readonly MaybeEncodedAccount[]> {
+  const step = await readRecurringPaymentStep({
+    effect: planCreatedEffect(input.planPda),
+    savedSignature: null,
+    lastValidBlockHeight: null,
+    logContext: input.logContext,
+  });
+  switch (step.state) {
+    case "landed":
+      return step.accounts;
+    case "pending":
+      throw new ResumedStepUnsettledError();
+    case "unsent":
+    case "dropped":
+      throw new RecurringPaymentStepFailedError({
+        failure: refuseCronUpdateStepSend(input.logContext),
+        slot: input.slot,
+        droppedSignature: null,
+      });
+    default:
+      return assertNever(step);
+  }
 }
 
 async function runMetadataScheduleUpdate(input: {
@@ -1860,6 +1932,11 @@ async function sendReplacementAuthorization(input: {
   failureMessage: string;
   logContext: RecurringPaymentStepLogContext;
 }): Promise<{ attempt: PaymentRecurringPaymentUpdateAttemptRow; signature: Signature | null }> {
+  // With no setup saved to read first, the subscribe needs a new send: its signer resolves, or the
+  // cron refuses, before the stage write, the authority read and the fee payer.
+  if (input.attempt.authorization_setup_signature === null) {
+    await input.stepSigner();
+  }
   const rpc = createClusterRpc();
   const attempt = requireUpdatedAttempt(
     await input.recurringRepo.updateUpdateAttempt({
@@ -2093,6 +2170,11 @@ async function runReplacementUpdate(input: {
   const savedAuthorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
   const savedOldCancelSignature = parseNullableStoredSignature(attempt.old_cancel_signature);
   const replacementPeriodStartAt = attempt.created_at;
+  const readsUnsentPlanFromChain =
+    !input.startsAllowed &&
+    (attempt.authorization_setup_signature !== null ||
+      savedAuthorizationSignature !== null ||
+      savedOldCancelSignature !== null);
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: latestSavedReplacementStep(attempt),
     step: { row: "update_attempt", column: "plan_creation_signature" },
@@ -2142,6 +2224,11 @@ async function runReplacementUpdate(input: {
   const replacementSteps = async (): Promise<SettledReplacementSteps> => {
     const { oldPlanPda, oldSubscriptionPda, oldSubscription, requestedNextDue } =
       await resolveOldMandate();
+    // An unsent plan creation needs a new send: its signer resolves, or the cron refuses, before
+    // any chain read or row write for the replacement.
+    if (savedPlanCreationSignature === null && !readsUnsentPlanFromChain) {
+      await stepSigner();
+    }
 
     const owner = assertValidAddress(input.resolved.sourceWallet.publicKey, "sourceAddress");
     const destination = assertValidAddress(input.resolved.destinationAddress, "destinationAddress");
@@ -2195,19 +2282,26 @@ async function runReplacementUpdate(input: {
     };
     // A signature saved in a step's slot means an earlier run reached its send (HOO-2044): the
     // chain settles whether it landed before anything is sent again. A step with no saved
-    // signature never left, and reads nothing extra.
-    const landedPlanAccounts =
-      savedPlanCreationSignature === null
-        ? null
-        : await readSavedRecurringPaymentStep({
-            phase,
-            slot: planSlot,
-            signature: savedPlanCreationSignature,
-            lastValidBlockHeight: attempt.last_valid_block_height,
-            effect: planCreatedEffect(planPda),
-            failureMessage: planFailureMessage,
-            logContext: planLogContext,
-          });
+    // signature never left, and reads nothing extra, except under the cron when a later step is
+    // saved (`readUnsentPlanCreationForCron`).
+    let landedPlanAccounts: readonly MaybeEncodedAccount[] | null = null;
+    if (savedPlanCreationSignature !== null) {
+      landedPlanAccounts = await readSavedRecurringPaymentStep({
+        phase,
+        slot: planSlot,
+        signature: savedPlanCreationSignature,
+        lastValidBlockHeight: attempt.last_valid_block_height,
+        effect: planCreatedEffect(planPda),
+        failureMessage: planFailureMessage,
+        logContext: planLogContext,
+      });
+    } else if (readsUnsentPlanFromChain) {
+      landedPlanAccounts = await readUnsentPlanCreationForCron({
+        planPda,
+        slot: planSlot,
+        logContext: planLogContext,
+      });
+    }
     let planCreationSignature = savedPlanCreationSignature;
     let onChainPlan =
       landedPlanAccounts === null ? null : subscriptionsProgram.decodePlan(landedPlanAccounts[0]);
@@ -2907,6 +3001,8 @@ export async function updateRecurringPayment(input: {
  * @param input.idempotency - The request's key and fingerprint; null for the cron.
  * @param input.startsAllowed - False for the cron, which sends no new update step.
  * @returns The schedule after the update.
+ * @throws RecurringPaymentStepFailedError, answering as its failure, once the update failed back
+ *   to `active`; the failure itself when it is not an `AppError`.
  */
 async function runClaimedRecurringPaymentUpdate(input: {
   env: Env;
@@ -2981,7 +3077,7 @@ async function runClaimedRecurringPaymentUpdate(input: {
         attempt,
         stepFailure,
       });
-      throw stepFailure.failure;
+      throw recurringPaymentStepFailureAnswer(stepFailure);
     }
     await journalInFlightRecurringPaymentAttempt({
       write: () =>
@@ -3006,74 +3102,117 @@ async function runClaimedRecurringPaymentUpdate(input: {
 const savedUpdateChangedFieldsSchema = z.array(z.enum(RECURRING_PAYMENT_UPDATE_FIELDS));
 
 /**
- * The source wallet a resumed update ends on. An update that keeps its source signs with the
- * schedule's pin. One that moves it signs with the new wallet its replacement plan was created
- * for: the plan row, written before the plan's send, records that wallet's provider id and
- * address. With no plan row recorded, no step of the update was ever sent.
+ * A resumed update's terms, rebuilt from its attempt: the saved new terms, and for a replacement
+ * the wallet and destination its plan row recorded. The plan row is written from the resolved
+ * wallet and destination before the plan's send, so nothing is resolved again: an account
+ * archived since cannot strand the update. With no plan row recorded, the replacement never
+ * reached a send.
  *
- * @param input - The schedule's pin, the attempt and its saved terms.
+ * @param input - The schedule, its pin and the attempt.
  * @param input.env - The environment.
  * @param input.organizationId - The schedule's organization.
  * @param input.projectId - The schedule's project.
+ * @param input.recurringPayment - The `updating` schedule, still on its old terms.
  * @param input.sourceWallet - The schedule's source wallet pin.
- * @param input.attempt - The resumed attempt.
- * @param input.after - The attempt's saved new terms.
- * @returns The wallet, or null when the update moves its source and never reached its plan.
- * @throws AppError INTERNAL_ERROR when the attempt's new source is inconsistent or its plan row is
- *   missing.
+ * @param input.attempt - The in-flight attempt.
+ * @returns The terms and the next due date the update asks for, or null when a replacement never
+ *   reached its plan.
+ * @throws ZodError when the attempt's saved values are not a snapshot.
+ * @throws AppError INTERNAL_ERROR when the attempt's new source is inconsistent, or its plan row
+ *   or the plan's destination is missing.
  */
-async function resumedUpdateSourceWallet(input: {
+async function resumedUpdateTerms(input: {
   env: Env;
   organizationId: string;
   projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
   sourceWallet: RecurringPaymentSourceWallet;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  after: RecurringPaymentUpdateSnapshot;
-}): Promise<RecurringPaymentSourceWallet | null> {
-  const nextSourceCustodyWalletId = input.after.sourceCustodyWalletId;
-  if (nextSourceCustodyWalletId === input.sourceWallet.id) {
-    return input.sourceWallet;
-  }
-  if (
-    nextSourceCustodyWalletId === null ||
-    input.attempt.new_source_custody_wallet_id !== nextSourceCustodyWalletId
-  ) {
-    throw internalError("Recurring payment update attempt names an inconsistent source wallet");
-  }
-  if (input.attempt.new_plan_id === null) {
-    return null;
-  }
-  const plan = await createPaymentSubscriptionsRepository(
-    input.env,
-    createTenantScope(input)
-  ).getPlanById({
-    planId: input.attempt.new_plan_id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+}): Promise<{
+  resolved: ResolvedRecurringPaymentUpdate;
+  requestedNextCollectionDueAt: string | null | undefined;
+} | null> {
+  const before = recurringPaymentUpdateSnapshotSchema.parse(input.attempt.before_values);
+  const after = recurringPaymentUpdateSnapshotSchema.parse(input.attempt.after_values);
+  const changedFields = savedUpdateChangedFieldsSchema.parse(input.attempt.changed_fields);
+  const terms = (sourceWallet: RecurringPaymentSourceWallet, destinationAddress: string) => ({
+    resolved: {
+      sourceWallet,
+      counterpartyId: after.counterpartyId,
+      counterpartyAccountId: after.counterpartyAccountId,
+      destinationAddress,
+      token: after.token,
+      amount: after.amount,
+      periodHours: after.periodHours,
+      firstCollectionAt: after.firstCollectionAt,
+      nextCollectionDueAt: after.nextCollectionDueAt,
+      metadataUri: after.metadataUri,
+      changedFields,
+      beforeValues: before,
+      afterValues: after,
+    },
+    requestedNextCollectionDueAt: changedFields.includes("nextCollectionDueAt")
+      ? after.nextCollectionDueAt
+      : undefined,
   });
-  if (plan === null) {
-    throw internalError("Recurring payment replacement plan was not found");
+  switch (input.attempt.mode) {
+    case "metadata_schedule":
+      return terms(input.sourceWallet, input.recurringPayment.destination_address);
+    case "replacement": {
+      if (input.attempt.new_plan_id === null) {
+        return null;
+      }
+      const plan = await createPaymentSubscriptionsRepository(
+        input.env,
+        createTenantScope(input)
+      ).getPlanById({
+        planId: input.attempt.new_plan_id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+      });
+      if (plan === null) {
+        throw internalError("Recurring payment replacement plan was not found");
+      }
+      if (plan.destination_address === null) {
+        throw internalError("Recurring payment replacement plan has no destination");
+      }
+      const nextSourceCustodyWalletId = after.sourceCustodyWalletId;
+      if (nextSourceCustodyWalletId === input.sourceWallet.id) {
+        return terms(input.sourceWallet, plan.destination_address);
+      }
+      if (
+        nextSourceCustodyWalletId === null ||
+        input.attempt.new_source_custody_wallet_id !== nextSourceCustodyWalletId
+      ) {
+        throw internalError("Recurring payment update attempt names an inconsistent source wallet");
+      }
+      return terms(
+        {
+          id: nextSourceCustodyWalletId,
+          walletId: plan.owner_wallet_id,
+          publicKey: plan.owner_address,
+        },
+        plan.destination_address
+      );
+    }
+    default:
+      return assertNever(input.attempt.mode);
   }
-  return {
-    id: nextSourceCustodyWalletId,
-    walletId: plan.owner_wallet_id,
-    publicKey: plan.owner_address,
-  };
 }
 
 /**
  * Resumes a stale `updating` schedule for the cron, from the attempt its first claim opened. The
- * claim takes the schedule while it is still stale (`updating`, unchanged for the stale window),
- * so the cron and a stale same-key PATCH race safely: the first claimant runs and the other gets
- * a 409. The attempt is read in the same transaction; an `updating` schedule always has one in
- * flight (its claim opened it), so none means this claim took a schedule another run finished,
- * and the claim rolls back. A fresh attempt is never opened.
+ * terms are rebuilt from that attempt before the claim, so a schedule whose terms cannot be read
+ * is never claimed. The claim takes the schedule while it is still stale (`updating`, unchanged
+ * for the stale window), so the cron and a stale same-key PATCH race safely: the first claimant
+ * runs and the other gets a 409. The claim re-reads the attempt (`requireResumedUpdateAttempt`)
+ * and rolls back unless it is the same one, unchanged; a fresh attempt is never opened.
  *
  * The run uses the attempt's saved terms and creator, with no idempotency key, and starts no
  * update send (the cron's mandate admits no `recurring.update`): landed steps finish, a pending
  * step keeps the attempt in flight, a dropped one unwinds, an unsent one fails the update back to
  * `active` on its old terms with an error log, and the old subscription's cancel (an exit) is
- * still sent. A changed destination is resolved again from its counterparty account.
+ * still sent. A replacement that never reached its plan fails back at once.
  *
  * @param input - The stale schedule and its source wallet pin.
  * @param input.env - The environment.
@@ -3082,8 +3221,9 @@ async function resumedUpdateSourceWallet(input: {
  * @param input.sourceWallet - The schedule's source wallet pin.
  * @param input.recurringPayment - The stale `updating` schedule as listed.
  * @returns The schedule once the update finished.
- * @throws AppError CONFLICT when another run holds or finished the update, a step is pending, or
- *   an unsent or failed step failed the update back to `active`.
+ * @throws RecurringPaymentStepFailedError once the update failed back to `active` (an unsent step
+ *   it does not send, a dropped step, or a step that cannot land).
+ * @throws AppError CONFLICT when another run holds or finished the update, or a step is pending.
  */
 export async function resumeRecurringPaymentUpdate(input: {
   env: Env;
@@ -3098,9 +3238,26 @@ export async function resumeRecurringPaymentUpdate(input: {
     );
   }
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const inFlightAttempt = await requireResumedUpdateAttempt(recurringRepo, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+  });
+  const terms = await resumedUpdateTerms({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: input.recurringPayment,
+    sourceWallet: input.sourceWallet,
+    attempt: inFlightAttempt,
+  });
   const settled = await recoverOrBlockLifecycleCollection({
     env: input.env,
-    recurringRepo: createPaymentRecurringPaymentsRepository(input.env, createTenantScope(input)),
+    recurringRepo,
     subscriptionsRepo: createPaymentSubscriptionsRepository(input.env, createTenantScope(input)),
     paymentsRepo: createPaymentsRepository(input.env, createTenantScope(input)),
     organizationId: input.organizationId,
@@ -3120,14 +3277,13 @@ export async function resumeRecurringPaymentUpdate(input: {
       activatedBy: null,
     });
     if (!claimed) return null;
-    const attempt = await transactionRepo.getLatestUpdateAttempt({
+    const attempt = await requireResumedUpdateAttempt(transactionRepo, {
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: claimed.id,
-      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
     });
-    if (!attempt) {
-      throw conflict("Recurring payment update finished before it was resumed");
+    if (attempt.id !== inFlightAttempt.id || attempt.new_plan_id !== inFlightAttempt.new_plan_id) {
+      throw conflict("Recurring payment update changed before it was resumed");
     }
     return { claimed, attempt };
   });
@@ -3136,18 +3292,7 @@ export async function resumeRecurringPaymentUpdate(input: {
   }
   const { claimed, attempt } = claimResult;
 
-  const before = recurringPaymentUpdateSnapshotSchema.parse(attempt.before_values);
-  const after = recurringPaymentUpdateSnapshotSchema.parse(attempt.after_values);
-  const changedFields = savedUpdateChangedFieldsSchema.parse(attempt.changed_fields);
-  const sourceWallet = await resumedUpdateSourceWallet({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWallet: input.sourceWallet,
-    attempt,
-    after,
-  });
-  if (sourceWallet === null) {
+  if (terms === null) {
     const stepFailure = new RecurringPaymentStepFailedError({
       failure: refuseCronUpdateStepSend({
         recurring_payment_id: claimed.id,
@@ -3164,22 +3309,8 @@ export async function resumeRecurringPaymentUpdate(input: {
       attempt,
       stepFailure,
     });
-    throw stepFailure.failure;
+    throw recurringPaymentStepFailureAnswer(stepFailure);
   }
-  const accountChanged =
-    after.counterpartyId !== claimed.counterparty_id ||
-    after.counterpartyAccountId !== claimed.counterparty_account_id;
-  const destinationAddress = accountChanged
-    ? (
-        await resolveSolanaCounterpartyAccount({
-          env: input.env,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          counterpartyId: after.counterpartyId,
-          counterpartyAccountId: after.counterpartyAccountId,
-        })
-      ).destinationAddress
-    : claimed.destination_address;
 
   return runClaimedRecurringPaymentUpdate({
     env: input.env,
@@ -3190,24 +3321,8 @@ export async function resumeRecurringPaymentUpdate(input: {
     attempt,
     subscription: settled.subscription,
     mode: attempt.mode,
-    resolved: {
-      sourceWallet,
-      counterpartyId: after.counterpartyId,
-      counterpartyAccountId: after.counterpartyAccountId,
-      destinationAddress,
-      token: after.token,
-      amount: after.amount,
-      periodHours: after.periodHours,
-      firstCollectionAt: after.firstCollectionAt,
-      nextCollectionDueAt: after.nextCollectionDueAt,
-      metadataUri: after.metadataUri,
-      changedFields,
-      beforeValues: before,
-      afterValues: after,
-    },
-    requestedNextCollectionDueAt: changedFields.includes("nextCollectionDueAt")
-      ? after.nextCollectionDueAt
-      : undefined,
+    resolved: terms.resolved,
+    requestedNextCollectionDueAt: terms.requestedNextCollectionDueAt,
     createdBy: attempt.created_by,
     idempotency: null,
     startsAllowed: false,
