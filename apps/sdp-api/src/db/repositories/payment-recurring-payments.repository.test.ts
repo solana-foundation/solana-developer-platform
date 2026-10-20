@@ -1,5 +1,9 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
-import type { PaymentRecurringPaymentAttemptStatus } from "@sdp/types/payments";
+import {
+  isInFlightRecurringPaymentAttemptStatus,
+  PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  type PaymentRecurringPaymentAttemptStatus,
+} from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
@@ -17,6 +21,8 @@ import { createPostgresCounterpartyAccountsRepository } from "./counterparty-acc
 import type {
   PaymentRecurringPaymentsRepository,
   RecurringPaymentStepSignatureSlot,
+  UpdatePaymentRecurringPaymentActivationAttemptInput,
+  UpdatePaymentRecurringPaymentLifecycleAttemptInput,
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
@@ -638,6 +644,92 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       last_valid_block_height: "403",
       updated_at: expect.any(String),
     });
+    const read = (slot: RecurringPaymentStepSignatureSlot, id: string) =>
+      repo.getStepSignature({ ...tenant, slot, id, recurringPaymentId });
+    expect(await read(SETUP_SLOT, activation.id)).toEqual({
+      signature: testSignature(4),
+      lastValidBlockHeight: "401",
+    });
+    expect(await read({ row: "lifecycle_attempt", column: "signature" }, lifecycle.id)).toEqual({
+      signature: testSignature(5),
+      lastValidBlockHeight: "402",
+    });
+    expect(
+      await read({ row: "update_attempt", column: "plan_creation_signature" }, update.id)
+    ).toEqual({ signature: testSignature(6), lastValidBlockHeight: "403" });
+  });
+
+  describe("getStepSignature", () => {
+    const readPlanSignature = (input: {
+      id: string;
+      recurringPaymentId: string;
+      projectId: string;
+    }) => repo.getStepSignature({ ...input, slot: PLAN_SLOT, organizationId: TEST_ORG.id });
+
+    it("reads an in-flight attempt's empty slot as no signature saved", async () => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_get_signature_empty");
+
+      expect(
+        await readPlanSignature({
+          id: attempt.id,
+          recurringPaymentId: attempt.recurring_payment_id,
+          projectId: TEST_PROJECT_ID,
+        })
+      ).toEqual({ signature: null, lastValidBlockHeight: null });
+    });
+
+    type UnreadStepSignature = {
+      unread: string;
+      projectId: string;
+      scheduleOf: "attempt" | "sibling";
+      status: PaymentRecurringPaymentAttemptStatus;
+    };
+
+    it.each<UnreadStepSignature>([
+      ...PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES.filter(
+        (status) => !isInFlightRecurringPaymentAttemptStatus(status)
+      ).map(
+        (status): UnreadStepSignature => ({
+          unread: `a ${status} attempt`,
+          projectId: TEST_PROJECT_ID,
+          scheduleOf: "attempt",
+          status,
+        })
+      ),
+      {
+        unread: "an attempt under another schedule",
+        projectId: TEST_PROJECT_ID,
+        scheduleOf: "sibling",
+        status: "processing",
+      },
+      {
+        unread: "another project's attempt",
+        projectId: SIBLING_PROJECT_ID,
+        scheduleOf: "attempt",
+        status: "processing",
+      },
+    ])("reads nothing for $unread", async ({ projectId, scheduleOf, status }) => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_get_signature_unread");
+      const sibling = await createUnsignedActivationAttempt("prpa_repo_get_signature_sibling");
+      await fillActivationSlots(attempt.id, {
+        planCreationSignature: testSignature(1),
+        authorizationSetupSignature: null,
+        lastValidBlockHeight: "301",
+      });
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payment_activation_attempts SET status = ? WHERE id = ?")
+        .bind(status, attempt.id)
+        .run();
+
+      expect(
+        await readPlanSignature({
+          id: attempt.id,
+          recurringPaymentId:
+            scheduleOf === "attempt" ? attempt.recurring_payment_id : sibling.recurring_payment_id,
+          projectId,
+        })
+      ).toBeNull();
+    });
   });
 
   it("writes an update attempt only while it holds the expected status", async () => {
@@ -691,6 +783,92 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       updated_at: expect.any(String),
     });
     expect(await repo.getLatestUpdateAttempt({ ...tenant, recurringPaymentId })).toEqual(applied);
+  });
+
+  it("writes an activation attempt only while it holds the expected status", async () => {
+    const attempt = await createUnsignedActivationAttempt("prpa_repo_activation_fence");
+    const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const recurringPaymentId = attempt.recurring_payment_id;
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payment_activation_attempts SET status = 'confirmed' WHERE id = ?"
+      )
+      .bind(attempt.id)
+      .run();
+    const confirmed = required(
+      await repo.getLatestActivationAttempt({ ...tenant, recurringPaymentId })
+    );
+    const failure: UpdatePaymentRecurringPaymentActivationAttemptInput = {
+      ...tenant,
+      attemptId: attempt.id,
+      status: "failed",
+      error: "Recurring payment step failed",
+      updatedAt: STEP_UPDATED_AT,
+    };
+
+    expect(
+      await repo.updateActivationAttempt({ ...failure, expectedStatus: "processing" })
+    ).toBeNull();
+    expect(await repo.getLatestActivationAttempt({ ...tenant, recurringPaymentId })).toEqual(
+      confirmed
+    );
+
+    const applied = await repo.updateActivationAttempt(failure);
+
+    expect(applied).toEqual({
+      ...confirmed,
+      status: "failed",
+      error: "Recurring payment step failed",
+      updated_at: expect.any(String),
+    });
+    expect(await repo.getLatestActivationAttempt({ ...tenant, recurringPaymentId })).toEqual(
+      applied
+    );
+  });
+
+  it("writes a lifecycle attempt only while it holds the expected status", async () => {
+    const activation = await createUnsignedActivationAttempt("prpa_repo_lifecycle_fence");
+    const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const recurringPaymentId = activation.recurring_payment_id;
+    const confirmed = required(
+      await repo.createLifecycleAttempt({
+        ...tenant,
+        id: "prpl_repo_lifecycle_fence",
+        recurringPaymentId,
+        operation: "cancel",
+        status: "confirmed",
+        stage: "finalize",
+        signature: null,
+        error: null,
+        metadata: {},
+        createdAt: activation.created_at,
+        updatedAt: activation.created_at,
+      })
+    );
+    const failure: UpdatePaymentRecurringPaymentLifecycleAttemptInput = {
+      ...tenant,
+      attemptId: confirmed.id,
+      status: "failed",
+      error: "Recurring payment step failed",
+      updatedAt: STEP_UPDATED_AT,
+    };
+    const latest = () =>
+      repo.getLatestLifecycleAttempt({ ...tenant, recurringPaymentId, operation: "cancel" });
+
+    expect(
+      await repo.updateLifecycleAttempt({ ...failure, expectedStatus: "processing" })
+    ).toBeNull();
+    expect(await latest()).toEqual(confirmed);
+
+    const applied = await repo.updateLifecycleAttempt(failure);
+
+    expect(applied).toEqual({
+      ...confirmed,
+      status: "failed",
+      error: "Recurring payment step failed",
+      updated_at: expect.any(String),
+    });
+    expect(await latest()).toEqual(applied);
   });
 });
 
