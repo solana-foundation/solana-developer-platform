@@ -1952,6 +1952,77 @@ describe("payment transfer batches", () => {
     }
   );
 
+  it("refuses a scaled UI amount recipient that converts to zero base units before signing anything", async () => {
+    const mint = syntheticAddress(22);
+    getAccountInfoMock.mockImplementationOnce(
+      async (client, account) =>
+        (
+          await client
+            .getAccountInfo(account, { encoding: "base64", commitment: "confirmed" })
+            .send()
+        ).value
+    );
+    answerSourceTokenAccount(mint);
+    respondMintAccounts(rpc, {
+      mints: new Map([
+        [
+          mint,
+          {
+            decimals: 6,
+            extensions: [
+              scaledUiAmountConfig({
+                multiplier: 2,
+                newMultiplier: 4,
+                newMultiplierEffectiveTimestamp: 1_800_000_000n,
+              }),
+            ],
+          },
+        ],
+      ]),
+      clockUnixTimestamp: 1_750_000_000n,
+    });
+    const counterpartyId = await seedCounterparty("batch_scaled_zero_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: mint,
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.000001" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Recipient amount must be greater than zero" },
+    });
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const count = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM payment_transfer_batches
+          WHERE organization_id = ? AND project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .first<{ count: number }>();
+    expect(count).toEqual({ count: 0 });
+  });
+
   it("moves a scaled UI amount mint's converted base units while recipients keep their requested amount", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
