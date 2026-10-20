@@ -1,10 +1,11 @@
 import { SigningError } from "@sdp/custody/signing";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
+import * as recurringPaymentUpdate from "@/services/payments/recurring-payments/update";
 import { env } from "@/test/helpers/env";
 
 interface MockState {
@@ -13,7 +14,6 @@ interface MockState {
   collectRecurringPayment: ReturnType<typeof vi.fn>;
   journalAutomatedCollectionFailure: ReturnType<typeof vi.fn>;
   resumeRecurringPayment: ReturnType<typeof vi.fn>;
-  resumeRecurringPaymentUpdate: ReturnType<typeof vi.fn>;
   findOperationalWalletById: ReturnType<typeof vi.fn>;
   listStaleLifecyclePayments: ReturnType<typeof vi.fn>;
   listRecoverableCollectionPayments: ReturnType<typeof vi.fn>;
@@ -32,7 +32,6 @@ const mocks = vi.hoisted<MockState>(() => ({
   collectRecurringPayment: vi.fn(),
   journalAutomatedCollectionFailure: vi.fn(),
   resumeRecurringPayment: vi.fn(),
-  resumeRecurringPaymentUpdate: vi.fn(),
   findOperationalWalletById: vi.fn(),
   listStaleLifecyclePayments: vi.fn(),
   listRecoverableCollectionPayments: vi.fn(),
@@ -85,16 +84,14 @@ vi.mock("@/services/payments/recurring-payments/lifecycle", () => ({
   resumeRecurringPayment: mocks.resumeRecurringPayment,
 }));
 
-vi.mock("@/services/payments/recurring-payments/update", () => ({
-  resumeRecurringPaymentUpdate: mocks.resumeRecurringPaymentUpdate,
-}));
-
 let collectDueRecurringPayments: typeof import("./collect-recurring-payments").collectDueRecurringPayments;
 let activateRecurringPayment: typeof import("@/services/payments/recurring-payments/activation").activateRecurringPayment;
 let cancelRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").cancelRecurringPayment;
 let collectRecurringPayment: typeof import("@/services/payments/recurring-payments/collection").collectRecurringPayment;
 let resumeRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").resumeRecurringPayment;
-let resumeRecurringPaymentUpdate: typeof import("@/services/payments/recurring-payments/update").resumeRecurringPaymentUpdate;
+let resumeRecurringPaymentUpdate: MockInstance<
+  typeof recurringPaymentUpdate.resumeRecurringPaymentUpdate
+>;
 
 const SOURCE_WALLET_PIN = { id: "cwlt_1", walletId: "wallet_1", publicKey: "source_address" };
 
@@ -153,9 +150,6 @@ describe("collectDueRecurringPayments", () => {
     ({ cancelRecurringPayment, resumeRecurringPayment } = await import(
       "@/services/payments/recurring-payments/lifecycle"
     ));
-    ({ resumeRecurringPaymentUpdate } = await import(
-      "@/services/payments/recurring-payments/update"
-    ));
   });
 
   beforeEach(() => {
@@ -165,7 +159,6 @@ describe("collectDueRecurringPayments", () => {
     mocks.collectRecurringPayment.mockReset();
     mocks.journalAutomatedCollectionFailure.mockReset();
     mocks.resumeRecurringPayment.mockReset();
-    mocks.resumeRecurringPaymentUpdate.mockReset();
     mocks.findOperationalWalletById.mockReset();
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
@@ -186,7 +179,10 @@ describe("collectDueRecurringPayments", () => {
     mocks.cancelRecurringPayment.mockResolvedValue(recurringRow("canceled"));
     mocks.collectRecurringPayment.mockResolvedValue({});
     mocks.resumeRecurringPayment.mockResolvedValue(recurringRow("active"));
-    mocks.resumeRecurringPaymentUpdate.mockResolvedValue(recurringRow("active"));
+    resumeRecurringPaymentUpdate = vi
+      .spyOn(recurringPaymentUpdate, "resumeRecurringPaymentUpdate")
+      .mockResolvedValue(recurringRow("active"));
+    return () => resumeRecurringPaymentUpdate.mockRestore();
   });
 
   it("recovers interrupted operations before collecting due payments", async () => {
@@ -277,7 +273,7 @@ describe("collectDueRecurringPayments", () => {
   ])("counts %s from the update resume", async (_, error, counts) => {
     const logError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     mocks.rows.lifecycle = [recurringRow("updating")];
-    mocks.resumeRecurringPaymentUpdate.mockRejectedValue(error);
+    resumeRecurringPaymentUpdate.mockRejectedValue(error);
 
     const result = await collectDueRecurringPaymentsIn("sandbox", new Date());
 

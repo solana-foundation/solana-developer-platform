@@ -62,6 +62,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { clusterOfRpcClient, multipleAccountsRead } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
@@ -8344,8 +8345,9 @@ describe("Payments routes — recurring", () => {
           ...DEFAULT_RECURRING_CHAIN,
           plan: () => ({ createdAt: 1_770_000_000n, metadataUri }),
         });
-        const cronTicks: Awaited<ReturnType<typeof collectDueRecurringPaymentsIn>>[] = [];
-        let cronStarted = false;
+        const claimReached = deferred<undefined>();
+        const releaseClaim = deferred<undefined>();
+        let claimHeld = false;
         const createRepository =
           paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
         const repositorySpy = vi
@@ -8358,10 +8360,11 @@ describe("Payments routes — recurring", () => {
             return {
               ...repository,
               claimRecurringPaymentUpdate: async (input) => {
-                // The PATCH read the schedule `updating`; the cron finishes it before this claim.
-                if (!cronStarted) {
-                  cronStarted = true;
-                  cronTicks.push(await collectDueRecurringPaymentsIn("sandbox", new Date()));
+                // The PATCH read the schedule `updating`; the cron runs outside its cluster scope before this claim.
+                if (!claimHeld) {
+                  claimHeld = true;
+                  claimReached.resolve(undefined);
+                  await releaseClaim.promise;
                 }
                 return repository.claimRecurringPaymentUpdate(input);
               },
@@ -8370,16 +8373,18 @@ describe("Payments routes — recurring", () => {
         onTestFinished(() => repositorySpy.mockRestore());
         const sent = sends();
 
-        const retry = await request();
+        const pendingRetry = request();
+        await claimReached.promise;
+        const cronTick = await collectDueRecurringPaymentsIn("sandbox", new Date());
+        releaseClaim.resolve(undefined);
+        const retry = await pendingRetry;
 
         expect(retry.status).toBe(409);
         expect(errorResponseSchema.parse(await retry.json()).error).toMatchObject({
           code: "CONFLICT",
           message: "Recurring payment update finished before it was resumed",
         });
-        expect(cronTicks).toEqual([
-          { recovered: 1, collected: 0, failed: 0, skipped: 0, refused: 0 },
-        ]);
+        expect(cronTick).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0, refused: 0 });
         expect(sent).not.toHaveBeenCalled();
         expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
           status: "confirmed",
