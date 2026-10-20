@@ -84,9 +84,10 @@ fi
 kora_api_key="$(env_value "${API_KEY_FILE}" KORA_API_KEY)"
 [ -n "${kora_api_key}" ] || { echo "${API_KEY_FILE} has no KORA_API_KEY; delete it to generate a new one." >&2; exit 1; }
 
+devnet_rpc_url="${KORA_DEVNET_RPC_URL:-https://api.devnet.solana.com}"
 echo "Starting devnet Kora on 127.0.0.1:${DEVNET_PORT}."
 COMPOSE_PROJECT_NAME=kora-devnet KORA_PORT="${DEVNET_PORT}" KORA_REDIS_PORT="${DEVNET_REDIS_PORT}" \
-  RPC_URL="${KORA_DEVNET_RPC_URL:-https://api.devnet.solana.com}" SIGNER_PRIVATE_KEY="${signer}" \
+  RPC_URL="${devnet_rpc_url}" SIGNER_PRIVATE_KEY="${signer}" \
   KORA_API_KEY="${kora_api_key}" docker compose -f "${ROOT_DIR}/infra/kora/docker-compose.yml" up -d redis kora
 
 # `compose up -d` succeeds even when the container then crash-loops.
@@ -106,7 +107,7 @@ surfpool_rpc_url=""
 if [ -n "${mainnet_upstream_rpc}" ]; then
   echo "Starting mainnet Kora on 127.0.0.1:${MAINNET_PORT} against a Surfpool fork."
   # The fork airdrops the shared fee payer SOL on boot.
-  SIGNER_PRIVATE_KEY="${signer}" KORA_API_KEY="${kora_api_key}" COMPOSE_PROJECT_NAME=kora-mainnet KORA_SURFPOOL_MODE=docker KORA_SURFPOOL_STATE_DIR="${MAINNET_STATE_DIR}" \
+  SIGNER_PRIVATE_KEY="${signer}" KORA_API_KEY="${kora_api_key}" COMPOSE_PROJECT_NAME=kora-mainnet KORA_SURFPOOL_MODE=docker KORA_SURFPOOL_SHARED=1 KORA_SURFPOOL_STATE_DIR="${MAINNET_STATE_DIR}" \
     SURFPOOL_REMOTE_RPC_URL="${mainnet_upstream_rpc}" KORA_REDIS_PORT="${MAINNET_REDIS_PORT}" \
     "${ROOT_DIR}/scripts/kora-surfpool/up.sh"
   surfpool_rpc_url="$(env_value "${MAINNET_STATE_DIR}/runtime.env" SURFPOOL_RPC_URL)"
@@ -119,8 +120,11 @@ fi
 # The per-cluster Kora URLs override Doppler's deployed Koras (empty audiences:
 # the local Koras are plain HTTP, and a Doppler audience would reject them), and the
 # mainnet RPCs point at the fork so the API, its fee preflight and its paymaster see one chain.
+# Each Kora URL goes out with its upstream RPC, set or blank together: the API refuses to boot
+# on a half-configured cluster (assertKoraConfigured).
 {
   echo "KORA_DEVNET_URL=http://127.0.0.1:${DEVNET_PORT}"
+  echo "KORA_DEVNET_RPC_URL=${devnet_rpc_url}"
   echo "KORA_DEVNET_API_KEY=${kora_api_key}"
   echo "KORA_DEVNET_CLOUD_RUN_AUDIENCE="
   if [ -n "${surfpool_rpc_url}" ]; then
@@ -132,6 +136,7 @@ fi
   else
     # No fork: blank Doppler's deployed mainnet Kora too, so the API reports no mainnet sponsor.
     echo "KORA_MAINNET_URL="
+    echo "KORA_MAINNET_RPC_URL="
   fi
   # The door builds Production transactions from the managed mainnet pool: only the fork, so
   # nothing reaches real mainnet through a provider URL inherited from Doppler. Written even

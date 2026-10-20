@@ -201,10 +201,19 @@ start_embedded_surfpool() {
     if [ -n "${old_pid}" ] && kill -0 "${old_pid}" >/dev/null 2>&1; then
       if [ -f "${SURFPOOL_INFO_FILE}" ]; then
         SURFPOOL_RPC_URL="$(json_file_field "${SURFPOOL_INFO_FILE}" rpcUrl)"
-        if embedded_surfpool_config_matches "${SURFPOOL_INFO_FILE}" && json_rpc_ok "${SURFPOOL_RPC_URL}"; then
-          export SURFPOOL_RPC_URL
-          echo "Embedded Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
-          return 0
+        if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
+          if embedded_surfpool_config_matches "${SURFPOOL_INFO_FILE}"; then
+            export SURFPOOL_RPC_URL
+            echo "Embedded Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
+            return 0
+          fi
+          # A shared fork (scripts/kora-local) has callers that already hold its address, so a
+          # different upstream must not restart it out from under them.
+          if [ "${KORA_SURFPOOL_SHARED:-}" = "1" ]; then
+            export SURFPOOL_RPC_URL
+            echo "Reusing the shared Surfpool fork at ${SURFPOOL_RPC_URL}, which forks a different upstream RPC; run \`pnpm kora:local:down\` to restart it on this one." >&2
+            return 0
+          fi
         fi
       fi
       stop_pid_file "${SURFPOOL_PID_FILE}"
