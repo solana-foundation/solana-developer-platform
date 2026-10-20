@@ -34,6 +34,7 @@ import type {
   GetPaymentRecurringPaymentStepSignatureInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
+  LockPaymentRecurringPaymentEmptyStepSlotsInput,
   PaymentRecurringPaymentActivationAttemptRow,
   PaymentRecurringPaymentLifecycleAttemptRow,
   PaymentRecurringPaymentRow,
@@ -1325,10 +1326,11 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return { signature: saved.signature, lastValidBlockHeight: saved.last_valid_block_height };
     },
 
-    async lockEmptyStepSlot(input: GetPaymentRecurringPaymentStepSignatureInput) {
-      const table = STEP_SIGNATURE_TABLES[input.slot.row];
-      const { column } = input.slot;
-      // Table and column come from the typed slot, never from caller text.
+    async lockEmptyStepSlot(input: LockPaymentRecurringPaymentEmptyStepSlotsInput) {
+      const [step] = input.slots;
+      const table = STEP_SIGNATURE_TABLES[step.row];
+      // Table and columns come from the typed slots, never from caller text.
+      const emptySlots = input.slots.map(({ column }) => `${column} IS NULL`).join(" AND ");
       const row = await db
         .prepare(
           `SELECT id
@@ -1338,7 +1340,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND status = ANY(?::text[])
-              AND ${column} IS NULL
+              AND ${emptySlots}
             FOR UPDATE`
         )
         .bind(input.id, input.recurringPaymentId, input.organizationId, input.projectId, [

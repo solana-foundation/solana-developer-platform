@@ -359,27 +359,49 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
 }
 
 /**
+ * Each attempt row's step signature columns in the order its flow saves them; a step saves only
+ * after every earlier one landed. An update attempt is either a metadata update (`plan_update_signature`
+ * alone) or a replacement (the rest), so a metadata attempt's later columns are always empty.
+ */
+export const RECURRING_PAYMENT_STEP_SLOT_ORDER = {
+  activation_attempt: [
+    "plan_creation_signature",
+    "authorization_setup_signature",
+    "authorization_signature",
+  ],
+  update_attempt: [
+    "plan_update_signature",
+    "plan_creation_signature",
+    "authorization_setup_signature",
+    "authorization_signature",
+    "old_cancel_signature",
+  ],
+  lifecycle_attempt: ["signature"],
+} as const;
+
+type RecurringPaymentStepSlotOrder = typeof RECURRING_PAYMENT_STEP_SLOT_ORDER;
+
+/** One attempt row's step signature slot. */
+type RecurringPaymentStepSignatureSlotOf<TRow extends keyof RecurringPaymentStepSlotOrder> = {
+  row: TRow;
+  column: RecurringPaymentStepSlotOrder[TRow][number];
+};
+
+/**
  * Where one subscription step's saved signature lives: always its attempt row. The schedule row's
  * signatures are written once the step lands.
  */
-export type RecurringPaymentStepSignatureSlot =
-  | {
-      row: "activation_attempt";
-      column:
-        | "plan_creation_signature"
-        | "authorization_setup_signature"
-        | "authorization_signature";
-    }
-  | {
-      row: "update_attempt";
-      column:
-        | "plan_update_signature"
-        | "plan_creation_signature"
-        | "authorization_setup_signature"
-        | "authorization_signature"
-        | "old_cancel_signature";
-    }
-  | { row: "lifecycle_attempt"; column: "signature" };
+export type RecurringPaymentStepSignatureSlot = {
+  [TRow in keyof RecurringPaymentStepSlotOrder]: RecurringPaymentStepSignatureSlotOf<TRow>;
+}[keyof RecurringPaymentStepSlotOrder];
+
+/** One or more step slots of the same attempt row. */
+export type RecurringPaymentStepSignatureSlots = {
+  [TRow in keyof RecurringPaymentStepSlotOrder]: readonly [
+    RecurringPaymentStepSignatureSlotOf<TRow>,
+    ...RecurringPaymentStepSignatureSlotOf<TRow>[],
+  ];
+}[keyof RecurringPaymentStepSlotOrder];
 
 export interface SetPaymentRecurringPaymentStepSignatureInput {
   slot: RecurringPaymentStepSignatureSlot;
@@ -413,6 +435,17 @@ export interface GetPaymentRecurringPaymentStepSignatureInput {
   /** The attempt's id. */
   id: string;
   /** The parent schedule's id; the attempt is read only under it. */
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+}
+
+export interface LockPaymentRecurringPaymentEmptyStepSlotsInput {
+  /** The slots that must all be empty: a failed step's and every later one of its attempt row. */
+  slots: RecurringPaymentStepSignatureSlots;
+  /** The attempt's id. */
+  id: string;
+  /** The parent schedule's id; the attempt is locked only under it. */
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
@@ -711,13 +744,13 @@ export interface PaymentRecurringPaymentsRepository {
     input: GetPaymentRecurringPaymentStepSignatureInput
   ): Promise<PaymentRecurringPaymentStepSignature | null>;
   /**
-   * Row-lock the attempt for the rest of the transaction while the step's slot is still empty and
+   * Row-lock the attempt for the rest of the transaction while every given slot is still empty and
    * the attempt still in flight: the twin of `clearStepSignature` for a failure that saved nothing,
    * so a concurrent save waits for the transaction and then finds the attempt settled.
    *
-   * @returns False when the slot holds a signature or the attempt has settled.
+   * @returns False when any slot holds a signature or the attempt has settled.
    */
-  lockEmptyStepSlot(input: GetPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
+  lockEmptyStepSlot(input: LockPaymentRecurringPaymentEmptyStepSlotsInput): Promise<boolean>;
   getLatestUpdateAttempt(
     input: GetLatestPaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;

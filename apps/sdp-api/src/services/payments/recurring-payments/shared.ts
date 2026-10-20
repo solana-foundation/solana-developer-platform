@@ -41,10 +41,12 @@ import {
 } from "@solana/subscriptions";
 import { decodeToken } from "@solana-program/token-2022";
 import type { DatabaseExecutor } from "@/db/client";
-import type {
-  PaymentRecurringPaymentRow,
-  PaymentRecurringPaymentsRepository,
-  RecurringPaymentStepSignatureSlot,
+import {
+  type PaymentRecurringPaymentRow,
+  type PaymentRecurringPaymentsRepository,
+  RECURRING_PAYMENT_STEP_SLOT_ORDER,
+  type RecurringPaymentStepSignatureSlot,
+  type RecurringPaymentStepSignatureSlots,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import type {
   PaymentSubscriptionPlanRow,
@@ -558,9 +560,40 @@ export class RecurringPaymentStepFailedError extends AppError {
 }
 
 /**
+ * A step's slot and every later slot of its attempt row, in the order the flow saves them.
+ *
+ * @param slot - The step's slot.
+ * @returns The slots from `slot` to the row's last step.
+ */
+function stepSlotsFrom(
+  slot: RecurringPaymentStepSignatureSlot
+): RecurringPaymentStepSignatureSlots {
+  switch (slot.row) {
+    case "activation_attempt": {
+      const order = RECURRING_PAYMENT_STEP_SLOT_ORDER.activation_attempt;
+      const later = order.slice(order.indexOf(slot.column) + 1);
+      return [slot, ...later.map((column) => ({ row: slot.row, column }))];
+    }
+    case "update_attempt": {
+      const order = RECURRING_PAYMENT_STEP_SLOT_ORDER.update_attempt;
+      const later = order.slice(order.indexOf(slot.column) + 1);
+      return [slot, ...later.map((column) => ({ row: slot.row, column }))];
+    }
+    case "lifecycle_attempt": {
+      const order = RECURRING_PAYMENT_STEP_SLOT_ORDER.lifecycle_attempt;
+      const later = order.slice(order.indexOf(slot.column) + 1);
+      return [slot, ...later.map((column) => ({ row: slot.row, column }))];
+    }
+    default:
+      return assertNever(slot);
+  }
+}
+
+/**
  * Fences a step failure's unwind inside its transaction, on the failed step's slot: clears a
  * dropped send's signature only while the slot still holds it, or, with nothing dropped, holds the
- * attempt row while the slot is still empty and the attempt in flight.
+ * attempt row while the slot and every later one of the row are still empty and the attempt in
+ * flight, so a run that took the attempt over and saved any later step is never unwound.
  *
  * @param input - The transaction's repository, the attempt and the step failure.
  * @param input.recurringRepo - The repository bound to the failure's transaction.
@@ -570,8 +603,9 @@ export class RecurringPaymentStepFailedError extends AppError {
  * @param input.projectId - The schedule's project.
  * @param input.stepFailure - The step failure.
  * @param input.updatedAt - The failure's timestamp.
- * @throws AppError CONFLICT when the slot no longer holds the dropped signature, or holds a
- *   signature this run did not save; the transaction rolls back and the attempt stays in flight.
+ * @throws AppError CONFLICT when the slot no longer holds the dropped signature, or it or a later
+ *   slot holds a signature this run did not save; the transaction rolls back and the attempt stays
+ *   in flight.
  */
 export async function fenceRecurringPaymentStepFailure(input: {
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -583,7 +617,6 @@ export async function fenceRecurringPaymentStepFailure(input: {
   updatedAt: string;
 }): Promise<void> {
   const target = {
-    slot: input.stepFailure.slot,
     id: input.attemptId,
     recurringPaymentId: input.recurringPaymentId,
     organizationId: input.organizationId,
@@ -591,9 +624,13 @@ export async function fenceRecurringPaymentStepFailure(input: {
   };
   const fenced =
     input.stepFailure.droppedSignature === null
-      ? await input.recurringRepo.lockEmptyStepSlot(target)
+      ? await input.recurringRepo.lockEmptyStepSlot({
+          ...target,
+          slots: stepSlotsFrom(input.stepFailure.slot),
+        })
       : await input.recurringRepo.clearStepSignature({
           ...target,
+          slot: input.stepFailure.slot,
           signature: input.stepFailure.droppedSignature,
           updatedAt: input.updatedAt,
         });
