@@ -11,7 +11,7 @@ export interface OfframpFinalStepWizard {
   selectedWallet: { label: string | null } | null;
   canSendOnchain: boolean;
   onchainSendLoading: boolean;
-  onchainSendResult: unknown;
+  onchainSendResult: PaymentTransferSummary | null;
   onchainSendError: string | null;
   sendCryptoToDeposit: () => Promise<void>;
   startOver: (stepId: "WITHDRAW") => void;

@@ -64,6 +64,17 @@ describe("RampOpenSale", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("holds Send while the sale is being canceled", async () => {
+    vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>(() => undefined));
+    render(<RampOpenSale transfer={sale({})} />, { wrapper });
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel payout" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel transaction" }));
+
+    expect(screen.getByRole("button", { name: "Send 25 USDC" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", true);
+  });
+
   it("offers only Cancel while the provider has not named a deposit address", () => {
     render(<RampOpenSale transfer={sale({ status: "pending", cryptoDeposit: undefined })} />, {
       wrapper,

@@ -33,8 +33,25 @@ import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps
 import { useTranslations } from "@/i18n/provider";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
 
-function isRamp(transfer: PaymentTransferDetail | null): transfer is PaymentTransferDetail {
+type RampTransferDetail = PaymentTransferDetail & { type: "onramp" | "offramp" };
+
+function isRamp(transfer: PaymentTransferDetail | null): transfer is RampTransferDetail {
   return transfer?.type === "onramp" || transfer?.type === "offramp";
+}
+
+/** The status key a ramp in motion polls, or null once it can no longer change. */
+function liveRampTransferKey(transfer: PaymentTransferDetail | null) {
+  if (!isRamp(transfer) || getRampTransferState(transfer.status).terminal) return null;
+  switch (transfer.type) {
+    case "offramp":
+      return paymentsQueryKeys.offrampTransferStatus({ transferId: transfer.id });
+    case "onramp":
+      return paymentsQueryKeys.onrampTransferStatus({ transferId: transfer.id });
+    default: {
+      const unhandled: never = transfer.type;
+      throw new Error(`Unhandled ramp type: ${String(unhandled)}`);
+    }
+  }
 }
 
 /**
@@ -45,15 +62,8 @@ export function useLiveRampTransfer(
   initial: PaymentTransferDetail | null
 ): PaymentTransferDetail | null {
   const t = useTranslations();
-  const live = isRamp(initial) && !getRampTransferState(initial.status).terminal;
-  const key =
-    live && initial
-      ? initial.type === "offramp"
-        ? paymentsQueryKeys.offrampTransferStatus({ transferId: initial.id })
-        : paymentsQueryKeys.onrampTransferStatus({ transferId: initial.id })
-      : null;
   const { data } = useSWR(
-    key,
+    liveRampTransferKey(initial),
     ([, transferId]: readonly [string, string]) => fetchTransferById({ transferId }, t),
     {
       // A fresh function each render re-arms SWR's timer with the latest transfer.
@@ -163,7 +173,7 @@ export function RampOpenSale({ transfer }: { transfer: PaymentTransferDetail }) 
           <Button
             type="button"
             iconLeft={<SendIcon />}
-            disabled={sending || sent !== undefined}
+            disabled={sending || canceling || sent !== undefined}
             onClick={() => setConfirmingSend(true)}
           >
             {sending

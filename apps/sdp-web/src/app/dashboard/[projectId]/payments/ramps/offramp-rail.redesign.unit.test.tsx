@@ -5,6 +5,7 @@ import type {
   PaymentTransferStatus,
   PaymentTransferSummary,
 } from "@sdp/types/payments";
+import { ThemeScopeContext } from "@sdp/ui/theme-scope";
 import { address } from "@solana/kit";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -198,5 +199,29 @@ describe("OfframpRail final step before the quote lands", () => {
     );
 
     expect(screen.getByRole("button", { name: "Previous" })).toHaveProperty("disabled", false);
+  });
+});
+
+describe("OfframpRail cancel on refresh surfaces", () => {
+  function renderRefreshRail(wizard: OfframpWizard) {
+    mocks.wizard = wizard;
+    return render(
+      <ThemeScopeContext.Provider value="refresh">
+        <OfframpRail {...railProps} />
+      </ThemeScopeContext.Provider>,
+      { wrapper }
+    );
+  }
+
+  it("holds Cancel payout while a cancel is in flight", () => {
+    renderRefreshRail(offrampWizard({ isCanceling: true }));
+
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", true);
+  });
+
+  it("offers Cancel payout while the sale is open", () => {
+    renderRefreshRail(offrampWizard({}));
+
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", false);
   });
 });

@@ -156,6 +156,7 @@ export function OfframpRail({
         wizard.onTransactionStage ? t("DashboardPayments.ramps.cancelPayout") : undefined
       }
       confirmCancel={cancelable}
+      cancelDisabled={wizard.isCanceling}
       secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading || wizard.quoteInFlight}
       hideSecondary={wizard.onTransactionStage}
       footerActions={

@@ -261,6 +261,7 @@ export function useRampWizard<TId extends string>(
     quoteInFlight,
     retryQuoteCreation,
     resetQuoteCreation,
+    discardQuote,
   } = useRampQuote({
     endpoint: config.quoteEndpoint,
     payload: quotePayload,
@@ -388,7 +389,7 @@ export function useRampWizard<TId extends string>(
 
   // A finished transfer can't take another payment: drop its quote and resume from a step.
   const startOver = (stepId: TId) => {
-    resetQuoteCreation();
+    discardQuote();
     setStepIndex(
       Math.max(
         0,
