@@ -22,7 +22,7 @@ unset DATABASE_URL REDIS_URL
 # process first), so each service binds where its URLs point.
 # ponytail: two runs starting in the same second can pick one slot; the loser's API fails
 # to bind and a rerun takes the next slot.
-port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null || (exec 3<>"/dev/tcp/::1/$1") 2>/dev/null; }
 offset=""
 for slot in $(seq 0 9); do
   candidate=$((slot * 10))
@@ -43,6 +43,8 @@ export NEXT_PUBLIC_SDP_API_BASE_URL="${SDP_API_BASE_URL}"
 export PUBLIC_API_ORIGIN="http://localhost:${SDP_API_PORT}"
 export NEXT_PUBLIC_SDP_WEB_URL="http://localhost:${PORT}/"
 export SDP_DOCS_PROXY_ORIGIN="http://localhost:${SDP_DOCS_PORT}"
+# The dashboard's absolute docs links: a pinned value (the deployed docs) stays; otherwise this slot.
+export NEXT_PUBLIC_SDP_DOCS_URL="${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:${PORT}/docs}"
 
 mkdir -p "$(dirname "${URLS_FILE}")"
 {
