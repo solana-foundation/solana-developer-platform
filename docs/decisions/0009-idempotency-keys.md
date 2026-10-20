@@ -137,8 +137,8 @@ accounts at `confirmed` from a bank at that slot or later. The step is in one of
 (`GLOSSARY.md`): landed when its effect shows, so it is not sent again; unsent when no signature is
 saved, so it is sent; dropped when a signature is saved, the effect is absent and the chain is past
 the saved expiry, so the send can never land; pending otherwise. A dropped step's signature is
-cleared in the same transaction as its failure action: an update's plan, setup, authorization or
-plan update fails it back to `active` on what it had, and its old subscription's cancel is sent
+cleared in the same transaction as its unwind: an update's plan, setup, authorization or plan
+update fails it back to `active` on what it had, and a dropped old cancel is cleared, then sent
 again; an activation's plan, setup or subscribe fails it back to `pending_activation`, never while
 its delegation is on chain; a cancel fails back to `active` and a resume to `canceled`. No signature
 status is read: the effect and the expiry decide, which also covers a send that failed on chain.

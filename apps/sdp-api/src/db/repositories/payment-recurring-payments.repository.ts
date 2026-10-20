@@ -710,6 +710,14 @@ export interface PaymentRecurringPaymentsRepository {
   getStepSignature(
     input: GetPaymentRecurringPaymentStepSignatureInput
   ): Promise<PaymentRecurringPaymentStepSignature | null>;
+  /**
+   * Row-lock the attempt for the rest of the transaction while the step's slot is still empty and
+   * the attempt still in flight: the twin of `clearStepSignature` for a failure that saved nothing,
+   * so a concurrent save waits for the transaction and then finds the attempt settled.
+   *
+   * @returns False when the slot holds a signature or the attempt has settled.
+   */
+  lockEmptyStepSlot(input: GetPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
   getLatestUpdateAttempt(
     input: GetLatestPaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;

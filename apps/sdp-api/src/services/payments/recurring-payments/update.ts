@@ -80,7 +80,9 @@ import {
   delegationCanceledEffect,
   delegationCreatedEffect,
   derivePlanAddresses,
+  fenceRecurringPaymentStepFailure,
   insideRecurringPaymentStepPhase,
+  journalInFlightRecurringPaymentAttempt,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   planCreatedEffect,
@@ -1062,6 +1064,7 @@ async function runMetadataScheduleUpdate(input: {
   const planUpdateSignature = parseNullableStoredSignature(attempt.plan_update_signature);
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: planUpdateSignature === null ? null : "plan_update_signature",
+    step: { row: "update_attempt", column: "plan_update_signature" },
   };
 
   const metadataSteps = async () => {
@@ -1235,6 +1238,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
 }) {
   const failureMessage = "Recurring payment update failed on-chain";
   const slot = { row: "update_attempt", column: "authorization_setup_signature" } as const;
+  input.phase.step = slot;
   const logContext: RecurringPaymentStepLogContext = {
     recurring_payment_id: input.recurringPaymentId,
     attempt_id: input.attempt.id,
@@ -1820,6 +1824,7 @@ async function sendReplacementAuthorization(input: {
     tokenProgram: input.tokenProgram,
     feePayer,
   });
+  input.phase.step = input.slot;
   if (!subscriptionAuthority.exists) {
     throw transactionFailed("Subscription authority was not found on-chain");
   }
@@ -1886,7 +1891,10 @@ async function runReplacementUpdate(input: {
   const savedAuthorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
   const savedOldCancelSignature = parseNullableStoredSignature(attempt.old_cancel_signature);
   const replacementPeriodStartAt = attempt.created_at;
-  const phase: RecurringPaymentStepPhase = { unreadSavedStep: latestSavedReplacementStep(attempt) };
+  const phase: RecurringPaymentStepPhase = {
+    unreadSavedStep: latestSavedReplacementStep(attempt),
+    step: { row: "update_attempt", column: "plan_creation_signature" },
+  };
 
   const replacementSteps = async () => {
     if (
@@ -2028,6 +2036,7 @@ async function runReplacementUpdate(input: {
       throw transactionFailed("Subscription plan was not found on-chain");
     }
     const planCreatedAt = onChainPlan.data.data.terms.createdAt.toString();
+    phase.step = { row: "update_attempt", column: "authorization_setup_signature" };
 
     let subscription = await getOrCreateReplacementSubscription({
       subscriptionsRepo,
@@ -2269,8 +2278,9 @@ async function runReplacementUpdate(input: {
 }
 
 /**
- * Fails an update whose unwinding step cannot land, in one transaction: clears a dropped step's
- * saved signature while its slot still holds it, fails the attempt (its stage stays where the
+ * Fails an update whose unwinding step cannot land, in one transaction: fences the step's slot (a
+ * dropped signature is cleared while the slot still holds it; otherwise the slot must still be
+ * empty), fails the attempt (its stage stays where the
  * run left it), and moves the schedule from `updating` back to `active` with the activator it had.
  * Both writes are fenced to this run: the attempt must still be `processing`, and the schedule
  * must still carry this run's claim stamp, so a stalled run never undoes a later run's re-claim.
@@ -2282,8 +2292,8 @@ async function runReplacementUpdate(input: {
  * @param input.claimed - The claimed schedule.
  * @param input.attempt - The run's attempt.
  * @param input.stepFailure - The step failure.
- * @throws AppError CONFLICT when the slot no longer holds the dropped signature, the attempt is no
- *   longer `processing`, or the schedule left this run's claim; the transaction rolls back and the
+ * @throws AppError CONFLICT when the slot fence fails, the attempt is no longer `processing`, or
+ *   the schedule left this run's claim; the transaction rolls back and the
  *   attempt stays in flight.
  */
 async function failRecurringPaymentUpdate(input: {
@@ -2297,21 +2307,15 @@ async function failRecurringPaymentUpdate(input: {
   const failedAt = new Date().toISOString();
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    const { clear } = input.stepFailure;
-    if (clear !== null) {
-      const cleared = await recurringRepo.clearStepSignature({
-        slot: clear.slot,
-        id: input.attempt.id,
-        recurringPaymentId: input.claimed.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        signature: clear.signature,
-        updatedAt: failedAt,
-      });
-      if (!cleared) {
-        throw conflict("Recurring payment step signature changed concurrently");
-      }
-    }
+    await fenceRecurringPaymentStepFailure({
+      recurringRepo,
+      attemptId: input.attempt.id,
+      recurringPaymentId: input.claimed.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stepFailure: input.stepFailure,
+      updatedAt: failedAt,
+    });
     requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
         attemptId: input.attempt.id,
@@ -2704,26 +2708,19 @@ export async function updateRecurringPayment(input: {
     }
     // Anything else may leave a step in flight: the attempt keeps its status and records only
     // the error, so a concurrent finalize is never flipped back.
-    try {
-      requireUpdatedAttempt(
-        await recurringRepo.updateUpdateAttempt({
+    await journalInFlightRecurringPaymentAttempt({
+      error,
+      write: () =>
+        recurringRepo.updateUpdateAttempt({
           attemptId: attempt.id,
           organizationId: input.organizationId,
           projectId: input.projectId,
           error: recurringPaymentErrorMessage(error),
+          expectedStatus: "processing",
           updatedAt: new Date().toISOString(),
-        })
-      );
-    } catch (journalError) {
-      if (!(journalError instanceof Error)) throw journalError;
-      getLogger().error(
-        {
-          error: recurringPaymentErrorMessage(journalError),
-          recurring_payment_id: claimed.id,
-        },
-        "Failed to journal recurring payment update after failure"
-      );
-    }
+        }),
+      logContext: { recurring_payment_id: claimed.id, attempt_id: attempt.id },
+    });
 
     throw error;
   }

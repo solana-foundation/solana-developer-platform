@@ -62,7 +62,9 @@ import {
   canonicalAttemptSignature,
   delegationCreatedEffect,
   derivePlanAddresses,
+  fenceRecurringPaymentStepFailure,
   insideRecurringPaymentStepPhase,
+  journalInFlightRecurringPaymentAttempt,
   lazyRecurringPaymentStepSigner,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
@@ -200,11 +202,12 @@ async function getOrCreateActivationSubscription(input: {
 }
 
 /**
- * Fails an activation whose step cannot land, in one transaction: clears a dropped step's saved
- * signature while its slot still holds it, fails the attempt (its stage stays where the run left
- * it), and returns the schedule from `activating` to `pending_activation` with no activator. The
- * attempt write is fenced to `processing` and the schedule write to `activating`. The claim
- * stamp is no fence here: the run's own schedule writes move `updated_at`.
+ * Fails an activation whose step cannot land, in one transaction: fences the failed step's slot
+ * (a dropped signature is cleared while the slot still holds it; otherwise the slot must still be
+ * empty), fails the attempt (its stage stays where the run left it), and returns the schedule from
+ * `activating` to `pending_activation` with no activator. The attempt write is fenced to
+ * `processing` and the schedule write to `activating`. The claim stamp is no fence here: the
+ * run's own schedule writes move `updated_at`.
  *
  * @param input - The run's schedule, attempt and step failure.
  * @param input.env - The environment.
@@ -213,9 +216,9 @@ async function getOrCreateActivationSubscription(input: {
  * @param input.claimed - The claimed schedule.
  * @param input.attempt - The run's attempt.
  * @param input.stepFailure - The step failure.
- * @throws AppError CONFLICT when the slot no longer holds the dropped signature, the attempt is no
- *   longer `processing`, or the schedule is no longer `activating`; the transaction rolls back and
- *   the attempt stays in flight.
+ * @throws AppError CONFLICT when the slot fence fails, the attempt is no longer `processing`, or
+ *   the schedule is no longer `activating`; the transaction rolls back and the attempt stays in
+ *   flight.
  */
 async function failRecurringPaymentActivation(input: {
   env: Env;
@@ -228,21 +231,15 @@ async function failRecurringPaymentActivation(input: {
   const failedAt = new Date().toISOString();
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    const { clear } = input.stepFailure;
-    if (clear !== null) {
-      const cleared = await recurringRepo.clearStepSignature({
-        slot: clear.slot,
-        id: input.attempt.id,
-        recurringPaymentId: input.claimed.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        signature: clear.signature,
-        updatedAt: failedAt,
-      });
-      if (!cleared) {
-        throw conflict("Recurring payment step signature changed concurrently");
-      }
-    }
+    await fenceRecurringPaymentStepFailure({
+      recurringRepo,
+      attemptId: input.attempt.id,
+      recurringPaymentId: input.claimed.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stepFailure: input.stepFailure,
+      updatedAt: failedAt,
+    });
     requireUpdatedAttempt(
       await recurringRepo.updateActivationAttempt({
         attemptId: input.attempt.id,
@@ -382,8 +379,8 @@ async function journalActivationClaimConflict(input: {
       recurringPaymentId: input.recurringPayment.id,
       status: "failed",
       stage: "claim",
-      planCreationSignature: input.recurringPayment.plan_creation_signature,
-      authorizationSignature: input.recurringPayment.authorization_signature,
+      planCreationSignature: null,
+      authorizationSignature: null,
       error: "Recurring payment activation is already processing",
       metadata: {},
       createdAt: input.nowIso,
@@ -538,8 +535,9 @@ function latestSavedActivationStep(
 
 /**
  * Brings the activation's plan on chain. A plan an earlier send of this attempt saved is read;
- * one the schedule already records as created (it writes both fields only once the plan landed)
- * is taken as landed with no read; otherwise create plan goes out through the step runner and the
+ * one the schedule already records as created (it writes `plan_created_at` only once the plan
+ * landed, with the signature that created it, null when a resend was refused as already done) is
+ * taken as landed with no read; otherwise create plan goes out through the step runner and the
  * plan is read from a bank at least as new as the send's confirmation.
  *
  * @param input - The plan's terms, accounts, signer and attempt.
@@ -593,7 +591,7 @@ async function settleActivationPlan(input: {
       planCreationSignature: savedSignature,
     };
   }
-  if (input.claimed.plan_creation_signature !== null && input.claimed.plan_created_at !== null) {
+  if (input.claimed.plan_created_at !== null) {
     return {
       planCreatedAt: input.claimed.plan_created_at,
       planCreationSignature: parseNullableStoredSignature(input.claimed.plan_creation_signature),
@@ -650,15 +648,43 @@ async function settleActivationPlan(input: {
 }
 
 /**
+ * The fee payer an activation's sends name, resolved from the project's sponsor.
+ *
+ * @param input - The schedule's tenant and source wallet.
+ * @param input.env - The environment.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.sourceWallet - The wallet the sponsorship is scoped to.
+ * @returns The fee payer's address.
+ */
+async function resolveActivationFeePayer(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: CustodyWallet;
+}): Promise<Address> {
+  const feePayment = createSponsorshipFeePayment(
+    input.env,
+    await resolveProjectSponsorshipScope(input.env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.sourceWallet.walletId },
+    }),
+    "recurring.activate"
+  );
+  return feePayment.getFeePayer();
+}
+
+/**
  * Makes sure the source wallet's subscription authority and token account exist and delegate to
  * each other before subscribe. A setup an earlier send of this attempt saved is read first, as
- * every other step is; otherwise a wallet that already has both skips the step, and one missing
- * either sends the setup (the token account create when it is missing, then the authority init,
- * always) through the step runner. The skip takes an existing authority and token account as set
- * up without reading the token account's delegate (the setup effect does); a revoked approval
- * there is not repaired.
+ * every other step is, so a pending or dropped one reads nothing else; otherwise the authority is
+ * read, a wallet that already has both skips the step, and one missing either sends the setup
+ * (the token account create when it is missing, then the authority init, always) through the step
+ * runner. The skip takes an existing authority and token account as set up without reading the
+ * token account's delegate (the setup effect does); a revoked approval there is not repaired.
  *
- * @param input - The setup's accounts, signer and attempt.
+ * @param input - The setup's accounts, signer, fee payer and attempt.
  * @returns The subscription authority as read after setup.
  * @throws ResumedStepUnsettledError when the setup is pending.
  * @throws RecurringPaymentStepFailedError when the setup is dropped or cannot land.
@@ -674,16 +700,14 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   sourceWallet: CustodyWallet;
   sourceSigner: () => Promise<TransactionSigner>;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
-  subscriptionAuthority: Awaited<
-    ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionAuthority>
-  >;
   subscriptionAuthorityAddress: Address;
   owner: Address;
   mint: Address;
   tokenProgram: Address;
-  feePayer: Address;
+  feePayer: () => Promise<Address>;
 }) {
   const slot = { row: "activation_attempt", column: "authorization_setup_signature" } as const;
+  input.phase.step = slot;
   const logContext: RecurringPaymentStepLogContext = {
     recurring_payment_id: input.recurringPaymentId,
     attempt_id: input.attempt.id,
@@ -711,12 +735,18 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     });
     return subscriptionsProgram.decodeSubscriptionAuthority(accounts[0]);
   }
-  if (input.subscriptionAuthority.exists && input.sourceTokenAccount.exists) {
-    return input.subscriptionAuthority;
+  const existingAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
+    input.rpc,
+    input.subscriptionAuthorityAddress,
+    { commitment: "confirmed" }
+  );
+  if (existingAuthority.exists && input.sourceTokenAccount.exists) {
+    return existingAuthority;
   }
 
+  const feePayer = await input.feePayer();
   const sourceSigner = await input.sourceSigner();
-  const payer = createNoopSigner(input.feePayer);
+  const payer = createNoopSigner(feePayer);
   // The init always goes out: it is idempotent on an existing authority (its `initId` stays) and
   // re-runs the token account's Approve, which the setup effect requires.
   const initAuthorityInstruction =
@@ -748,7 +778,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     movement: "recurring.activate",
     sourceWallet: input.sourceWallet,
     sourceSigner,
-    feePayer: input.feePayer,
+    feePayer,
     instructions,
     slot,
     effect,
@@ -760,8 +790,8 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   if (settled.state === "landed") {
     return subscriptionsProgram.decodeSubscriptionAuthority(settled.accounts[0]);
   }
-  if (input.subscriptionAuthority.exists) {
-    return input.subscriptionAuthority;
+  if (existingAuthority.exists) {
+    return existingAuthority;
   }
 
   const subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
@@ -826,21 +856,13 @@ async function settleActivationSubscription(input: {
     return savedSignature;
   }
 
-  const fetchedSubscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-    input.rpc,
-    input.subscriptionAuthorityAddress,
-    { commitment: "confirmed" }
-  );
-  const feePayment = createSponsorshipFeePayment(
-    input.env,
-    await resolveProjectSponsorshipScope(input.env, {
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actor: { type: "wallet", id: input.sourceWallet.walletId },
-    }),
-    "recurring.activate"
-  );
-  const feePayer = await feePayment.getFeePayer();
+  let feePayerResolution: Promise<Address> | null = null;
+  const resolveFeePayer = () => {
+    if (feePayerResolution === null) {
+      feePayerResolution = resolveActivationFeePayer(input);
+    }
+    return feePayerResolution;
+  };
   const subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
     env: input.env,
     organizationId: input.organizationId,
@@ -852,17 +874,18 @@ async function settleActivationSubscription(input: {
     sourceWallet: input.sourceWallet,
     sourceSigner: input.sourceSigner,
     sourceTokenAccount: input.sourceTokenAccount,
-    subscriptionAuthority: fetchedSubscriptionAuthority,
     subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
     owner: input.owner,
     mint: input.mint,
     tokenProgram: input.tokenProgram,
-    feePayer,
+    feePayer: resolveFeePayer,
   });
+  input.phase.step = slot;
   if (!subscriptionAuthority.exists) {
     throw transactionFailed("Subscription authority was not found on-chain");
   }
 
+  const feePayer = await resolveFeePayer();
   const sourceSigner = await input.sourceSigner();
   const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
     expectedAmount: input.amountBaseUnits,
@@ -997,7 +1020,10 @@ export async function activateRecurringPayment(input: {
     throw conflict("Recurring payment activation is already processing");
   }
   const { attempt, claimed } = claimResult;
-  const phase: RecurringPaymentStepPhase = { unreadSavedStep: latestSavedActivationStep(attempt) };
+  const phase: RecurringPaymentStepPhase = {
+    unreadSavedStep: latestSavedActivationStep(attempt),
+    step: { row: "activation_attempt", column: "plan_creation_signature" },
+  };
   const sourceSigner = lazyRecurringPaymentStepSigner({
     env: input.env,
     organizationId: input.organizationId,
@@ -1077,6 +1103,7 @@ export async function activateRecurringPayment(input: {
       programPlanId,
       planPda,
     });
+    phase.step = { row: "activation_attempt", column: "authorization_setup_signature" };
 
     await subscriptionsRepo.updatePlan({
       planId: plan.id,
@@ -1290,26 +1317,19 @@ export async function activateRecurringPayment(input: {
     }
     // Anything else may leave a step in flight: the attempt keeps its status and records only
     // the error, so a concurrent finalize is never flipped back.
-    try {
-      requireUpdatedAttempt(
-        await recurringRepo.updateActivationAttempt({
+    await journalInFlightRecurringPaymentAttempt({
+      error,
+      write: () =>
+        recurringRepo.updateActivationAttempt({
           attemptId: attempt.id,
           organizationId: input.organizationId,
           projectId: input.projectId,
           error: recurringPaymentErrorMessage(error),
+          expectedStatus: "processing",
           updatedAt: new Date().toISOString(),
-        })
-      );
-    } catch (journalError) {
-      if (!(journalError instanceof Error)) throw journalError;
-      getLogger().error(
-        {
-          error: recurringPaymentErrorMessage(journalError),
-          recurring_payment_id: claimed.id,
-        },
-        "Failed to journal recurring payment activation after failure"
-      );
-    }
+        }),
+      logContext: { recurring_payment_id: claimed.id, attempt_id: attempt.id },
+    });
 
     throw error;
   }

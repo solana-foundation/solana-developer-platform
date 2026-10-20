@@ -526,27 +526,116 @@ async function observeRecurringPaymentStep(
 /**
  * A step that cannot land, raised inside a flow's unwinding steps: refused at preflight, dropped
  * past its expiry, or failed with nothing in flight. The flow fails back to its last stable status
- * in one transaction that also clears `clear`'s saved signature, only while its slot still holds
- * it. The request answers with `failure`.
+ * in one transaction fenced on the step's slot: a dropped send's saved signature is cleared only
+ * while the slot still holds it, and with nothing dropped the slot must still be empty, so a run
+ * that took the attempt over and saved a send of its own is never unwound. The request answers
+ * with `failure`.
  */
 export class RecurringPaymentStepFailedError extends AppError {
   readonly failure: Error;
-  readonly clear: { slot: RecurringPaymentStepSignatureSlot; signature: Signature } | null;
+  readonly slot: RecurringPaymentStepSignatureSlot;
+  readonly droppedSignature: Signature | null;
 
   /**
-   * @param input - The failure and the saved signature to clear.
+   * @param input - The failure and the step it failed.
    * @param input.failure - The error the request answers with.
-   * @param input.clear - A dropped step's slot and saved signature, or null when nothing is saved.
+   * @param input.slot - The failed step's signature slot.
+   * @param input.droppedSignature - A dropped send's saved signature, or null when this run
+   *   saved nothing in the slot.
    */
   constructor(input: {
     failure: Error;
-    clear: { slot: RecurringPaymentStepSignatureSlot; signature: Signature } | null;
+    slot: RecurringPaymentStepSignatureSlot;
+    droppedSignature: Signature | null;
   }) {
     super("TRANSACTION_FAILED", recurringPaymentErrorMessage(input.failure));
     // biome-ignore lint/security/noSecrets: the error class name, not a secret.
     this.name = "RecurringPaymentStepFailedError";
     this.failure = input.failure;
-    this.clear = input.clear;
+    this.slot = input.slot;
+    this.droppedSignature = input.droppedSignature;
+  }
+}
+
+/**
+ * Fences a step failure's unwind inside its transaction, on the failed step's slot: clears a
+ * dropped send's signature only while the slot still holds it, or, with nothing dropped, holds the
+ * attempt row while the slot is still empty and the attempt in flight.
+ *
+ * @param input - The transaction's repository, the attempt and the step failure.
+ * @param input.recurringRepo - The repository bound to the failure's transaction.
+ * @param input.attemptId - The run's attempt.
+ * @param input.recurringPaymentId - The schedule.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.stepFailure - The step failure.
+ * @param input.updatedAt - The failure's timestamp.
+ * @throws AppError CONFLICT when the slot no longer holds the dropped signature, or holds a
+ *   signature this run did not save; the transaction rolls back and the attempt stays in flight.
+ */
+export async function fenceRecurringPaymentStepFailure(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  attemptId: string;
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  stepFailure: RecurringPaymentStepFailedError;
+  updatedAt: string;
+}): Promise<void> {
+  const target = {
+    slot: input.stepFailure.slot,
+    id: input.attemptId,
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  };
+  const fenced =
+    input.stepFailure.droppedSignature === null
+      ? await input.recurringRepo.lockEmptyStepSlot(target)
+      : await input.recurringRepo.clearStepSignature({
+          ...target,
+          signature: input.stepFailure.droppedSignature,
+          updatedAt: input.updatedAt,
+        });
+  if (!fenced) {
+    throw conflict("Recurring payment step signature changed concurrently");
+  }
+}
+
+/**
+ * Records an error on a run's attempt that leaves it in flight, only while it is still
+ * `processing`. An attempt another run already settled is logged and left as it is. A failed
+ * write is attached to `error` as its cause, keeping any cause it carried, so the request still
+ * answers with `error`.
+ *
+ * @param input - The error, the write and what the log names.
+ * @param input.error - The error the request answers with.
+ * @param input.write - The attempt's error-only write, fenced to `processing`.
+ * @param input.logContext - The schedule and attempt the log names.
+ */
+export async function journalInFlightRecurringPaymentAttempt<TAttempt>(input: {
+  error: Error;
+  write: () => Promise<TAttempt | null>;
+  logContext: Pick<RecurringPaymentStepLogContext, "recurring_payment_id" | "attempt_id">;
+}): Promise<void> {
+  let journaled: TAttempt | null;
+  try {
+    journaled = await input.write();
+  } catch (journalError) {
+    input.error.cause =
+      input.error.cause === undefined
+        ? journalError
+        : new AggregateError(
+            [input.error.cause, journalError],
+            "Recurring payment attempt journal failed"
+          );
+    return;
+  }
+  if (journaled === null) {
+    getLogger().warn(
+      input.logContext,
+      "Recurring payment attempt was settled by another run before its error was journaled"
+    );
   }
 }
 
@@ -554,10 +643,12 @@ export class RecurringPaymentStepFailedError extends AppError {
  * One run's unwinding steps. `unreadSavedStep` is the latest step an earlier run saved a signature
  * for, until this run reads it landed: its send may still land, so until then a failure leaves
  * the attempt in flight instead of failing it. Only the latest saved step can be in flight; every
- * earlier one landed before it saved.
+ * earlier one landed before it saved. `step` is the step the run is working toward, which the flow
+ * moves forward as each step settles: a failure no step names fails that step, fenced on its slot.
  */
 export interface RecurringPaymentStepPhase {
   unreadSavedStep: RecurringPaymentStepSignatureSlot["column"] | null;
+  step: RecurringPaymentStepSignatureSlot;
 }
 
 /**
@@ -592,7 +683,11 @@ export async function insideRecurringPaymentStepPhase<T>(
     stepFailure =
       error instanceof RecurringPaymentStepFailedError
         ? error
-        : new RecurringPaymentStepFailedError({ failure: error, clear: null });
+        : new RecurringPaymentStepFailedError({
+            failure: error,
+            slot: phase.step,
+            droppedSignature: null,
+          });
   }
   if (beforeUnwind !== null) {
     await beforeUnwind(stepFailure);
@@ -645,7 +740,8 @@ export async function readSavedRecurringPaymentStep(input: {
     case "dropped":
       throw new RecurringPaymentStepFailedError({
         failure: transactionFailed(input.failureMessage),
-        clear: { slot: input.slot, signature: input.signature },
+        slot: input.slot,
+        droppedSignature: input.signature,
       });
     default:
       return assertNever(step);
@@ -892,10 +988,11 @@ async function settleFailedRecurringPaymentStep(
       if (input.onFailure.outcome === "stay_in_flight") {
         await input.onFailure.onDropped(saved.signature);
       }
-      return failRecurringPaymentStep(input, transactionFailed(input.failureMessage), {
-        slot: input.slot,
-        signature: saved.signature,
-      });
+      return failRecurringPaymentStep(
+        input,
+        transactionFailed(input.failureMessage),
+        saved.signature
+      );
     }
     default:
       return assertNever(step);
@@ -907,18 +1004,18 @@ async function settleFailedRecurringPaymentStep(
  *
  * @param input - The step's send.
  * @param failure - The error the request answers with.
- * @param clear - A dropped step's slot and saved signature, or null.
+ * @param droppedSignature - A dropped send's saved signature, or null when none is saved.
  * @throws RecurringPaymentStepFailedError for an unwinding step.
  * @throws `failure` for a step that stays in flight.
  */
 function failRecurringPaymentStep(
   input: RecurringPaymentStepSend,
   failure: Error,
-  clear: { slot: RecurringPaymentStepSignatureSlot; signature: Signature } | null
+  droppedSignature: Signature | null
 ): never {
   switch (input.onFailure.outcome) {
     case "unwind":
-      throw new RecurringPaymentStepFailedError({ failure, clear });
+      throw new RecurringPaymentStepFailedError({ failure, slot: input.slot, droppedSignature });
     case "stay_in_flight":
       throw failure;
     default:

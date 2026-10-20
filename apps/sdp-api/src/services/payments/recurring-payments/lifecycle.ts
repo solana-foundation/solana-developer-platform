@@ -41,7 +41,9 @@ import {
   assertRecurringPaymentTokenMint,
   delegationCanceledEffect,
   delegationResumedEffect,
+  fenceRecurringPaymentStepFailure,
   insideRecurringPaymentStepPhase,
+  journalInFlightRecurringPaymentAttempt,
   lazyRecurringPaymentStepSigner,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
@@ -228,8 +230,9 @@ async function answerFinalLifecycle(input: {
 }
 
 /**
- * Fails a lifecycle operation whose step cannot land, in one transaction: clears a dropped step's
- * saved signature while its slot still holds it, fails the attempt (its stage stays where the run
+ * Fails a lifecycle operation whose step cannot land, in one transaction: fences the step's slot
+ * (a dropped signature is cleared while the slot still holds it; otherwise the slot must still be
+ * empty), fails the attempt (its stage stays where the run
  * left it), and moves the schedule from the operation's processing status back to the one it was
  * claimed from (`canceling` to `active`, `resuming` to `canceled`). The attempt write is fenced to
  * `processing` and the schedule write to the processing status.
@@ -241,8 +244,8 @@ async function answerFinalLifecycle(input: {
  * @param input.operation - The lifecycle operation.
  * @param input.attempt - The run's attempt.
  * @param input.stepFailure - The step failure.
- * @throws AppError CONFLICT when the slot no longer holds the dropped signature, the attempt is no
- *   longer `processing`, or the schedule left the processing status; the transaction rolls back
+ * @throws AppError CONFLICT when the slot fence fails, the attempt is no longer `processing`, or
+ *   the schedule left the processing status; the transaction rolls back
  *   and the attempt stays in flight.
  */
 async function recordLifecycleFailure(input: {
@@ -259,21 +262,15 @@ async function recordLifecycleFailure(input: {
   );
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    const { clear } = input.stepFailure;
-    if (clear !== null) {
-      const cleared = await recurringRepo.clearStepSignature({
-        slot: clear.slot,
-        id: input.attempt.id,
-        recurringPaymentId: input.attempt.recurring_payment_id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        signature: clear.signature,
-        updatedAt: failedAt,
-      });
-      if (!cleared) {
-        throw conflict("Recurring payment step signature changed concurrently");
-      }
-    }
+    await fenceRecurringPaymentStepFailure({
+      recurringRepo,
+      attemptId: input.attempt.id,
+      recurringPaymentId: input.attempt.recurring_payment_id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stepFailure: input.stepFailure,
+      updatedAt: failedAt,
+    });
     requireUpdatedAttempt(
       await recurringRepo.updateLifecycleAttempt({
         attemptId: input.attempt.id,
@@ -514,6 +511,7 @@ async function runRecurringPaymentLifecycle(
   const savedSignature = parseNullableStoredSignature(attempt.signature);
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: savedSignature === null ? null : slot.column,
+    step: slot,
   };
   const failureMessage = lifecycleConfirmationMessage(input.operation);
   const sourceSigner = lazyRecurringPaymentStepSigner({
@@ -690,29 +688,21 @@ async function runRecurringPaymentLifecycle(
       });
       throw stepFailure.failure;
     }
-    // Anything else may leave the step in flight: the attempt keeps its status and records only
+    // Anything else may leave a step in flight: the attempt keeps its status and records only
     // the error, so a concurrent finalize is never flipped back.
-    try {
-      requireUpdatedAttempt(
-        await recurringRepo.updateLifecycleAttempt({
+    await journalInFlightRecurringPaymentAttempt({
+      error,
+      write: () =>
+        recurringRepo.updateLifecycleAttempt({
           attemptId: attempt.id,
           organizationId: input.organizationId,
           projectId: input.projectId,
           error: recurringPaymentErrorMessage(error),
+          expectedStatus: "processing",
           updatedAt: new Date().toISOString(),
-        })
-      );
-    } catch (journalError) {
-      if (!(journalError instanceof Error)) throw journalError;
-      getLogger().error(
-        {
-          error: recurringPaymentErrorMessage(journalError),
-          operation: input.operation,
-          recurring_payment_id: claimed.id,
-        },
-        "Failed to journal recurring payment lifecycle after failure"
-      );
-    }
+        }),
+      logContext: { recurring_payment_id: claimed.id, attempt_id: attempt.id },
+    });
 
     throw error;
   }

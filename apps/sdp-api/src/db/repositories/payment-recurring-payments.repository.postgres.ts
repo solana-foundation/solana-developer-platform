@@ -1325,6 +1325,29 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return { signature: saved.signature, lastValidBlockHeight: saved.last_valid_block_height };
     },
 
+    async lockEmptyStepSlot(input: GetPaymentRecurringPaymentStepSignatureInput) {
+      const table = STEP_SIGNATURE_TABLES[input.slot.row];
+      const { column } = input.slot;
+      // Table and column come from the typed slot, never from caller text.
+      const row = await db
+        .prepare(
+          `SELECT id
+             FROM ${table}
+            WHERE id = ?
+              AND recurring_payment_id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = ANY(?::text[])
+              AND ${column} IS NULL
+            FOR UPDATE`
+        )
+        .bind(input.id, input.recurringPaymentId, input.organizationId, input.projectId, [
+          ...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+        ])
+        .first<Record<string, unknown>>();
+      return row !== null;
+    },
+
     async updateUpdateAttempt(input: UpdatePaymentRecurringPaymentUpdateAttemptInput) {
       const row = await db
         .prepare(
