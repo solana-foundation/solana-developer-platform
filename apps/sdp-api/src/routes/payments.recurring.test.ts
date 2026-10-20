@@ -7823,6 +7823,58 @@ describe("Payments routes — recurring", () => {
         expect(sent).not.toHaveBeenCalled();
       });
 
+      it("keeps an activation in flight when its unwind finds the delegation on chain after its saved subscribe read as dropped", async () => {
+        const { created, subscribeSignature } = await leaveSubscribeInFlight();
+        // The subscribe read and the unwind's check reach different nodes: only the check sees it.
+        let delegationReads = 0;
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          absoluteSlot: 2_900,
+          blockHeight: 1_001,
+          delegation: () => {
+            delegationReads += 1;
+            return delegationReads === 1 ? null : 1_800_000_000n;
+          },
+        });
+        const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+        onTestFinished(() => errorLog.mockRestore());
+        const sent = sends();
+
+        const retry = await activate(created.id, crypto.randomUUID());
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: subscribeSignature,
+        });
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
+        const recorded = required(
+          await getDb(env)
+            .prepare("SELECT subscription_pda FROM payment_recurring_payments WHERE id = ?")
+            .bind(created.id)
+            .first<{ subscription_pda: string | null }>()
+        );
+        const refused = errorLog.mock.calls.filter(([payload]) => {
+          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+          return (
+            parsed.success &&
+            parsed.data.event === "sdp_api_recurring_payment_unwind_refused_delegation_live"
+          );
+        });
+        expect(refused).toHaveLength(1);
+        expect(required(refused[0])[0]).toEqual(
+          expect.objectContaining({
+            recurring_payment_id: created.id,
+            step: "authorize_subscription",
+            delegation_state: "landed",
+            subscription_pda: required(recorded.subscription_pda),
+          })
+        );
+      });
+
       it("fails an activation whose setup send expired without landing back to pending_activation, clearing its setup signature", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         // No subscription authority yet, so the setup goes out between the plan and subscribe.
