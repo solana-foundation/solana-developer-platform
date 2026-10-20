@@ -1,8 +1,8 @@
+import { getSponsoredTransaction, isSponsoredBlockhashValid } from "@sdp/fee-payment/chain-reads";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import * as solanaRpc from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
+import { assertIsBlockhash, assertIsSignature, type Blockhash } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   SPONSORSHIP_BREAKER_OPERATOR,
@@ -16,10 +16,7 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import { getManagedSponsorshipProviderConfiguration } from "@/services/sponsorship.service";
-import {
-  createKoraClusterRpc,
-  sponsorshipProviderConfigFingerprint,
-} from "@/services/sponsorship-budget.service";
+import { sponsorshipProviderConfigFingerprint } from "@/services/sponsorship-budget.service";
 import type { Env } from "@/types/env";
 
 const RECONCILIATION_DELAY_MS = 2 * 60_000;
@@ -68,11 +65,9 @@ type ReconciliationOutcome =
 export interface SponsorshipReconciliationDependencies {
   repository?: ReconciliationRepository;
   budgetRedis?: ReconciliationRedis;
-  getTransaction?: (
-    signature: Signature
-  ) => Promise<Awaited<ReturnType<typeof solanaRpc.getTransaction>>>;
+  getTransaction?: typeof getSponsoredTransaction;
   isBlockhashValid?: (blockhash: Blockhash) => Promise<boolean>;
-  getProviderConfiguration?: (cluster: SolanaCluster) => Promise<SponsorshipProviderConfiguration>;
+  getProviderConfiguration?: () => Promise<SponsorshipProviderConfiguration>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -109,19 +104,14 @@ async function reconcileSponsorshipNetwork(
 ): Promise<void> {
   const repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
   const budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
-  // Built on first use, not up front: a network with nothing outstanding must
-  // finish its pass without needing an RPC endpoint at all.
-  let rpc: solanaRpc.SolanaRpc | null = null;
-  const clusterRpc = () => {
-    rpc ??= createKoraClusterRpc(env, cluster);
-    return rpc;
-  };
-  const getTransaction =
-    dependencies.getTransaction ??
-    ((signature: Signature) => solanaRpc.getTransaction(clusterRpc(), signature));
-  const isBlockhashValid =
-    dependencies.isBlockhashValid ??
-    ((blockhash: Blockhash) => solanaRpc.isBlockhashValid(clusterRpc(), blockhash));
+  // NOTE: settlement reads Kora's upstream while track-pending-transfers settles the same
+  // transaction's payment row on the managed pool. Kept apart on purpose: sponsorship bookkeeping
+  // stays off the customer pool. Both are nodes on one genesis-checked cluster, so outcomes
+  // converge, and every transient difference (slot lag, an early "not found") resolves toward
+  // charged_unknown, which over-counts and never refunds a transaction that landed. Each read
+  // resolves the endpoint when called, so a network with nothing outstanding needs none.
+  const getTransaction = dependencies.getTransaction ?? getSponsoredTransaction;
+  const isBlockhashValid = dependencies.isBlockhashValid ?? isSponsoredBlockhashValid;
   const now = dependencies.now?.() ?? new Date();
   const sleep =
     dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -158,13 +148,10 @@ async function reconcileSponsorshipNetwork(
 
   const getProviderConfiguration =
     dependencies.getProviderConfiguration ??
-    ((target: SolanaCluster) => getManagedSponsorshipProviderConfiguration(env, target));
+    (() => getManagedSponsorshipProviderConfiguration(env));
   let providerConfiguration: SponsorshipProviderConfiguration;
   try {
-    providerConfiguration = await readProviderConfiguration(
-      () => getProviderConfiguration(cluster),
-      sleep
-    );
+    providerConfiguration = await readProviderConfiguration(getProviderConfiguration, sleep);
   } catch (error) {
     // With no live reservations there is nothing the breaker protects; the
     // already-tripped policy stays down and the next tick probes again.

@@ -57,7 +57,6 @@ import { organizations } from "@/routes/organizations";
 import { pay } from "@/routes/pay";
 import { payments } from "@/routes/payments";
 import { places } from "@/routes/places";
-import { playgroundInternal } from "@/routes/playground-internal";
 import { privateChannels } from "@/routes/private-channels";
 import { projects } from "@/routes/projects";
 import { transactions } from "@/routes/transactions";
@@ -195,9 +194,8 @@ function mapFeePaymentError(err: FeePaymentError): {
       // The provider returned a structured refusal of these exact bytes
       // (policy, allowlist, malformed request). Nothing was signed and a
       // retry cannot succeed, so do not tell the caller to try again.
-      // SIGNING_FAILED stays on the ambiguous 502 path below: the native
-      // adapter uses it for any signing exception, including post-sign
-      // timeouts, where a retry may be valid.
+      // SIGNING_FAILED stays on the ambiguous 502 path below: Kora answers it
+      // for a malformed JSON-RPC request, which says nothing about these bytes.
       return {
         status: 422,
         code: "SIGNING_REJECTED",
@@ -390,7 +388,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Dashboard-only helpers. These routes are intentionally excluded from the
   // public OpenAPI and AI discovery surfaces.
-  app.route("/internal/playground", playgroundInternal);
   app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
   app.use("/internal/dashboard/wallets/*", requireModule("custody"));

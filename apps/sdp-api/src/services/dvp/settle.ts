@@ -264,6 +264,8 @@ export async function closeDvpTrade(
     },
     markStarted: async () => {},
     hasStarted: async () => false,
+    // A refused close releases its claim in the caller.
+    clearSigned: async () => {},
   };
 
   let closeSignature: Signature;

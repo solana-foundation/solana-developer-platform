@@ -111,26 +111,30 @@ interface InlineValidatedHandler {
  * the enclosing registration method up to the handler.
  */
 function collectInlineHandlers(): InlineValidatedHandler[] {
+  return sourceFiles(routesRoot).flatMap((file) =>
+    inlineHandlersIn(path.relative(routesRoot, file), readFileSync(file, "utf8"))
+  );
+}
+
+/** The inline validated handlers in one route file's source. */
+function inlineHandlersIn(file: string, source: string): InlineValidatedHandler[] {
   const handlers: InlineValidatedHandler[] = [];
-  for (const file of sourceFiles(routesRoot)) {
-    const source = readFileSync(file, "utf8");
-    for (const match of source.matchAll(INLINE_HANDLER)) {
-      const validators = annotationValidators(match[1], match[2]);
-      if (validators.length === 0) {
-        continue;
-      }
-      const before = source.slice(0, match.index);
-      let lastMethodIndex = -1;
-      for (const method of before.matchAll(REGISTRATION_METHOD)) {
-        lastMethodIndex = method.index;
-      }
-      handlers.push({
-        file: path.relative(routesRoot, file),
-        line: before.split("\n").length,
-        validators,
-        chain: lastMethodIndex >= 0 ? source.slice(lastMethodIndex, match.index) : null,
-      });
+  for (const match of source.matchAll(INLINE_HANDLER)) {
+    const validators = annotationValidators(match[1], match[2]);
+    if (validators.length === 0) {
+      continue;
     }
+    const before = source.slice(0, match.index);
+    let lastMethodIndex = -1;
+    for (const method of before.matchAll(REGISTRATION_METHOD)) {
+      lastMethodIndex = method.index;
+    }
+    handlers.push({
+      file,
+      line: before.split("\n").length,
+      validators,
+      chain: lastMethodIndex >= 0 ? source.slice(lastMethodIndex, match.index) : null,
+    });
   }
   return handlers;
 }
@@ -195,11 +199,28 @@ describe("validated handler wiring", () => {
 
   const inlineHandlers = collectInlineHandlers();
 
-  it("finds the inline handler inventory", () => {
-    expect(inlineHandlers.length).toBeGreaterThan(0);
+  // No route declares one today, so the scanner is checked against a sample:
+  // a regex that stopped matching would otherwise pass with nothing to check.
+  it("recognises an inline validated handler and its chain", () => {
+    const sample = [
+      "routes.post(",
+      '  "/sample",',
+      "  validateBody(sampleSchema),",
+      "  async (c: ValidatedBodyContext<typeof sampleSchema>) => {",
+      "    return c.json({});",
+      "  }",
+      ");",
+    ].join("\n");
+    const [handler, ...rest] = inlineHandlersIn("sample.ts", sample);
+    expect(rest).toEqual([]);
+    expect(handler?.line).toBe(4);
+    expect(handler?.validators.length).toBeGreaterThan(0);
+    for (const validator of handler?.validators ?? []) {
+      expect(handler?.chain).toContain(validator);
+    }
   });
 
-  it.each(inlineHandlers)(
+  it.skipIf(inlineHandlers.length === 0).each(inlineHandlers)(
     "wires the inline handler at $file:$line with its declared validators",
     ({ file, line, validators, chain }) => {
       expect(chain, `${file}:${line} must sit inside a route registration`).not.toBeNull();

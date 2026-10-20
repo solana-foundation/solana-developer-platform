@@ -201,7 +201,7 @@ export type StartMovementId = {
  * The actions that may sign a start (HOO-2099): the principal must hold one.
  * Null for an exit, which no principal check refuses.
  */
-export function movementActions(movement: MovementId): readonly Action[] | null {
+export function movementActions(movement: MovementId): readonly [Action, ...Action[]] | null {
   const definition: MovementDefinition = MOVEMENTS[movement];
   return definition.kind === "start" ? definition.actions : null;
 }

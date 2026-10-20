@@ -5,13 +5,10 @@
  * The platform sponsors all transaction fees via this port.
  * Users never pay fees directly - fully gasless model.
  *
- * Implementations:
- * - KoraAdapter: Uses Kora/Solana Foundation relay for sponsored fees
- * - NativeAdapter: Direct SOL fee payment (fallback/testing)
+ * Kora (`KoraAdapter`) is the only implementation.
  */
 
-import type { RpcEnv } from "@sdp/rpc/types";
-import type { Address, Signature } from "@solana/kit";
+import type { Address } from "@solana/kit";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Environment
@@ -22,24 +19,23 @@ import type { Address, Signature } from "@solana/kit";
  * doppler-injected `Env` satisfies this shape; the package never reads
  * `process.env` directly.
  */
-export interface FeePaymentEnv extends RpcEnv {
-  FEE_PAYMENT_PROVIDER?: "kora" | "native";
+export interface FeePaymentEnv {
   KORA_TIMEOUT_MS?: string;
   /**
    * One Kora per cluster, named `KORA_<CLUSTER>_*` identically in Doppler, the
-   * API and the Kora service. Each trio is self-contained; see
-   * `resolveKoraEndpoint`. `KORA_<CLUSTER>_URL` is the Kora endpoint the API
-   * calls; `KORA_<CLUSTER>_RPC_URL` (not read here) is the Solana RPC that
-   * Kora itself talks to.
+   * API and the Kora service; see `resolveKoraEndpoint`. `KORA_<CLUSTER>_URL`
+   * is the Kora endpoint the API calls; `KORA_<CLUSTER>_RPC_URL` is the Solana
+   * RPC that Kora itself talks to, which `@sdp/rpc`'s `createKoraUpstreamRpc`
+   * reads for the Fee Payer's own chain reads.
    */
   KORA_DEVNET_URL?: string;
+  KORA_DEVNET_RPC_URL?: string;
   KORA_DEVNET_API_KEY?: string;
   KORA_DEVNET_CLOUD_RUN_AUDIENCE?: string;
   KORA_MAINNET_URL?: string;
+  KORA_MAINNET_RPC_URL?: string;
   KORA_MAINNET_API_KEY?: string;
   KORA_MAINNET_CLOUD_RUN_AUDIENCE?: string;
-  FEE_PAYER_PRIVATE_KEY?: string;
-  CUSTODY_PRIVATE_KEY?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -69,17 +65,8 @@ export interface FeePaymentPort {
    */
   signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array>;
 
-  /**
-   * Sign a transaction with the fee payer and submit to Solana.
-   * This is the primary method for gasless transaction submission.
-   *
-   * @param transaction Serialized transaction (unsigned or partially signed)
-   * @returns Transaction signature
-   */
-  signAndSend(transaction: Uint8Array): Promise<Signature>;
-
   /** Conservative provider-side lamport outflow ceiling used for admission. */
-  getSponsorshipConfiguration?(): Promise<SponsorshipProviderConfiguration>;
+  getSponsorshipConfiguration(): Promise<SponsorshipProviderConfiguration>;
 }
 
 export interface SponsorshipProviderConfiguration {

@@ -1,11 +1,10 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import * as feePaymentChainReads from "@sdp/fee-payment/chain-reads";
 import { address } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipReconciliationReservation } from "@/db/repositories/sponsorship-budget.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { sponsorshipProviderConfigFingerprint } from "@/services/sponsorship-budget.service";
 import { env as testEnv } from "@/test/helpers/env";
-import type { Env } from "@/types/env";
 import {
   KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
   reconcileSponsorshipBudgets,
@@ -159,22 +158,17 @@ function harness(candidate: SponsorshipReconciliationReservation) {
 describe("reconcileSponsorshipBudgets", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("reads a mainnet reservation's chain state through the mainnet Kora RPC", async () => {
-    const env: Env = {
-      ...testEnv,
-      KORA_DEVNET_RPC_URL: "https://kora-devnet-rpc.reconcile.invalid",
-      KORA_MAINNET_RPC_URL: "https://kora-mainnet-rpc.reconcile.invalid",
-    };
-    const { repository, budgetRedis, getTransaction } = harness(
-      reservation({ id: "reservation_mainnet", network: "mainnet" })
-    );
-    const createRpcSpy = vi.spyOn(solanaRpc, "createRpc");
-    const getTransactionSpy = vi
-      .spyOn(solanaRpc, "getTransaction")
-      .mockImplementation(getTransaction);
+  it("reads chain state through the Fee Payer's own upstream when no reads are injected", async () => {
+    const { repository, budgetRedis } = harness(reservation());
+    const getSponsoredTransaction = vi
+      .spyOn(feePaymentChainReads, "getSponsoredTransaction")
+      .mockResolvedValueOnce(null);
+    const isSponsoredBlockhashValid = vi
+      .spyOn(feePaymentChainReads, "isSponsoredBlockhashValid")
+      .mockResolvedValueOnce(true);
 
-    await runInEnvironmentClusterScope("production", () =>
-      reconcileSponsorshipBudgets(env, {
+    await runInEnvironmentClusterScope("sandbox", () =>
+      reconcileSponsorshipBudgets(testEnv, {
         repository,
         budgetRedis,
         getProviderConfiguration: vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION),
@@ -183,13 +177,9 @@ describe("reconcileSponsorshipBudgets", () => {
       })
     );
 
-    expect(createRpcSpy).toHaveBeenCalledExactlyOnceWith(env, {
-      rpcUrl: "https://kora-mainnet-rpc.reconcile.invalid",
-    });
-    expect(getTransactionSpy).toHaveBeenCalledWith(
-      createRpcSpy.mock.results[0]?.value,
-      TEST_SIGNATURE
-    );
+    expect(getSponsoredTransaction).toHaveBeenCalledExactlyOnceWith(TEST_SIGNATURE);
+    expect(isSponsoredBlockhashValid).toHaveBeenCalledExactlyOnceWith(TEST_BLOCKHASH);
+    expect(repository.settleReservation).not.toHaveBeenCalled();
   });
 
   it("reconciles only the cluster scope's network", async () => {
@@ -236,7 +226,6 @@ describe("reconcileSponsorshipBudgets", () => {
       )
     ).rejects.toThrow("Kora security configuration is unavailable");
 
-    expect(getProviderConfiguration).toHaveBeenCalledWith("mainnet-beta");
     expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("mainnet");
     expect(repository.settleReservation).not.toHaveBeenCalled();
   });

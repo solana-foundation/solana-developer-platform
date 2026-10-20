@@ -20,7 +20,7 @@ import { installClusterRpcStub, tokenSupplyResult } from "@/test/helpers/cluster
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionDelegationMock,
@@ -1077,12 +1077,11 @@ describe("Payments routes — subscriptions", () => {
       TEST_MOCK_FEE_PAYER,
     ]);
     expect(getRecentBlockhashMock).toHaveBeenCalledTimes(5);
-    expect(createFeePaymentAdapterMock).toHaveBeenCalledTimes(5);
+    expect(createKoraAdapterMock).toHaveBeenCalledTimes(5);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();
-    for (const { value: provider } of createFeePaymentAdapterMock.mock.results) {
+    for (const { value: provider } of createKoraAdapterMock.mock.results) {
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();
-      expect(provider.signAndSend).not.toHaveBeenCalled();
     }
   });
 });

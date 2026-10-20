@@ -334,6 +334,41 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   updatedAt: string;
 }
 
+/**
+ * Where one subscription step's saved signature lives. Activation's authority-setup signature is a
+ * key in its attempt's `metadata`, not a column.
+ */
+export type RecurringPaymentStepSignatureSlot =
+  | { row: "recurring_payment"; column: "plan_creation_signature" | "authorization_signature" }
+  | {
+      row: "activation_attempt";
+      column:
+        | "plan_creation_signature"
+        | "authorization_signature"
+        | "metadata.authorizationSetupSignature";
+    }
+  | {
+      row: "update_attempt";
+      column:
+        | "plan_update_signature"
+        | "plan_creation_signature"
+        | "authorization_setup_signature"
+        | "authorization_signature"
+        | "old_cancel_signature";
+    }
+  | { row: "lifecycle_attempt"; column: "signature" };
+
+export interface ClearPaymentRecurringPaymentStepSignatureInput {
+  slot: RecurringPaymentStepSignatureSlot;
+  /** The recurring payment's id for `recurring_payment`, otherwise the attempt's. */
+  id: string;
+  organizationId: string;
+  projectId: string;
+  /** The signature the step saved; the slot is cleared only while it still holds it. */
+  signature: string;
+  updatedAt: string;
+}
+
 export interface GetLatestPaymentRecurringPaymentUpdateAttemptInput {
   organizationId: string;
   projectId: string;
@@ -594,6 +629,13 @@ export interface PaymentRecurringPaymentsRepository {
   updateUpdateAttempt(
     input: UpdatePaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
+  /**
+   * Null a step's saved signature after its send was provably refused, only while the slot still
+   * holds that signature.
+   *
+   * @returns False when the slot no longer holds it.
+   */
+  clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
   getLatestUpdateAttempt(
     input: GetLatestPaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;

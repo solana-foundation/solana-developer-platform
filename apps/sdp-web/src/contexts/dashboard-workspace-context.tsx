@@ -25,18 +25,10 @@ import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
 import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
-import { clearStoredApiKeySecrets, syncStoredApiKeySecretScope } from "@/lib/playground-api-keys";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
-
-export interface DashboardPlaygroundApiKeyOption {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  environment: string;
-}
 
 type DashboardWorkspaceContextValue = {
   initialQuickStartStatus: import("@/lib/dashboard-quick-start.redesign").QuickStartStatus | null;
@@ -52,12 +44,8 @@ type DashboardWorkspaceContextValue = {
   sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
   issuanceTab: IssuanceWorkspaceTab;
-  playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
-  selectedPlaygroundApiKeyId: string | null;
   isProjectSwitching: boolean;
   selectProject: (projectId: string) => void;
-  setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
-  setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -106,10 +94,6 @@ export function DashboardWorkspaceProvider({
   const selectedProjectId = useProjectId();
   const sdpEnvironment: SdpEnvironment =
     selectedProjectId === productionProject?.id ? "production" : "sandbox";
-  const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
-    DashboardPlaygroundApiKeyOption[]
-  >([]);
-  const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string | null>(null);
   const liveDashboardCacheScope = useMemo<DashboardCacheScope>(
     () =>
       auth.isLoaded && auth.orgId && auth.userId
@@ -136,17 +120,6 @@ export function DashboardWorkspaceProvider({
 
   const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
 
-  useEffect(() => {
-    if (!auth.isLoaded) {
-      return;
-    }
-
-    const scope = auth.userId
-      ? JSON.stringify([auth.userId, auth.orgId ?? null, selectedProjectId])
-      : null;
-    syncStoredApiKeySecretScope(scope);
-  }, [auth.isLoaded, auth.orgId, auth.userId, selectedProjectId]);
-
   const isProjectSwitchingRef = useRef(false);
   isProjectSwitchingRef.current = isProjectSwitching;
 
@@ -165,14 +138,11 @@ export function DashboardWorkspaceProvider({
 
   const selectProject = useCallback(
     (projectId: string) => {
-      if (projectId !== selectedProjectId) {
-        clearStoredApiKeySecrets();
-      }
       startProjectSwitchTransition(() => {
         router.push(projectHref(projectId, projectSwitchDestination(pathnameRef.current)));
       });
     },
-    [router, selectedProjectId]
+    [router]
   );
 
   // An Organization switched in Clerk leaves this URL naming the previous
@@ -216,19 +186,6 @@ export function DashboardWorkspaceProvider({
     setSidebarOpenState(open);
   }, []);
 
-  const setPlaygroundApiKeys = useCallback((keys: DashboardPlaygroundApiKeyOption[]) => {
-    setPlaygroundApiKeysState(keys);
-    setSelectedPlaygroundApiKeyId((current) => {
-      if (keys.length === 0) {
-        return null;
-      }
-      if (current && keys.some((key) => key.id === current)) {
-        return current;
-      }
-      return keys[0].id;
-    });
-  }, []);
-
   const toggleSidebar = useCallback(() => {
     setSidebarOpenState((current) => !current);
   }, []);
@@ -248,11 +205,7 @@ export function DashboardWorkspaceProvider({
       isSidebarOpen,
       isProjectSwitching,
       issuanceTab,
-      playgroundApiKeys,
-      selectedPlaygroundApiKeyId,
       selectProject,
-      setPlaygroundApiKeys,
-      setSelectedPlaygroundApiKeyId,
       setSidebarOpen,
       toggleSidebar,
     }),
@@ -270,11 +223,8 @@ export function DashboardWorkspaceProvider({
       sdpEnvironment,
       isSidebarOpen,
       isProjectSwitching,
-      playgroundApiKeys,
       issuanceTab,
-      selectedPlaygroundApiKeyId,
       selectProject,
-      setPlaygroundApiKeys,
       setSidebarOpen,
       toggleSidebar,
     ]

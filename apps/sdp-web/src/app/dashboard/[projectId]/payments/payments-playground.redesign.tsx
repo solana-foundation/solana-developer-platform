@@ -8,8 +8,6 @@ import {
   type ApiPlaygroundEndpointConfig,
   ApiPlaygroundShell,
 } from "@/components/api-playground-shell";
-import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
-import { usePlaygroundCreateKeyHref } from "@/components/use-playground-create-key-href";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -25,8 +23,6 @@ import { buildPaymentRequestsPlaygroundEndpointConfigs } from "./requests/paymen
 
 interface PaymentsPlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyId: string | null;
-  hasActiveApiKeys: boolean;
   transfers: PaymentsPlaygroundTransferView[];
   transfersError: string | null;
   wallets: PaymentsDashboardWallet[];
@@ -46,8 +42,6 @@ function withGroup(endpoints: ApiPlaygroundEndpointConfig[], group: string) {
  */
 export function PaymentsPlayground({
   apiBaseUrl,
-  apiKeyId,
-  hasActiveApiKeys,
   transfers,
   transfersError,
   wallets,
@@ -56,7 +50,6 @@ export function PaymentsPlayground({
   rampProviders,
 }: PaymentsPlaygroundProps) {
   const t = useTranslations();
-  const createApiKeyHref = usePlaygroundCreateKeyHref();
   const { sdpEnvironment } = useDashboardWorkspace();
   const endpoints = useMemo(() => {
     const tokens = deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]);
@@ -91,10 +84,6 @@ export function PaymentsPlayground({
       endpoints={endpoints}
       defaultEndpointId="list-transfers"
       apiBaseUrl={apiBaseUrl}
-      apiKeyId={apiKeyId}
-      apiKeySelector={<PlaygroundApiKeySelector />}
-      createApiKeyHref={createApiKeyHref}
-      requiresApiKey={!hasActiveApiKeys}
       leftMessages={[
         ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
         ...(transfersError ? [{ text: transfersError, tone: "critical" as const }] : []),

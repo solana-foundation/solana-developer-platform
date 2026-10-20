@@ -67,7 +67,7 @@ export async function authorizeTransferBatch(
   // Refusing here as well, before the key is claimed, keeps a refused batch
   // from writing failed recipients and an Idempotency-Key that would replay
   // them after the scope is fixed.
-  assertCallerWalletInScope(authorized.scope.auth.walletAccess, authorized.sourceWallet.id);
+  assertCallerWalletInScope(authorized.scope.auth, authorized.sourceWallet.id);
   return authorized;
 }
 

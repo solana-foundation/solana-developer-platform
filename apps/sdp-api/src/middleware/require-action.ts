@@ -1,7 +1,7 @@
 import { type Action, isApiKeyGrantableAction } from "@sdp/types/actions";
 import type { Context, MiddlewareHandler } from "hono";
 import { authMayPerform, getOptionalAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, missingAction } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 /**
@@ -45,7 +45,7 @@ export function assertCallerMayPerform(c: Context<{ Bindings: Env }>, action: Ac
       action,
     });
   }
-  throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+  throw missingAction(action);
 }
 
 function named(

@@ -60,7 +60,6 @@
     "matrix:generate": "tsx scripts/generate-support-matrix.ts"
   },
   "dependencies": {
-    "@sdp/fee-payment": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",

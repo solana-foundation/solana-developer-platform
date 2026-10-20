@@ -12,7 +12,6 @@ import { StatusText } from "@sdp/ui/status-text";
 import { XIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
   dashboardWorkspaceOverviewPanelClassName,
@@ -78,13 +77,6 @@ const SORT_OPTIONS: { value: IssuanceSortOption; label: MessageKey }[] = [
   { value: "name-desc", label: "DashboardIssuance.newDesign.list.sortNameDesc" },
 ];
 
-interface IssuanceApiKeyOption {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  environment: string;
-}
-
 interface IssuanceTemplateOption {
   id: string;
   name: string;
@@ -97,7 +89,6 @@ export interface IssuanceWorkspaceProps {
   initialTotal: number;
   facets: IssuanceTokenFacets;
   templates: IssuanceTemplateOption[];
-  apiKeys: IssuanceApiKeyOption[];
   apiBaseUrl: string | null;
   templatesError: string | null;
   tokensNotice: string | null;
@@ -108,17 +99,9 @@ export interface IssuanceWorkspaceProps {
  * state and the date that matters, and the API Playground beside it in the header's tabs.
  */
 export function IssuanceWorkspace(props: IssuanceWorkspaceProps) {
-  const { issuanceTab, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  const { apiKeys } = props;
-  useEffect(() => {
-    setPlaygroundApiKeys(apiKeys);
-  }, [apiKeys, setPlaygroundApiKeys]);
+  const { issuanceTab } = useDashboardWorkspace();
   const isPlaygroundTab = issuanceTab === "playground";
   const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? props.initialTokens;
-  const playgroundApiKeyId = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId)?.id ?? null,
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
 
   return (
     <DashboardWorkspaceTabShell
@@ -139,8 +122,6 @@ export function IssuanceWorkspace(props: IssuanceWorkspaceProps) {
           content: (
             <IssuancePlayground
               apiBaseUrl={props.apiBaseUrl}
-              apiKeyId={playgroundApiKeyId}
-              hasActiveApiKeys={apiKeys.length > 0}
               templates={props.templates}
               templatesError={props.templatesError}
               tokens={playgroundTokens}

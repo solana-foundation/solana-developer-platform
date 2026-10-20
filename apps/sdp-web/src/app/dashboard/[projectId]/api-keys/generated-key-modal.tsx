@@ -4,38 +4,20 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
-import { storeApiKeySecret } from "@/lib/playground-api-keys";
 import { GeneratedApiKeyInput } from "./generated-key-input";
 
 interface GeneratedApiKeyModalProps {
   keyValue: string;
   message: string;
-  apiKeyId?: string;
   keyPrefix?: string;
 }
 
-function GeneratedApiKeyModal({
-  keyValue,
-  message,
-  apiKeyId,
-  keyPrefix,
-}: GeneratedApiKeyModalProps) {
+function GeneratedApiKeyModal({ keyValue, message, keyPrefix }: GeneratedApiKeyModalProps) {
   const t = useTranslations();
   const [isOpen, setIsOpen] = useState(true);
   const [copyLabel, setCopyLabel] = useState(() => t("DashboardCustody.copyValue"));
-
-  useEffect(() => {
-    if (!(keyValue && apiKeyId)) {
-      return;
-    }
-
-    storeApiKeySecret({
-      value: keyValue,
-      apiKeyId,
-    });
-  }, [apiKeyId, keyValue]);
 
   const close = async () => {
     setIsOpen(false);
@@ -85,7 +67,6 @@ function GeneratedApiKeyModal({
       <div className="mt-4 space-y-2">
         <Label htmlFor="generated-key-value">{t("DashboardCustody.fullKeyShownOnce")}</Label>
         <GeneratedApiKeyInput value={keyValue} />
-        <p className="text-xs text-tertiary">{t("DashboardCustody.apiKeyPlaygroundSession")}</p>
       </div>
 
       <div className="mt-5 flex items-center justify-end gap-2">

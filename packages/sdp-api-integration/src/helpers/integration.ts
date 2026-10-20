@@ -1,10 +1,10 @@
 import { type ApiTestCustodyWallet, apiTestSupport } from "@sdp/api/test-support";
-import { resolveDefaultCluster } from "@sdp/rpc/config";
 import {
   confirmTransaction,
   createRpc,
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
+  sendTransaction,
 } from "@sdp/rpc/solana";
 import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
 import {
@@ -26,13 +26,13 @@ import { koraEndpoint } from "./kora";
 const {
   app,
   createKVStoreSet,
-  createFeePaymentAdapter,
   createMosaicService,
   createSigningService,
   CustodyConfigStore,
   ensureTestClerkIssuer,
   getDb,
   hashString,
+  KoraAdapter,
   runAsMoneyPrincipal,
   seedTestDatabase,
   signTestClerkJwt,
@@ -551,15 +551,14 @@ async function fundAddressViaKoraFeePayer(
   lamports: bigint = BigInt(INTEGRATION_CUSTODY_FUND_LAMPORTS)
 ): Promise<boolean> {
   const rpcUrl = env.SOLANA_RPC_URL;
-  if (!rpcUrl || !KORA_CONFIGURED) {
+  if (!rpcUrl || koraEndpoint === null) {
     return false;
   }
 
-  const feePayment = createFeePaymentAdapter(
-    env,
-    "sdp:v1:system:integration-funding",
-    resolveDefaultCluster(env)
-  );
+  const feePayment = new KoraAdapter({
+    ...koraEndpoint,
+    userId: "sdp:v1:system:integration-funding",
+  });
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
   const maxTransferLamports =
@@ -592,7 +591,7 @@ async function fundAddressViaKoraFeePayer(
 
     const compiled = compileTransaction(message);
     const txBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
-    const signature = await feePayment.signAndSend(txBytes);
+    const signature = await sendTransaction(rpc, await feePayment.signAsFeePayer(txBytes));
     const confirmation = await confirmTransaction(rpc, signature, { commitment: "confirmed" });
 
     if (confirmation.err) {

@@ -18,7 +18,7 @@ import {
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
@@ -126,7 +126,7 @@ describe("Public payment request routes", () => {
       providerId: "test",
       getFeePayer: async () => TEST_MOCK_FEE_PAYER,
       signAsFeePayer: sponsorSignTestTransaction,
-      signAndSend: () => Promise.reject(new Error("not used")),
+      getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
       prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
     }));
   }
@@ -179,7 +179,7 @@ describe("Public payment request routes", () => {
     await expect(transactionResponse.json()).resolves.toMatchObject({
       error: { code: "CONFLICT" },
     });
-    expect(createFeePaymentAdapterMock).not.toHaveBeenCalled();
+    expect(createKoraAdapterMock).not.toHaveBeenCalled();
     expect(getRecentBlockhashMock).not.toHaveBeenCalled();
   });
 
@@ -194,7 +194,7 @@ describe("Public payment request routes", () => {
         expect((await postTransaction(request.public_token)).status).toBe(200);
         expect(sponsorship).toHaveBeenCalledWith(
           env,
-          expect.objectContaining({ environment, projectId: wallet.projectId }),
+          expect.objectContaining({ projectId: wallet.projectId }),
           "payments.pay_request"
         );
         expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
@@ -311,7 +311,7 @@ describe("Public payment request routes", () => {
         providerId: "test",
         getFeePayer: async () => TEST_MOCK_FEE_PAYER,
         signAsFeePayer: () => Promise.reject(new Error("signing timed out")),
-        signAndSend: () => Promise.reject(new Error("not used")),
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
         prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
       }));
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);

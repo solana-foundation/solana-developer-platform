@@ -160,7 +160,6 @@ describe("closeDvpTrade", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.spyOn(sponsorshipService, "resolveRequestSponsorshipScope").mockReturnValue({
-      environment: "sandbox",
       organizationId: "org_dvp_settle",
       projectId: "prj_dvp_settle",
       actor: { type: "api_key", id: "key_dvp_settle" },
@@ -170,7 +169,7 @@ describe("closeDvpTrade", () => {
       prepareOwnedSubmission,
       providerId: "test",
       signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn(),
+      getSponsorshipConfiguration: vi.fn(),
     });
     closeLocks.clear();
     getBlockHeight.mockResolvedValue(50n);

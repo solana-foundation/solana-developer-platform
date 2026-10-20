@@ -91,7 +91,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     );
 
     // The sponsorship port supplies only the fee payer ADDRESS, so the
-    // simulated message has a funded payer. The check never calls signAndSend:
+    // simulated message has a funded payer. The check never asks for a sponsor signature:
     // a signer check is diagnostics, and diagnostics must not be able to spend
     // sponsorship — the transaction below is verified locally and in RPC
     // simulation, and is never broadcast.

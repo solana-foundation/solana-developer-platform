@@ -622,7 +622,9 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
  */
 function assertProgramKeyIsNotWalletScoped(c: AppContext, action: string): void {
   if (getAuth(c).walletAccess.scope === "selected") {
-    throw new AppError("FORBIDDEN", `Wallet-scoped API keys cannot ${action}`);
+    throw new AppError("FORBIDDEN", `Wallet-scoped API keys cannot ${action}`, {
+      reason: "wallet_out_of_scope",
+    });
   }
 }
 

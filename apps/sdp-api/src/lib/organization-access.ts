@@ -68,7 +68,9 @@ function readAllowedIpAddresses(settings: string | null): unknown {
  */
 function enforceIpAllowlist(c: Context<{ Bindings: Env }>, settings: string | null): void {
   if (!isClientIpAllowed(getClientIp(c), readAllowedIpAddresses(settings))) {
-    throw new AppError("FORBIDDEN", "Request origin is not allowed for this organization");
+    throw new AppError("FORBIDDEN", "Request origin is not allowed for this organization", {
+      reason: "ip_not_allowed",
+    });
   }
 }
 
@@ -204,7 +206,9 @@ export async function authorizeApiKey(
     );
   }
   if (!isClientIpAllowed(getClientIp(c), parseOptionalPostgresJson<unknown>(row.allowed_ips))) {
-    throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");
+    throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key", {
+      reason: "ip_not_allowed",
+    });
   }
   enforceIpAllowlist(c, row.settings);
 

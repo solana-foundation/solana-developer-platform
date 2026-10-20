@@ -97,7 +97,11 @@ describe("human-only routes", () => {
 
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({
-      error: { code: "FORBIDDEN", message: HUMAN_SESSION_REQUIRED_MESSAGE },
+      error: {
+        code: "FORBIDDEN",
+        message: HUMAN_SESSION_REQUIRED_MESSAGE,
+        details: { reason: "human_session_required" },
+      },
     });
   });
 });

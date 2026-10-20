@@ -34,7 +34,7 @@ export function requireHumanActor(
   const clerk = c.get("clerk");
   if (!clerk) {
     if (c.get("apiKey")) {
-      throw forbidden(HUMAN_SESSION_REQUIRED_MESSAGE);
+      throw forbidden(HUMAN_SESSION_REQUIRED_MESSAGE, { reason: "human_session_required" });
     }
     throw new AppError("UNAUTHORIZED", "Authentication required");
   }

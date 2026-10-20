@@ -29,12 +29,13 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
@@ -43,6 +44,7 @@ import {
   assertRecurringPaymentTokenMint,
   assertRecurringPlanSourceWallet,
   confirmSubscriptionSignature,
+  createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
@@ -411,7 +413,17 @@ async function finalizeRecurringPaymentLifecycle(input: {
  * before it signs. Cancel is an exit and is never refused (ADR 0002).
  */
 type RecurringPaymentLifecycleRun =
-  | { operation: Extract<RecurringPaymentLifecycleOperation, "cancel"> }
+  | {
+      operation: Extract<RecurringPaymentLifecycleOperation, "cancel">;
+      /**
+       * The caller's own refusal of a cancel it may not sign (wallet scope),
+       * run before the claim. Null for the job, which cancels as the mandate,
+       * and for revocation, which signs as the person revoking, whom wallet
+       * scope never narrows. A cancel is an exit: this is the waist's refusal
+       * made early, so a refused request claims and journals nothing (HOO-2099).
+       */
+      admitCaller: (() => void) | null;
+    }
   | {
       operation: Extract<RecurringPaymentLifecycleOperation, "resume">;
       admitStart: () => Promise<void>;
@@ -497,6 +509,9 @@ async function runRecurringPaymentLifecycle(
     getRecurringPaymentLifecycleStatuses(input.operation).processingStatus;
   if (input.operation === "resume" && !recoveringStaleLifecycle) {
     await input.admitStart();
+  }
+  if (input.operation === "cancel") {
+    input.admitCaller?.();
   }
 
   // A resume starts the mandate again; a cancel records nobody.
@@ -688,21 +703,29 @@ async function runRecurringPaymentLifecycle(
       sourceWallet: input.sourceWallet,
       sourceSigner,
       instructions: [instruction],
+      submissionStore: createSubscriptionStepStore({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        save: async (savedSignature) => {
+          const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+            attemptId: attempt.id,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            stage: currentStage,
+            signature: savedSignature,
+            error: null,
+            updatedAt: new Date().toISOString(),
+          });
+          if (updatedAttempt === null) {
+            throw conflict("Recurring payment lifecycle attempt changed concurrently");
+          }
+          attempt = updatedAttempt;
+          signature = savedSignature;
+        },
+        rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
+      }),
     });
-
-    const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: currentStage,
-      signature,
-      error: null,
-      updatedAt: new Date().toISOString(),
-    });
-    if (updatedAttempt === null) {
-      throw conflict("Recurring payment lifecycle attempt changed concurrently");
-    }
-    attempt = updatedAttempt;
 
     await confirmSubscriptionSignature(signature, lifecycleConfirmationMessage(input.operation));
     confirmedOnChain = true;
@@ -730,12 +753,13 @@ async function runRecurringPaymentLifecycle(
       "Recurring payment lifecycle operation failed"
     );
     const failedAt = new Date().toISOString();
-    const failedOnChain = error instanceof AppError && error.code === "TRANSACTION_FAILED";
+    // Failed on chain, or refused at preflight (its saved signature already cleared).
+    const definitelyFailed = isDefiniteSubmissionError(error);
 
     // Once the operation is on chain, or may be, a failure only leaves the attempt to finish.
     if (
       (signature || confirmedOnChain || error instanceof ResumedStepUnsettledError) &&
-      !failedOnChain
+      !definitelyFailed
     ) {
       await preserveRecoverableLifecycleAttempt({
         recurringRepo,
@@ -788,6 +812,8 @@ export async function cancelRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   /** The request's Idempotency-Key, written on the attempt; null for the cron. */
   idempotencyKey: string | null;
+  /** See RecurringPaymentLifecycleRun; a cancel before activation signs nothing, so skips it. */
+  admitCaller: (() => void) | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
     return cancelPendingRecurringPayment(input);
