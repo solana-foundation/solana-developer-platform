@@ -91,7 +91,8 @@ function completionDetailRows(
     copyValue: transfer.id,
   });
 
-  const exchangeRateRow = derivedExchangeRateRow(transfer, tokenLabel, t);
+  // A sale's fiat is the payout net of fees, so a rate derived from it would misstate the rate.
+  const exchangeRateRow = onramp ? derivedExchangeRateRow(transfer, tokenLabel, t) : undefined;
   const exchangeRate = exchangeRateRow?.value;
   if (exchangeRateRow) {
     rows.push(exchangeRateRow);
@@ -101,6 +102,11 @@ function completionDetailRows(
   for (const row of providerTransferDetailRows(transfer, { cluster }, t)) {
     if (row.key === "DashboardPayments.transferDetails.receipt") {
       receiptRow = row;
+    } else if (
+      row.key === "DashboardPayments.transferDetails.solanaSignature" &&
+      row.copyValue === transfer.signature
+    ) {
+      // The transfer's own signature row below names the same transaction.
     } else if (!exchangeRate || row.key !== "DashboardPayments.transferDetails.exchangeRate") {
       rows.push(row);
     }
@@ -128,10 +134,11 @@ function completionDetailRows(
       value: formatTimestamp(transfer.createdAt, t),
     });
   }
-  if (transfer.updatedAt) {
+  const completedAt = transfer.confirmedAt ?? transfer.updatedAt;
+  if (completedAt) {
     rows.push({
       label: t("DashboardPayments.ramps.completed"),
-      value: formatTimestamp(transfer.updatedAt, t),
+      value: formatTimestamp(completedAt, t),
     });
   }
   if (receiptRow) {
@@ -218,8 +225,10 @@ export function RampCompleteScreen({
   const onramp = direction === "onramp";
   const tokenLabel = resolveTransferTokenLabel(transfer.token);
   const cryptoAmount = transfer.amount && tokenLabel ? `${transfer.amount} ${tokenLabel}` : null;
-  const fiatAmount =
-    transfer.fiatAmount && transfer.fiatCurrency
+  // A completed sale leads with what the provider paid out; the quote stays among the rows.
+  const fiatAmount = transfer.fiatPayout
+    ? formatDisplayAmount(transfer.fiatPayout.amount, transfer.fiatPayout.currency.toUpperCase())
+    : transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
       : null;
 

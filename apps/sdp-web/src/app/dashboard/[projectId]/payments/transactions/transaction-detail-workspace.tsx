@@ -138,6 +138,16 @@ function transactionAmountLabel(
   return { amount, token };
 }
 
+/** The fiat a sale pays its contact: the provider's reported payout, else the quote. */
+function saleFiatLabel(transfer: PaymentTransferDetail, locale: string): string | null {
+  if (transfer.fiatPayout) {
+    return `${formatDecimalAmount(transfer.fiatPayout.amount, locale)} ${transfer.fiatPayout.currency.toUpperCase()}`;
+  }
+  return transfer.fiatAmount && transfer.fiatCurrency
+    ? `${formatDecimalAmount(transfer.fiatAmount, locale)} ${transfer.fiatCurrency.toUpperCase()}`
+    : null;
+}
+
 /**
  * Who the other side is. The transfer names its contact; a ledger row only carries the id,
  * which the project's contacts resolve, and the shortened id is the last resort. Without a
@@ -167,7 +177,14 @@ function useTransactionSummary(
   const t = useTranslations();
   const locale = useLocale();
   const ledgerStatus = useTransactionStatus()(transaction);
-  const { amount, token } = transactionAmountLabel(transaction, issuedTokensByMint, locale);
+  const { amount: cryptoAmount, token } = transactionAmountLabel(
+    transaction,
+    issuedTokensByMint,
+    locale
+  );
+  // A sale moves crypto to the provider, but the contact gets fiat: name what they get.
+  const saleFiat = transfer?.type === "offramp" ? saleFiatLabel(transfer, locale) : null;
+  const amount = saleFiat ?? cryptoAmount;
   const direction = paymentDirection(transaction, transfer);
   const { contact, party } = transactionParty(transaction, transfer, direction, counterpartyName);
   const titleKey =
@@ -189,7 +206,8 @@ function useTransactionSummary(
     : transaction.module === "payments" && isPaymentTransferStatus(transaction.moduleStatus)
       ? paymentWhy(transaction.moduleStatus, transfer, t)
       : undefined;
-  return { status, amount, direction, contact, title, why };
+  const soldCrypto = saleFiat ? cryptoAmount : null;
+  return { status, amount, soldCrypto, direction, contact, title, why };
 }
 
 /** Whether the band has anything to offer: the explorer, the wallet, Requests, the module. */
@@ -371,7 +389,7 @@ function ProofSection({
             </RecordRow>
           ) : null}
           <RecordRow
-            label={t("DashboardPayments.transactions.transactionId")}
+            label={t("DashboardPayments.transactionDetail.sdpTransactionId")}
             copy={transaction.id}
           >
             <span className="tabular-nums">{transaction.id}</span>
@@ -487,6 +505,11 @@ function TransactionRecord({
           muted={summary.amount === null}
         >
           {summary.amount ?? t("DashboardPayments.transactionDetail.notRecorded")}
+          {summary.soldCrypto ? (
+            <span className="ml-2 text-body font-normal text-tertiary">
+              {t("DashboardPayments.transactionDetail.saleOf", { amount: summary.soldCrypto })}
+            </span>
+          ) : null}
         </RecordAmount>
         <TransactionParties
           transaction={transaction}

@@ -28,8 +28,9 @@ import {
   statusVariant,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
+import { rampPhaseCopy } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { MemoJsonView } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -289,6 +290,12 @@ function TransferDetailRows({
           copyValue={row.copyValue}
         />
       ))}
+      {transfer.confirmedAt ? (
+        <DetailRow
+          label={t("DashboardPayments.ramps.completed")}
+          value={formatTimestamp(transfer.confirmedAt, t)}
+        />
+      ) : null}
       {transfer.updatedAt ? (
         <DetailRow
           label={t("DashboardPayments.transferDetails.lastUpdated")}
@@ -311,9 +318,14 @@ export function TransferDetailModal({
   const t = useTranslations();
   const cluster = useSolanaCluster();
   const [memoJsonOpen, setMemoJsonOpen] = useState(false);
+  const locale = useLocale();
   const isInbound = isInboundTransfer(transfer);
   const signature = transfer.signature;
   const flow = resolveTransferFlow(transfer);
+  const phase =
+    transfer.type === "onramp" || transfer.type === "offramp"
+      ? rampPhaseCopy(t, transfer, { locale })
+      : null;
 
   return (
     <Modal
@@ -334,6 +346,16 @@ export function TransferDetailModal({
           </div>
           <TransferStatusBadge status={transfer.status} />
         </div>
+        {phase ? (
+          <p
+            className={cn(
+              "text-sm leading-relaxed",
+              phase.tone === "attention" ? "text-warning" : "text-secondary"
+            )}
+          >
+            {phase.description}
+          </p>
+        ) : null}
 
         <div className="flex items-center justify-between gap-4 rounded-2xl bg-fill-subtle p-5">
           <div className="min-w-0 space-y-0.5">

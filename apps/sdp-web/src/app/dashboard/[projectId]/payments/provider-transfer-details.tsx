@@ -161,7 +161,27 @@ function moonpayBuilder(
     settlement !== undefined && settlement.provider === "moonpay"
       ? rowsFromSpecs(MOONPAY_FIELDS, settlement, context, t)
       : [];
-  return [...receipt, ...settlementRows];
+  return [...receipt, ...quotedPayoutRows(transfer, t), ...settlementRows];
+}
+
+/** A sale's quoted payout, shown beside the provider's reported payout when the two differ. */
+function quotedPayoutRows(
+  transfer: PaymentTransferSummary,
+  t: Translate
+): ProviderTransferDetailRow[] {
+  const payout = transfer.fiatPayout;
+  if (transfer.type !== "offramp" || !payout || !transfer.fiatAmount || !transfer.fiatCurrency) {
+    return [];
+  }
+  const sameCurrency = payout.currency.toUpperCase() === transfer.fiatCurrency.toUpperCase();
+  if (sameCurrency && Number(payout.amount) === Number(transfer.fiatAmount)) return [];
+  return [
+    {
+      key: "DashboardPayments.transferDetails.quotedPayout",
+      label: t("DashboardPayments.transferDetails.quotedPayout"),
+      value: formatDisplayAmount(transfer.fiatAmount, transfer.fiatCurrency.toUpperCase()),
+    },
+  ];
 }
 
 /**
