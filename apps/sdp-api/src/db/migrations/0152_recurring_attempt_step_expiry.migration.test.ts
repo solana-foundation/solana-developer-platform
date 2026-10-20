@@ -127,6 +127,12 @@ beforeEach(async () => {
        DROP CONSTRAINT payment_recurring_lifecycle_attempts_expiry_signature_check,
        DROP COLUMN last_valid_block_height`
   );
+  await client.query(
+    `ALTER TABLE payment_subscription_collection_attempts
+       DROP CONSTRAINT payment_subscription_collection_attempts_pre_image_check,
+       DROP COLUMN delegation_period_start_ts_before,
+       DROP COLUMN delegation_amount_pulled_before`
+  );
   await client.query("DROP DOMAIN sdp_u64");
 
   tenant = await seedOrgProject(client, "0152");
