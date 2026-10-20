@@ -682,29 +682,46 @@ export async function journalInFlightRecurringPaymentAttempt<TAttempt>(input: {
  * the attempt in flight instead of failing it. Only the latest saved step can be in flight; every
  * earlier one landed before it saved. `step` is the step the run is working toward, which the flow
  * moves forward as each step settles: a failure no step names fails that step, fenced on its slot.
+ * `lastStepLanded` is set once the unwind check found the phase's last step on chain with no
+ * signature this attempt holds: the steps then run again and the last one is taken as landed
+ * without a send.
  */
 export interface RecurringPaymentStepPhase {
   unreadSavedStep: RecurringPaymentStepSignatureSlot["column"] | null;
   step: RecurringPaymentStepSignatureSlot;
+  lastStepLanded: boolean;
 }
+
+/**
+ * What a flow's unwind check found: the phase's last step absent, so the unwind may go ahead, or
+ * on chain, so the flow continues from it instead.
+ */
+export type RecurringPaymentUnwindCheck = "unwind" | "last_step_landed";
 
 /**
  * Runs a flow's unwinding steps. Inside them any error but a pending step becomes
  * `RecurringPaymentStepFailedError`, once no saved step is unread: the step runner settles every
  * send before it returns or throws, so nothing this run sent can still land. Every step failure,
- * raised or converted, passes `beforeUnwind` first, which may refuse the unwind.
+ * raised or converted, passes `beforeUnwind` first. When it finds the phase's last step on chain,
+ * the flow never unwinds: the steps run once more with `lastStepLanded` set, so the last step is
+ * taken as landed without a send, and any failure of that run leaves the attempt in flight.
  *
  * @param phase - The run's unwinding steps.
  * @param run - The steps.
  * @param beforeUnwind - The chain check an unwind must pass, or null when it needs none.
  * @returns What the steps return.
- * @throws ResumedStepUnsettledError when a step is pending, or `beforeUnwind` refuses the unwind.
- * @throws RecurringPaymentStepFailedError when a step fails with nothing in flight.
+ * @throws ResumedStepUnsettledError when a step is pending, or `beforeUnwind` cannot read the
+ *   chain.
+ * @throws RecurringPaymentStepFailedError when a step fails with nothing in flight and its last
+ *   step is not on chain.
+ * @throws The failure itself, never a step failure, when the run after a landed last step fails.
  */
 export async function insideRecurringPaymentStepPhase<T>(
   phase: RecurringPaymentStepPhase,
   run: () => Promise<T>,
-  beforeUnwind: ((stepFailure: RecurringPaymentStepFailedError) => Promise<void>) | null
+  beforeUnwind:
+    | ((stepFailure: RecurringPaymentStepFailedError) => Promise<RecurringPaymentUnwindCheck>)
+    | null
 ): Promise<T> {
   let stepFailure: RecurringPaymentStepFailedError;
   try {
@@ -726,10 +743,24 @@ export async function insideRecurringPaymentStepPhase<T>(
             droppedSignature: null,
           });
   }
-  if (beforeUnwind !== null) {
-    await beforeUnwind(stepFailure);
+  if (beforeUnwind === null) {
+    throw stepFailure;
   }
-  throw stepFailure;
+  const check = await beforeUnwind(stepFailure);
+  switch (check) {
+    case "unwind":
+      throw stepFailure;
+    case "last_step_landed":
+      phase.lastStepLanded = true;
+      try {
+        return await run();
+      } catch (error) {
+        // The last step is on chain, so nothing may unwind now: the attempt stays in flight.
+        throw error instanceof RecurringPaymentStepFailedError ? error.failure : error;
+      }
+    default:
+      return assertNever(check);
+  }
 }
 
 /**

@@ -512,6 +512,7 @@ async function runRecurringPaymentLifecycle(
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: savedSignature === null ? null : slot.column,
     step: slot,
+    lastStepLanded: false,
   };
   const failureMessage = lifecycleConfirmationMessage(input.operation);
   const sourceSigner = lazyRecurringPaymentStepSigner({

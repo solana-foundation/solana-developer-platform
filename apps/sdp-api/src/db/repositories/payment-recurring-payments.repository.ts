@@ -358,6 +358,12 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   updatedAt: string;
 }
 
+/** The attempt rows a subscription step saves its signature on. */
+export type RecurringPaymentStepSignatureRow =
+  | "activation_attempt"
+  | "update_attempt"
+  | "lifecycle_attempt";
+
 /**
  * Each attempt row's step signature columns in the order its flow saves them; a step saves only
  * after every earlier one landed. An update attempt is either a metadata update (`plan_update_signature`
@@ -377,7 +383,10 @@ export const RECURRING_PAYMENT_STEP_SLOT_ORDER = {
     "old_cancel_signature",
   ],
   lifecycle_attempt: ["signature"],
-} as const;
+} as const satisfies Record<
+  RecurringPaymentStepSignatureRow,
+  readonly [`${string}signature`, ...`${string}signature`[]]
+>;
 
 type RecurringPaymentStepSlotOrder = typeof RECURRING_PAYMENT_STEP_SLOT_ORDER;
 

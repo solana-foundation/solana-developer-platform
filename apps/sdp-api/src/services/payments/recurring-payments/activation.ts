@@ -51,8 +51,8 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import {
-  createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
+  resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -72,6 +72,7 @@ import {
   RecurringPaymentStepFailedError,
   type RecurringPaymentStepLogContext,
   type RecurringPaymentStepPhase,
+  type RecurringPaymentUnwindCheck,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   readSavedRecurringPaymentStep,
@@ -264,11 +265,13 @@ async function failRecurringPaymentActivation(input: {
 }
 
 /**
- * Refuses to unwind an activation whose delegation is on chain: a schedule back in
- * `pending_activation` never carries a live delegation, which a later activation would subscribe
- * beside. The delegation is derived from the activation's plan, so the check holds however far
- * this run got; with no plan recorded, no delegation can exist. Costs one plan row read and two
- * RPC calls, only on the unwind path.
+ * Checks the chain before an activation unwinds: a schedule back in `pending_activation` never
+ * carries a live delegation, which a later activation would subscribe beside. A delegation on
+ * chain is the subscribe landed (its slot is empty only because a resend was refused as already
+ * subscribed, or nothing was saved), so the activation continues from it and finalizes instead.
+ * The delegation is derived from the activation's plan, so the check holds however far this run
+ * got; with no plan recorded, no delegation can exist. Costs one plan row read and two RPC calls,
+ * only on the unwind path.
  *
  * @param input - The run's plan and the failure being unwound.
  * @param input.env - The environment.
@@ -278,11 +281,12 @@ async function failRecurringPaymentActivation(input: {
  * @param input.attemptId - The run's attempt.
  * @param input.planId - The activation's plan row, or null when none is recorded.
  * @param input.stepFailure - The step failure the activation would unwind for.
- * @throws ResumedStepUnsettledError when the delegation exists or cannot be read; the attempt
- *   stays in flight and the next run finalizes from the landed subscribe.
+ * @returns `unwind` when no delegation exists, `last_step_landed` when it does.
+ * @throws ResumedStepUnsettledError when the delegation cannot be read; the attempt stays in
+ *   flight.
  * @throws AppError INTERNAL_ERROR when the recorded plan row is missing.
  */
-async function assertActivationDelegationAbsent(input: {
+async function checkActivationUnwind(input: {
   env: Env;
   organizationId: string;
   projectId: string;
@@ -290,9 +294,9 @@ async function assertActivationDelegationAbsent(input: {
   attemptId: string;
   planId: string | null;
   stepFailure: RecurringPaymentStepFailedError;
-}): Promise<void> {
+}): Promise<RecurringPaymentUnwindCheck> {
   if (input.planId === null) {
-    return;
+    return "unwind";
   }
   const plan = await createPaymentSubscriptionsRepository(
     input.env,
@@ -324,8 +328,15 @@ async function assertActivationDelegationAbsent(input: {
   switch (delegation.state) {
     case "unsent":
     case "dropped":
-      return;
+      return "unwind";
     case "landed":
+      logEvent("warn", {
+        event: "sdp_api_recurring_payment_unwind_found_step_landed",
+        ...logContext,
+        subscription_pda: subscriptionPda,
+        ...describeError(input.stepFailure.failure),
+      });
+      return "last_step_landed";
     case "pending":
       logEvent("error", {
         event: "sdp_api_recurring_payment_unwind_refused_delegation_live",
@@ -663,16 +674,14 @@ async function resolveActivationFeePayer(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
 }): Promise<Address> {
-  const feePayment = createSponsorshipFeePayment(
+  return resolveSponsoredFeePayer(
     input.env,
     await resolveProjectSponsorshipScope(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: input.sourceWallet.walletId },
-    }),
-    "recurring.activate"
+    })
   );
-  return feePayment.getFeePayer();
 }
 
 /**
@@ -855,6 +864,11 @@ async function settleActivationSubscription(input: {
     });
     return savedSignature;
   }
+  // The unwind check found the delegation on chain: subscribe landed with no signature this
+  // attempt holds, so nothing is set up or sent.
+  if (input.phase.lastStepLanded) {
+    return null;
+  }
 
   let feePayerResolution: Promise<Address> | null = null;
   const resolveFeePayer = () => {
@@ -1023,6 +1037,7 @@ export async function activateRecurringPayment(input: {
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: latestSavedActivationStep(attempt),
     step: { row: "activation_attempt", column: "plan_creation_signature" },
+    lastStepLanded: false,
   };
   const sourceSigner = lazyRecurringPaymentStepSigner({
     env: input.env,
@@ -1206,7 +1221,7 @@ export async function activateRecurringPayment(input: {
       phase,
       activationSteps,
       (stepFailure) =>
-        assertActivationDelegationAbsent({
+        checkActivationUnwind({
           env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,

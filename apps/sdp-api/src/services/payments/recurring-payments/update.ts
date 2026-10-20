@@ -91,6 +91,7 @@ import {
   RecurringPaymentStepFailedError,
   type RecurringPaymentStepLogContext,
   type RecurringPaymentStepPhase,
+  type RecurringPaymentUnwindCheck,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   readSavedRecurringPaymentStep,
@@ -922,11 +923,13 @@ type UpdateAttemptStepSlot = Extract<RecurringPaymentStepSignatureSlot, { row: "
 type UpdateAttemptStepColumn = UpdateAttemptStepSlot["column"];
 
 /**
- * Refuses to unwind a replacement whose new delegation is on chain. A replacement never returns
- * to `active` on the old mandate while the new delegation exists: both would be live. The new
- * delegation is derived from the attempt's replacement plan, so the check holds however far this
- * run got; with no replacement plan recorded, no new delegation can exist. Costs one plan row
- * read and two RPC calls, only on the unwind path.
+ * Checks the chain before a replacement unwinds. A replacement never returns to `active` on the
+ * old mandate while the new delegation exists: both would be live. A new delegation on chain is
+ * the authorization landed (its slot is empty only because a resend was refused as already
+ * subscribed, or nothing was saved), so the update continues from it to the old cancel instead.
+ * The new delegation is derived from the attempt's replacement plan, so the check holds however
+ * far this run got; with no replacement plan recorded, no new delegation can exist. Costs one plan
+ * row read and two RPC calls, only on the unwind path.
  *
  * @param input - The run's attempt and the failure being unwound.
  * @param input.env - The environment.
@@ -934,19 +937,20 @@ type UpdateAttemptStepColumn = UpdateAttemptStepSlot["column"];
  * @param input.projectId - The schedule's project.
  * @param input.attempt - The run's attempt as it stands.
  * @param input.stepFailure - The step failure the update would unwind for.
- * @throws ResumedStepUnsettledError when the new delegation exists or cannot be read; the
- *   attempt stays in flight and the next run continues from the landed authorization.
+ * @returns `unwind` when no new delegation exists, `last_step_landed` when it does.
+ * @throws ResumedStepUnsettledError when the new delegation cannot be read; the attempt stays in
+ *   flight.
  * @throws AppError INTERNAL_ERROR when the recorded replacement plan row is missing.
  */
-async function assertReplacementDelegationAbsent(input: {
+async function checkReplacementUnwind(input: {
   env: Env;
   organizationId: string;
   projectId: string;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   stepFailure: RecurringPaymentStepFailedError;
-}): Promise<void> {
+}): Promise<RecurringPaymentUnwindCheck> {
   if (input.attempt.new_plan_id === null) {
-    return;
+    return "unwind";
   }
   const plan = await createPaymentSubscriptionsRepository(
     input.env,
@@ -978,8 +982,15 @@ async function assertReplacementDelegationAbsent(input: {
   switch (delegation.state) {
     case "unsent":
     case "dropped":
-      return;
+      return "unwind";
     case "landed":
+      logEvent("warn", {
+        event: "sdp_api_recurring_payment_unwind_found_step_landed",
+        ...logContext,
+        subscription_pda: subscriptionPda,
+        ...describeError(input.stepFailure.failure),
+      });
+      return "last_step_landed";
     case "pending":
       logEvent("error", {
         event: "sdp_api_recurring_payment_unwind_refused_delegation_live",
@@ -1065,6 +1076,7 @@ async function runMetadataScheduleUpdate(input: {
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: planUpdateSignature === null ? null : "plan_update_signature",
     step: { row: "update_attempt", column: "plan_update_signature" },
+    lastStepLanded: false,
   };
 
   const metadataSteps = async () => {
@@ -1894,6 +1906,7 @@ async function runReplacementUpdate(input: {
   const phase: RecurringPaymentStepPhase = {
     unreadSavedStep: latestSavedReplacementStep(attempt),
     step: { row: "update_attempt", column: "plan_creation_signature" },
+    lastStepLanded: false,
   };
 
   const replacementSteps = async () => {
@@ -2098,7 +2111,9 @@ async function runReplacementUpdate(input: {
       });
     }
     let authorizationSignature = savedAuthorizationSignature;
-    if (savedAuthorizationSignature === null) {
+    // After the unwind check found the new delegation on chain, the authorization is taken as
+    // landed with no signature this attempt holds.
+    if (savedAuthorizationSignature === null && !phase.lastStepLanded) {
       const authorized = await sendReplacementAuthorization({
         env: input.env,
         organizationId: input.organizationId,
@@ -2145,7 +2160,7 @@ async function runReplacementUpdate(input: {
     phase,
     replacementSteps,
     (stepFailure) =>
-      assertReplacementDelegationAbsent({
+      checkReplacementUnwind({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
