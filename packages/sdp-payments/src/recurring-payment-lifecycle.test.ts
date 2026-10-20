@@ -100,6 +100,14 @@ describe("recurring payment lifecycle transitions", () => {
     );
     assert.equal(
       decideRecurringPaymentUpdateTransition({
+        status: "pending_activation",
+        updatedAt: FRESH,
+        nowIso: NOW,
+      }),
+      "claimable"
+    );
+    assert.equal(
+      decideRecurringPaymentUpdateTransition({
         status: "active",
         updatedAt: FRESH,
         nowIso: NOW,
