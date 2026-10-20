@@ -56,6 +56,7 @@ import {
   type ErrorCode,
   internalError,
   isErrorCode,
+  missingAction,
   notFound,
   solanaRpcError,
   transactionFailed,
@@ -995,7 +996,7 @@ function readableTransferTypes(
   );
   if (unreadable) {
     const action = TRANSFER_TYPE_READ_ACTIONS[unreadable];
-    throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
+    throw missingAction(action);
   }
   return candidates.filter((type) => callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type]));
 }

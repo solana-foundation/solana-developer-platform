@@ -13,11 +13,11 @@ import { getDb } from "@/db/client";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
-  AppError,
   badRequest,
   badRequestParams,
   badRequestQuery,
   internalError,
+  missingAction,
   notFound,
 } from "@/lib/errors";
 import {
@@ -253,11 +253,7 @@ export const updateAssetProfile = async (
     compliancePolicyChanged(current.issuance_metadata, body.issuanceMetadata) &&
     !callerMayPerform(c, "issuance.enforce")
   ) {
-    throw new AppError(
-      "INSUFFICIENT_PERMISSIONS",
-      "Missing action: issuance.enforce (editing compliance policy)",
-      { action: "issuance.enforce" }
-    );
+    throw missingAction("issuance.enforce", "editing compliance policy");
   }
 
   // Resolve the effective category/type by merging the patch over the existing
