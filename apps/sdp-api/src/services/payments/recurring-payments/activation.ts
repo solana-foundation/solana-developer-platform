@@ -38,7 +38,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
+import { badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -240,25 +240,6 @@ async function recordActivationFailure(input: {
         updatedAt: input.failedAt,
       })
     );
-
-    if (input.error instanceof AppError && input.error.code === "TRANSACTION_FAILED") {
-      const shouldClearAuthorizationSignature =
-        input.stage === "authorize_subscription" || input.stage === "finalize";
-      const planCreationSignature: string | null | undefined =
-        input.stage === "create_plan" ? null : undefined;
-      const authorizationSignature: string | null | undefined = shouldClearAuthorizationSignature
-        ? null
-        : undefined;
-      const cleared = await recurringRepo.updateRecurringPaymentActivation({
-        recurringPaymentId: input.claimed.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        planCreationSignature,
-        authorizationSignature,
-        updatedAt: input.failedAt,
-      });
-      if (cleared === null) throw conflict("Recurring payment activation changed concurrently");
-    }
 
     await resetRecurringPaymentActivationUnlessAlreadyActive({
       recurringRepo,

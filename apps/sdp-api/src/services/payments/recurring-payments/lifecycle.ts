@@ -664,13 +664,18 @@ async function runRecurringPaymentLifecycle(
     }
 
     currentStage = "submit";
-    await recurringRepo.updateLifecycleAttempt({
+    const stagedAttempt = await recurringRepo.updateLifecycleAttempt({
       attemptId: attempt.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
       stage: currentStage,
+      error: null,
       updatedAt: new Date().toISOString(),
     });
+    if (stagedAttempt === null) {
+      throw conflict("Recurring payment lifecycle attempt changed concurrently");
+    }
+    attempt = stagedAttempt;
 
     const instruction =
       input.operation === "cancel"
@@ -690,18 +695,6 @@ async function runRecurringPaymentLifecycle(
                 : onChainSubscription,
           });
 
-    const stagedAttempt = await recurringRepo.updateLifecycleAttempt({
-      attemptId: attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: currentStage,
-      error: null,
-      updatedAt: new Date().toISOString(),
-    });
-    if (stagedAttempt === null) {
-      throw conflict("Recurring payment lifecycle attempt changed concurrently");
-    }
-    attempt = stagedAttempt;
     signature = await sendSubscriptionInstructions({
       movement: LIFECYCLE_MOVEMENTS[input.operation],
       env: input.env,
