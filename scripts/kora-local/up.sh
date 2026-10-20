@@ -10,11 +10,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="${KORA_LOCAL_STATE_DIR:-"${ROOT_DIR}/.secrets/kora-local"}"
-# One test-only fee payer per machine, shared by every worktree and both clusters,
-# so funding it on devnet once lasts. Never the deployed KMS payer: a fork
-# transaction can carry a real mainnet blockhash and replay there.
-SIGNER_CACHE_FILE="${XDG_CONFIG_HOME:-"${HOME}/.config"}/sdp/kora-local-signer.env"
-MAINNET_STATE_DIR="${STATE_DIR}/mainnet"
+# Machine-wide state every worktree shares, like the Kora containers themselves:
+# one test-only fee payer for both clusters, so funding it on devnet once lasts (never
+# the deployed KMS payer: a fork transaction can carry a real mainnet blockhash and
+# replay there), and the one Surfpool fork the mainnet Kora runs against.
+MACHINE_DIR="${XDG_CONFIG_HOME:-"${HOME}/.config"}/sdp"
+SIGNER_CACHE_FILE="${MACHINE_DIR}/kora-local-signer.env"
+MAINNET_STATE_DIR="${MACHINE_DIR}/kora-mainnet"
 API_ENV_FILE="${STATE_DIR}/api.env"
 
 # Mainnet keeps the harness default (18080) so its Linux Docker-to-Surfpool
@@ -33,15 +35,20 @@ unset KORA_PORT RPC_URL KORA_RPC_URL KORA_SURFPOOL_KORA_RPC_URL
 env_value() { sed -n "/^$2=/{s///p;q;}" "$1" | tr -d "'\""; }
 
 command -v docker >/dev/null 2>&1 || { echo "docker is required for local Kora." >&2; exit 1; }
-mkdir -p "${STATE_DIR}"
-chmod 700 "${STATE_DIR}"
+mkdir -p "${STATE_DIR}" "${MACHINE_DIR}"
+chmod 700 "${STATE_DIR}" "${MACHINE_DIR}"
 
 # --- devnet -----------------------------------------------------------------
+# Published with a hard link, which fails when the file exists: two first runs racing
+# both read whichever key landed, and a reader never sees a half-written file.
 if [ ! -f "${SIGNER_CACHE_FILE}" ]; then
   echo "Generating the local Kora fee payer at ${SIGNER_CACHE_FILE}."
-  mkdir -p "$(dirname "${SIGNER_CACHE_FILE}")"
-  chmod 700 "$(dirname "${SIGNER_CACHE_FILE}")"
-  (umask 077 && echo "SIGNER_PRIVATE_KEY=$(pnpm --silent --filter @sdp/api keygen:local --quiet)" >"${SIGNER_CACHE_FILE}")
+  new_signer="$(pnpm --silent --filter @sdp/api keygen:local --quiet)"
+  [ -n "${new_signer}" ] || { echo "keygen:local printed no key." >&2; exit 1; }
+  signer_tmp="$(mktemp "${SIGNER_CACHE_FILE}.XXXXXX")"
+  echo "SIGNER_PRIVATE_KEY=${new_signer}" >"${signer_tmp}"
+  ln "${signer_tmp}" "${SIGNER_CACHE_FILE}" 2>/dev/null || true
+  rm -f "${signer_tmp}"
 fi
 signer="$(env_value "${SIGNER_CACHE_FILE}" SIGNER_PRIVATE_KEY)"
 [ -n "${signer}" ] || { echo "${SIGNER_CACHE_FILE} has no SIGNER_PRIVATE_KEY; delete it to generate a new fee payer." >&2; exit 1; }

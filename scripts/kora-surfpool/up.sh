@@ -210,12 +210,16 @@ start_embedded_surfpool() {
 
   echo "Starting embedded Surfpool RPC."
   rm -f "${SURFPOOL_INFO_FILE}"
+  # Its own process group, so Ctrl-C in the terminal that started it leaves the fork to
+  # whoever else shares it; down.sh stops the whole group through the pid file.
+  set -m
   (
     cd "${ROOT_DIR}/packages/sdp-api-integration"
     export SURFPOOL_INFO_FILE
     exec node scripts/kora-surfpool-surfnet.mjs
   ) >"${SURFPOOL_LOG}" 2>&1 &
   echo "$!" >"${SURFPOOL_PID_FILE}"
+  set +m
   wait_for_surfpool_info "${KORA_SURFPOOL_STARTUP_TIMEOUT_SECONDS}"
 }
 
