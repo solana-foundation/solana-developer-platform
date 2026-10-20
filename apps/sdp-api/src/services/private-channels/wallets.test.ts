@@ -240,21 +240,24 @@ describe("verifyPrivateChannelWallet", () => {
   );
   // The key changed after authentication: the custody signer reads the key's
   // row each time it signs (HOO-2099), so nothing is signed or verified.
+  // A missing action refuses as the route's own does; a dead key is FORBIDDEN.
   it.each([
     [
       "loses private_channels.execute",
       "UPDATE api_keys SET grants = '{private_channels.read}' WHERE id = ?",
+      "INSUFFICIENT_PERMISSIONS",
     ],
     [
       "holds only unknown grants",
       "UPDATE api_keys SET grants = '{payments:write,private_channels.everything}' WHERE id = ?",
+      "INSUFFICIENT_PERMISSIONS",
     ],
-    ["is revoked", "UPDATE api_keys SET status = 'revoked' WHERE id = ?"],
-  ])("refuses at signing a key that %s after authentication", async (_change, sql) => {
+    ["is revoked", "UPDATE api_keys SET status = 'revoked' WHERE id = ?", "FORBIDDEN"],
+  ])("refuses at signing a key that %s after authentication", async (_change, sql, code) => {
     await getDb(env).prepare(sql).bind(keyAuth.apiKeyId).run();
     await expect(
       verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID)
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    ).rejects.toMatchObject({ code });
     expect(signMessages).not.toHaveBeenCalled();
     expect(client.verifyWallet).not.toHaveBeenCalled();
     expect(verifiedRepo.upsert).not.toHaveBeenCalled();
