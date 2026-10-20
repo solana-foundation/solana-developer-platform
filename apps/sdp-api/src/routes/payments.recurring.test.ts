@@ -71,7 +71,6 @@ import {
   seedCounterparty,
   seedProductionPrivyWallet,
   sendTransactionMock,
-  sendTransactionPreflightError,
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
@@ -97,6 +96,7 @@ import {
   testSignature,
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
+import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
@@ -5294,6 +5294,7 @@ describe("Payments routes — recurring", () => {
     });
 
     it("resumes a PATCH that crashed after its claim when the same key retries it after the stale timeout", async () => {
+      mockDistinctRecentBlockhashes();
       const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
       const key = crypto.randomUUID();
       const metadataUri = "https://example.com/recurring/resumed.json";
@@ -6585,6 +6586,7 @@ describe("Payments routes — recurring", () => {
       });
 
       it("sends a cancel the chain does not show", async () => {
+        mockDistinctRecentBlockhashes();
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
         expect(

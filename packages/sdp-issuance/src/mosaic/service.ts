@@ -12,15 +12,14 @@
  * - Decimal-aware amount conversion for minting
  */
 
-import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import {
   type ConfirmTransactionOptions,
   confirmTransaction,
   createRpcForSdk,
-  sendTransaction,
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -160,7 +159,7 @@ export async function deriveAblListAddress(authority: Address, mint: Address): P
 export class MosaicService {
   private env: MosaicIssuanceEnv;
   private signer: TransactionSigner;
-  private feePayment?: FeePaymentPort;
+  private feePayment?: SponsoredSubmitter;
   private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
   private transactionFailedError: (message: string) => Error;
   private invalidArgumentError: (message: string) => Error;
@@ -168,7 +167,7 @@ export class MosaicService {
   constructor(
     env: MosaicIssuanceEnv,
     signer: TransactionSigner,
-    feePayment?: FeePaymentPort,
+    feePayment?: SponsoredSubmitter,
     options?: MosaicServiceOptions
   ) {
     this.env = env;
@@ -1217,7 +1216,11 @@ export class MosaicService {
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
 
       await onBeforeSubmit?.();
-      const signature = await sendTransaction(this.rpc, await feePayment.signAsFeePayer(txBytes));
+      const signature = await feePayment.submitSponsored({
+        transaction: txBytes,
+        lastValidBlockHeight: fullTx.lifetimeConstraint.lastValidBlockHeight,
+        rpc: this.rpc,
+      });
       return this.confirmSubmitted(signature);
     }
 

@@ -554,11 +554,8 @@ const signingSinkInventory: Record<string, string[]> = {
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/transfer.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/withdraw.ts": ["signTransactionMessageWithSigners"],
-  "packages/sdp-issuance/src/mosaic/service.ts": [
-    "signAsFeePayer",
-    "signTransactionMessageWithSigners",
-  ],
-  "packages/sdp-solana/src/token-2022.ts": ["signAsFeePayer", "signTransactionMessageWithSigners"],
+  "packages/sdp-issuance/src/mosaic/service.ts": ["signTransactionMessageWithSigners"],
+  "packages/sdp-solana/src/token-2022.ts": ["signTransactionMessageWithSigners"],
 };
 
 const valueMovingSourceRoots = [

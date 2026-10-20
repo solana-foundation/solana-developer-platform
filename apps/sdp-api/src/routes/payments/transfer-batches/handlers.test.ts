@@ -39,7 +39,6 @@ import {
   MAINNET_USDC_MINT,
   seedProjectPrivyWallet,
   sendTransactionMock,
-  sendTransactionPreflightError,
   sponsoredNetworkFeeMock,
   TEST_SPONSORED_NETWORK_FEE_LAMPORTS,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -47,6 +46,7 @@ import {
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
+import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";

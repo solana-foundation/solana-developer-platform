@@ -22,7 +22,6 @@ import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
   sendTransactionMock,
-  sendTransactionPreflightError,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PROJECT,
@@ -37,6 +36,7 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — signed submission", () => {

@@ -739,9 +739,6 @@ importers:
 
   packages/sdp-issuance:
     dependencies:
-      '@sdp/fee-payment':
-        specifier: workspace:*
-        version: link:../sdp-fee-payment
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc

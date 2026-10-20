@@ -8,8 +8,8 @@ import {
   confirmTransaction,
   createRpcForSdk,
   type SimulationResult,
+  type SolanaRpc,
   type SolanaRpcSdkBridge,
-  sendTransaction,
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
@@ -46,18 +46,17 @@ type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 export type Token2022Env = RpcEnv;
 
 /**
- * Structural port for gasless fee payment sponsorship.
- *
- * Mirrors the API app's `FeePaymentPort` (services/ports) so app adapters
- * remain assignable without the package depending on app code.
+ * The fee sponsor the API hands issuance: the fee-payer address a transaction names, and the
+ * API's owned sponsored submission, which signs, admits and sends a custody-signed transaction on
+ * the given RPC and releases its budget when the send is provably refused.
  */
-export interface FeePaymentPort {
-  /** Unique identifier for this fee payment provider */
-  readonly providerId: string;
-  /** Get the platform's fee payer address. */
+export interface SponsoredSubmitter {
   getFeePayer(): Promise<Address>;
-  /** Sign a transaction with the fee payer key without sending. */
-  signAsFeePayer(transaction: Uint8Array): Promise<Uint8Array>;
+  submitSponsored(input: {
+    transaction: Uint8Array;
+    lastValidBlockHeight: bigint;
+    rpc: SolanaRpc;
+  }): Promise<Signature>;
 }
 
 export interface PreparedTransaction {
@@ -94,9 +93,9 @@ export interface BurnResult {
 export class Token2022Service {
   private env: Token2022Env;
   private signer: TransactionSigner;
-  private feePayment?: FeePaymentPort;
+  private feePayment?: SponsoredSubmitter;
 
-  constructor(env: Token2022Env, signer: TransactionSigner, feePayment?: FeePaymentPort) {
+  constructor(env: Token2022Env, signer: TransactionSigner, feePayment?: SponsoredSubmitter) {
     this.env = env;
     this.signer = signer;
     this.feePayment = feePayment;
@@ -122,7 +121,11 @@ export class Token2022Service {
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
-      const signature = await sendTransaction(rpc, await this.feePayment.signAsFeePayer(txBytes));
+      const signature = await this.feePayment.submitSponsored({
+        transaction: txBytes,
+        lastValidBlockHeight: fullTx.lifetimeConstraint.lastValidBlockHeight,
+        rpc,
+      });
       const confirmation = await confirmTransaction(rpc, signature);
 
       if (confirmation.err) {

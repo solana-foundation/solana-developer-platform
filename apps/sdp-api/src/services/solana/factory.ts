@@ -8,11 +8,8 @@
 import { Token2022Service } from "@sdp/solana/token-2022";
 import type { MovementId } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
-import {
-  createSponsorshipFeePayment,
-  isKoraSponsorshipConfigured,
-  type SponsorshipScope,
-} from "@/services/sponsorship.service";
+import { createIssuanceSponsor } from "@/services/issuance/sponsored-submitter";
+import { isKoraSponsorshipConfigured, type SponsorshipScope } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -35,7 +32,7 @@ export function createToken2022Service(
   sponsorship: { scope: SponsorshipScope; movement: MovementId }
 ): Token2022Service {
   const feePayment = isKoraSponsorshipConfigured(env)
-    ? createSponsorshipFeePayment(env, sponsorship.scope, sponsorship.movement)
+    ? createIssuanceSponsor(env, sponsorship.scope, sponsorship.movement)
     : undefined;
 
   return new Token2022Service(env, signer, feePayment);

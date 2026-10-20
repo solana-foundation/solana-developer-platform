@@ -13,9 +13,6 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
   type Signature,
-  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-  SolanaError,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
@@ -127,31 +124,6 @@ export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
 } satisfies SponsorshipProviderConfiguration;
-
-export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
-  const cause =
-    customProgramErrorCode === undefined
-      ? undefined
-      : new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
-          code: customProgramErrorCode,
-          index: 0,
-        });
-  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
-    accounts: null,
-    fee: null,
-    loadedAccountsDataSize: null,
-    loadedAddresses: null,
-    logs: null,
-    postBalances: null,
-    postTokenBalances: null,
-    preBalances: null,
-    preTokenBalances: null,
-    replacementBlockhash: null,
-    returnData: null,
-    unitsConsumed: null,
-    ...(cause === undefined ? {} : { cause }),
-  });
-}
 
 const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,

@@ -25,7 +25,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/hastra` | Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | `@sdp/types` |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` |
-| `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/fee-payment`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/ondo` | Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
@@ -57,7 +57,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/hastra` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/helius-rings` -> `@sdp/types`
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
-- `@sdp/issuance` -> `@sdp/fee-payment`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/issuance` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/jupiter-lend` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/ondo` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
