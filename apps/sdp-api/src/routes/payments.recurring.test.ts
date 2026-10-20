@@ -97,10 +97,12 @@ import {
   createRecurringPaymentFixture,
   DEFAULT_RECURRING_CHAIN,
   DEFAULT_RECURRING_FIXTURE,
+  delegationPulledOnce,
   installRecurringExecutionHooks,
   parseCollectionResponse,
   parseRecurringResponse,
   poolSentSignatures,
+  RECURRING_FIXTURE_PRE_IMAGE,
   RECURRING_HEADERS,
   type RecordedPlanParties,
   type RecurringChainView,
@@ -108,6 +110,7 @@ import {
   seedRecurringCollectionJournal,
   setRecurringCollectionDue,
   testSignature,
+  unpulledDelegation,
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
@@ -1971,7 +1974,10 @@ describe("Payments routes — recurring", () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
     // The re-read sees the delegation uncanceled while the send can still land.
-    recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
+    recurringExecution.showChain({
+      ...DEFAULT_RECURRING_CHAIN,
+      delegation: () => unpulledDelegation(0n),
+    });
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
@@ -2125,7 +2131,7 @@ describe("Payments routes — recurring", () => {
       // The submitted operation landed: a cancel sets the expiry, a resume clears it.
       recurringExecution.showChain({
         ...DEFAULT_RECURRING_CHAIN,
-        delegation: () => (operation === "cancel" ? 1_800_000_000n : 0n),
+        delegation: () => unpulledDelegation(operation === "cancel" ? 1_800_000_000n : 0n),
       });
       confirmTransactionMock.mockClear();
 
@@ -2293,7 +2299,10 @@ describe("Payments routes — recurring", () => {
         sourceAddress: sourceSigner.address,
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
         signature: collectionSignature,
+        lastValidBlockHeight: "1000",
+        submissionStartedAt: now,
       },
+      preImage: RECURRING_FIXTURE_PRE_IMAGE,
     });
 
     const cancelRes = await app.request(
@@ -2571,7 +2580,7 @@ describe("Payments routes — recurring", () => {
     expect(transfers?.count).toBe(0);
   });
 
-  it("keeps ambiguous collections processing and recovers them", async () => {
+  it("keeps an ambiguous collection processing and finalizes it once the delegation shows the pull", async () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
@@ -2626,6 +2635,10 @@ describe("Payments routes — recurring", () => {
     // Another key never recovers this request's attempt (it would leave that key
     // free to pull the next period); the cron's unkeyed claim can be adopted.
     await clearCollectionAttemptKeys(activated.subscriptionId);
+    recurringExecution.showChain({
+      ...DEFAULT_RECURRING_CHAIN,
+      delegation: () => delegationPulledOnce(0n),
+    });
     const recoveredRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,
       { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -2974,7 +2987,7 @@ describe("Payments routes — recurring", () => {
       (status) => !isCollectableRecurringPaymentStatus(status)
     )
   )(
-    "finalizes recovered recurring payment collections while recurring payment is %s",
+    "answers 409 without a write while a landed pull is not indexed, then finalizes it, while the recurring payment is %s",
     async (recurringPaymentStatus) => {
       const sourceSigner = recurringExecution.sourceSigner();
       const submittedSignature = signature(
@@ -3044,7 +3057,14 @@ describe("Payments routes — recurring", () => {
           sourceAddress: sourceSigner.address,
           destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
           signature: submittedSignature,
+          lastValidBlockHeight: "1000",
+          submissionStartedAt: staleAt,
         },
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        delegation: () => delegationPulledOnce(0n),
       });
 
       getTransactionMock.mockResolvedValueOnce(null);
@@ -3053,22 +3073,23 @@ describe("Payments routes — recurring", () => {
         { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
         env
       );
-      expect(uncertainRes.status).toBe(502);
-      const uncertainAttempt = await getDb(env)
-        .prepare(
-          `SELECT status, signature, updated_at
-           FROM payment_subscription_collection_attempts
-          WHERE id = ?`
-        )
-        .bind(attemptId)
-        .first<{ status: string; signature: string | null; updated_at: string }>();
+      expect(uncertainRes.status).toBe(409);
+      expect(errorResponseSchema.parse(await uncertainRes.json()).error.code).toBe("CONFLICT");
+      const uncertainAttempt = required(
+        await getDb(env)
+          .prepare(
+            `SELECT status, signature, updated_at
+               FROM payment_subscription_collection_attempts
+              WHERE id = ?`
+          )
+          .bind(attemptId)
+          .first<{ status: string; signature: string | null; updated_at: string }>()
+      );
       expect(uncertainAttempt).toMatchObject({
         status: "processing",
         signature: submittedSignature,
       });
-      expect(new Date(uncertainAttempt?.updated_at ?? 0).getTime()).toBeGreaterThan(
-        new Date(staleAt).getTime()
-      );
+      expect(new Date(uncertainAttempt.updated_at).getTime()).toBe(new Date(staleAt).getTime());
 
       // The first request adopted the journal's attempt; another key never
       // recovers it, so the attempt goes back to the cron's unkeyed claim.
@@ -3307,7 +3328,7 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(2);
   });
 
-  it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
+  it("fails a saved pull the chain shows expired without landing and collects the period afresh", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const submittedSignature = signature(
       "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
@@ -3340,14 +3361,16 @@ describe("Payments routes — recurring", () => {
         sourceAddress: sourceSigner.address,
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
         signature: submittedSignature,
+        lastValidBlockHeight: "1000",
+        submissionStartedAt: now,
       },
+      preImage: RECURRING_FIXTURE_PRE_IMAGE,
     });
-    confirmTransactionMock.mockImplementation(async (_rpc, signature) => ({
-      signature,
-      slot: 101n,
-      confirmationStatus: "confirmed",
-      err: signature === submittedSignature ? { InstructionError: [0, "Custom"] } : null,
-    }));
+    recurringExecution.showChain({
+      ...DEFAULT_RECURRING_CHAIN,
+      absoluteSlot: 2_900,
+      blockHeight: 1_001,
+    });
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,
@@ -3366,17 +3389,23 @@ describe("Payments routes — recurring", () => {
       .bind(attemptId)
       .first<{ status: string; error: string | null; metadata: { retryAfterAt?: string } }>();
     expect(failedAttempt?.status).toBe("failed");
-    expect(failedAttempt?.error).toContain("collection failed on-chain");
+    expect(failedAttempt?.error).toBe(PUBLIC_INTERNAL_ERROR_MESSAGE);
     expect(failedAttempt?.metadata.retryAfterAt).toBeTruthy();
     const failedTransfer = await getDb(env)
       .prepare("SELECT status, error, signature FROM payment_transfers WHERE id = ?")
       .bind(transferId)
       .first<{ status: string; error: string | null; signature: string | null }>();
-    expect(failedTransfer).toMatchObject({
+    expect(failedTransfer).toEqual({
       status: "failed",
+      error: PUBLIC_INTERNAL_ERROR_MESSAGE,
       signature: submittedSignature,
     });
-    expect(failedTransfer?.error).toContain("collection failed on-chain");
+    expect(confirmTransactionMock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      submittedSignature,
+      expect.anything()
+    );
+    expect(getTransactionMock).not.toHaveBeenCalledWith(expect.anything(), submittedSignature);
     expect(collectBody.data.collectionAttempt).toMatchObject({
       status: "confirmed",
     });
@@ -3390,7 +3419,7 @@ describe("Payments routes — recurring", () => {
   });
 
   it.each(SUCCESSFUL_PAYMENT_TRANSFER_STATUSES)(
-    "recovers %s collection transfers without reopening the due period",
+    "finalizes a landed pull whose transfer is already %s from the delegation, never polling its signature",
     async (transferStatus) => {
       const sourceSigner = recurringExecution.sourceSigner();
       const submittedSignature = signature(
@@ -3424,15 +3453,19 @@ describe("Payments routes — recurring", () => {
           sourceAddress: sourceSigner.address,
           destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
           signature: submittedSignature,
+          lastValidBlockHeight: "1000",
+          submissionStartedAt: now,
         },
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
       });
       await getDb(env)
         .prepare("UPDATE payment_transfers SET status = ? WHERE id = ?")
         .bind(transferStatus, transferId)
         .run();
-      confirmTransactionMock.mockRejectedValue(
-        new Error("Transaction history expired from the status cache")
-      );
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        delegation: () => delegationPulledOnce(0n),
+      });
       const collectRes = await app.request(
         `/v1/payments/recurring-payments/${activated.id}/collect`,
         { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -3457,10 +3490,10 @@ describe("Payments routes — recurring", () => {
       expect(new Date(collectBody.data.recurringPayment.nextCollectionDueAt).getTime()).toBe(
         new Date(dueAt).getTime() + 24 * 60 * 60 * 1000
       );
-      expect(confirmTransactionMock).toHaveBeenCalledWith(
+      expect(confirmTransactionMock).not.toHaveBeenCalledWith(
         expect.anything(),
         submittedSignature,
-        expect.objectContaining({ commitment: "confirmed" })
+        expect.anything()
       );
       const attempt = await getDb(env)
         .prepare("SELECT status, error FROM payment_subscription_collection_attempts WHERE id = ?")
@@ -3868,7 +3901,7 @@ describe("Payments routes — recurring", () => {
         // The submitted operation landed: a cancel sets the expiry, a resume clears it.
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
-          delegation: () => (operation === "cancel" ? 1_800_000_000n : 0n),
+          delegation: () => unpulledDelegation(operation === "cancel" ? 1_800_000_000n : 0n),
         });
         await deleteTestOrganization();
 
@@ -5785,6 +5818,10 @@ describe("Payments routes — recurring", () => {
         .bind(activated.subscriptionId)
         .run();
 
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        delegation: () => delegationPulledOnce(0n),
+      });
       const key = crypto.randomUUID();
       const collect = () =>
         app.request(
@@ -6608,7 +6645,7 @@ describe("Payments routes — recurring", () => {
         );
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
-          delegation: () => 1_800_000_000n,
+          delegation: () => unpulledDelegation(1_800_000_000n),
         });
         const sent = sends();
 
@@ -6854,7 +6891,10 @@ describe("Payments routes — recurring", () => {
             subscriptionsProgram.SUBSCRIPTIONS_ERROR__SUBSCRIPTION_NOT_CANCELLED
           )
         );
-        recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          delegation: () => unpulledDelegation(0n),
+        });
         const sent = sends();
 
         const resume = await lifecycle("resume");
@@ -6904,7 +6944,7 @@ describe("Payments routes — recurring", () => {
         // The chain shows the old subscription canceled.
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
-          delegation: () => 1_800_000_000n,
+          delegation: () => unpulledDelegation(1_800_000_000n),
         });
         const sent = sends();
 
@@ -6973,8 +7013,10 @@ describe("Payments routes — recurring", () => {
           ...DEFAULT_RECURRING_CHAIN,
           absoluteSlot: tip.absoluteSlot,
           blockHeight: tip.blockHeight,
-          delegation: (subscriptionPda) =>
-            subscriptionPda === oldSubscriptionPda ? 0n : otherExpiresAtTs,
+          delegation: (subscriptionPda) => {
+            if (subscriptionPda === oldSubscriptionPda) return unpulledDelegation(0n);
+            return otherExpiresAtTs === null ? null : unpulledDelegation(otherExpiresAtTs);
+          },
         });
       }
 
@@ -7570,7 +7612,10 @@ describe("Payments routes — recurring", () => {
           recurringPaymentId: activated.id,
           oldSubscriptionPda: required(activated.subscriptionPda),
         });
-        await showSetupApprovalRevoked({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
+        await showSetupApprovalRevoked({
+          ...DEFAULT_RECURRING_CHAIN,
+          delegation: () => unpulledDelegation(0n),
+        });
         const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
         onTestFinished(() => warnLog.mockRestore());
         const sent = sends();
@@ -7630,7 +7675,8 @@ describe("Payments routes — recurring", () => {
         });
         await showSetupApprovalRevoked({
           ...DEFAULT_RECURRING_CHAIN,
-          delegation: (subscriptionPda) => (subscriptionPda === oldSubscriptionPda ? 0n : null),
+          delegation: (subscriptionPda) =>
+            subscriptionPda === oldSubscriptionPda ? unpulledDelegation(0n) : null,
         });
         const sent = sends();
 
@@ -8015,7 +8061,7 @@ describe("Payments routes — recurring", () => {
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
           delegation: (subscriptionPda) =>
-            subscriptionPda === oldSubscriptionPda ? 1_800_000_000n : 0n,
+            unpulledDelegation(subscriptionPda === oldSubscriptionPda ? 1_800_000_000n : 0n),
         });
         const sent = sends();
 
@@ -8234,7 +8280,7 @@ describe("Payments routes — recurring", () => {
             createdAt: 1_770_000_000n,
             metadataUri: "",
           }),
-          delegation: () => 0n,
+          delegation: () => unpulledDelegation(0n),
         });
       }
 
@@ -8684,7 +8730,7 @@ describe("Payments routes — recurring", () => {
           blockHeight: 1_001,
           delegation: () => {
             delegationReads += 1;
-            return delegationReads === 1 ? null : 1_800_000_000n;
+            return delegationReads === 1 ? null : unpulledDelegation(1_800_000_000n);
           },
         });
         const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
@@ -8898,7 +8944,10 @@ describe("Payments routes — recurring", () => {
 
       it("finishes a resumed activation whose setup reads pending with no expiry once the delegation shows, sending nothing", async () => {
         const { created, planSignature } = await leaveSetupSavedWithoutExpiry();
-        await showSetupApprovalRevoked({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
+        await showSetupApprovalRevoked({
+          ...DEFAULT_RECURRING_CHAIN,
+          delegation: () => unpulledDelegation(0n),
+        });
         const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
         onTestFinished(() => warnLog.mockRestore());
         const sent = sends();
@@ -9028,7 +9077,7 @@ describe("Payments routes — recurring", () => {
           ...DEFAULT_RECURRING_CHAIN,
           blockHeight: SAVED_LIFECYCLE_SEND_EXPIRY + 1,
           absoluteSlot: 2_900,
-          delegation: () => 0n,
+          delegation: () => unpulledDelegation(0n),
         });
         confirmTransactionMock.mockClear();
         const sent = sends();
@@ -9070,7 +9119,7 @@ describe("Payments routes — recurring", () => {
           ...DEFAULT_RECURRING_CHAIN,
           blockHeight: SAVED_LIFECYCLE_SEND_EXPIRY,
           absoluteSlot: 2_900,
-          delegation: () => 0n,
+          delegation: () => unpulledDelegation(0n),
         });
         const sent = sends();
 
@@ -9105,7 +9154,7 @@ describe("Payments routes — recurring", () => {
           ...DEFAULT_RECURRING_CHAIN,
           blockHeight: SAVED_LIFECYCLE_SEND_EXPIRY,
           absoluteSlot: 2_900,
-          delegation: () => 1_800_000_000n,
+          delegation: () => unpulledDelegation(1_800_000_000n),
         });
         const sent = sends();
 

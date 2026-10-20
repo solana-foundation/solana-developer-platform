@@ -9,7 +9,7 @@ import {
   SUBSCRIPTIONS_PROGRAM_ADDRESS,
   ZERO_ADDRESS,
 } from "@solana/subscriptions";
-import { AccountState, getTokenEncoder } from "@solana-program/token-2022";
+import { AccountState, getMintEncoder, getTokenEncoder } from "@solana-program/token-2022";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import type { StubEncodedAccount } from "@/test/helpers/cluster-rpc";
 
@@ -69,13 +69,21 @@ export function planAccount(plan: StubPlan): StubEncodedAccount {
   };
 }
 
+/** What a stubbed delegation shows: its expiry and the period the program last pulled in. */
+export interface StubDelegation {
+  /** 0 while active, the period's end once canceled. */
+  expiresAtTs: bigint;
+  currentPeriodStartTs: bigint;
+  amountPulledInPeriod: bigint;
+}
+
 /**
  * A subscription delegation as the subscriptions program stores it.
  *
- * @param expiresAtTs - The delegation's expiry: 0 while active, the period's end once canceled.
+ * @param delegation - The delegation's expiry, current period start and amount pulled in it.
  * @returns The account, owned by the subscriptions program.
  */
-export function subscriptionDelegationAccount(expiresAtTs: bigint): StubEncodedAccount {
+export function subscriptionDelegationAccount(delegation: StubDelegation): StubEncodedAccount {
   return {
     owner: SUBSCRIPTIONS_PROGRAM_ADDRESS,
     data: new Uint8Array(
@@ -90,9 +98,9 @@ export function subscriptionDelegationAccount(expiresAtTs: bigint): StubEncodedA
           initId: 1n,
         },
         terms: { ...PLAN_TERMS, createdAt: 1_770_000_000n },
-        amountPulledInPeriod: 0n,
-        currentPeriodStartTs: 1_770_000_000n,
-        expiresAtTs,
+        amountPulledInPeriod: delegation.amountPulledInPeriod,
+        currentPeriodStartTs: delegation.currentPeriodStartTs,
+        expiresAtTs: delegation.expiresAtTs,
       })
     ),
   };
@@ -154,6 +162,34 @@ export function tokenAccount(input: {
         isNative: null,
         delegatedAmount: input.delegate === null ? 0n : 100_000_000n,
         closeAuthority: null,
+        extensions: null,
+      })
+    ),
+  };
+}
+
+/**
+ * A mint with no extensions, encoded with the token-2022 layout (which the legacy token program
+ * shares for the base mint).
+ *
+ * @param input - The mint's fields.
+ * @param input.programAddress - The token program owning the mint.
+ * @param input.decimals - The mint's decimals.
+ * @returns The account, owned by `programAddress`.
+ */
+export function tokenMintAccount(input: {
+  programAddress: Address;
+  decimals: number;
+}): StubEncodedAccount {
+  return {
+    owner: input.programAddress,
+    data: new Uint8Array(
+      getMintEncoder().encode({
+        mintAuthority: DELEGATOR,
+        supply: 1_000_000_000_000n,
+        decimals: input.decimals,
+        isInitialized: true,
+        freezeAuthority: null,
         extensions: null,
       })
     ),

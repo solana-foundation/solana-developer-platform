@@ -17,7 +17,7 @@ import {
   multipleAccountsResult,
   type StubEncodedAccount,
 } from "@/test/helpers/cluster-rpc";
-import { testSignature } from "@/test/helpers/recurring-payments";
+import { testSignature, unpulledDelegation } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import {
   planAccount,
@@ -241,7 +241,11 @@ describe("readRecurringPaymentStep", () => {
   // Only revoking a delegation after its cancel landed closes it (C8).
   it.each([
     { delegation: "closed", account: null, state: "landed" },
-    { delegation: "still active", account: subscriptionDelegationAccount(0n), state: "unsent" },
+    {
+      delegation: "still active",
+      account: subscriptionDelegationAccount(unpulledDelegation(0n)),
+      state: "unsent",
+    },
   ] as const)(
     "reads a cancel as $state when the delegation is $delegation",
     async ({ account, state }) => {

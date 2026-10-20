@@ -7,9 +7,11 @@ import {
   type Signature,
   signature,
 } from "@solana/kit";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
+import type { CollectionAttemptDelegationPreImage } from "@/db/repositories/payment-subscriptions.repository";
 import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -43,9 +45,11 @@ import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import {
   planAccount,
+  type StubDelegation,
   type StubPlan,
   soleDestination,
   subscriptionDelegationAccount,
+  tokenMintAccount,
 } from "@/test/helpers/subscription-accounts";
 import { withIdempotencyKeys } from "./idempotency-keys";
 
@@ -66,35 +70,80 @@ export function testSignature(seed: number): Signature {
   return signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
 }
 
+/** The decimals every fixture token's mint reports, to `getTokenSupply` and in its account. */
+export const RECURRING_FIXTURE_TOKEN_DECIMALS = 6;
+
+/** `DEFAULT_RECURRING_FIXTURE.amount` in base units at the fixture decimals. */
+export const RECURRING_FIXTURE_PULL_BASE_UNITS = 25_000_000n;
+
+/**
+ * The delegation's period as a fixture activation leaves it, which is the pre-image a fresh
+ * collection of it saves: the opening period, with nothing pulled.
+ */
+export const RECURRING_FIXTURE_PRE_IMAGE = {
+  periodStartTs: 1_770_000_000n,
+  amountPulled: 0n,
+} as const satisfies CollectionAttemptDelegationPreImage;
+
+/**
+ * The fixture delegation in its opening period with nothing pulled.
+ *
+ * @param expiresAtTs - The delegation's expiry: 0 while active, the period's end once canceled.
+ * @returns The delegation.
+ */
+export function unpulledDelegation(expiresAtTs: bigint): StubDelegation {
+  return {
+    expiresAtTs,
+    currentPeriodStartTs: RECURRING_FIXTURE_PRE_IMAGE.periodStartTs,
+    amountPulledInPeriod: RECURRING_FIXTURE_PRE_IMAGE.amountPulled,
+  };
+}
+
+/**
+ * The fixture delegation once the fixture amount was pulled in its opening period: a collection
+ * saved against `RECURRING_FIXTURE_PRE_IMAGE` landed.
+ *
+ * @param expiresAtTs - The delegation's expiry: 0 while active, the period's end once canceled.
+ * @returns The delegation.
+ */
+export function delegationPulledOnce(expiresAtTs: bigint): StubDelegation {
+  return {
+    expiresAtTs,
+    currentPeriodStartTs: RECURRING_FIXTURE_PRE_IMAGE.periodStartTs,
+    amountPulledInPeriod:
+      RECURRING_FIXTURE_PRE_IMAGE.amountPulled + RECURRING_FIXTURE_PULL_BASE_UNITS,
+  };
+}
+
 /** A recorded plan's parties as its row names them: its owner and its one destination. */
 export type RecordedPlanParties = Pick<StubPlan, "owner" | "destinations">;
 
 /**
  * The chain a resumed recurring step reads at `confirmed`: the tip `getEpochInfo` reports, the
- * plan or delegation at each address SDP recorded as one, and any other account at an address it
- * never recorded.
+ * plan or delegation at each address SDP recorded as one, every schedule's token mint at the
+ * fixture decimals, and any other account at an address it never recorded.
  */
 export interface RecurringChainView {
   absoluteSlot: number;
   blockHeight: number;
   /** The plan at a recorded plan address, given the parties its row names at the time of the read. */
   plan: (planPda: string, recorded: RecordedPlanParties) => StubPlan | null;
-  /** A delegation's `expiresAtTs`, or null when it does not exist. */
-  delegation: (subscriptionPda: string) => bigint | null;
-  /** The account at an address recorded as neither, or null when it does not exist. */
+  /** The delegation at `subscriptionPda`, or null when it does not exist. */
+  delegation: (subscriptionPda: string) => StubDelegation | null;
+  /** The account at an address recorded as none of them, or null when it does not exist. */
   unrecorded: (accountAddress: string) => StubEncodedAccount | null;
 }
 
 /**
  * Every recorded plan on chain as the fixtures create it, owned by and paying the wallets its row
- * names, every recorded delegation canceled, as the codama fetch stubs answer, and no other
- * account; the tip is below the default blockhash's expiry.
+ * names, every recorded delegation canceled with nothing pulled, as the codama fetch stubs answer,
+ * and no other account; the tip is below the default blockhash's expiry.
  */
 export const DEFAULT_RECURRING_CHAIN: RecurringChainView = {
   absoluteSlot: 1_250,
   blockHeight: 940,
   plan: (_planPda, recorded) => ({ ...recorded, createdAt: 1_770_000_000n, metadataUri: "" }),
-  delegation: () => 1_800_000_000n,
+  delegation: () => unpulledDelegation(1_800_000_000n),
   unrecorded: () => null,
 };
 
@@ -102,11 +151,12 @@ export const DEFAULT_RECURRING_CHAIN: RecurringChainView = {
 type RecordedSubscriptionAccount =
   | { kind: "plan"; parties: RecordedPlanParties }
   | { kind: "delegation" }
+  | { kind: "mint" }
   | { kind: "unrecorded" };
 
 /**
  * What SDP recorded at `accountAddress`: a plan, with the parties its row names, a subscription
- * delegation, or nothing.
+ * delegation, a schedule's token mint, or nothing.
  *
  * @param accountAddress - An address a step read asked for.
  * @returns The recorded account.
@@ -131,15 +181,18 @@ async function recordedSubscriptionAccount(
       },
     };
   }
-  const delegation = required(
+  const recorded = required(
     await db
       .prepare(
-        "SELECT EXISTS (SELECT 1 FROM payment_subscriptions WHERE subscription_pda = ?) AS recorded"
+        `SELECT EXISTS (SELECT 1 FROM payment_subscriptions WHERE subscription_pda = ?) AS delegation,
+                EXISTS (SELECT 1 FROM payment_recurring_payments WHERE token = ?) AS mint`
       )
-      .bind(accountAddress)
-      .first<{ recorded: boolean }>()
+      .bind(accountAddress, accountAddress)
+      .first<{ delegation: boolean; mint: boolean }>()
   );
-  return delegation.recorded ? { kind: "delegation" } : { kind: "unrecorded" };
+  if (recorded.delegation) return { kind: "delegation" };
+  if (recorded.mint) return { kind: "mint" };
+  return { kind: "unrecorded" };
 }
 
 /**
@@ -160,9 +213,14 @@ async function recurringChainAccount(
       return plan === null ? null : planAccount(plan);
     }
     case "delegation": {
-      const expiresAtTs = view.delegation(accountAddress);
-      return expiresAtTs === null ? null : subscriptionDelegationAccount(expiresAtTs);
+      const delegation = view.delegation(accountAddress);
+      return delegation === null ? null : subscriptionDelegationAccount(delegation);
     }
+    case "mint":
+      return tokenMintAccount({
+        programAddress: TOKEN_PROGRAM_ADDRESS,
+        decimals: RECURRING_FIXTURE_TOKEN_DECIMALS,
+      });
     case "unrecorded":
       return view.unrecorded(accountAddress);
     default: {
@@ -206,7 +264,7 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+    rpc.answer("getTokenSupply", tokenSupplyResult(1, RECURRING_FIXTURE_TOKEN_DECIMALS));
     answerRecurringChain(rpc, DEFAULT_RECURRING_CHAIN);
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
@@ -363,8 +421,11 @@ export async function setRecurringCollectionDue(options: {
   ]);
 }
 
+/** The signed bytes a seeded pull saves; recovery reads the chain, never these. */
+const SEEDED_SIGNED_COLLECTION_TRANSACTION = "c2VlZGVkIHNpZ25lZCBjb2xsZWN0aW9uIHB1bGw=";
+
 type DurableCollectionJournal =
-  | { stage: "claimed"; transfer?: never }
+  | { stage: "claimed"; transfer?: never; preImage?: never }
   | {
       stage: "submitted" | "confirmed";
       transfer: {
@@ -374,7 +435,13 @@ type DurableCollectionJournal =
         sourceAddress: string;
         destinationAddress: string;
         signature: Signature;
+        /** The saved pull's last valid block height, a u64 decimal string. */
+        lastValidBlockHeight: string;
+        /** When its send started, or null when the process died between saving and sending. */
+        submissionStartedAt: string | null;
       };
+      /** The delegation read before signing, or null for an attempt signed before it was saved. */
+      preImage: CollectionAttemptDelegationPreImage | null;
     };
 
 export async function seedRecurringCollectionJournal(
@@ -399,8 +466,9 @@ export async function seedRecurringCollectionJournal(
             `INSERT INTO payment_transfers (
                id, organization_id, project_id, wallet_id, counterparty_id,
                source_address, destination_address, token, amount, memo, type,
-               direction, status, provider_data, signature, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'transfer', 'outbound', ?, ?::jsonb, ?, ?, ?)`
+               direction, status, provider_data, signature, signed_transaction,
+               last_valid_block_height, submission_started_at, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'transfer', 'outbound', ?, ?::jsonb, ?, ?, ?::numeric, ?, ?, ?)`
           )
           .bind(
             transfer.id,
@@ -419,18 +487,24 @@ export async function seedRecurringCollectionJournal(
               collectionDueAt: options.collectionDueAt,
             }),
             transfer.signature,
+            SEEDED_SIGNED_COLLECTION_TRANSACTION,
+            transfer.lastValidBlockHeight,
+            transfer.submissionStartedAt,
             options.attemptedAt,
             options.attemptedAt
           ),
       ]
     : [];
+  const preImage = options.stage === "claimed" ? null : options.preImage;
   statements.push(
     db
       .prepare(
         `INSERT INTO payment_subscription_collection_attempts
            (id, organization_id, project_id, subscription_id, transfer_id, token,
-            amount, due_at, attempted_at, status, signature, metadata, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+            amount, due_at, attempted_at, status, signature, metadata,
+            delegation_period_start_ts_before, delegation_amount_pulled_before,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::bigint, ?::numeric, ?, ?)`
       )
       .bind(
         options.attemptId,
@@ -449,6 +523,8 @@ export async function seedRecurringCollectionJournal(
           recurringPaymentId: options.recurringPaymentId,
           initiatedByKeyId: null,
         }),
+        preImage === null ? null : preImage.periodStartTs.toString(),
+        preImage === null ? null : preImage.amountPulled.toString(),
         options.attemptedAt,
         options.attemptedAt
       )
