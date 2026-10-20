@@ -65,6 +65,7 @@ import {
   conflict,
   internalError,
   PUBLIC_INTERNAL_ERROR_MESSAGE,
+  solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
 import { assertMovementAdmitted, decidePrincipal } from "@/lib/money-admission";
@@ -400,10 +401,15 @@ export interface RecurringPaymentStepEffect {
   landed: (accounts: readonly MaybeEncodedAccount[]) => boolean;
 }
 
-/** A resumed step the flow acts on now: it landed, or it was never sent. */
+/**
+ * A resumed step the flow acts on now: it landed, or it was never sent. `blockHeight` is the
+ * `confirmed` block height the read saw, for a caller that must compare it with the saved send's
+ * expiry.
+ */
 export interface ActionableRecurringPaymentStep {
   state: ActionableRecurringPaymentStepState;
   accounts: readonly MaybeEncodedAccount[];
+  blockHeight: bigint;
 }
 
 /**
@@ -492,7 +498,7 @@ export async function readRecurringPaymentStep(input: {
       return { state };
     case "landed":
     case "unsent":
-      return { state, accounts: observed.accounts };
+      return { state, accounts: observed.accounts, blockHeight: observed.blockHeight };
     default:
       return assertNever(state);
   }
@@ -508,44 +514,55 @@ export async function readRecurringPaymentStep(input: {
 async function observeRecurringPaymentStep(
   effect: RecurringPaymentStepEffect
 ): Promise<{ blockHeight: bigint; accounts: MaybeEncodedAccount[]; landed: boolean }> {
-  const { blockHeight, accounts } = await readConfirmedAccounts(effect.addresses);
+  const { blockHeight, accounts } = await readConfirmedAccounts({
+    addresses: effect.addresses,
+    minContextSlot: null,
+  });
   return { blockHeight, accounts, landed: effect.landed(accounts) };
 }
 
 /**
  * Reads accounts in two RPC calls on the cluster pool: the `confirmed` epoch info (slot S and
  * block height c), then every account in one `getMultipleAccounts` at `confirmed` from a bank at
- * slot S or later, so the accounts include every block up to c.
+ * slot S or later, so the accounts include every block up to c. A caller that knows a later slot
+ * the accounts must include (a node behind it would miss a write) raises the floor to it.
  *
- * @param addresses - The accounts to read.
+ * @param input - What to read.
+ * @param input.addresses - The accounts to read.
+ * @param input.minContextSlot - A slot the answering bank must also reach, or null for S alone.
  * @returns The `confirmed` block height and the accounts, in the order of `addresses`.
- * @throws When a read fails, the accounts come from a bank below the epoch read's slot, or the
- *   answer lists a different number of accounts.
+ * @throws AppError SOLANA_RPC_ERROR when the accounts come from a bank below the floor or the
+ *   answer lists a different number of accounts; the RPC's own error when a read fails.
  */
-export async function readConfirmedAccounts(
-  addresses: readonly Address[]
-): Promise<{ blockHeight: bigint; accounts: MaybeEncodedAccount[] }> {
+export async function readConfirmedAccounts(input: {
+  addresses: readonly Address[];
+  minContextSlot: bigint | null;
+}): Promise<{ blockHeight: bigint; accounts: MaybeEncodedAccount[] }> {
   const rpc = createClusterRpc();
   const epochInfo = await rpc.getEpochInfo({ commitment: "confirmed" }).send();
+  const slotFloor =
+    input.minContextSlot !== null && input.minContextSlot > epochInfo.absoluteSlot
+      ? input.minContextSlot
+      : epochInfo.absoluteSlot;
   const response = await rpc
-    .getMultipleAccounts(addresses, {
+    .getMultipleAccounts(input.addresses, {
       commitment: "confirmed",
-      minContextSlot: epochInfo.absoluteSlot,
+      minContextSlot: slotFloor,
       encoding: "base64",
     })
     .send();
   // The pool does not check the answering bank's slot, so it is checked here.
-  if (response.context.slot < epochInfo.absoluteSlot) {
-    throw new Error(
-      `getMultipleAccounts answered from slot ${response.context.slot}, below ${epochInfo.absoluteSlot}`
+  if (response.context.slot < slotFloor) {
+    throw solanaRpcError(
+      `getMultipleAccounts answered from slot ${response.context.slot}, below ${slotFloor}`
     );
   }
-  if (response.value.length !== addresses.length) {
-    throw new Error(
-      `getMultipleAccounts returned ${response.value.length} accounts for ${addresses.length} addresses`
+  if (response.value.length !== input.addresses.length) {
+    throw solanaRpcError(
+      `getMultipleAccounts returned ${response.value.length} accounts for ${input.addresses.length} addresses`
     );
   }
-  const accounts = addresses.map((address, index) =>
+  const accounts = input.addresses.map((address, index) =>
     parseBase64RpcAccount(address, response.value[index])
   );
   return { blockHeight: epochInfo.blockHeight, accounts };

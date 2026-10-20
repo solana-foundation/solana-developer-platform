@@ -111,15 +111,19 @@ interface VerifiedRecurringPaymentCollection {
   dueAt: string;
   destinationTokenAccount: Address;
   signature: Signature;
+  /** The slot the confirmed pull landed in; the next pull's pre-image read must reach it. */
+  slot: bigint;
   transferId: string;
 }
 
 /**
- * What verification found: the confirmed transaction is not indexed yet, or it proves the
- * expected pull.
+ * What the chain shows of a collection's signature: not indexed yet, failed on chain, without the
+ * expected pull, or proving it.
  */
 type RecurringPaymentCollectionVerification =
   | { kind: "not_indexed" }
+  | { kind: "failed_on_chain" }
+  | { kind: "instruction_mismatch" }
   | { kind: "proven"; proof: VerifiedRecurringPaymentCollection };
 
 interface RecurringPaymentCollectionResult {
@@ -337,20 +341,37 @@ function createRecurringCollectionSignedSubmissionStore(input: {
 }
 
 /**
- * Reads the subscription delegation's period start and amount pulled at `confirmed`, from a bank
- * no older than the cluster's confirmed slot, just before a pull is signed: the pre-image that
- * recovery proves the pull against.
+ * Reads the subscription delegation's period start and amount pulled at `confirmed` before a pull
+ * is claimed and signed: the pre-image recovery proves the pull against. The answering bank must
+ * reach the cluster's confirmed slot and the slot the subscription's last proven pull landed in,
+ * so a node behind that pull cannot hand back a pre-image a later dropped pull would read as
+ * landed. A read that fails writes nothing, so the cron retries it next tick without a cooldown.
  *
- * @param subscriptionPda - The delegation the pull draws on.
+ * @param input - The subscription to read.
+ * @param input.subscriptionsRepo - The tenant's subscriptions repository.
+ * @param input.paymentsRepo - The tenant's payments repository.
+ * @param input.organizationId - The subscription's organization.
+ * @param input.projectId - The subscription's project.
+ * @param input.subscriptionId - The subscription whose last proven pull sets the slot floor.
+ * @param input.subscriptionPda - The delegation the pull draws on.
  * @returns The delegation's pre-image.
+ * @throws AppError SOLANA_RPC_ERROR when the answer comes from a bank below the floor.
  * @throws AppError CONFLICT when the delegation is not on chain.
  */
-async function readCollectionDelegationPreImage(
-  subscriptionPda: Address
-): Promise<CollectionAttemptDelegationPreImage> {
+async function readCollectionDelegationPreImage(input: {
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  organizationId: string;
+  projectId: string;
+  subscriptionId: string;
+  subscriptionPda: Address;
+}): Promise<CollectionAttemptDelegationPreImage> {
   const {
     accounts: [delegationAccount],
-  } = await readConfirmedAccounts([subscriptionPda]);
+  } = await readConfirmedAccounts({
+    addresses: [input.subscriptionPda],
+    minContextSlot: await lastProvenCollectionSlot(input),
+  });
   if (!delegationAccount.exists) {
     throw conflict("Recurring payment subscription delegation is not on chain");
   }
@@ -359,6 +380,51 @@ async function readCollectionDelegationPreImage(
     periodStartTs: delegation.currentPeriodStartTs,
     amountPulled: delegation.amountPulledInPeriod,
   };
+}
+
+/**
+ * The slot the subscription's most recent confirmed collection landed in, as finalize recorded it
+ * on its transfer.
+ *
+ * @param input - The subscription to look up.
+ * @param input.subscriptionsRepo - The tenant's subscriptions repository.
+ * @param input.paymentsRepo - The tenant's payments repository.
+ * @param input.organizationId - The subscription's organization.
+ * @param input.projectId - The subscription's project.
+ * @param input.subscriptionId - The subscription.
+ * @returns The slot, or null when the subscription has no confirmed collection or its transfer
+ *   carries no slot.
+ * @throws AppError INTERNAL_ERROR when a confirmed attempt has no transfer.
+ */
+async function lastProvenCollectionSlot(input: {
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
+  organizationId: string;
+  projectId: string;
+  subscriptionId: string;
+}): Promise<bigint | null> {
+  const confirmed = await input.subscriptionsRepo.listCollectionAttempts({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subscriptionId: input.subscriptionId,
+    status: "confirmed",
+    limit: 1,
+    offset: 0,
+  });
+  if (confirmed.rows.length === 0) return null;
+  const [lastConfirmed] = confirmed.rows;
+  if (lastConfirmed.transfer_id === null) {
+    throw internalError("Confirmed collection attempt has no transfer");
+  }
+  const transfer = await input.paymentsRepo.getTransferById({
+    transferId: lastConfirmed.transfer_id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (!transfer) {
+    throw internalError("Confirmed collection transfer not found");
+  }
+  return transfer.slot === null ? null : BigInt(transfer.slot);
 }
 
 async function resolveDestinationTokenAccount(input: {
@@ -479,9 +545,8 @@ async function matchesRecurringTransferInstruction(input: {
  * @param input.signature - The pull's signature.
  * @param input.dueAt - The period the pull collects.
  * @param input.destinationTokenAccount - The token account the pull pays.
- * @returns `not_indexed` when the RPC does not return the transaction yet, otherwise the proof.
- * @throws AppError CONFLICT when the evidence or the transaction does not match.
- * @throws AppError TRANSACTION_FAILED when the transaction failed on chain.
+ * @returns What the chain shows of the signature; an instruction mismatch is logged.
+ * @throws AppError CONFLICT when the stored evidence does not match the due payment.
  */
 async function verifyRecurringPaymentCollection(input: {
   recurringPayment: PaymentRecurringPaymentRow;
@@ -492,13 +557,12 @@ async function verifyRecurringPaymentCollection(input: {
   dueAt: string;
   destinationTokenAccount: Address;
 }): Promise<RecurringPaymentCollectionVerification> {
-  const proofMismatch = (
+  const logProofMismatch = (
     reason:
       | "persisted_evidence_mismatch"
       | "missing_verified_addresses"
-      | "on_chain_instruction_mismatch",
-    message: string
-  ): AppError => {
+      | "on_chain_instruction_mismatch"
+  ): void => {
     logEvent("error", {
       event: "sdp_api_recurring_payment_collection_proof_mismatch",
       reason,
@@ -510,7 +574,6 @@ async function verifyRecurringPaymentCollection(input: {
       transfer_id: input.transfer.id,
       signature: input.signature,
     });
-    return conflict(message);
   };
   const providerData = input.transfer.provider_data;
   const attemptMetadata = input.attempt.metadata;
@@ -540,10 +603,8 @@ async function verifyRecurringPaymentCollection(input: {
     input.transfer.signature === input.signature;
 
   if (!persistedEvidenceMatches) {
-    throw proofMismatch(
-      "persisted_evidence_mismatch",
-      "Recurring payment collection evidence does not match the due payment"
-    );
+    logProofMismatch("persisted_evidence_mismatch");
+    throw conflict("Recurring payment collection evidence does not match the due payment");
   }
   if (
     !input.recurringPayment.plan_pda ||
@@ -551,10 +612,8 @@ async function verifyRecurringPaymentCollection(input: {
     !input.subscription.subscription_authority_address ||
     !input.subscription.subscriber_token_account
   ) {
-    throw proofMismatch(
-      "missing_verified_addresses",
-      "Recurring payment collection is missing verified addresses"
-    );
+    logProofMismatch("missing_verified_addresses");
+    throw conflict("Recurring payment collection is missing verified addresses");
   }
 
   const planPda = input.recurringPayment.plan_pda;
@@ -574,7 +633,7 @@ async function verifyRecurringPaymentCollection(input: {
     return { kind: "not_indexed" };
   }
   if (confirmedTransaction.err !== null) {
-    throw transactionFailed("Recurring payment collection failed on-chain");
+    return { kind: "failed_on_chain" };
   }
   const [eventAuthority] = await subscriptionsProgram.findEventAuthorityPda();
 
@@ -603,10 +662,8 @@ async function verifyRecurringPaymentCollection(input: {
     }
   }
   if (!hasExpectedInstruction) {
-    throw proofMismatch(
-      "on_chain_instruction_mismatch",
-      "Confirmed transaction does not prove the expected recurring payment collection"
-    );
+    logProofMismatch("on_chain_instruction_mismatch");
+    return { kind: "instruction_mismatch" };
   }
 
   return {
@@ -616,9 +673,41 @@ async function verifyRecurringPaymentCollection(input: {
       dueAt: input.dueAt,
       destinationTokenAccount: input.destinationTokenAccount,
       signature: input.signature,
+      slot: confirmedTransaction.slot,
       transferId: input.transfer.id,
     },
   };
+}
+
+/**
+ * The fresh path's proof: a pull it just confirmed must verify now, so every other outcome is
+ * the error it answers today.
+ *
+ * @param verification - What verification found.
+ * @returns The proof.
+ * @throws AppError SOLANA_RPC_ERROR when the transaction is not indexed yet.
+ * @throws AppError TRANSACTION_FAILED when it failed on chain.
+ * @throws AppError CONFLICT when it does not carry the expected pull.
+ */
+function requireProvenCollection(
+  verification: RecurringPaymentCollectionVerification
+): VerifiedRecurringPaymentCollection {
+  switch (verification.kind) {
+    case "proven":
+      return verification.proof;
+    case "not_indexed":
+      throw solanaRpcError(
+        "Recurring payment collection is confirmed but not yet indexed; retry shortly"
+      );
+    case "failed_on_chain":
+      throw transactionFailed("Recurring payment collection failed on-chain");
+    case "instruction_mismatch":
+      throw conflict(
+        "Confirmed transaction does not prove the expected recurring payment collection"
+      );
+    default:
+      return assertNever(verification);
+  }
 }
 
 function collectionRetryMetadata(error: Error): { error: string; retryAfterAt: string } {
@@ -964,11 +1053,24 @@ export async function journalAutomatedCollectionFailure(input: {
 }
 
 /**
- * Atomically settles a failed collection attempt and its linked transfer.
+ * Atomically fails a collection attempt and its linked transfer, so the period is retried after
+ * the cooldown. Both status writes share one transaction: split, they could strand a processing
+ * transfer behind a failed attempt and block the retry. The transfer write is compared and set on
+ * the status the caller read it in; a transfer that moved since (the generic tracker saw it
+ * confirmed) is logged and left for the next recovery, which reads it again, so an attempt is
+ * never confirmed here, only by `finalizeRecurringPaymentCollection`.
  *
- * Keep these status writes in one database transaction. Splitting them into
- * independent repository calls can strand a processing transfer behind a failed
- * attempt and block the due-period retry path.
+ * @param input - The attempt, its transfer as the caller read it, and why it failed.
+ * @param input.env - The API environment.
+ * @param input.organizationId - The attempt's organization.
+ * @param input.projectId - The attempt's project.
+ * @param input.recurringPaymentId - The schedule the attempt collects for.
+ * @param input.attempt - The attempt to fail.
+ * @param input.transfer - Its transfer as the caller read it, or null when none was linked.
+ * @param input.submittedSignature - The pull's saved signature, or null when none was saved.
+ * @param input.error - Why the attempt failed.
+ * @throws ResumedStepUnsettledError when the transfer is no longer in the status it was read in,
+ *   or reads successful; nothing is written.
  */
 async function markRecurringPaymentCollectionFailedAtomically(input: {
   env: Env;
@@ -982,16 +1084,31 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
 }): Promise<void> {
   const failedAt = new Date().toISOString();
   const message = recurringPaymentErrorMessage(input.error);
+  const transfer = input.transfer;
   const metadata = retryCollectionMetadata({
     metadata: input.attempt.metadata,
-    transferId: input.transfer?.id ?? null,
+    transferId: transfer === null ? null : transfer.id,
     ...collectionRetryMetadata(input.error),
   });
+  const transferMoved = (): ResumedStepUnsettledError => {
+    logEvent("error", {
+      event: "sdp_api_recurring_payment_collection_transfer_moved",
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      recurring_payment_id: input.recurringPaymentId,
+      attempt_id: input.attempt.id,
+      transfer_id: transfer === null ? null : transfer.id,
+      expected_status: transfer === null ? null : transfer.status,
+      signature: input.submittedSignature,
+    });
+    return new ResumedStepUnsettledError();
+  };
+  if (transfer !== null && isSuccessfulPaymentTransferStatus(transfer.status)) {
+    throw transferMoved();
+  }
 
   await getDb(input.env).transaction(async (tx) => {
-    let confirmedTransferSignature: Signature | null = null;
-
-    if (input.transfer) {
+    if (transfer !== null) {
       const transferRows = await tx
         .prepare(
           `UPDATE payment_transfers
@@ -1002,65 +1119,29 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status IN ('pending', 'processing', 'failed')`
+              AND status = ?`
         )
         .bind(
           input.submittedSignature !== null,
           input.submittedSignature,
           message,
           failedAt,
-          input.transfer.id,
+          transfer.id,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          transfer.status
         )
         .run();
       if (transferRows === 0) {
-        const currentTransfer = await tx
-          .prepare(
-            `SELECT status, signature
-               FROM payment_transfers
-              WHERE id = ?
-                AND organization_id = ?
-                AND project_id = ?`
-          )
-          .bind(input.transfer.id, input.organizationId, input.projectId)
-          .first<{ status: string; signature: string | null }>();
-
-        if (currentTransfer === null || currentTransfer.status !== "confirmed") {
-          throw internalError("Failed to mark collection transfer failed");
-        }
-
-        const currentSignature = currentTransfer.signature ?? input.submittedSignature;
-        if (!currentSignature) {
-          throw internalError("Confirmed collection transfer is missing signature");
-        }
-        confirmedTransferSignature = validatedStoredCollectionSignature({
-          attemptId: input.attempt.id,
-          signature: currentSignature,
-          transferId: input.transfer.id,
-        });
+        throw transferMoved();
       }
-    }
-
-    const attemptStatus = confirmedTransferSignature ? "confirmed" : "failed";
-    const attemptSignature = confirmedTransferSignature ?? input.submittedSignature;
-    const attemptError = confirmedTransferSignature ? null : message;
-    let attemptMetadata = metadata;
-    if (confirmedTransferSignature !== null) {
-      if (input.transfer === null) {
-        throw internalError("Confirmed collection is missing its transfer");
-      }
-      attemptMetadata = linkedTransferCollectionMetadata({
-        metadata: input.attempt.metadata,
-        transferId: input.transfer.id,
-      });
     }
 
     const attemptRows = await tx
       .prepare(
         `UPDATE payment_subscription_collection_attempts
             SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
-                status = ?,
+                status = 'failed',
                 signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
                 error = ?,
                 metadata = ?::jsonb,
@@ -1068,25 +1149,19 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           WHERE id = ?
             AND organization_id = ?
             AND project_id = ?
-            AND (
-              (?::text = 'confirmed' AND status IN ('pending', 'processing', 'confirmed'))
-              OR (?::text = 'failed' AND status IN ('pending', 'processing', 'failed'))
-            )`
+            AND status IN ('pending', 'processing', 'failed')`
       )
       .bind(
-        input.transfer !== null,
-        input.transfer?.id ?? null,
-        attemptStatus,
-        attemptSignature !== null,
-        attemptSignature,
-        attemptError,
-        JSON.stringify(attemptMetadata),
+        transfer !== null,
+        transfer === null ? null : transfer.id,
+        input.submittedSignature !== null,
+        input.submittedSignature,
+        message,
+        JSON.stringify(metadata),
         failedAt,
         input.attempt.id,
         input.organizationId,
-        input.projectId,
-        attemptStatus,
-        attemptStatus
+        input.projectId
       )
       .run();
     if (attemptRows === 0) {
@@ -1135,6 +1210,7 @@ async function finalizeRecurringPaymentCollection(input: {
         ? expectedTransferStatus
         : "confirmed",
       signature: input.proof.signature,
+      slot: Number(input.proof.slot),
       error: null,
       updatedAt: finalizedAt,
     });
@@ -1386,9 +1462,10 @@ async function handleRecurringPaymentCollectionError(input: {
  * pull through the step reader before anything is written. An attempt that never linked a
  * transfer or never saved a signature fails once it is stale. A saved pull that is dropped
  * fails the attempt and its transfer, so the period is retried after the cooldown; one that
- * landed is verified against its confirmed transaction and finalized; one that is pending, or
- * landed but not yet indexed, answers 409 and writes nothing, so the attempt's `updated_at`
- * keeps the cron revisiting it every tick. A keyed request adopts the attempt before it answers
+ * landed is verified against its confirmed transaction and finalized, or failed when it is past
+ * expiry and its signature contradicts the pull (`finishLandedRecurringPaymentCollection`); one
+ * that is pending, or landed but not yet proven, answers 409 and writes nothing, so the attempt's
+ * `updated_at` keeps the cron revisiting it every tick. A keyed request adopts the attempt before it answers
  * for a pending or landed pull; a dropped one is left to the fresh claim that follows.
  *
  * @param input - The schedule, its subscription and the due period to recover.
@@ -1404,7 +1481,7 @@ async function handleRecurringPaymentCollectionError(input: {
  * @param input.idempotencyKey - The keyed collect request's key; absent for lifecycle and cron recovery.
  * @returns The finalized rows when the pull landed, or null when nothing is in flight or the
  *   attempt was failed and the caller may claim the period afresh.
- * @throws ResumedStepUnsettledError when the saved pull is pending or not yet indexed.
+ * @throws ResumedStepUnsettledError when the saved pull is pending or not yet proven.
  */
 async function recoverRecurringPaymentCollection(input: {
   env: Env;
@@ -1483,7 +1560,7 @@ async function recoverRecurringPaymentCollection(input: {
     transfer,
     signature: recoveredSignature,
   });
-  switch (step) {
+  switch (step.state) {
     case "dropped":
       await markRecurringPaymentCollectionFailedAtomically({
         env: input.env,
@@ -1506,6 +1583,7 @@ async function recoverRecurringPaymentCollection(input: {
         attempt: existing,
         transfer,
         signature: recoveredSignature,
+        blockHeight: step.blockHeight,
       });
     case "unsent":
       throw internalError("Recurring payment collection read its saved pull as unsent");
@@ -1516,23 +1594,24 @@ async function recoverRecurringPaymentCollection(input: {
 
 /**
  * Reads a collection attempt's saved pull through the step reader, against the delegation's
- * pre-image saved with its signature and the transfer's stored expiry. An attempt with no
- * pre-image (signed before the pre-image was saved) cannot prove its pull either way, so it is
- * pending and logged without a chain read, and never dropped.
+ * pre-image saved with its signature and the transfer's stored expiry. Every signed attempt
+ * carries a pre-image (`persistSigned` writes both, and migration 0153 failed the in-flight
+ * attempts signed before it), so one without is an invariant breach.
  *
  * @param input - The attempt's rows and saved signature.
  * @param input.recurringPayment - The schedule, for its subscription delegation.
  * @param input.attempt - The in-flight attempt, for its token, amount and pre-image.
  * @param input.transfer - The attempt's transfer, for the saved pull's expiry.
  * @param input.signature - The saved pull's signature.
- * @returns The saved pull's step state.
+ * @returns The saved pull as the chain shows it.
+ * @throws AppError INTERNAL_ERROR when the attempt has no pre-image or the schedule no delegation.
  */
 async function readRecurringPaymentCollectionStep(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
   signature: Signature;
-}): Promise<RecurringPaymentStepRead["state"]> {
+}): Promise<RecurringPaymentStepRead> {
   const logContext: RecurringPaymentStepLogContext = {
     recurring_payment_id: input.recurringPayment.id,
     attempt_id: input.attempt.id,
@@ -1541,17 +1620,12 @@ async function readRecurringPaymentCollectionStep(input: {
   const periodStartTs = input.attempt.delegation_period_start_ts_before;
   const amountPulled = input.attempt.delegation_amount_pulled_before;
   if (periodStartTs === null || amountPulled === null) {
-    logEvent("warn", {
-      event: "sdp_api_recurring_payment_collection_pre_image_missing",
-      ...logContext,
-      signature: input.signature,
-    });
-    return "pending";
+    throw internalError("Recurring payment collection attempt is signed without its pre-image");
   }
   if (input.recurringPayment.subscription_pda === null) {
     throw internalError("Recurring payment collection is missing its subscription delegation");
   }
-  const step = await readRecurringPaymentStep({
+  return readRecurringPaymentStep({
     effect: collectionPulledEffect({
       subscriptionPda: assertValidAddress(
         input.recurringPayment.subscription_pda,
@@ -1566,7 +1640,6 @@ async function readRecurringPaymentCollectionStep(input: {
     lastValidBlockHeight: input.transfer.last_valid_block_height,
     logContext,
   });
-  return step.state;
 }
 
 /**
@@ -1606,7 +1679,13 @@ async function adoptRecoveredCollectionAttempt(input: {
 /**
  * Finalizes a recovered pull the step reader saw land: re-reads the schedule and subscription,
  * verifies the confirmed transaction against them, and confirms the transfer and attempt and
- * advances the due date in one transaction.
+ * advances the due date in one transaction. The delegation shows a pull, but only the signature
+ * proves it was this attempt's: until the saved send's expiry an unproven one stays pending. Past
+ * it, a signature that failed on chain or carries another instruction contradicts the pre-image,
+ * so it is logged and the attempt failed; the program's per-period cap refuses a second pull in
+ * the same period, so the retry cannot charge twice. A signature still not indexed past expiry is
+ * logged and stays pending: the pool may lack the transaction's history, and failing a pull that
+ * moved money would retry it into the next period.
  *
  * @param input - The recovered attempt and the schedule it collects for.
  * @param input.env - The API environment.
@@ -1620,8 +1699,9 @@ async function adoptRecoveredCollectionAttempt(input: {
  * @param input.attempt - The recovered attempt.
  * @param input.transfer - The attempt's transfer.
  * @param input.signature - The landed pull's signature.
- * @returns The finalized rows.
- * @throws ResumedStepUnsettledError when the confirmed transaction is not indexed yet.
+ * @param input.blockHeight - The `confirmed` block height the step read saw.
+ * @returns The finalized rows, or null when the attempt was failed.
+ * @throws ResumedStepUnsettledError when the pull is not proven and the attempt stays in flight.
  */
 async function finishLandedRecurringPaymentCollection(input: {
   env: Env;
@@ -1635,12 +1715,13 @@ async function finishLandedRecurringPaymentCollection(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
   signature: Signature;
+  blockHeight: bigint;
 }): Promise<{
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   collectionAttempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
-}> {
+} | null> {
   const currentRecurringPayment = await input.recurringRepo.getRecurringPaymentById({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -1675,19 +1756,55 @@ async function finishLandedRecurringPaymentCollection(input: {
     dueAt: input.dueAt,
     destinationTokenAccount,
   });
-  if (verification.kind === "not_indexed") {
+  if (verification.kind === "proven") {
+    return finalizeRecurringPaymentCollection({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: currentRecurringPayment,
+      subscription: currentSubscription,
+      attempt: input.attempt,
+      transfer: input.transfer,
+      proof: verification.proof,
+    });
+  }
+  const expiry = input.transfer.last_valid_block_height;
+  if (expiry === null || input.blockHeight <= BigInt(expiry)) {
     throw new ResumedStepUnsettledError();
   }
-  return finalizeRecurringPaymentCollection({
+  const unproven = {
+    organization_id: input.organizationId,
+    project_id: input.projectId,
+    recurring_payment_id: input.recurringPayment.id,
+    attempt_id: input.attempt.id,
+    transfer_id: input.transfer.id,
+    signature: input.signature,
+    reason: verification.kind,
+    block_height: input.blockHeight.toString(),
+    last_valid_block_height: expiry,
+  };
+  if (verification.kind === "not_indexed") {
+    logEvent("error", {
+      event: "sdp_api_recurring_payment_collection_unindexed_past_expiry",
+      ...unproven,
+    });
+    throw new ResumedStepUnsettledError();
+  }
+  logEvent("error", {
+    event: "sdp_api_recurring_payment_collection_unproven_past_expiry",
+    ...unproven,
+  });
+  await markRecurringPaymentCollectionFailedAtomically({
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    recurringPayment: currentRecurringPayment,
-    subscription: currentSubscription,
+    recurringPaymentId: input.recurringPayment.id,
     attempt: input.attempt,
     transfer: input.transfer,
-    proof: verification.proof,
+    submittedSignature: input.signature,
+    error: new Error("Recurring payment collection could not be proven on chain before it expired"),
   });
+  return null;
 }
 
 export async function recoverOrBlockLifecycleCollection(input: {
@@ -1853,6 +1970,14 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Subscription must be active before collection");
     }
 
+    const delegationPreImage = await readCollectionDelegationPreImage({
+      subscriptionsRepo,
+      paymentsRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId: subscription.id,
+      subscriptionPda: assertValidAddress(recurringPayment.subscription_pda, "subscriptionPda"),
+    });
     const linkedCollection = await claimCollectionUnderRecurringLock({
       env: input.env,
       organizationId: input.organizationId,
@@ -1993,7 +2118,7 @@ export async function collectRecurringPayment(input: {
       env: input.env,
       attempt,
       transfer,
-      delegationPreImage: await readCollectionDelegationPreImage(subscriptionPda),
+      delegationPreImage,
     });
     const signature = await sendSubscriptionInstructions({
       movement: "recurring.collect",
@@ -2054,11 +2179,7 @@ export async function collectRecurringPayment(input: {
       dueAt,
       destinationTokenAccount: receiverAta,
     });
-    if (verification.kind === "not_indexed") {
-      throw solanaRpcError(
-        "Recurring payment collection is confirmed but not yet indexed; retry shortly"
-      );
-    }
+    const proof = requireProvenCollection(verification);
 
     return finalizeRecurringPaymentCollection({
       env: input.env,
@@ -2068,7 +2189,7 @@ export async function collectRecurringPayment(input: {
       subscription,
       attempt,
       transfer,
-      proof: verification.proof,
+      proof,
     });
   } catch (error) {
     if (!(error instanceof Error)) throw error;

@@ -81,7 +81,7 @@ const attemptRowSchema = z.object({
   signature: z.string().nullable(),
   error: z.string().nullable(),
   metadata: paymentSubscriptionCollectionAttemptMetadataSchema,
-  delegation_period_start_ts_before: z.number().int().nullable(),
+  delegation_period_start_ts_before: z.int().nullable(),
   delegation_amount_pulled_before: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
