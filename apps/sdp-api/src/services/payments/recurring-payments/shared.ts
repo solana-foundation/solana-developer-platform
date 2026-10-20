@@ -1,9 +1,9 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import {
   confirmTransaction,
-  type createRpc,
   getRecentBlockhash,
   getSignatureStatuses,
+  type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -349,7 +349,7 @@ export class ResumedStepUnsettledError extends AppError {
 }
 
 export async function settleResumedStep<T extends { exists: boolean }>(input: {
-  rpc: ReturnType<typeof createRpc>;
+  rpc: SolanaRpc;
   read: (commitment: "finalized" | "confirmed") => Promise<T>;
   /** Whether the account shows the step's effect. */
   landed: (account: T) => boolean;

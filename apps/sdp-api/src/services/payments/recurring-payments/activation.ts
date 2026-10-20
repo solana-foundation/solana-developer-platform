@@ -5,7 +5,7 @@ import {
   nextRecurringPaymentCollectionDueAt,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { createRpc } from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -500,7 +500,7 @@ const ACTIVATION_FAILED_ON_CHAIN = "Recurring payment activation failed on-chain
 
 /** Confirms the plan this run sent, then reads it. */
 async function confirmActivationPlan(input: {
-  rpc: ReturnType<typeof createRpc>;
+  rpc: SolanaRpc;
   planPda: Address;
   planCreationSignature: Signature;
 }) {
@@ -510,7 +510,7 @@ async function confirmActivationPlan(input: {
 
 /** Confirms the subscription this run sent, then reads it. */
 async function confirmActivationSubscription(input: {
-  rpc: ReturnType<typeof createRpc>;
+  rpc: SolanaRpc;
   subscriptionPda: Address;
   authorizationSignature: Signature;
 }) {
@@ -526,7 +526,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   organizationId: string;
   projectId: string;
-  rpc: ReturnType<typeof createRpc>;
+  rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };

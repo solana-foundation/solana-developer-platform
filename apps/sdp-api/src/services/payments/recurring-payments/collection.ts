@@ -5,7 +5,7 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { type createRpc, getTransaction, type ParsedInstruction } from "@sdp/rpc/solana";
+import { getTransaction, type ParsedInstruction, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -347,7 +347,7 @@ function subscriptionsInstructionFromRpc(parsed: ParsedInstruction): Instruction
 }
 
 async function matchesRecurringTransferInstruction(input: {
-  rpc: ReturnType<typeof createRpc>;
+  rpc: SolanaRpc;
   instruction: Instruction;
   amountBaseUnits: bigint;
   sourceAddress: string;

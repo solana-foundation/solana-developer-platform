@@ -6,6 +6,7 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
+import { DatabaseUnavailableError } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { rootLogger } from "@/runtime/logger";
@@ -28,6 +29,7 @@ const FEE_NETWORK_PATH = "/__fee_network_test_throw";
 const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 const IDEMPOTENCY_REUSED_PATH = "/__idempotency_reused_test_throw";
+const DATABASE_UNAVAILABLE_PATH = "/__database_unavailable_test_throw";
 
 function buildApp() {
   const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
@@ -89,6 +91,13 @@ function buildApp() {
   });
   app.all(IDEMPOTENCY_REUSED_PATH, () => {
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
+  });
+  app.all(DATABASE_UNAVAILABLE_PATH, () => {
+    throw new DatabaseUnavailableError(new Error("timeout exceeded when trying to connect"), {
+      totalCount: 10,
+      idleCount: 0,
+      waitingCount: 42,
+    });
   });
   app.all(FEE_REJECTED_PATH, () => {
     throw new FeePaymentError(
@@ -236,6 +245,19 @@ describe("createApp onError", () => {
       "The wallet used for this payment does not have enough funds. Add funds and try again."
     );
     expect(body.error.message).not.toContain("custom program error");
+  });
+
+  it("answers 503 with Retry-After when the database could not take the request", async () => {
+    const app = buildApp();
+
+    const res = await app.request(DATABASE_UNAVAILABLE_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("2");
+    const text = await res.text();
+    expect(JSON.parse(text)).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+    // The pool's own wording stays in the logs, not in the response.
+    expect(text).not.toContain("timeout exceeded");
   });
 
   // HOO-1918: the IETF draft's 422 for a reused Idempotency-Key must reach the

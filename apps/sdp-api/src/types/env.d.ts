@@ -16,6 +16,10 @@ import type { KVStoreSet } from "@/runtime/kv";
 export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
+  // "off" sends every database statement unnamed, so PostgreSQL plans each one
+  // again. Needed behind a transaction-mode connection pooler; parsed at startup
+  // by src/db/database-env.ts.
+  DATABASE_PREPARED_STATEMENTS?: string;
   REDIS_URL?: string;
 
   // Cloud Run services disable embedded cron by default so only the Worker

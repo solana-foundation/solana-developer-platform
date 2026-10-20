@@ -1,4 +1,4 @@
-import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
+import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -29,6 +29,20 @@ interface GetSplTokenBalancesOptions {
   abortSignal?: AbortSignal;
 }
 
+/** The token account an SPL transfer sends from: the owner's largest one for the mint. */
+export interface SourceTokenAccount {
+  tokenAccount: Address;
+  decimals: number;
+  /** Base units it held when read. */
+  amount: bigint;
+  frozen: boolean;
+}
+
+/** A source token account with its mint's token program, read once for a send to reuse. */
+export interface SplTransferSource extends SourceTokenAccount {
+  tokenProgram: Address;
+}
+
 function issuedTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string | null {
   return tokenLabelsByMint?.get(mint)?.trim() || null;
 }
@@ -55,10 +69,7 @@ export function withIssuedTokenLabels<T extends { mint: string; token: string }>
   });
 }
 
-export async function resolveMintDecimals(
-  rpc: ReturnType<typeof createRpc>,
-  mint: Address
-): Promise<number> {
+export async function resolveMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number> {
   const response = await rpc.getTokenSupply(mint, { commitment: "confirmed" }).send();
   const decimals = response.value.decimals;
 
@@ -84,7 +95,7 @@ function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
 }
 
 export async function getSplTokenBalances(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   options?: GetSplTokenBalancesOptions
 ): Promise<
@@ -141,7 +152,7 @@ export async function getSplTokenBalances(
 }
 
 export async function getSplTokenAccountAddresses(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address
 ): Promise<Address[]> {
   const addresses: Address[] = [];
@@ -180,10 +191,7 @@ function assertSupportedTokenProgram(program: string): Address {
   throw badRequest("Unsupported token program for mint");
 }
 
-export async function resolveMintTokenProgram(
-  rpc: ReturnType<typeof createRpc>,
-  mint: Address
-): Promise<Address> {
+export async function resolveMintTokenProgram(rpc: SolanaRpc, mint: Address): Promise<Address> {
   const mintAccountInfo = await getAccountInfo(rpc, mint);
   if (!mintAccountInfo) {
     throw badRequest("Token mint account does not exist");
@@ -192,25 +200,22 @@ export async function resolveMintTokenProgram(
 }
 
 export async function resolveSourceTokenAccount(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
-): Promise<{ tokenAccount: Address; decimals: number }> {
+): Promise<SourceTokenAccount> {
   const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
 
   if (!selected) {
     throw badRequest("Source wallet has no token account for this mint");
   }
 
-  return {
-    tokenAccount: selected.tokenAccount,
-    decimals: selected.decimals,
-  };
+  return selected;
 }
 
 export async function resolveSourceTokenAccountOrAta(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
@@ -238,22 +243,22 @@ export async function resolveSourceTokenAccountOrAta(
  * transferChecked from the authority's largest token account.
  */
 export async function buildSplTransferInstructions(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   input: {
     authority: TransactionSigner;
     destination: Address;
     mint: Address;
     amount: string;
     ataRentPayer: Address;
+    /** The source this request already read, so the build reads nothing again. */
+    source?: SplTransferSource;
   }
 ) {
-  const tokenProgram = await resolveMintTokenProgram(rpc, input.mint);
-  const sourceTokenAccount = await resolveSourceTokenAccount(
-    rpc,
-    input.authority.address,
-    input.mint,
-    tokenProgram
-  );
+  const tokenProgram =
+    input.source?.tokenProgram ?? (await resolveMintTokenProgram(rpc, input.mint));
+  const sourceTokenAccount =
+    input.source ??
+    (await resolveSourceTokenAccount(rpc, input.authority.address, input.mint, tokenProgram));
   const transferAmount = parseDecimalAmount(input.amount, sourceTokenAccount.decimals);
   if (transferAmount <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
@@ -288,11 +293,11 @@ export async function buildSplTransferInstructions(
 }
 
 async function findSourceTokenAccount(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
-): Promise<{ tokenAccount: Address; decimals: number; amount: bigint } | null> {
+): Promise<SourceTokenAccount | null> {
   const response = await rpc
     .getTokenAccountsByOwner(
       owner,
@@ -300,7 +305,7 @@ async function findSourceTokenAccount(
       { encoding: "jsonParsed", commitment: "confirmed" }
     )
     .send();
-  let selected: { tokenAccount: Address; decimals: number; amount: bigint } | null = null;
+  let selected: SourceTokenAccount | null = null;
 
   for (const account of response.value) {
     const parsed = parseTokenAmountInfo(account.account.data.parsed.info);
@@ -314,6 +319,7 @@ async function findSourceTokenAccount(
         tokenAccount,
         decimals: parsed.decimals,
         amount: parsed.amount,
+        frozen: account.account.data.parsed.info.state === "frozen",
       };
     }
   }

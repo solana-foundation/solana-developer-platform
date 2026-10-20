@@ -4742,16 +4742,16 @@ describe("Payments routes — recurring", () => {
     {
       change: "loses recurring.execute",
       narrowing: "UPDATE api_keys SET grants = '{recurring.read}' WHERE id = ?",
-      reason: "action_not_held",
+      error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "recurring.execute" } },
     },
     {
       change: "loses the source wallet",
       narrowing: "UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?",
-      reason: "wallet_out_of_scope",
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
     },
   ])(
     "refuses an activation whose key $change between admission and claim",
-    async ({ narrowing, reason }) => {
+    async ({ narrowing, error }) => {
       const payment = await seedPendingRecurringPayment();
       const before = await recurringExecutionSnapshot(payment.id);
 
@@ -4762,7 +4762,7 @@ describe("Payments routes — recurring", () => {
       );
 
       expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toMatchObject({ error: { details: { reason } } });
+      await expect(response.json()).resolves.toMatchObject({ error });
       expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
     }
   );
@@ -4871,6 +4871,38 @@ describe("Payments routes — recurring", () => {
       }),
     },
     {
+      route: "resume",
+      prepare: async (activated: { id: string }) => {
+        recurringExecution
+          .signAndSendMock()
+          .mockResolvedValue(
+            signature(
+              "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+            )
+          );
+        const canceled = await app.request(
+          `/v1/payments/recurring-payments/${activated.id}/cancel`,
+          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+          env
+        );
+        expect(canceled.status).toBe(200);
+      },
+      request: (id: string) => ({
+        path: `/v1/payments/recurring-payments/${id}/resume`,
+        method: "POST",
+        body: {},
+      }),
+    },
+    {
+      route: "cancel",
+      prepare: async () => {},
+      request: (id: string) => ({
+        path: `/v1/payments/recurring-payments/${id}/cancel`,
+        method: "POST",
+        body: {},
+      }),
+    },
+    {
       route: "an amount change",
       prepare: async () => {},
       request: (id: string) => ({
@@ -4904,6 +4936,40 @@ describe("Payments routes — recurring", () => {
       expect(recurringExecutionCallCounts()).toEqual(executionCalls);
     }
   );
+
+  // Greptile (#2435): the early refusal must leave the key unstored, so the same
+  // request runs once the key's scope is fixed, and cancels exactly once.
+  it("runs a refused cancel's same-key retry once the key may sign with the source wallet", async () => {
+    await seedUnboundWallet();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+    const headers = { ...RECURRING_HEADERS, "Idempotency-Key": "cancel-after-scope-fix" };
+    const cancel = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers, body: "{}" },
+        env
+      );
+
+    await expectWalletOutOfScope(await cancel());
+
+    await seedCachedKey({ walletScope: "all", walletIds: [] });
+    recurringExecution.signAndSendMock().mockResolvedValue(testSignature(9));
+    const retried = await cancel();
+
+    expect(retried.status).toBe(200);
+    const cancelAttempts = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count FROM payment_recurring_payment_lifecycle_attempts
+          WHERE recurring_payment_id = ? AND operation = 'cancel'`
+      )
+      .bind(activated.id)
+      .first<{ count: number }>();
+    expect(cancelAttempts).toEqual({ count: 1 });
+  });
 
   // The compromised-key path (APE-343): revoke-and-cancel finds what the key
   // activated under its own id or one it was rotated from.

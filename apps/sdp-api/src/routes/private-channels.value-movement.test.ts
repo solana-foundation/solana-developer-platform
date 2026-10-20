@@ -412,6 +412,25 @@ async function postWithdrawal(body: Record<string, unknown>, headers: Record<str
   );
 }
 
+/** Every row a Private Channels movement or verification could write. */
+async function privateChannelRows(): Promise<Record<string, unknown[]>> {
+  const tables = [
+    "private_channel_deposits",
+    "private_channel_withdrawals",
+    "private_channel_transfers",
+    "private_channel_verified_wallets",
+    "private_channel_events",
+  ] as const;
+  const db = getDb(env);
+  const entries = await Promise.all(
+    tables.map(
+      async (table) =>
+        [table, (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results] as const
+    )
+  );
+  return Object.fromEntries(entries);
+}
+
 async function recordedDeposit(recipient: string) {
   return createPrivateChannelDepositRepository(env).createDeposit({
     organizationId: ORGANIZATION_ID,
@@ -644,6 +663,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("refuses verification of a wallet outside the key's current wallet grants", async () => {
+    const before = await privateChannelRows();
     const response = await app.request(
       `/v1/private-channels/wallets/${ACTOR_WALLET_ID}/verify`,
       {
@@ -654,9 +674,11 @@ describe("Private Channels — deposit and withdrawal access", () => {
       env
     );
     expect(response.status).toBe(403);
-    expect(JSON.stringify(await response.json())).toContain(
-      "The credential may not sign with this wallet"
-    );
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(await privateChannelRows()).toEqual(before);
+    expect(providerSignerMock).not.toHaveBeenCalled();
   });
 
   it("requires the original source for withdrawal replay while history remains readable", async () => {
@@ -1122,19 +1144,25 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
+  // HOO-2099: refused before the movement row, the SPC session or the
+  // gateway, so a retry after the scope is fixed runs as new.
   it("refuses a selected-scope API key naming an enrolled wallet it is not bound to", async () => {
     const headers = scopedApiKeyHeaders();
+    const before = await privateChannelRows();
 
     const deposit = await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers);
     const withdrawal = await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers);
 
-    expect(deposit.status).toBe(403);
-    expect(withdrawal.status).toBe(403);
-    expect(JSON.stringify(await deposit.json())).toContain(
-      "The credential may not sign with this wallet"
-    );
+    for (const response of [deposit, withdrawal]) {
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+      });
+    }
+    expect(await privateChannelRows()).toEqual(before);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
+    expect(providerSignerMock).not.toHaveBeenCalled();
   });
 
   it("refuses a custody wallet that is not enrolled under the principal", async () => {

@@ -8,13 +8,15 @@ import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import type { ApiKeyFlash } from "./api-key-flash";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 
-const clerk = vi.hoisted(() => ({
-  auth: {
-    isLoaded: true,
-    sessionId: "sess_a" as string | null,
-    userId: "user_a" as string | null,
-    orgId: "org_a" as string | null,
-  },
+interface ClerkAuthFixture {
+  isLoaded: boolean;
+  sessionId: string | null;
+  userId: string | null;
+  orgId: string | null;
+}
+
+const clerk = vi.hoisted((): { auth: ClerkAuthFixture } => ({
+  auth: { isLoaded: true, sessionId: "sess_a", userId: "user_a", orgId: "org_a" },
 }));
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => clerk.auth }));

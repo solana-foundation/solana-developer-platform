@@ -100,7 +100,8 @@
     "@biomejs/biome": "2.5.14",
     "turbo": "2.11.4",
     "typescript": "6.0.3",
-    "yaml": "2.9.1"
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
   },
   "workspaces": {
     "packages": [

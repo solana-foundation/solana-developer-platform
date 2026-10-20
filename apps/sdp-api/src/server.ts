@@ -13,6 +13,7 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 
 import { createApp } from "@/app";
 import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
+import { parseDatabaseEnv } from "@/db/database-env";
 import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
@@ -109,6 +110,7 @@ export function assertRequiredEnv(env: Env): void {
   if (!env.REDIS_URL?.trim()) {
     throw new Error("REDIS_URL is required for the Node runtime");
   }
+  parseDatabaseEnv(env);
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);

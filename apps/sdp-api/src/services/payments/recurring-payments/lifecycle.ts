@@ -410,7 +410,17 @@ async function finalizeRecurringPaymentLifecycle(input: {
  * before it signs. Cancel is an exit and is never refused (ADR 0002).
  */
 type RecurringPaymentLifecycleRun =
-  | { operation: Extract<RecurringPaymentLifecycleOperation, "cancel"> }
+  | {
+      operation: Extract<RecurringPaymentLifecycleOperation, "cancel">;
+      /**
+       * The caller's own refusal of a cancel it may not sign (wallet scope),
+       * run before the claim. Null for the job, which cancels as the mandate,
+       * and for revocation, which signs as the person revoking, whom wallet
+       * scope never narrows. A cancel is an exit: this is the waist's refusal
+       * made early, so a refused request claims and journals nothing (HOO-2099).
+       */
+      admitCaller: (() => void) | null;
+    }
   | {
       operation: Extract<RecurringPaymentLifecycleOperation, "resume">;
       admitStart: () => Promise<void>;
@@ -496,6 +506,9 @@ async function runRecurringPaymentLifecycle(
     getRecurringPaymentLifecycleStatuses(input.operation).processingStatus;
   if (input.operation === "resume" && !recoveringStaleLifecycle) {
     await input.admitStart();
+  }
+  if (input.operation === "cancel") {
+    input.admitCaller?.();
   }
 
   // A resume starts the mandate again; a cancel records nobody.
@@ -783,6 +796,8 @@ export async function cancelRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   /** The request's Idempotency-Key, written on the attempt; null for the cron. */
   idempotencyKey: string | null;
+  /** See RecurringPaymentLifecycleRun; a cancel before activation signs nothing, so skips it. */
+  admitCaller: (() => void) | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
     return cancelPendingRecurringPayment(input);

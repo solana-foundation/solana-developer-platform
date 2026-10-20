@@ -49,7 +49,9 @@ import {
   createCounterpartyAccountsRepository,
   createDvpTradeRepository,
 } from "@/db/repositories/repository-factory";
+import { getAuth } from "@/lib/auth";
 import { badRequest, conflict } from "@/lib/errors";
+import { assertCallerWalletInScope, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
@@ -68,7 +70,7 @@ import { inspectDvpMint } from "./inspect-mint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
 import { observeDvpTradeNow } from "./observe-now";
-import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
+import { getOrCreateDvpSettlementWallet, readDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
 
 /**
@@ -281,6 +283,25 @@ async function assertNamedDestinationsUsable(
 }
 
 /**
+ * The settlement wallet signs the create. The custody signer refuses it for a
+ * key whose scope does not list it (HOO-2099); refusing here as well stops the
+ * create before it provisions the wallet or records the trade, so a retry
+ * after the scope is fixed runs as new. A wallet not provisioned yet is one no
+ * selected key can list.
+ */
+async function assertSettlementWalletInScope(
+  env: Env,
+  c: Context<{ Bindings: Env }>,
+  scope: { organizationId: string; projectId: string }
+): Promise<void> {
+  const auth = getAuth(c);
+  if (auth.walletAccess.scope === "all") return;
+  const settlement = await readDvpSettlementWallet(env, scope);
+  if (settlement === null) throw new MoneyMovementRefusedError("wallet_out_of_scope");
+  assertCallerWalletInScope(auth, settlement.custodyWalletId);
+}
+
+/**
  * Creates a DvP trade on chain and records it.
  *
  * @param env - API process environment.
@@ -293,6 +314,7 @@ export async function createDvpTrade(
   auditContext: Context<{ Bindings: Env }>,
   input: CreateDvpTradeInput
 ): Promise<DvpTradeRow> {
+  await assertSettlementWalletInScope(env, auditContext, input);
   const repository = createDvpTradeRepository(env);
 
   // Resolve BOTH parties first: the fingerprint hashes the resolved addresses.

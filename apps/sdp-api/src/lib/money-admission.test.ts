@@ -1,20 +1,23 @@
 import { MOVEMENTS, type MovementId } from "@sdp/types/movements";
 import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import type { ProjectEnvironment } from "@sdp/types/projects";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
+  assertCallerWalletInScope,
   assertMoneyStartAdmitted,
   decideMoneyStart,
   decideMovement,
   decidePrincipal,
   type MoneyAdmissionFacts,
+  type MoneyAdmissionRefused,
   MoneyMovementRefusedError,
   type MoneyPrincipalFacts,
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
 import { type MoneyPrincipal, runAsMoneyPrincipal } from "@/lib/money-principal";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -418,7 +421,29 @@ describe("decidePrincipal", () => {
     expect(decide(liveKey({ grants: ["transfers.read", "recurring.execute"] }))).toEqual({
       admitted: false,
       reason: "action_not_held",
+      action: "transfers.execute",
     });
+  });
+
+  // One refusal shape for keys: a missing action reads like the route's own.
+  it.each<[MoneyAdmissionRefused, Record<string, unknown>]>([
+    [
+      { admitted: false, reason: "action_not_held", action: "transfers.execute" },
+      {
+        code: "INSUFFICIENT_PERMISSIONS",
+        statusCode: 403,
+        reason: "action_not_held",
+        details: { action: "transfers.execute" },
+      },
+    ],
+    [
+      { admitted: false, reason: "wallet_out_of_scope" },
+      { code: "FORBIDDEN", statusCode: 403, details: { reason: "wallet_out_of_scope" } },
+    ],
+  ])("turns %o into its error", (decision, error) => {
+    const refusal = MoneyMovementRefusedError.of(decision);
+    expect(refusal).toMatchObject(error);
+    expect(refusal.details).toEqual(error.details);
   });
 
   it("scopes a selected key to its listed wallets, and never widens an empty list", () => {
@@ -449,7 +474,7 @@ describe("decidePrincipal", () => {
         WALLET,
         "issuance.seize"
       )
-    ).toEqual({ admitted: false, reason: "action_not_held" });
+    ).toEqual({ admitted: false, reason: "action_not_held", action: "issuance.enforce" });
   });
 
   it("admits a mandate only for its own movement, status and source wallet", () => {
@@ -575,5 +600,50 @@ describe("money admission reads the principal in the same statement", () => {
       )
     );
     expect(read?.principal).toEqual({ kind: "api_key", key: null });
+  });
+});
+
+describe("assertCallerWalletInScope", () => {
+  const caller = {
+    organizationId: "org_early",
+    projectId: "prj_early",
+    walletAccess: { scope: "selected", custodyWalletIds: ["cwlt_listed"] },
+  } as const;
+
+  it("admits a listed wallet and logs nothing", () => {
+    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+    expect(() => assertCallerWalletInScope(caller, "cwlt_listed")).not.toThrow();
+    expect(events).not.toHaveBeenCalled();
+    events.mockRestore();
+  });
+
+  // Zach (#2434): early refusals skipped the waist's event.
+  it("logs the waist's refusal event when it refuses early", () => {
+    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+    const refusal = (() => {
+      try {
+        runAsMoneyPrincipal({ kind: "api_key", apiKeyId: "key_early" }, () =>
+          assertCallerWalletInScope(caller, "cwlt_other")
+        );
+      } catch (error) {
+        return error;
+      }
+      return null;
+    })();
+
+    expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+    expect(events).toHaveBeenCalledWith("warn", {
+      event: "sdp_money_refused",
+      surface: "early",
+      movement: null,
+      module: null,
+      subject_id: "cwlt_other",
+      organization_id: "org_early",
+      project_id: "prj_early",
+      principal_kind: "api_key",
+      principal: "api_key:key_early",
+      reason: "wallet_out_of_scope",
+    });
+    events.mockRestore();
   });
 });

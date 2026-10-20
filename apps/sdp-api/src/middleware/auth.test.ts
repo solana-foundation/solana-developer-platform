@@ -184,8 +184,37 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(403);
-      const body = errorBodySchema.parse(await res.json());
-      expect(body.error.code).toBe("FORBIDDEN");
+      expect(await res.json()).toMatchObject({
+        error: { code: "FORBIDDEN", details: { reason: "ip_not_allowed" } },
+      });
+    });
+
+    it("rejects an API key used outside its organization's IP allowlist", async () => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ allowedIpAddresses: ["203.0.113.0/24"] }), TEST_ORG.id)
+        .run();
+      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "198.51.100.42",
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        error: {
+          code: "FORBIDDEN",
+          message: "Request origin is not allowed for this organization",
+          details: { reason: "ip_not_allowed" },
+        },
+      });
     });
 
     it("accepts an API key used from an allowed IPv4 address", async () => {

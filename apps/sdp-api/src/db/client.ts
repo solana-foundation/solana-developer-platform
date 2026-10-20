@@ -1,9 +1,16 @@
-import { Pool, type QueryResult, types } from "pg";
+import { DatabaseError, Pool, type PoolClient, type QueryResult, types } from "pg";
+import { parseDatabaseEnv } from "@/db/database-env";
 import {
   currentDatabaseIdentity,
   type DatabaseIdentity,
   databaseIdentityConfigStatement,
 } from "@/db/identity";
+import {
+  MAX_NAMED_STATEMENTS,
+  type QueryArgs,
+  type Queryable,
+  StatementCache,
+} from "@/db/prepared-statements";
 import { getLogger } from "@/runtime/logger";
 
 types.setTypeParser(20, (value) => Number.parseInt(value, 10));
@@ -64,14 +71,70 @@ export class SessionLockUnavailableError extends Error {
   }
 }
 
-interface QueryArgs {
-  text: string;
-  values?: unknown[];
+/**
+ * The database could not take the work at all: no pooled connection came free
+ * in time, a new one could not be opened in time, or the server is out of
+ * connection slots or still starting up. Every one of these fails before a
+ * statement runs, so the request can be retried, and the API answers 503 with
+ * `Retry-After` instead of 500 (src/app.ts).
+ */
+export class DatabaseUnavailableError extends Error {
+  /** Pool counters when the failure happened; `waiting` is the queue behind a saturated pool. */
+  readonly pool: { total: number; idle: number; waiting: number };
+  /** The server's SQLSTATE when it refused the connection; undefined for a pool timeout. */
+  readonly code: string | undefined;
+
+  constructor(cause: Error, pool: Pick<Pool, "totalCount" | "idleCount" | "waitingCount">) {
+    const counters = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
+    // The counters ride in the message because the API logs an unexpected
+    // error's message and nothing else of it, and they are what tells a
+    // saturated pool from a database that is down.
+    super(
+      `Database unavailable: ${cause.message} ` +
+        `(pool: ${counters.total} open, ${counters.idle} idle, ${counters.waiting} waiting)`,
+      { cause }
+    );
+    this.name = "DatabaseUnavailableError";
+    this.pool = counters;
+    this.code = cause instanceof DatabaseError ? cause.code : undefined;
+  }
 }
 
-type Queryable = {
-  query: (args: QueryArgs) => Promise<QueryResult>;
-};
+/** pg-pool messages for a connection that was never handed out. */
+const POOL_ACQUIRE_TIMEOUT_MESSAGES: readonly string[] = [
+  "timeout exceeded when trying to connect",
+  "Connection terminated due to connection timeout",
+];
+/** `too_many_connections` and `cannot_connect_now` (starting up or shutting down). */
+const CONNECT_REFUSED_CODES: readonly string[] = ["53300", "57P03"];
+
+/** Whether `error` is a failure to get any connection, as opposed to a statement that failed. */
+export function isDatabaseUnavailableCause(error: Error): boolean {
+  if (POOL_ACQUIRE_TIMEOUT_MESSAGES.includes(error.message)) {
+    return true;
+  }
+  return (
+    error instanceof DatabaseError &&
+    error.code !== undefined &&
+    CONNECT_REFUSED_CODES.includes(error.code)
+  );
+}
+
+/** Runs `run`, reporting a failure to get any connection as a DatabaseUnavailableError. */
+async function reportingUnavailable<T>(pool: Pool, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof Error && isDatabaseUnavailableCause(error)) {
+      throw new DatabaseUnavailableError(error, pool);
+    }
+    throw error;
+  }
+}
+
+function acquireClient(pool: Pool): Promise<PoolClient> {
+  return reportingUnavailable(pool, () => pool.connect());
+}
 
 const pooledClients = new Map<string, PooledPostgresClient>();
 
@@ -84,6 +147,8 @@ const NODE_POOL_OPTIONS = {
   // audit-ledger writer does for its Redis waits (`audit.service.ts`).
   statement_timeout: 30_000,
   idle_in_transaction_session_timeout: 60_000,
+  // Lets a leased connection take several commands in one write; see `inOneFlight`.
+  pipeline: true,
   connectionTimeoutMillis: 5_000,
   idleTimeoutMillis: 30_000,
   maxLifetimeSeconds: 300,
@@ -164,7 +229,32 @@ function normalizeInsertConflictSyntax(query: string): string {
   return `${baseInsert} ON CONFLICT (${conflictTarget}) DO UPDATE SET ${updateClause}`;
 }
 
+/**
+ * The SQL each query text rewrites to is the same every time, and rewriting it
+ * scans the whole text character by character, so it is kept. Dynamic SQL
+ * (variable IN lists, optional filters) makes new texts, so the oldest is
+ * forgotten once the cap is reached.
+ */
+const MAX_REWRITTEN_QUERIES = 2_048;
+const rewrittenQueries = new Map<string, string>();
+
 function normalizeSql(query: string): string {
+  const known = rewrittenQueries.get(query);
+  if (known !== undefined) {
+    return known;
+  }
+  const rewritten = rewriteSql(query);
+  if (rewrittenQueries.size >= MAX_REWRITTEN_QUERIES) {
+    const oldest = rewrittenQueries.keys().next();
+    if (!oldest.done) {
+      rewrittenQueries.delete(oldest.value);
+    }
+  }
+  rewrittenQueries.set(query, rewritten);
+  return rewritten;
+}
+
+function rewriteSql(query: string): string {
   return (
     normalizeInsertConflictSyntax(replacePositionalPlaceholders(query))
       // biome-ignore lint/security/noSecrets: SQL datetime literal, not a secret.
@@ -292,21 +382,63 @@ abstract class BasePostgresClient extends PostgresExecutor implements DatabaseCl
 }
 
 /**
- * Open a transaction stamped with the ambient database identity
- * (src/db/identity.ts) in a single round trip. The GUCs are `SET LOCAL`, so
- * COMMIT/ROLLBACK clears them and pooled connection reuse can never leak an
- * identity across callers. A missing or `none` identity opens a bare
+ * The command that opens a transaction stamped with the ambient database
+ * identity (src/db/identity.ts) in a single round trip. The GUCs are `SET
+ * LOCAL`, so COMMIT/ROLLBACK clears them and pooled connection reuse can never
+ * leak an identity across callers. A missing or `none` identity opens a bare
  * transaction — row-level security then denies by default.
  */
+function beginCommand(identity: DatabaseIdentity | undefined): { text: string } {
+  if (!identity || identity.kind === "none") {
+    return { text: "BEGIN" };
+  }
+  return { text: `BEGIN; ${databaseIdentityConfigStatement(identity).text}` };
+}
+
 async function beginWithDatabaseIdentity(
   client: Queryable,
   identity: DatabaseIdentity | undefined
 ): Promise<void> {
-  if (!identity || identity.kind === "none") {
-    await client.query({ text: "BEGIN" });
-    return;
+  await client.query(beginCommand(identity));
+}
+
+/**
+ * Sends `commands` on one connection without waiting for each to finish, and
+ * answers once every one of them has settled. node-postgres (`pipeline: true`)
+ * writes them back to back and PostgreSQL runs them in order, so a stamped
+ * statement costs one round trip instead of three.
+ *
+ * Nothing is left on the wire when this returns or throws, so the caller may
+ * roll back or release the connection straight away. The failure reported is
+ * the first in sending order, which is the one that caused the rest: after an
+ * error the server skips to the next command and runs it in an aborted
+ * transaction, where a `COMMIT` rolls back instead of committing.
+ */
+async function inOneFlight(
+  commands: readonly (() => Promise<QueryResult>)[]
+): Promise<QueryResult[]> {
+  const sent: Promise<QueryResult>[] = [];
+  let sendError: Error | undefined;
+  for (const send of commands) {
+    try {
+      sent.push(send());
+    } catch (error) {
+      sendError = error instanceof Error ? error : new Error(String(error));
+      break;
+    }
   }
-  await client.query({ text: `BEGIN; ${databaseIdentityConfigStatement(identity).text}` });
+  const settled = await Promise.allSettled(sent);
+  const results: QueryResult[] = [];
+  for (const outcome of settled) {
+    if (outcome.status === "rejected") {
+      throw outcome.reason instanceof Error ? outcome.reason : new Error(String(outcome.reason));
+    }
+    results.push(outcome.value);
+  }
+  if (sendError) {
+    throw sendError;
+  }
+  return results;
 }
 
 /**
@@ -316,20 +448,31 @@ async function beginWithDatabaseIdentity(
  * straight to the pool and RLS fails closed.
  */
 class IdentityStampingPoolQueryable implements Queryable {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly statements: StatementCache
+  ) {}
 
-  async query(args: QueryArgs): Promise<QueryResult> {
+  query(args: QueryArgs): Promise<QueryResult> {
+    return this.statements.retryingStale(args, (named) => this.queryOnce(named));
+  }
+
+  private async queryOnce(args: QueryArgs): Promise<QueryResult> {
     const identity = currentDatabaseIdentity();
     if (!identity || identity.kind === "none") {
-      return this.pool.query(args);
+      return reportingUnavailable(this.pool, () => this.pool.query(args));
     }
 
-    const client = await this.pool.connect();
+    const client = await acquireClient(this.pool);
     let releaseError: Error | undefined;
     try {
-      await beginWithDatabaseIdentity(client, identity);
-      const result = await client.query(args);
-      await client.query("COMMIT");
+      // The identity is stamped first, so a statement never runs without it.
+      const begin = beginCommand(identity);
+      const [, result] = await inOneFlight([
+        () => client.query(begin),
+        () => this.statements.run(client, args),
+        () => client.query("COMMIT"),
+      ]);
       return result;
     } catch (error) {
       try {
@@ -340,21 +483,32 @@ class IdentityStampingPoolQueryable implements Queryable {
       }
       throw error;
     } finally {
-      client.release(releaseError);
+      this.statements.release(client, releaseError);
     }
   }
 }
 
 class PooledPostgresClient extends BasePostgresClient {
   private readonly pool: Pool;
+  private readonly statements: StatementCache;
 
   constructor(connectionString: string) {
     const pool = new Pool({
       connectionString,
       ...NODE_POOL_OPTIONS,
     });
-    super(new IdentityStampingPoolQueryable(pool));
+    // Stale statements are found one connection at a time and each find closes
+    // that connection, so none meets more stale connections than the pool holds.
+    const statements = new StatementCache(
+      {
+        enabled: parseDatabaseEnv(process.env).DATABASE_PREPARED_STATEMENTS !== "off",
+        maxNames: MAX_NAMED_STATEMENTS,
+      },
+      NODE_POOL_OPTIONS.max
+    );
+    super(new IdentityStampingPoolQueryable(pool, statements));
     this.pool = pool;
+    this.statements = statements;
 
     // Idle pool errors are EventEmitter errors; without a listener Node treats
     // them as uncaught exceptions and terminates the process.
@@ -364,12 +518,12 @@ class PooledPostgresClient extends BasePostgresClient {
   }
 
   async transaction<T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
+    const client = await acquireClient(this.pool);
     let releaseError: Error | undefined;
 
     try {
       await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
-      const executor = new PostgresExecutor(client);
+      const executor = new PostgresExecutor(this.statements.on(client));
       const result = await callback(executor);
       await client.query("COMMIT");
       return result;
@@ -382,7 +536,7 @@ class PooledPostgresClient extends BasePostgresClient {
       }
       throw error;
     } finally {
-      client.release(releaseError);
+      this.statements.release(client, releaseError);
     }
   }
 
@@ -393,7 +547,7 @@ class PooledPostgresClient extends BasePostgresClient {
     afterRollback?: (result: T) => Promise<void>,
     options?: { wait?: boolean }
   ): Promise<T> {
-    const client = await this.pool.connect();
+    const client = await acquireClient(this.pool);
     let releaseError: Error | undefined;
     let transactionOpen = false;
     let lockHeld = false;
@@ -425,7 +579,7 @@ class PooledPostgresClient extends BasePostgresClient {
       // defensive ROLLBACK on an idle connection is only a warning.
       transactionOpen = true;
       await beginWithDatabaseIdentity(client, currentDatabaseIdentity());
-      const executor = new PostgresExecutor(client);
+      const executor = new PostgresExecutor(this.statements.on(client));
       const result = await callback(executor);
       callbackResult = result;
       callbackCompleted = true;
@@ -470,7 +624,7 @@ class PooledPostgresClient extends BasePostgresClient {
             unlockError instanceof Error ? unlockError : new Error(String(unlockError));
         }
       }
-      client.release(releaseError);
+      this.statements.release(client, releaseError);
     }
   }
 

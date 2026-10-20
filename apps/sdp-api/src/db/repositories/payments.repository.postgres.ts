@@ -1126,20 +1126,31 @@ export function createPostgresPaymentsRepository(
         updatedAt: { column: "pt.updated_at", nulls: "" },
       }[params.sortBy ?? "createdAt"] ?? { column: "pt.created_at", nulls: "" };
       const sortDirection = params.sortDirection === "asc" ? "ASC" : "DESC";
+      const orderBy = `${sort.column} ${sortDirection}${sort.nulls}, pt.created_at DESC, pt.id DESC`;
 
+      // The page is chosen from ids alone, then joined back. Row-level security
+      // makes PostgreSQL estimate a tenant's rows near one, so a generic plan
+      // for one wide statement sorted every row of a large tenant before the
+      // LIMIT (115 ms for 40k rows); the narrow id query takes the ordered
+      // idx_payment_transfers_org_project_created_id scan under any plan.
       const [rows, countRow] = await Promise.all([
         db
           .prepare(
             `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind, c.display_name AS counterparty_display_name
-             FROM payment_transfers pt
+             FROM (
+               SELECT pt.id
+               FROM payment_transfers pt
+               WHERE ${whereClause}
+               ORDER BY ${orderBy}
+               LIMIT ?
+               OFFSET ?
+             ) page
+             JOIN payment_transfers pt ON pt.id = page.id
              LEFT JOIN counterparties c
                ON c.id = pt.counterparty_id
               AND c.organization_id = pt.organization_id
               AND c.project_id = pt.project_id
-             WHERE ${whereClause}
-             ORDER BY ${sort.column} ${sortDirection}${sort.nulls}, pt.created_at DESC, pt.id DESC
-             LIMIT ?
-             OFFSET ?`
+             ORDER BY ${orderBy}`
           )
           .bind(...paginationValues)
           .all<PaymentTransferProjectionRow>(),
