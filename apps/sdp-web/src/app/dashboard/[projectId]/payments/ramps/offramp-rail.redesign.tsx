@@ -3,12 +3,13 @@
 import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
-import { OfframpFooterActionButton, offrampFooterAction } from "./components/offramp-final-step";
+import { OfframpFooterActionButton } from "./components/offramp-final-step";
 import { OfframpStepContent } from "./components/offramp-step-content.redesign";
 import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
 import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell.redesign";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard.redesign";
+import { offrampFooterAction } from "./offramp-footer-action";
 import type { RailProps } from "./ramp-action-page.redesign";
 import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";

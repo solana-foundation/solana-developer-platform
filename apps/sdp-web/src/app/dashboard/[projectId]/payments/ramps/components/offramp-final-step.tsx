@@ -11,48 +11,17 @@ import {
   formatDisplayAmount,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import type {
+  OfframpFinalStepWizard,
+  OfframpFooterAction,
+} from "@/app/dashboard/[projectId]/payments/ramps/offramp-footer-action";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { transactionHref } from "@/lib/payments-routes";
-import { getRampProviderLabel, type SelectedRampPair } from "@/lib/ramps";
+import { getRampProviderLabel } from "@/lib/ramps";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { InstructionActionButton } from "./instruction-action-button";
 import { RampStatusPanel } from "./ramp-status-panel";
-
-/** What the off-ramp's final step reads from either wizard. */
-export interface OfframpFinalStepWizard {
-  quoteTransferId: string | null;
-  transferStatus: PaymentTransferSummary | undefined;
-  depositTarget: RampCryptoDeposit | null;
-  selectedRampPair: SelectedRampPair;
-  selectedWallet: { label: string | null } | null;
-  canSendOnchain: boolean;
-  onchainSendLoading: boolean;
-  onchainSendResult: unknown;
-  onchainSendError: string | null;
-  sendCryptoToDeposit: () => Promise<void>;
-  startOver: (stepId: "WITHDRAW") => void;
-}
-
-export type OfframpFooterAction =
-  | { kind: "transaction"; transferId: string }
-  | { kind: "send"; depositTarget: RampCryptoDeposit };
-
-/** The one action the final step offers: the finished transaction, or sending the deposit. */
-export function offrampFooterAction(wizard: OfframpFinalStepWizard): OfframpFooterAction | null {
-  const transfer = wizard.transferStatus;
-  if (
-    transfer !== undefined &&
-    getRampTransferState(transfer.status).terminal &&
-    wizard.quoteTransferId !== null
-  ) {
-    return { kind: "transaction", transferId: wizard.quoteTransferId };
-  }
-  return wizard.depositTarget === null
-    ? null
-    : { kind: "send", depositTarget: wizard.depositTarget };
-}
 
 /**
  * Sending moves money from the wallet to an address only the provider named,

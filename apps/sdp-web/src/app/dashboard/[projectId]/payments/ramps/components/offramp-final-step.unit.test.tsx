@@ -5,15 +5,14 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  type OfframpFinalStepWizard,
+  offrampFooterAction,
+} from "@/app/dashboard/[projectId]/payments/ramps/offramp-footer-action";
 import { exceedsWalletBalance } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import {
-  type OfframpFinalStepWizard,
-  OfframpFooterActionButton,
-  OfframpOutcome,
-  offrampFooterAction,
-} from "./offramp-final-step";
+import { OfframpFooterActionButton, OfframpOutcome } from "./offramp-final-step";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
