@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
-import type { CounterpartyResponse } from "@sdp/types/counterparties";
-import type { PaymentRecurringPayment, PaymentRecurringPaymentResponse } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { Client } from "pg";
+import { z } from "zod";
+import { recurringPaymentEnvelopeSchema } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
 import {
@@ -12,11 +12,22 @@ import {
 } from "../support/payments-wallet-identity";
 
 const expect = playwrightExpect.configure({ timeout: 120_000 });
+const counterpartySchema = z.object({ id: z.string().min(1), displayName: z.string().min(1) });
+const tokenFixtureResponseSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.literal("recurring-identity-token-fixture"),
+  result: z.object({
+    context: z.object({ slot: z.number().int().nonnegative() }),
+    value: z.null(),
+  }),
+  error: z.never().optional(),
+});
 
 test.describe
   .serial("Managed recurring exact source identity", () => {
     let fixture: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>;
-    let counterparty: CounterpartyResponse["counterparty"];
+    let counterparty: z.infer<typeof counterpartySchema>;
+    let counterpartyId: string | undefined;
 
     async function withDatabase(fn: (db: Client) => Promise<void>) {
       const db = new Client({ connectionString: walletIdentityDatabaseUrl() });
@@ -54,12 +65,16 @@ test.describe
         signal: AbortSignal.timeout(30_000),
       });
       expect(seeded.ok).toBe(true);
-      expect(await seeded.json()).not.toHaveProperty("error");
-      const created = await fixture.api.post<CounterpartyResponse>("/v1/counterparties", {
+      tokenFixtureResponseSchema.parse(await seeded.json());
+      const created: unknown = await fixture.api.post("/v1/counterparties", {
         entityType: "individual",
         displayName: `Recurring Identity ${randomUUID().slice(0, 8)}`,
       });
-      counterparty = created.counterparty;
+      // Retain the owned ID for cleanup even if another response field is invalid.
+      counterpartyId = z
+        .object({ counterparty: counterpartySchema.pick({ id: true }) })
+        .parse(created).counterparty.id;
+      counterparty = z.object({ counterparty: counterpartySchema }).parse(created).counterparty;
       await fixture.api.post(`/v1/counterparties/${counterparty.id}/accounts`, {
         accountKind: "crypto_wallet",
         label: "Unfunded recurring identity destination",
@@ -69,17 +84,17 @@ test.describe
 
     test.afterAll(async () => {
       try {
-        if (counterparty) {
+        if (counterpartyId) {
           await withDatabase(async (db) => {
             await db.query("BEGIN");
             try {
               // Include this run's schedules whose source pin was intentionally cleared.
               await db.query(
                 "DELETE FROM payment_recurring_payments WHERE counterparty_id = $1 AND project_id = $2",
-                [counterparty.id, fixture.projectId]
+                [counterpartyId, fixture.projectId]
               );
               await db.query("DELETE FROM counterparties WHERE id = $1 AND project_id = $2", [
-                counterparty.id,
+                counterpartyId,
                 fixture.projectId,
               ]);
               await db.query("COMMIT");
@@ -144,9 +159,10 @@ test.describe
       });
       expect(savedResponse.request().postDataJSON()).not.toHaveProperty("sourceProviderWalletId");
       expect(savedResponse.ok()).toBe(true);
-      const saved: { data: PaymentRecurringPaymentResponse } = await savedResponse.json();
+      const savedJson: unknown = await savedResponse.json();
+      expect(savedJson).not.toHaveProperty("data.recurringPayment.sourceProviderWalletId");
+      const saved = recurringPaymentEnvelopeSchema.parse(savedJson);
       const recurring = saved.data.recurringPayment;
-      expect(recurring).not.toHaveProperty("sourceProviderWalletId");
       expect(recurring.sourceCustodyWalletId).toBe(wallet.id);
       expect(recurring.sourceAddress).toBe(fixture.walletA.publicKey);
       expect(recurring.status).toBe("pending_activation");
@@ -198,9 +214,11 @@ test.describe
         sourceCustodyWalletId: fixture.walletB.id,
       });
       expect(changed.ok()).toBe(true);
-      const persisted = await fixture.api.get<PaymentRecurringPaymentResponse>(
+      const persistedJson: unknown = await fixture.api.get(
         `/v1/payments/recurring-payments/${first.id}`
       );
+      expect(persistedJson).not.toHaveProperty("recurringPayment.sourceProviderWalletId");
+      const persisted = recurringPaymentEnvelopeSchema.shape.data.parse(persistedJson);
       expect(persisted.recurringPayment).toMatchObject({
         id: first.id,
         sourceCustodyWalletId: fixture.walletB.id,
@@ -209,7 +227,6 @@ test.describe
         periodHours: first.periodHours,
         status: first.status,
       });
-      expect(persisted.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
       await page.reload();
       await expect(
         page.getByRole("link", { name: fixture.walletB.label ?? "", exact: true })
@@ -232,12 +249,13 @@ test.describe
           0
         );
       }
-      const history = await fixture.api.get<{ recurringPayment: PaymentRecurringPayment }>(
+      const historyJson: unknown = await fixture.api.get(
         `/v1/payments/recurring-payments/${first.id}`
       );
+      expect(historyJson).not.toHaveProperty("recurringPayment.sourceProviderWalletId");
+      const history = recurringPaymentEnvelopeSchema.shape.data.parse(historyJson);
       expect(history.recurringPayment.sourceCustodyWalletId).toBeNull();
       expect(history.recurringPayment.sourceAddress).toBe(first.sourceAddress);
-      expect(history.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
       const shortened = `${first.sourceAddress.slice(0, 6)}…${first.sourceAddress.slice(-4)}`;
       await expect(page.getByText(shortened, { exact: true }).first()).toBeVisible();
       await page.screenshot({
