@@ -162,3 +162,14 @@ export const signerCheckSchema = z.object({
 });
 
 export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Devnet Faucet
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const walletIdParamsSchema = z.object({
+  walletId: z.string().trim().min(1),
+});
+
+// The amount is the server's: a body naming one is refused.
+export const walletFaucetSchema = z.object({}).strict();

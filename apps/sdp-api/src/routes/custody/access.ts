@@ -98,6 +98,19 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
   }
 }
 
+/** Devnet faucet: the wallet the path names. */
+export async function authorizeWalletFaucet(c: AppContext, input: AuthorizeInput): Promise<void> {
+  // SAFETY: mounted after validateParams(walletIdParamsSchema), which requires it.
+  const { walletId } = input.params as { walletId: string };
+  // The handler resolves the path's id with its record-id alias and answers "Wallet not found".
+  await assertCustodyWalletInProject(
+    c,
+    walletId,
+    true,
+    () => new AppError("NOT_FOUND", "Wallet not found")
+  );
+}
+
 /** Wallet delete: the wallet the body names. */
 export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
   const walletId = body<{ walletId: string }>(input).walletId;

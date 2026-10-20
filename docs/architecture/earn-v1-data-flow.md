@@ -76,7 +76,7 @@ caller broadcasts and tracks them.
 | Embedded Yield activity | `earn_movements`; `GET /external-wallet/movements` + `/:movementId` | Caller-signed deposit and withdrawal submits, recorded before SDP broadcasts | Intent = immediate; detail polls chain finality and the background sweep recovers unattended rows |
 | Queued withdrawal lifecycle | `earn_vault_withdrawal_requests` plus signed action/build rows; external-wallet list/detail and custody request routes | Owner-signed request/cancellation actions, persisted before broadcast; provider PDA/event reads prove Veda maturity and solver fulfilment or Hastra administrator completion, cancellation, and intermediate wYLDS terms | Durable immediately; due-queue reconciliation continues until terminal |
 | Movement history, ALL providers | `earn_movements` (**DB ledger** — `GET /v1/earn/movements`) | Every movement above, one chronological feed across both execution models; no provider gate (ADR 0002 exit safety) | Same as the rows it serves |
-| Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
+| Wallet balances (funding) | Existing wallet/custody surfaces | Existing wallet balance and token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
 > **Ledger vs live.** SDP ledgers every movement it signs or accepts through a

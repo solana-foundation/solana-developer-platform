@@ -66,7 +66,6 @@ describe("API-key authoring: grants offered by the release channel", () => {
       "wallets",
       "projects",
       "organizations",
-      "rpc",
     ]);
     // A counterparty's payout destination is a stable payments route; the
     // ramp requirements route is gated by its own mount, not by this action.
@@ -134,13 +133,10 @@ describe("API-key authoring: grant toggles", () => {
     expect(toggleGrant(["issuance.enforce"], "issuance.enforce")).toEqual([]);
   });
 
-  it("writes Everything out as the explicit offered list, the RPC relay left to its own tick", () => {
+  it("writes Everything out as the explicit offered list", () => {
     const offered = grantableActionsInChannel(inStable);
-    expect(offered).toContain("rpc.execute");
     const everything = everythingGrants(offered);
-    expect(everything).not.toContain("rpc.execute");
     for (const action of offered) {
-      if (action === "rpc.execute") continue;
       expect(grantsCoverAction(everything, action), action).toBe(true);
     }
   });

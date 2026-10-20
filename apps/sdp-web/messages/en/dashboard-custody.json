@@ -204,13 +204,8 @@
     "requestFailed": "Request failed",
     "httpRequestFailed": "{error} (HTTP {status})",
     "walletIdRequired": "Wallet ID is required.",
-    "validWalletAddressRequired": "A valid wallet address is required.",
     "signInToRequestDevnetSol": "Sign in to request devnet SOL.",
-    "devnetFaucetHttpError": "Devnet faucet RPC provider {provider} returned HTTP {status}.",
-    "devnetFaucetEmptyResponse": "Devnet faucet returned an empty RPC response.",
-    "devnetFaucetProviderError": "Devnet faucet RPC provider {provider} returned: {error}",
-    "devnetFaucetProviderGenericError": "Devnet faucet RPC provider {provider} returned an error.",
-    "devnetFaucetNoSignature": "Devnet faucet returned no transaction signature.",
+    "devnetFaucetTransactionFailed": "The devnet airdrop transaction failed.",
     "walletAddress": "Wallet address",
     "walletMetadataCopied": "{label} copied.",
     "unableToCopy": "Unable to copy {label}.",
@@ -355,6 +350,7 @@
     "proveOwnershipAdminOnly": "Prove ownership (admin only)",
     "requesting": "Requesting...",
     "requestDevnetSol": "Request devnet SOL",
+    "requestDevnetSolAdminOnly": "Request devnet SOL (admin only)",
     "playgroundProviderField": "Provider",
     "playgroundLabelField": "Label",
     "playgroundPurposeField": "Purpose",
@@ -714,10 +710,6 @@
       "organizations": {
         "label": "Organization",
         "description": "Organization settings and provider access."
-      },
-      "rpc": {
-        "label": "RPC",
-        "description": "The managed Solana RPC relay."
       },
       "onramp": {
         "label": "On-ramp",

@@ -38,7 +38,6 @@ authenticated.
 
 - `/admin/allowlist/*` — Admin allowlist management
 - `/webhooks/clerk/link-orgs` — Clerk org sync webhook
-- `/v1/rpc/*` — Solana RPC proxy (internal)
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
 - `/v1/onboarding/*` — Internal onboarding status

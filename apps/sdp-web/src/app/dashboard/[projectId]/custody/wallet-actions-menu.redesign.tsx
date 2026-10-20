@@ -9,15 +9,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
-import {
-  ArrowUpRight,
-  ChevronDown,
-  Droplets,
-  Ellipsis,
-  EllipsisVertical,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowUpRight, ChevronDown, Ellipsis, EllipsisVertical, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { DevnetSolMenuItem } from "@/app/dashboard/[projectId]/custody/devnet-sol-menu-item";
 import { useWalletActions } from "@/app/dashboard/[projectId]/custody/use-wallet-actions";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -53,11 +47,11 @@ export function WalletActionsMenu({
 }: WalletActionsMenuProps) {
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
-  const { isBusy, canRunSignerCheck, runSignerCheck, requestDevnetSol } = useWalletActions({
-    walletId,
-    walletAddress,
-    supportsSignerCheck,
-  });
+  const { isBusy, canRunSignerCheck, runSignerCheck, canRequestDevnetSol, requestDevnetSol } =
+    useWalletActions({
+      walletId,
+      supportsSignerCheck,
+    });
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
   const resolvedTriggerLabel = triggerLabel ?? t("DashboardCustody.actions");
 
@@ -116,10 +110,11 @@ export function WalletActionsMenu({
                 : t("DashboardCustody.proveOwnershipAdminOnly")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy}>
-          <Droplets className="h-4 w-4" />
-          {isBusy ? t("DashboardCustody.requesting") : t("DashboardCustody.requestDevnetSol")}
-        </DropdownMenuItem>
+        <DevnetSolMenuItem
+          isBusy={isBusy}
+          canRequest={canRequestDevnetSol}
+          onSelect={requestDevnetSol}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

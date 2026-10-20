@@ -35,7 +35,6 @@ import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectAdministrationPaths, registerProjectPaths } from "./paths/projects";
-import { registerRpcPaths } from "./paths/rpc";
 import { registerTransactionsPaths } from "./paths/transactions";
 import {
   isValuePublished,
@@ -61,7 +60,6 @@ const OPENAPI_TAG = {
     description:
       "Projects and their provider availability. Project members and keys are managed in the dashboard.",
   },
-  RPC: { name: "RPC", description: "Managed Solana RPC relay." },
   ISSUANCE: {
     name: "Issuance",
     description: "Token issuance, allowlists, and lifecycle operations.",
@@ -183,7 +181,6 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.MEMBERS,
   OPENAPI_TAG.WALLETS,
   OPENAPI_TAG.PROJECTS,
-  OPENAPI_TAG.RPC,
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.PRIVATE_CHANNELS,
@@ -249,7 +246,6 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerDvpPaths(registry);
   registerProjectPaths(registry, true);
   registerProjectAdministrationPaths(registry);
-  registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);

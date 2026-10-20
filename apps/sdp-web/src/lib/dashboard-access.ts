@@ -8,6 +8,7 @@ export interface DashboardCapabilities {
   canManageTokenAdmin: boolean;
   canManageTokenWrite: boolean;
   canUseWalletSignerCheck: boolean;
+  canUseWalletFaucet: boolean;
 }
 
 /** Plain data: the project layout hands it to a client provider, so it holds no functions. */
@@ -39,6 +40,7 @@ export function resolveDashboardAccess(role: string | null | undefined): Dashboa
       canManageTokenWrite: mayPerform("issuance.manage"),
       // Current dashboard implementation creates a short-lived API key before signer check.
       canUseWalletSignerCheck: mayPerform("wallets.execute") && mayPerform("api_keys.manage"),
+      canUseWalletFaucet: mayPerform("wallets.execute"),
     },
   };
 }

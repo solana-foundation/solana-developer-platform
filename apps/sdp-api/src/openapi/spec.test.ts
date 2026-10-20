@@ -867,18 +867,13 @@ describe("OpenAPI spec", () => {
   });
 
   it("names the hidden families' actions in no channel's document or surface manifest", () => {
-    expect([...hiddenValues()].sort()).toEqual([
-      "organizations.manage",
-      "organizations.read",
-      "rpc.execute",
-    ]);
+    expect([...hiddenValues()].sort()).toEqual(["organizations.manage", "organizations.read"]);
     for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
       const published = JSON.stringify(createPublicOpenApiDocument({ releaseChannel }));
       const manifest = createPublicSurfaceManifest(releaseChannel);
       for (const value of hiddenValues()) {
         expect(published).not.toContain(`"${value}"`);
       }
-      expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("rpc");
       expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("organizations");
     }
   });

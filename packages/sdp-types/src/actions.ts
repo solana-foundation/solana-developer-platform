@@ -49,7 +49,7 @@ export type ActionOwner = SdpModule | "core";
  * the order the dashboard shows.
  *
  * Modules outside the Mainnet V1 release (issuance, dvp, earn,
- * private_channels, helius_rings, rpc, onramp, offramp, ramp_transfers) carry
+ * private_channels, helius_rings, onramp, offramp, ramp_transfers) carry
  * a coarse mapping: GET is `read`, a mutation is `manage`, `execute` or
  * `configure` by the rule above. Review each before its module is promoted.
  */
@@ -72,7 +72,6 @@ export const ACTION_MODULES = {
   members: { owner: "core", verbs: ["read", "manage"] },
   organizations: { owner: "core", verbs: ["read", "manage"] },
   // Coarse, review before promotion.
-  rpc: { owner: "core", verbs: ["execute"] },
   onramp: { owner: "ramps", verbs: ["read", "execute"] },
   offramp: { owner: "ramps", verbs: ["read", "execute"] },
   ramp_transfers: { owner: "ramps", verbs: ["manage"] },
@@ -104,7 +103,6 @@ export const ACTION_MODULE_NAMES = Object.keys(ACTION_MODULES) as ActionModule[]
 
 /** Modules whose action mapping is coarse and must be reviewed before promotion. */
 export const COARSE_ACTION_MODULES = [
-  "rpc",
   "onramp",
   "offramp",
   "ramp_transfers",
@@ -194,29 +192,17 @@ export const API_KEY_GRANTABLE_ACTIONS: readonly Action[] = ACTIONS.filter(
 );
 
 /**
- * Action modules of the families kept out of every public surface (the RPC
- * relay and organization administration; see AGENTS.md, "Public vs internal
+ * Action modules of the families kept out of every public surface
+ * (organization administration; see AGENTS.md, "Public vs internal
  * surfaces"): the public OpenAPI document, its grant enum, the docs and the
  * AI resources never name their actions. Keys may still hold them.
  */
-export const HIDDEN_ACTION_MODULES = [
-  "rpc",
-  "organizations",
-] as const satisfies readonly ActionModule[];
+export const HIDDEN_ACTION_MODULES = ["organizations"] as const satisfies readonly ActionModule[];
 
 const HIDDEN_ACTION_MODULE_SET: ReadonlySet<ActionModule> = new Set(HIDDEN_ACTION_MODULES);
 
 export function isHiddenAction(action: Action): boolean {
   return HIDDEN_ACTION_MODULE_SET.has(actionModuleOf(action));
-}
-
-/**
- * Whether the dashboard's "Everything" includes an action. The metered RPC
- * relay never rides along: a key gets `rpc.execute` only when it is granted
- * explicitly.
- */
-export function isInEverythingGrant(action: Action): boolean {
-  return actionModuleOf(action) !== "rpc";
 }
 
 export function isApiKeyGrantableAction(action: Action): boolean {

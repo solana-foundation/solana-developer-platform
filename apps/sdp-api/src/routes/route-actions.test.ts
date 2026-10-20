@@ -130,7 +130,6 @@ describe("route actions", () => {
       "onramp",
       "private_channels",
       "ramp_transfers",
-      "rpc",
     ]);
   });
 });
@@ -214,7 +213,10 @@ function declaredAction(route: RegisteredRouteAuthorization): Action | null {
  * still refused; the test pins that it never answers 2xx.
  */
 const REFUSED_BEFORE_THE_ACTION =
-  /^(\/v1\/(api-keys|members|organizations)|\/v1\/projects\/:projectId\/(api-keys|members)|\/internal\/(playground|dashboard\/custody|dashboard\/helius-rings))(\/|$)/;
+  /^(\/v1\/(api-keys|members|organizations)|\/v1\/projects\/:projectId\/(api-keys|members)|\/internal\/(playground|dashboard\/custody|dashboard\/helius-rings|dashboard\/wallets))(\/|$)/;
+
+/** The mounts above that refuse a key on every route, whatever its action. */
+const KEYLESS_MOUNTS = /^\/internal\/(playground|dashboard\/(custody|helius-rings|wallets))(\/|$)/;
 
 describe("actions no API key may hold", () => {
   const forbiddenRoutes = routes.filter((route) => {
@@ -284,6 +286,12 @@ describe("each route enforces its own action", () => {
       const action = declaredAction(route);
       if (!action) throw new Error("filtered to action routes");
       await clearKVStores(env);
+
+      if (KEYLESS_MOUNTS.test(route.path)) {
+        await setTestKeyGrants([...grantsWithout(action), action]);
+        expect([401, 403]).toContain((await requestRoute(route, "with")).status);
+        return;
+      }
 
       await setTestKeyGrants(grantsWithout(action));
       expect(await refusedAction(await requestRoute(route, "without"))).toBe(action);
