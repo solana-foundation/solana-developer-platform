@@ -188,9 +188,8 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel": {
     refusedEarly: {
       file: EARN_EXITS,
-      test: "refuses a withdrawal request with wallet_out_of_scope before recording it",
+      test: "refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged",
     },
-    via: "resolveCustodyQueueTarget(c, positionId, 'write'), which request and cancel share",
   },
   "POST /v1/earn/programs/:programId/withdrawals": {
     refusedEarly: {
