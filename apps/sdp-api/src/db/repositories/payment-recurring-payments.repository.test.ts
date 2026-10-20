@@ -412,6 +412,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       {
         refused: "a slot that already holds a signature",
         projectId: TEST_PROJECT_ID,
+        status: "processing",
         held: {
           planCreationSignature: testSignature(1),
           authorizationSetupSignature: null,
@@ -426,6 +427,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       {
         refused: "another project's write",
         projectId: SIBLING_PROJECT_ID,
+        status: "processing",
         held: {
           planCreationSignature: null,
           authorizationSetupSignature: null,
@@ -433,20 +435,40 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         },
         expected: UNSIGNED_SLOTS,
       },
-    ])("refuses $refused and leaves the row unchanged", async ({ projectId, held, expected }) => {
-      const attempt = await createUnsignedActivationAttempt("prpa_repo_set_signature_refused");
-      await fillActivationSlots(attempt.id, held);
+      {
+        refused: "a settled attempt",
+        projectId: TEST_PROJECT_ID,
+        status: "failed",
+        held: {
+          planCreationSignature: null,
+          authorizationSetupSignature: null,
+          lastValidBlockHeight: null,
+        },
+        expected: UNSIGNED_SLOTS,
+      },
+    ])(
+      "refuses $refused and leaves the row unchanged",
+      async ({ projectId, status, held, expected }) => {
+        const attempt = await createUnsignedActivationAttempt("prpa_repo_set_signature_refused");
+        await fillActivationSlots(attempt.id, held);
+        await getDb(env)
+          .prepare(
+            "UPDATE payment_recurring_payment_activation_attempts SET status = ? WHERE id = ?"
+          )
+          .bind(status, attempt.id)
+          .run();
 
-      const saved = await setPlanSignature({
-        id: attempt.id,
-        projectId,
-        signature: testSignature(2),
-        lastValidBlockHeight: "302",
-      });
+        const saved = await setPlanSignature({
+          id: attempt.id,
+          projectId,
+          signature: testSignature(2),
+          lastValidBlockHeight: "302",
+        });
 
-      expect(saved).toBe(false);
-      expect(await savedActivationSlots(attempt.id)).toEqual(expected);
-    });
+        expect(saved).toBe(false);
+        expect(await savedActivationSlots(attempt.id)).toEqual(expected);
+      }
+    );
 
     it("refuses a block height past u64 through the sdp_u64 domain", async () => {
       const attempt = await createUnsignedActivationAttempt("prpa_repo_set_signature_u64");
