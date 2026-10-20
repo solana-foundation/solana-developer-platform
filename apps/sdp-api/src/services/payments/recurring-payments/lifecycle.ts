@@ -708,6 +708,7 @@ async function runRecurringPaymentLifecycle(
         organizationId: input.organizationId,
         projectId: input.projectId,
         slot: { row: "lifecycle_attempt", column: "signature" },
+        recurringPaymentId: claimed.id,
         attemptId: attempt.id,
       }),
     });

@@ -298,7 +298,7 @@ export async function sendSubscriptionInstructions(input: {
  * instead of waiting on a transaction that never left. Recovery reads the saved signature and the
  * chain, so there is no started marker.
  *
- * @param step - The step's tenant, attempt id and signature slot.
+ * @param step - The step's tenant, schedule id, attempt id and signature slot.
  * @returns The store.
  */
 export function createSubscriptionStepStore(step: {
@@ -306,12 +306,14 @@ export function createSubscriptionStepStore(step: {
   organizationId: string;
   projectId: string;
   slot: RecurringPaymentStepSignatureSlot;
+  recurringPaymentId: string;
   attemptId: string;
 }): SignedSubmissionStore {
   const recurringRepo = createPaymentRecurringPaymentsRepository(step.env, createTenantScope(step));
   const target = {
     slot: step.slot,
     id: step.attemptId,
+    recurringPaymentId: step.recurringPaymentId,
     organizationId: step.organizationId,
     projectId: step.projectId,
   };

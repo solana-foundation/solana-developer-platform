@@ -1239,6 +1239,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   last_valid_block_height = ?::numeric,
                   updated_at = ?
             WHERE id = ?
+              AND recurring_payment_id = ?
               AND organization_id = ?
               AND project_id = ?
               AND status = ANY(?::text[])
@@ -1249,6 +1250,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.lastValidBlockHeight,
           input.updatedAt,
           input.id,
+          input.recurringPaymentId,
           input.organizationId,
           input.projectId,
           [...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES]
@@ -1268,11 +1270,19 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   last_valid_block_height = NULL,
                   updated_at = ?
             WHERE id = ?
+              AND recurring_payment_id = ?
               AND organization_id = ?
               AND project_id = ?
               AND ${column} = ?`
         )
-        .bind(input.updatedAt, input.id, input.organizationId, input.projectId, input.signature)
+        .bind(
+          input.updatedAt,
+          input.id,
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId,
+          input.signature
+        )
         .run();
       return rowsAffected > 0;
     },

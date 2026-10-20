@@ -505,6 +505,7 @@ async function confirmActivationSubscription(input: {
 async function prepareSubscriptionAuthorityForActivation(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
+  recurringPaymentId: string;
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   organizationId: string;
   projectId: string;
@@ -561,6 +562,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       slot: { row: "activation_attempt", column: "authorization_setup_signature" },
+      recurringPaymentId: input.recurringPaymentId,
       attemptId: input.attempt.id,
     }),
   });
@@ -796,6 +798,7 @@ export async function activateRecurringPayment(input: {
           organizationId: input.organizationId,
           projectId: input.projectId,
           slot: { row: "activation_attempt", column: "plan_creation_signature" },
+          recurringPaymentId: claimed.id,
           attemptId: attempt.id,
         }),
       });
@@ -910,6 +913,7 @@ export async function activateRecurringPayment(input: {
       subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
         env: input.env,
         recurringRepo,
+        recurringPaymentId: claimed.id,
         attempt,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -953,6 +957,7 @@ export async function activateRecurringPayment(input: {
           organizationId: input.organizationId,
           projectId: input.projectId,
           slot: { row: "activation_attempt", column: "authorization_signature" },
+          recurringPaymentId: claimed.id,
           attemptId: attempt.id,
         }),
       });

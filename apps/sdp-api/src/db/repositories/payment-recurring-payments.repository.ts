@@ -361,6 +361,8 @@ export interface SetPaymentRecurringPaymentStepSignatureInput {
   slot: RecurringPaymentStepSignatureSlot;
   /** The attempt's id. */
   id: string;
+  /** The parent schedule's id; the attempt is written only under it. */
+  recurringPaymentId: string;
   organizationId: string;
   projectId: string;
   signature: string;
@@ -373,6 +375,8 @@ export interface ClearPaymentRecurringPaymentStepSignatureInput {
   slot: RecurringPaymentStepSignatureSlot;
   /** The attempt's id. */
   id: string;
+  /** The parent schedule's id; the attempt is written only under it. */
+  recurringPaymentId: string;
   organizationId: string;
   projectId: string;
   /** The signature the step saved; the slot is cleared only while it still holds it. */

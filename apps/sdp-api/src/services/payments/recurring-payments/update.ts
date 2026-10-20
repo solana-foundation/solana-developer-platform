@@ -985,6 +985,7 @@ async function runMetadataScheduleUpdate(input: {
           organizationId: input.organizationId,
           projectId: input.projectId,
           slot: { row: "update_attempt", column: "plan_update_signature" },
+          recurringPaymentId: input.claimed.id,
           attemptId: attempt.id,
         }),
       });
@@ -1012,6 +1013,7 @@ async function runMetadataScheduleUpdate(input: {
 async function prepareSubscriptionAuthorityForUpdate(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
+  recurringPaymentId: string;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
@@ -1068,6 +1070,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       slot: { row: "update_attempt", column: "authorization_setup_signature" },
+      recurringPaymentId: input.recurringPaymentId,
       attemptId: input.attempt.id,
     }),
   });
@@ -1514,6 +1517,7 @@ async function runReplacementUpdate(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         slot: { row: "update_attempt", column: "plan_creation_signature" },
+        recurringPaymentId: input.claimed.id,
         attemptId: attempt.id,
       }),
     });
@@ -1615,6 +1619,7 @@ async function runReplacementUpdate(input: {
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
       env: input.env,
       recurringRepo,
+      recurringPaymentId: input.claimed.id,
       attempt,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1658,6 +1663,7 @@ async function runReplacementUpdate(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         slot: { row: "update_attempt", column: "authorization_signature" },
+        recurringPaymentId: input.claimed.id,
         attemptId: attempt.id,
       }),
     });
@@ -1725,6 +1731,7 @@ async function runReplacementUpdate(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         slot: { row: "update_attempt", column: "old_cancel_signature" },
+        recurringPaymentId: input.claimed.id,
         attemptId: attempt.id,
       }),
     });
