@@ -97,6 +97,7 @@ import {
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
+import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
@@ -838,6 +839,7 @@ describe("Payments routes — recurring", () => {
 
     const issuedMint = (await generateKeyPairSigner()).address;
     const pausedMint = (await generateKeyPairSigner()).address;
+    const scaledMint = (await generateKeyPairSigner()).address;
     await seedIssuedTokenMint({
       projectId: TEST_PROJECT.id,
       mintAddress: issuedMint,
@@ -848,7 +850,37 @@ describe("Payments routes — recurring", () => {
       mintAddress: pausedMint,
       status: "paused",
     });
+    await seedIssuedTokenMint({
+      projectId: TEST_PROJECT.id,
+      mintAddress: scaledMint,
+      status: "active",
+    });
+    respondMintAccounts(recurringExecution.rpc, {
+      mints: new Map([
+        [issuedMint, { decimals: 6, extensions: null }],
+        [
+          scaledMint,
+          {
+            decimals: 6,
+            extensions: [
+              scaledUiAmountConfig({
+                multiplier: 2,
+                newMultiplier: 2,
+                newMultiplierEffectiveTimestamp: 0n,
+              }),
+            ],
+          },
+        ],
+      ]),
+      clockUnixTimestamp: 1_750_000_000n,
+    });
     await expectTokenRejected(pausedMint);
+
+    const scaledRes = await createRecurring(scaledMint);
+    expect(scaledRes.status).toBe(400);
+    expect(errorResponseSchema.parse(await scaledRes.json()).error.message).toBe(
+      "Recurring payments do not support interest-bearing or scaled UI amount tokens"
+    );
 
     const issuedRes = await createRecurring(issuedMint);
     expect(issuedRes.status).toBe(201);

@@ -11,6 +11,11 @@ import {
   getTransactionDecoder,
   type Signature,
 } from "@solana/kit";
+import {
+  getTransferCheckedInstructionDataDecoder,
+  TOKEN_2022_PROGRAM_ADDRESS,
+  TRANSFER_CHECKED_DISCRIMINATOR,
+} from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
@@ -30,9 +35,10 @@ import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   createKoraAdapterMock,
   enableMainnetSponsorship,
@@ -48,6 +54,11 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import {
+  mintAccountInfoResult,
+  respondMintAccounts,
+  scaledUiAmountConfig,
+} from "@/test/helpers/token-mints";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -384,9 +395,10 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
 }
 
 describe("payment transfer batches", () => {
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   function answerSourceTokenAccount(mint: string) {
+    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
@@ -1939,6 +1951,100 @@ describe("payment transfer batches", () => {
       expect(required(settledBatch).status).toBe("confirmed");
     }
   );
+
+  it("moves a scaled UI amount mint's converted base units while recipients keep their requested amount", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+    const mint = syntheticAddress(21);
+    getAccountInfoMock.mockImplementationOnce(
+      async (client, account) =>
+        (
+          await client
+            .getAccountInfo(account, { encoding: "base64", commitment: "confirmed" })
+            .send()
+        ).value
+    );
+    answerSourceTokenAccount(mint);
+    respondMintAccounts(rpc, {
+      mints: new Map([
+        [
+          mint,
+          {
+            decimals: 6,
+            extensions: [
+              scaledUiAmountConfig({
+                multiplier: 2,
+                newMultiplier: 4,
+                newMultiplierEffectiveTimestamp: 1_800_000_000n,
+              }),
+            ],
+          },
+        ],
+      ]),
+      clockUnixTimestamp: 1_750_000_000n,
+    });
+    const signingOutcomeMock = vi
+      .fn<(transactionBytes: Uint8Array) => Promise<string>>()
+      .mockResolvedValueOnce(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
+    const counterpartyId = await seedCounterparty("batch_scaled_ui_amount_counterparty");
+    const counterpartyAccountIds = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
+      TEST_SOLANA_ADDRESSES.wallet2,
+      TEST_SOLANA_ADDRESSES.wallet3,
+    ]);
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: mint,
+          recipients: [
+            { counterpartyId, counterpartyAccountId: counterpartyAccountIds[0], amount: "10" },
+            { counterpartyId, counterpartyAccountId: counterpartyAccountIds[1], amount: "2.5" },
+          ],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const [transactionBytes] = required(signingOutcomeMock.mock.calls.at(0));
+    const message = getCompiledTransactionMessageDecoder().decode(
+      getTransactionDecoder().decode(transactionBytes).messageBytes
+    );
+    assert(message.version === 0);
+    const transferCheckedAmounts = message.instructions.flatMap((instruction) =>
+      message.staticAccounts[instruction.programAddressIndex] === TOKEN_2022_PROGRAM_ADDRESS &&
+      instruction.data !== undefined &&
+      instruction.data[0] === TRANSFER_CHECKED_DISCRIMINATOR
+        ? [getTransferCheckedInstructionDataDecoder().decode(instruction.data).amount]
+        : []
+    );
+    expect(transferCheckedAmounts).toEqual([5_000_000n, 1_250_000n]);
+    const stored = await getDb(env)
+      .prepare(
+        `SELECT r.destination_address, r.amount, b.total_amount
+           FROM payment_transfer_recipients r
+           JOIN payment_transfer_batches b ON b.id = r.batch_id
+          WHERE b.organization_id = ?
+          ORDER BY r.destination_address`
+      )
+      .bind(TEST_ORG.id)
+      .all<{ destination_address: string; amount: string; total_amount: string }>();
+    expect(stored.results).toEqual([
+      { destination_address: TEST_SOLANA_ADDRESSES.wallet2, amount: "10", total_amount: "12.5" },
+      { destination_address: TEST_SOLANA_ADDRESSES.wallet3, amount: "2.5", total_amount: "12.5" },
+    ]);
+  });
 
   it("builds a Production project's USDC batch on mainnet-beta with the mainnet mint", async () => {
     const productionProjectId = `${TEST_PROJECT.id}_production`;

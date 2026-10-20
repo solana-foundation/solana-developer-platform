@@ -43,6 +43,7 @@ import {
 } from "@/test/helpers/payments-transfers";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
+import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 
 function testProjectPaymentsRepository() {
   return createPostgresPaymentsRepository(
@@ -103,6 +104,7 @@ describe("Payments routes — on-chain transfers", () => {
   const rpc = installClusterRpcStub();
 
   function answerSourceUsdcTokenAccount(mint: string) {
+    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [

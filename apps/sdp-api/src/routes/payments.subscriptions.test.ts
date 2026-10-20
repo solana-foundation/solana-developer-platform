@@ -16,7 +16,7 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -31,6 +31,7 @@ import {
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 
 const SUBSCRIPTION_HEADERS = {
   Authorization: "Bearer sk_test_payments_policy",
@@ -81,7 +82,7 @@ describe("Payments routes — subscriptions", () => {
   const rpc = installClusterRpcStub();
 
   beforeEach(() => {
-    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
   });
 
   it("stores a Production plan's USDC as the mainnet mint", async () => {

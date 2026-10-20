@@ -32,6 +32,7 @@ import {
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 import { withIdempotencyKeys } from "./idempotency-keys";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
@@ -63,6 +64,7 @@ export function installRecurringExecutionHooks() {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
     rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
       .mockImplementation(async (transaction) => fullySignTestTransaction(transaction));
