@@ -162,6 +162,21 @@ describe("API playground allowlist", () => {
     });
   });
 
+  // Greptile (#2433): a concrete path can fit a published template's parameter
+  // while the API's router sends it to an unpublished literal route.
+  it("refuses a path an unpublished literal route takes over a published parameter", () => {
+    expect(
+      findPublishedPlaygroundOperation("GET", "/v1/counterparties/accounts", "experimental")
+    ).toBeUndefined();
+    // A published literal route still resolves to itself, not to the parameter.
+    expect(
+      findPublishedPlaygroundOperation("GET", "/v1/issuance/tokens/facets", "experimental")
+    ).toMatchObject({ pathTemplate: "/v1/issuance/tokens/facets" });
+    expect(
+      findPublishedPlaygroundOperation("GET", "/v1/counterparties/cp_1", "experimental")
+    ).toMatchObject({ pathTemplate: "/v1/counterparties/{counterpartyId}" });
+  });
+
   it("refuses what the catalog does not publish on the channel", () => {
     expect(findPublishedPlaygroundOperation("GET", "/v1/api-keys", "experimental")).toBeUndefined();
     expect(

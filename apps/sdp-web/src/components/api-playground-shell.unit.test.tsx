@@ -16,11 +16,20 @@ import { PRODUCTION_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
 
-const mocks = vi.hoisted(() => ({
-  replaceSearchParams: vi.fn(),
-  searchParamGet: vi.fn(() => null as string | null),
-  workspace: undefined as { flags: { releaseChannel: SdpReleaseChannel } } | undefined,
-}));
+interface ShellTestMocks {
+  replaceSearchParams: ReturnType<typeof vi.fn>;
+  searchParamGet: ReturnType<typeof vi.fn<() => string | null>>;
+  /** The dashboard workspace the shell reads its release channel from; none by default. */
+  workspace: { flags: { releaseChannel: SdpReleaseChannel } } | undefined;
+}
+
+const mocks = vi.hoisted(
+  (): ShellTestMocks => ({
+    replaceSearchParams: vi.fn(),
+    searchParamGet: vi.fn<() => string | null>(() => null),
+    workspace: undefined,
+  })
+);
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useOptionalDashboardWorkspace: () => mocks.workspace,

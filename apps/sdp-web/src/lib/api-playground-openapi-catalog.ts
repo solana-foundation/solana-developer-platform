@@ -23,6 +23,8 @@ type ValueGate = { module: SdpModule } | { rampProvider: RampProviderId };
 
 type GeneratedPlaygroundOperation = ApiPlaygroundEndpointConfig & {
   releaseModule: string;
+  /** API routes whose literal segments win over this operation's parameters. */
+  shadowedBy: string[];
 };
 
 interface GeneratedPlaygroundCatalog {
@@ -101,6 +103,7 @@ function matchesTemplate(segments: readonly TemplateSegment[], pathname: string)
 
 const CATALOG_OPERATIONS: readonly (PlaygroundCatalogOperation & {
   segments: readonly TemplateSegment[];
+  shadows: readonly (readonly TemplateSegment[])[];
 })[] = Object.values(catalog.modules)
   .flat()
   .map((endpoint) => {
@@ -110,6 +113,7 @@ const CATALOG_OPERATIONS: readonly (PlaygroundCatalogOperation & {
       pathTemplate,
       releaseModule: parseRouteOwner(endpoint.releaseModule),
       segments: templateSegments(pathTemplate),
+      shadows: endpoint.shadowedBy.map(templateSegments),
     };
   });
 
@@ -140,6 +144,9 @@ export function findPublishedPlaygroundOperation(
     (candidate) => candidate.method === method && matchesTemplate(candidate.segments, pathname)
   ).sort((left, right) => parameterCount(left.segments) - parameterCount(right.segments))[0];
   if (operation === undefined) return undefined;
+  // The API's router would send this path to a literal route instead, one the
+  // catalog does not publish, so the request is not this operation.
+  if (operation.shadows.some((shadow) => matchesTemplate(shadow, pathname))) return undefined;
   const modules: ReadonlySet<string> = new Set(SDP_RELEASE_CHANNELS[releaseChannel]);
   return operation.releaseModule === "core" || modules.has(operation.releaseModule)
     ? operation

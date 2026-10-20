@@ -16,6 +16,7 @@ import {
 } from "openapi3-ts/oas30";
 
 import { valueGates } from "@/openapi/release-channel-values";
+import routeActionsJson from "@/openapi/route-actions.generated.json";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 
@@ -46,6 +47,13 @@ interface PlaygroundOperation {
   path: string;
   /** The SDP module that owns the route; the dashboard drops it outside its release channel. */
   releaseModule: RouteOwner;
+  /**
+   * API routes of the same method whose literal segments win, in the API's router, over
+   * this operation's parameters (`/v1/counterparties/accounts` over
+   * `/v1/counterparties/{counterpartyId}`). A request one of them matches is not this
+   * operation, so the execute route refuses it.
+   */
+  shadowedBy: string[];
   pathFields: PlaygroundField[];
   bodyFields: PlaygroundField[];
   expectedResponse: unknown;
@@ -58,6 +66,14 @@ const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS);
 function isHttpMethod(key: string): key is HttpMethod {
   return HTTP_METHOD_SET.has(key);
 }
+
+const PLAYGROUND_METHODS: Record<HttpMethod, PlaygroundMethod> = {
+  get: "GET",
+  post: "POST",
+  put: "PUT",
+  patch: "PATCH",
+  delete: "DELETE",
+};
 const TAG_TO_MODULE = new Map<string, PlaygroundModule>([
   ["Wallets", "wallets"],
   ["Payments", "payments"],
@@ -344,9 +360,10 @@ function buildCatalogEntry(
       id: toEndpointId(operationId),
       operationId,
       title: operation.summary ?? operationId,
-      method: method.toUpperCase() as PlaygroundMethod,
+      method: PLAYGROUND_METHODS[method],
       path: buildPathWithQuery(pathname, pathAndQuery),
       releaseModule,
+      shadowedBy: shadowingRoutes(PLAYGROUND_METHODS[method], pathname),
       pathFields: parameters
         .map((parameter) => fieldFromParameter(parameter, document))
         .filter((field): field is PlaygroundField => field !== null),
@@ -361,6 +378,41 @@ function buildCatalogEntry(
  * at runtime by its own `SDP_RELEASE_CHANNEL`, so one committed file serves
  * every deployment.
  */
+/** A route's segments, a parameter (`{name}` or `:name`) as null. */
+function routeSegments(template: string): (string | null)[] {
+  return template
+    .split("/")
+    .map((segment) => (segment.startsWith("{") || segment.startsWith(":") ? null : segment));
+}
+
+/**
+ * The API routes that take a request this operation's template also matches: the same
+ * method and length, compatible segment by segment, with a literal where the template
+ * has a parameter. Taken from every route the app mounts (`route-actions.generated.json`),
+ * published or not, since an unpublished one is exactly what must not run.
+ */
+function shadowingRoutes(method: PlaygroundMethod, template: string): string[] {
+  const own = routeSegments(template);
+  return Object.keys(routeActionsJson)
+    .map((operation) => operation.split(" "))
+    .filter(([routeMethod]) => routeMethod === method)
+    .map(([, routePath]) => routePath ?? "")
+    .filter((routePath) => {
+      const theirs = routeSegments(routePath);
+      if (theirs.length !== own.length) return false;
+      let literalOverParameter = false;
+      for (const [index, segment] of own.entries()) {
+        const other = theirs[index];
+        if (segment !== null && other !== null && segment !== other) return false;
+        if (segment === null && other !== null) literalOverParameter = true;
+        if (segment !== null && other === null) return false;
+      }
+      return literalOverParameter;
+    })
+    .map((routePath) => routePath.replace(/:[^/]+/g, "{_}"))
+    .sort();
+}
+
 function generateCatalog(): string {
   const document = createPublicOpenApiDocument({ releaseChannel: "experimental" });
   const modules: Record<PlaygroundModule, PlaygroundOperation[]> = {
