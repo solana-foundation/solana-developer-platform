@@ -103,7 +103,7 @@ export async function createRingsWallet(c: AppContext) {
 
   const scope = await resolveScope(c);
   const custodyWallet = resolveWallet(scope.wallets, parsed.data.walletId);
-  assertCallerWalletInScope(getAuth(c).walletAccess, custodyWallet.id);
+  assertCallerWalletInScope(getAuth(c), custodyWallet.id);
 
   const service = getHeliusRingsService(c, tenant);
   const wallet = await withRingsErrors(() =>

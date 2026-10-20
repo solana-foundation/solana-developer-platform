@@ -16,7 +16,7 @@ import { normalizeOrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
-import { type WalletAccess, walletAccessAllows } from "@/lib/auth";
+import { type ApiKeyContext, type WalletAccess, walletAccessAllows } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import {
   currentMoneyPrincipal,
@@ -194,11 +194,35 @@ export class MoneyMovementRefusedError extends AppError {
  * 403; the waist still decides every signature (ADR 0007 addendum).
  */
 export function assertCallerWalletInScope(
-  walletAccess: WalletAccess,
+  caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
   custodyWalletId: string
 ): void {
-  if (walletAccessAllows(walletAccess, custodyWalletId)) return;
+  if (walletAccessAllows(caller.walletAccess, custodyWalletId)) return;
+  logMoneyRefusedEarly(caller, custodyWalletId);
   throw new MoneyMovementRefusedError("wallet_out_of_scope");
+}
+
+/**
+ * The waist's `sdp_money_refused` event for a refusal made before any
+ * movement starts, so it names no movement (surface `early`).
+ */
+function logMoneyRefusedEarly(
+  caller: Pick<ApiKeyContext, "organizationId" | "projectId">,
+  custodyWalletId: string
+): void {
+  const principal = currentMoneyPrincipal();
+  logEvent("warn", {
+    event: "sdp_money_refused",
+    surface: "early",
+    movement: null,
+    module: null,
+    subject_id: custodyWalletId,
+    organization_id: caller.organizationId,
+    project_id: caller.projectId,
+    principal_kind: principal ? principal.kind : null,
+    principal: principal ? describeMoneyPrincipal(principal) : null,
+    reason: "wallet_out_of_scope",
+  });
 }
 
 /**

@@ -294,11 +294,11 @@ async function assertSettlementWalletInScope(
   c: Context<{ Bindings: Env }>,
   scope: { organizationId: string; projectId: string }
 ): Promise<void> {
-  const { walletAccess } = getAuth(c);
-  if (walletAccess.scope === "all") return;
+  const auth = getAuth(c);
+  if (auth.walletAccess.scope === "all") return;
   const settlement = await readDvpSettlementWallet(env, scope);
   if (settlement === null) throw new MoneyMovementRefusedError("wallet_out_of_scope");
-  assertCallerWalletInScope(walletAccess, settlement.custodyWalletId);
+  assertCallerWalletInScope(auth, settlement.custodyWalletId);
 }
 
 /**

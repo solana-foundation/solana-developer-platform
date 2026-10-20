@@ -57,7 +57,7 @@ export async function resolvePrivateChannelCustodyWallet(
   // The custody signer refuses a wallet outside the key's scope for every
   // movement, withdrawals included (HOO-2099); refusing here as well stops the
   // flow before it records a movement or calls the gateway.
-  assertCallerWalletInScope(auth.walletAccess, wallet.id);
+  assertCallerWalletInScope(auth, wallet.id);
   return wallet;
 }
 

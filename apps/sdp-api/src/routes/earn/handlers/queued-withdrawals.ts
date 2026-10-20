@@ -307,7 +307,7 @@ async function resolveCustodyQueueTarget(
     wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
     // The custody signer's scope refusal, made before a request or
     // cancellation is recorded (ADR 0007 addendum).
-    assertCallerWalletInScope(auth.walletAccess, wallet.id);
+    assertCallerWalletInScope(auth, wallet.id);
   }
 
   return {
