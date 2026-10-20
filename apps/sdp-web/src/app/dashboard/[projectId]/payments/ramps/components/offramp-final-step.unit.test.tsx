@@ -93,6 +93,20 @@ describe("off-ramp final step", () => {
     expect(wizard.sendCryptoToDeposit).toHaveBeenCalledTimes(1);
   });
 
+  it("confirms a deposit with every digit the provider asked for", async () => {
+    const wizard = finalStep({
+      depositTarget: { destinationAddress: DEPOSIT_ADDRESS, amount: "1.000000001" },
+      selectedRampPair: { fiatCurrency: "USD", assetRail: "sol.solana" },
+    });
+    const action = offrampFooterAction(wizard);
+    if (action === null) throw new Error("Expected a footer action");
+    render(<OfframpFooterActionButton action={action} wizard={wizard} />, { wrapper });
+
+    await userEvent.click(screen.getByRole("button", { name: /Send 1\.000000001 SOL/ }));
+
+    expect(screen.getByText("Send 1.000000001 SOL?")).toBeTruthy();
+  });
+
   it("explains a failed sale and starts a new payout from the amount", async () => {
     const wizard = finalStep({
       transferStatus: sale({ status: "failed", error: "Deposit timeout" }),

@@ -7,10 +7,8 @@ import { Modal } from "@sdp/ui/modal";
 import { RotateCcwIcon, SendIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import {
-  formatDisplayAmount,
-  shortenAddress,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import type {
   OfframpFinalStepWizard,
   OfframpFooterAction,
@@ -50,7 +48,7 @@ export function SendDepositDialog({
   const providerLabel = provider
     ? getRampProviderLabel(provider)
     : t("DashboardPayments.ramps.phase.providerFallback");
-  const amount = formatDisplayAmount(depositTarget.amount, token, locale);
+  const amount = `${formatDecimalAmount(depositTarget.amount, locale)} ${token}`;
   return (
     <Modal
       isOpen={open}
