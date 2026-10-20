@@ -163,6 +163,7 @@ export function useRampWizard<TId extends string>(
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
+      revalidateIfStale: false,
     }
   );
 

@@ -361,7 +361,9 @@
       },
       "sendRefused": "Couldn't send the deposit",
       "startNewPayout": "Start a new payout",
-      "cancelPayout": "Cancel payout"
+      "cancelPayout": "Cancel payout",
+      "rateLine": "1 {asset} = {rate} {fiat}",
+      "youPayIncludesFees": "{amount} plus the provider's fees"
     },
     "onchainSend": {
       "noAssets": "This wallet has no assets available to send.",

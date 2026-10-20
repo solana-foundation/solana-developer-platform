@@ -11,16 +11,14 @@ import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { ArrowDownIcon, Link2Icon, ReceiptTextIcon, Repeat2Icon } from "lucide-react";
 import Link from "next/link";
 import { Fragment, Suspense } from "react";
+import { loadOrganizationProviderAccess } from "@/app/dashboard/[projectId]/payments/payments-provider-access.server";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import type { MessageKey } from "@/i18n/messages";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { projectHref } from "@/lib/dashboard-project-path";
-import {
-  fetchProviderAvailability,
-  filterEnabledRampProviderAccess,
-} from "@/lib/provider-availability";
+import { filterEnabledRampProviderAccess } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
@@ -60,6 +58,7 @@ import {
 import {
   ACTIVITY_KIND_MESSAGE_KEYS,
   activityKind,
+  formatDecimalAmount,
   formatElapsedShort,
   formatSignedAmount,
   PAYMENT_STATUS_TONE,
@@ -214,13 +213,7 @@ function countLabel(t: Translate, key: string, count: number | null): string {
  * reads "—" rather than a misleading zero, and providers drop out when their availability
  * can't be read at all.
  */
-async function PaymentsSummaryLine({
-  apiClientPromise,
-  organizationId,
-}: {
-  apiClientPromise: ApiClientPromise;
-  organizationId: string;
-}) {
+async function PaymentsSummaryLine({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
   const [{ request }, t, projectId] = await Promise.all([
     apiClientPromise,
     getTranslations(),
@@ -234,7 +227,7 @@ async function PaymentsSummaryLine({
           fetchCounterparties(request, { page: 1, pageSize: 1 }),
           fetchPaymentRequests(request, { pageSize: 1, status: "awaiting_payment" }),
           fetchRecurringPayments(request, t, { page: 1, pageSize: 1, status: "active" }),
-          fetchProviderAvailability(request, organizationId).catch(() => null),
+          loadOrganizationProviderAccess(),
         ])
       ),
       getEnabledRampProviders(),
@@ -420,31 +413,39 @@ function transferRow(
     transfer.direction === "inbound" || transfer.direction === "outbound"
       ? transfer.direction
       : undefined;
-  // A ramp row leads with the fiat side the person asked for; wallet transfers with the token.
+  // Every row leads with what moved through the wallet, so buys, sales and sends read alike;
+  // a ramp's fiat side rides in the detail, and leads only while a buy's tokens are unknown.
   const isRamp = transfer.type === "onramp" || transfer.type === "offramp";
-  const amount =
+  const rampDirection = direction ?? (transfer.type === "onramp" ? "inbound" : "outbound");
+  const fiat =
     isRamp && transfer.fiatAmount && transfer.fiatCurrency
+      ? `${formatDecimalAmount(transfer.fiatAmount, locale)} ${transfer.fiatCurrency.toUpperCase()}`
+      : null;
+  const amount = transfer.amount
+    ? formatSignedAmount(
+        transfer.amount,
+        isRamp ? rampDirection : direction,
+        resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
+        locale
+      )
+    : isRamp && transfer.fiatAmount && transfer.fiatCurrency
       ? formatSignedAmount(
           transfer.fiatAmount,
-          direction ?? (transfer.type === "onramp" ? "inbound" : "outbound"),
+          rampDirection,
           transfer.fiatCurrency.toUpperCase(),
           locale
         )
-      : formatSignedAmount(
-          transfer.amount,
-          direction,
-          resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
-          locale
-        );
+      : null;
   const wallet = walletName(walletsById, transfer.custodyWalletId);
   const kind = t(ACTIVITY_KIND_MESSAGE_KEYS[activityKind(transfer)]);
+  const detail = [kind, wallet, transfer.amount ? fiat : null].filter(Boolean).join(" · ");
   return {
     href: projectHref(
       projectId,
       `/dashboard/payments/transactions?search=${encodeURIComponent(transfer.id)}`
     ),
     name: counterparty.length > 24 ? shortenAddress(counterparty) : counterparty,
-    detail: wallet ? `${kind} · ${wallet}` : kind,
+    detail,
     status: {
       label: t(statusMessageKey(transfer.status)),
       tone: PAYMENT_STATUS_TONE[transfer.status],
@@ -582,10 +583,8 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
 
 export function PaymentsCommandCenter({
   apiClientPromise,
-  organizationId,
 }: {
   apiClientPromise: ApiClientPromise;
-  organizationId: string;
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-16" data-payments-command-center>
@@ -595,10 +594,7 @@ export function PaymentsCommandCenter({
             <AvailableBalance apiClientPromise={apiClientPromise} />
           </Suspense>
           <Suspense fallback={<PaymentsSummarySkeleton />}>
-            <PaymentsSummaryLine
-              apiClientPromise={apiClientPromise}
-              organizationId={organizationId}
-            />
+            <PaymentsSummaryLine apiClientPromise={apiClientPromise} />
           </Suspense>
         </div>
         <MoveMoneyActions />

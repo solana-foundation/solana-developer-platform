@@ -91,6 +91,9 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     fetchAllCounterparties,
     {
       fallbackData: props.counterpartiesResult,
+      // The server just read them; a new reader of the key reuses that, and a contact
+      // created here updates the cache itself.
+      revalidateIfStale: false,
     }
   );
   const liveCounterparties = counterpartiesResult ?? props.counterpartiesResult;

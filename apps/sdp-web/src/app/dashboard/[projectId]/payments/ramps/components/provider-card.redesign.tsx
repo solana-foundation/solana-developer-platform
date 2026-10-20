@@ -6,6 +6,10 @@ import { cn } from "@sdp/ui/cn";
 import { Loader2Icon } from "lucide-react";
 import { domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
+import {
+  estimateLimitCopy,
+  estimateRateCopy,
+} from "@/app/dashboard/[projectId]/payments/ramps/ramp-estimate-copy";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
@@ -91,6 +95,8 @@ function ProviderCardEstimate({
     const amount = formatEstimateDecimal(isFiatOut ? fiatAmount : cryptoAmount, locale);
     const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
     const feeLabel = buildFeeLabel(t, fees, locale);
+    // A payout is the crypto at the rate, less the fee; without the rate the numbers don't add up.
+    const rate = isFiatOut ? estimateRateCopy(t, estimate.estimate, locale) : null;
 
     return (
       <div className="shrink-0 text-right leading-none">
@@ -103,6 +109,7 @@ function ProviderCardEstimate({
             {feeLabel}
           </span>
         </div>
+        {rate ? <p className="mt-1 text-xs text-tertiary">{rate}</p> : null}
       </div>
     );
   }
@@ -117,7 +124,9 @@ function ProviderCardEstimate({
 
   if (estimate?.status === "error") {
     return (
-      <p className="shrink-0 text-sm text-tertiary">{t("DashboardPayments.ramps.unavailable")}</p>
+      <p className="shrink-0 text-sm text-tertiary">
+        {estimateLimitCopy(t, estimate) ?? t("DashboardPayments.ramps.unavailable")}
+      </p>
     );
   }
 
@@ -206,15 +215,15 @@ function QuoteCardEstimate({
     );
   }
   if (estimate?.status === "error") {
-    // The API relays the provider's own error text, which is not written for users; the
-    // tile says what happened and what to try instead.
+    // The provider's own error text is not written for users; the tile says what happened and
+    // what to try instead, naming the amount that would work when the provider set a bound.
     return (
       <span className="space-y-1">
         <span className="block text-meta text-tertiary">
           {t("DashboardPayments.ramps.unavailable")}
         </span>
         <span className="block text-body text-secondary">
-          {t("DashboardPayments.ramps.noQuote")}
+          {estimateLimitCopy(t, estimate) ?? t("DashboardPayments.ramps.noQuote")}
         </span>
       </span>
     );
@@ -230,6 +239,8 @@ function QuoteCardEstimate({
   }
   const ok = estimate.estimate;
   const isFiatOut = ok.direction === "offramp";
+  // A payout is the crypto at the rate, less the fee; without the rate the numbers don't add up.
+  const saleRate = isFiatOut ? estimateRateCopy(t, ok, locale) : null;
   // 13px line, 6px, the 24px figure on its 30px line, 4px, 13px line: 72px, as the design draws it.
   return (
     <span className="block">
@@ -248,6 +259,7 @@ function QuoteCardEstimate({
       </span>
       <span className="mt-1 block text-meta text-tertiary">
         {buildFeeLabel(t, ok.fees, locale)}
+        {saleRate ? ` · ${saleRate}` : null}
       </span>
     </span>
   );

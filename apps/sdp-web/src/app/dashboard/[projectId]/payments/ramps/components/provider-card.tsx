@@ -6,6 +6,10 @@ import { cn } from "@sdp/ui/cn";
 import { Loader2Icon } from "lucide-react";
 import { motion } from "motion/react";
 import Image from "next/image";
+import {
+  estimateLimitCopy,
+  estimateRateCopy,
+} from "@/app/dashboard/[projectId]/payments/ramps/ramp-estimate-copy";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
@@ -90,6 +94,8 @@ function ProviderCardEstimate({
     const amount = formatEstimateDecimal(isFiatOut ? fiatAmount : cryptoAmount, locale);
     const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
     const feeLabel = buildFeeLabel(t, fees, locale);
+    // A payout is the crypto at the rate, less the fee; without the rate the numbers don't add up.
+    const rate = isFiatOut ? estimateRateCopy(t, estimate.estimate, locale) : null;
 
     return (
       <div className="shrink-0 text-right leading-none">
@@ -102,6 +108,7 @@ function ProviderCardEstimate({
             {feeLabel}
           </span>
         </div>
+        {rate ? <p className="mt-1 text-xs text-tertiary">{rate}</p> : null}
       </div>
     );
   }
@@ -116,7 +123,9 @@ function ProviderCardEstimate({
 
   if (estimate?.status === "error") {
     return (
-      <p className="shrink-0 text-sm text-tertiary">{t("DashboardPayments.ramps.unavailable")}</p>
+      <p className="shrink-0 text-sm text-tertiary">
+        {estimateLimitCopy(t, estimate) ?? t("DashboardPayments.ramps.unavailable")}
+      </p>
     );
   }
 

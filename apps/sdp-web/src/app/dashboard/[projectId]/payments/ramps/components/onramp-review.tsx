@@ -9,6 +9,10 @@ import { formatRampQuoteTimeRemaining } from "@/app/dashboard/[projectId]/paymen
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import type { OnrampWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard.redesign";
 import { useRampEstimate } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
+import {
+  estimateRateCopy,
+  formatEstimateFigure,
+} from "@/app/dashboard/[projectId]/payments/ramps/ramp-estimate-copy";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
 
@@ -42,6 +46,8 @@ function useChosenProviderEstimate(wizard: OnrampWizard): PaymentRampEstimate | 
     selectedPair: selectedRampPair,
     amount: fields.amount,
     enabled: fields.provider !== null,
+    // The review restates the estimate the card showed; a fresh read would swap figures silently.
+    reuseCached: true,
   });
   const estimate = fields.provider === null ? undefined : estimatesByProvider.get(fields.provider);
   return estimate?.status === "ok" ? estimate.estimate : null;
@@ -68,12 +74,10 @@ function CounterpartyRow({ counterparty }: { counterparty: OnrampWizard["selecte
 function EstimateRows({
   estimate,
   amount,
-  fiat,
   asset,
 }: {
   estimate: PaymentRampEstimate | null;
   amount: string;
-  fiat: string;
   asset: string;
 }) {
   const t = useTranslations();
@@ -88,6 +92,7 @@ function EstimateRows({
     estimate && Number.isFinite(numericAmount) && numericAmount > 0
       ? percentFormat.format(Number(estimate.fees.total) / numericAmount)
       : null;
+  const rate = estimate ? estimateRateCopy(t, estimate, locale) : null;
 
   return (
     <>
@@ -104,14 +109,14 @@ function EstimateRows({
         label={t("DashboardPayments.ramps.walletReceives")}
         value={
           estimate
-            ? `${formatDecimalAmount(estimate.cryptoAmount, locale)} ${asset}`
+            ? `${formatEstimateFigure(estimate.cryptoAmount, locale)} ${asset}`
             : t("DashboardPayments.ramps.rateKnownAtQuote")
         }
       />
-      {estimate ? (
+      {rate ? (
         <ReviewRow
           label={t("DashboardPayments.manualInstructions.exchangeRate")}
-          value={`1 ${fiat} = ${estimate.exchangeRate} ${asset}`}
+          value={rate}
           aside={t("DashboardPayments.ramps.estimateConfirmedNext")}
         />
       ) : null}
@@ -178,9 +183,16 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
           />
           <ReviewRow
             label={t("DashboardPayments.ramps.youPay")}
-            value={`${formatDecimalAmount(fields.amount, locale)} ${fiat}`}
+            value={`${formatDecimalAmount(ok?.totalFiatAmount ?? fields.amount, locale)} ${fiat}`}
+            aside={
+              ok?.totalFiatAmount && Number(ok.totalFiatAmount) !== Number(fields.amount)
+                ? t("DashboardPayments.ramps.youPayIncludesFees", {
+                    amount: `${formatDecimalAmount(fields.amount, locale)} ${fiat}`,
+                  })
+                : undefined
+            }
           />
-          <EstimateRows estimate={ok} amount={fields.amount} fiat={fiat} asset={asset} />
+          <EstimateRows estimate={ok} amount={fields.amount} asset={asset} />
           <WalletRow wallet={selectedWallet} />
           <EstimateExpiryRow expiresAt={ok?.expiresAt} now={now} />
         </dl>

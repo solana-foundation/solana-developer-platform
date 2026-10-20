@@ -35,7 +35,7 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
-function isInboundTransfer(transfer: PaymentTransferSummary): boolean {
+export function isInboundTransfer(transfer: PaymentTransferSummary): boolean {
   return transfer.type === "onramp" || transfer.direction === "inbound";
 }
 
