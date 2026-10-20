@@ -1692,7 +1692,10 @@ async function adoptRecoveredCollectionAttempt(input: {
  * program's per-period cap refuses a second pull in the same period. A signature still not
  * indexed, or one whose instruction the matcher does not recognize (a transfer-hook account
  * resolved differently since), may still be a pull that moved money, and failing it would retry
- * it into the next period, so it is logged by kind and stays pending.
+ * it into the next period, so it is logged by kind and stays pending. Those two may never settle,
+ * so they bump the attempt's `updated_at` (only while it is processing) and leave the cron's
+ * oldest-first recovery batch for one stale window instead of starving the attempts behind them;
+ * every other pending answer writes nothing.
  *
  * @param input - The recovered attempt and the schedule it collects for.
  * @param input.env - The API environment.
@@ -1794,12 +1797,14 @@ async function finishLandedRecurringPaymentCollection(input: {
         event: "sdp_api_recurring_payment_collection_unindexed_past_expiry",
         ...unproven,
       });
+      await rotateStuckCollectionAttempt(input);
       throw new ResumedStepUnsettledError();
     case "instruction_mismatch":
       logEvent("error", {
         event: "sdp_api_recurring_payment_collection_instruction_mismatch_past_expiry",
         ...unproven,
       });
+      await rotateStuckCollectionAttempt(input);
       throw new ResumedStepUnsettledError();
     case "failed_on_chain":
       logEvent("error", {
@@ -1821,6 +1826,32 @@ async function finishLandedRecurringPaymentCollection(input: {
     error: new Error("Recurring payment collection could not be proven on chain before it expired"),
   });
   return null;
+}
+
+/**
+ * Moves a processing attempt that may never settle to the back of the cron's recovery order by
+ * bumping its `updated_at`, writing nothing else. An attempt another writer already moved is left
+ * as it is.
+ *
+ * @param input - The attempt to rotate.
+ * @param input.subscriptionsRepo - The tenant's subscriptions repository.
+ * @param input.organizationId - The attempt's organization.
+ * @param input.projectId - The attempt's project.
+ * @param input.attempt - The attempt.
+ */
+async function rotateStuckCollectionAttempt(input: {
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  organizationId: string;
+  projectId: string;
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+}): Promise<void> {
+  await input.subscriptionsRepo.updateCollectionAttempt({
+    attemptId: input.attempt.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    status: "processing",
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export async function recoverOrBlockLifecycleCollection(input: {
