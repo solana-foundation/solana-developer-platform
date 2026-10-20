@@ -9,7 +9,11 @@ import {
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types/well-known-tokens";
-import { type Commitment, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND } from "@solana/kit";
+import {
+  type Commitment,
+  getBase64Decoder,
+  SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND,
+} from "@solana/kit";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
@@ -224,9 +228,12 @@ export interface ClusterRpcResponder extends ClusterRpcStub {
    * attempt, or fail the request.
    *
    * @param method - The JSON-RPC method name.
-   * @param reply - Builds the answer from the request.
+   * @param reply - Builds the answer from the request, at once or asynchronously.
    */
-  respond(method: string, reply: (request: ClusterRpcRequest) => ClusterRpcReply): void;
+  respond(
+    method: string,
+    reply: (request: ClusterRpcRequest) => ClusterRpcReply | Promise<ClusterRpcReply>
+  ): void;
   /**
    * Answer every `getSignatureStatuses` request of the current test signature by signature.
    *
@@ -290,7 +297,10 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
   const stub = installClusterRpcStub();
   const calls: ClusterRpcCall[] = [];
   const requests: ClusterRpcRequest[] = [];
-  const replies = new Map<string, (request: ClusterRpcRequest) => ClusterRpcReply>();
+  const replies = new Map<
+    string,
+    (request: ClusterRpcRequest) => ClusterRpcReply | Promise<ClusterRpcReply>
+  >();
 
   beforeEach(() => {
     const stubbedFetch = globalThis.fetch;
@@ -307,7 +317,7 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
       if (reply === undefined) {
         return stubbedFetch(input, init);
       }
-      return Response.json({ jsonrpc: "2.0", id, ...reply(request) });
+      return Response.json({ jsonrpc: "2.0", id, ...(await reply(request)) });
     };
   });
 
@@ -428,4 +438,82 @@ export function clusterOfRpcClient(client: SolanaRpc): SolanaCluster | undefined
       client
   );
   return environment === undefined ? undefined : CLUSTER_BY_SDP_ENVIRONMENT[environment];
+}
+
+/**
+ * A `getEpochInfo` result for a cluster at `absoluteSlot` and `blockHeight`.
+ *
+ * @param input - The tip the answer reports.
+ * @param input.absoluteSlot - The current slot.
+ * @param input.blockHeight - The current block height.
+ * @returns The JSON-RPC `result` to return from a responder.
+ */
+export function epochInfoResult(input: {
+  absoluteSlot: number;
+  blockHeight: number;
+}): JsonRpcResult {
+  return {
+    absoluteSlot: input.absoluteSlot,
+    blockHeight: input.blockHeight,
+    epoch: 1,
+    slotIndex: 0,
+    slotsInEpoch: 432_000,
+    transactionCount: null,
+  };
+}
+
+/** An account a stubbed base64 read returns: the program owning it and its raw data. */
+export interface StubEncodedAccount {
+  owner: string;
+  data: Uint8Array;
+}
+
+/**
+ * A base64 `getMultipleAccounts` result served from the bank at `slot`, in request order.
+ *
+ * @param slot - The context slot the answer claims.
+ * @param accounts - Each requested account, or null when it does not exist.
+ * @returns The JSON-RPC `result` to return from a responder.
+ */
+export function multipleAccountsResult(
+  slot: number,
+  accounts: readonly (StubEncodedAccount | null)[]
+): JsonRpcResult {
+  return {
+    context: { slot },
+    value: accounts.map((account) =>
+      account === null
+        ? null
+        : {
+            data: [getBase64Decoder().decode(account.data), "base64"],
+            executable: false,
+            lamports: 2_000_000,
+            owner: account.owner,
+            rentEpoch: 0,
+            space: account.data.length,
+          }
+    ),
+  };
+}
+
+const multipleAccountsParamsSchema = z.tuple([
+  z.array(z.string()),
+  z.object({ commitment: z.string(), minContextSlot: z.number(), encoding: z.string() }),
+]);
+
+/**
+ * The addresses and options a `getMultipleAccounts` request carried.
+ *
+ * @param request - A recorded `getMultipleAccounts` request.
+ * @returns The requested addresses and the read's commitment, slot floor and encoding.
+ * @throws ZodError when the request names no commitment, slot floor or encoding.
+ */
+export function multipleAccountsRead(request: ClusterRpcRequest): {
+  addresses: readonly string[];
+  commitment: string;
+  minContextSlot: number;
+  encoding: string;
+} {
+  const [addresses, options] = multipleAccountsParamsSchema.parse(request.params);
+  return { addresses, ...options };
 }
