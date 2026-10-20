@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
@@ -36,25 +35,27 @@ import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helper
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
+  createKoraAdapterMock,
   enableMainnetSponsorship,
   MAINNET_USDC_MINT,
   seedProjectPrivyWallet,
   sendTransactionMock,
-  sendTransactionPreflightError,
+  sponsoredNetworkFeeMock,
+  TEST_SPONSORED_NETWORK_FEE_LAMPORTS,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
+  testKoraAdapter,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
+import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
-const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaSigner,
   "createOrgSignerForCustodyWallet"
@@ -107,11 +108,8 @@ function actualSignature(label: string): string {
   return signature;
 }
 
-function ownedSubmissionAdapter(
-  signingOutcome: (transactionBytes: Uint8Array) => Promise<string>
-): ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter> {
-  return {
-    providerId: "mock",
+function ownedSubmissionAdapter(signingOutcome: (transactionBytes: Uint8Array) => Promise<string>) {
+  return testKoraAdapter({
     getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
     getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
     signAsFeePayer: vi.fn(async (transactionBytes: Uint8Array) => {
@@ -123,13 +121,7 @@ function ownedSubmissionAdapter(
       );
       return signed;
     }),
-    signAndSend: async (transactionBytes: Uint8Array) => {
-      await signingOutcome(transactionBytes);
-      return getSignatureFromTransaction(
-        getTransactionDecoder().decode(await fullySignTestTransaction(transactionBytes))
-      );
-    },
-  };
+  });
 }
 
 async function seedAuthAndWallet(): Promise<void> {
@@ -405,6 +397,7 @@ describe("payment transfer batches", () => {
           amount: "1000000000",
           decimals: 6,
           uiAmountString: "1000",
+          state: "initialized",
         },
       ])
     );
@@ -414,11 +407,7 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
 
-    createRpcMock.mockReturnValue({
-      getFeeForMessage: () => ({
-        send: async () => ({ value: 5000n }),
-      }),
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
@@ -437,7 +426,7 @@ describe("payment transfer batches", () => {
       confirmationStatus: "confirmed",
       err: null,
     }));
-    createFeePaymentAdapterMock.mockReturnValue(
+    createKoraAdapterMock.mockReturnValue(
       ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
     );
     sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
@@ -560,11 +549,11 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
 
-    const signAndSendMock = vi
+    const signingOutcomeMock = vi
       .fn()
       .mockResolvedValueOnce(FIRST_SIGNATURE)
       .mockResolvedValueOnce(SECOND_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_create_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -643,7 +632,7 @@ describe("payment transfer batches", () => {
     );
     expect(body.data.transfers.every((transfer) => transfer.type === "transfer_batch")).toBe(true);
     expect(body.data.transfers.every((transfer) => transfer.status === "processing")).toBe(true);
-    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(2);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
 
     const batchRow = await getDb(env)
@@ -1092,14 +1081,13 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-    const signAndSend = vi.fn().mockRejectedValue(new Error("legacy signAndSend was used"));
-    createFeePaymentAdapterMock.mockReturnValueOnce({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValueOnce(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      })
+    );
 
     let persistedSignature: string | null = null;
     sendTransactionMock.mockImplementationOnce(async (_rpc, signedBytes) => {
@@ -1157,7 +1145,6 @@ describe("payment transfer batches", () => {
     expect(body.data.transfers).toMatchObject([
       { status: "processing", signature: persistedSignature },
     ]);
-    expect(signAndSend).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
   });
 
@@ -1166,14 +1153,13 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-    const signAndSend = vi.fn().mockRejectedValue(new Error("legacy signAndSend was used"));
-    createFeePaymentAdapterMock.mockReturnValueOnce({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend,
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValueOnce(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      })
+    );
     sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
 
     const counterpartyId = await seedCounterparty("batch_ambiguous_send_counterparty");
@@ -1225,7 +1211,6 @@ describe("payment transfer batches", () => {
     expect(required(row).signed_transaction).not.toBeNull();
     expect(required(row).last_valid_block_height).toBe("1000");
     expect(required(row).submission_started_at).not.toBeNull();
-    expect(signAndSend).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1250,13 +1235,13 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-    createFeePaymentAdapterMock.mockReturnValueOnce({
-      providerId: "mock",
-      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-      getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      signAndSend: vi.fn(),
-    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    createKoraAdapterMock.mockReturnValueOnce(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      })
+    );
     sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
 
     const counterpartyId = await seedCounterparty("batch_preflight_rejection_counterparty");
@@ -1403,8 +1388,8 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_reordered_backstop_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -1440,7 +1425,7 @@ describe("payment transfer batches", () => {
 
     const original = await post([first, second]);
     expect(original.status).toBe(200);
-    const sends = signAndSendMock.mock.calls.length;
+    const sends = signingOutcomeMock.mock.calls.length;
     await getDb(env).execute("DELETE FROM idempotency_keys");
     const reordered = await post([second, first]);
 
@@ -1448,7 +1433,7 @@ describe("payment transfer batches", () => {
     const originalBatch = ((await original.json()) as { data: { batch: { id: string } } }).data;
     const replayedBatch = ((await reordered.json()) as { data: { batch: { id: string } } }).data;
     expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
-    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
   });
 
   // Keegan (#2334): a request that died after the batch and its recipients
@@ -1458,8 +1443,8 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_stranded_counterparty");
     const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -1506,7 +1491,7 @@ describe("payment transfer batches", () => {
       )
       .run();
     await getDb(env).execute("DELETE FROM idempotency_keys");
-    const sends = signAndSendMock.mock.calls.length;
+    const sends = signingOutcomeMock.mock.calls.length;
 
     const retry = await post();
 
@@ -1516,14 +1501,14 @@ describe("payment transfer batches", () => {
     };
     expect(body.data.batch).toMatchObject({ id: batchId, status: "failed" });
     expect(body.data.recipients.map((recipient) => recipient.status)).toEqual(["failed"]);
-    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
   });
 
   it("settles a stranded batch with no client retry from the pending-transfers job", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    createFeePaymentAdapterMock.mockReturnValue(
+    createKoraAdapterMock.mockReturnValue(
       ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
     );
     const counterpartyId = await seedCounterparty("batch_stranded_sweep_counterparty");
@@ -1580,8 +1565,8 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_archived_backstop_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -1610,7 +1595,7 @@ describe("payment transfer batches", () => {
 
     const original = await request();
     expect(original.status).toBe(200);
-    const sends = signAndSendMock.mock.calls.length;
+    const sends = signingOutcomeMock.mock.calls.length;
     await getDb(env).execute("DELETE FROM idempotency_keys");
     await getDb(env).execute("UPDATE counterparty_accounts SET status = 'archived' WHERE id = ?", [
       counterpartyAccountId,
@@ -1621,7 +1606,7 @@ describe("payment transfer batches", () => {
     const originalBatch = ((await original.json()) as { data: { batch: { id: string } } }).data;
     const replayedBatch = ((await retry.json()) as { data: { batch: { id: string } } }).data;
     expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
-    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
   });
 
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
@@ -1629,8 +1614,8 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
 
-    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_idempotent_replay_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -1665,7 +1650,7 @@ describe("payment transfer batches", () => {
     const firstBody = (await first.json()) as { data: unknown };
     const secondBody = (await second.json()) as { data: unknown };
     expect(secondBody.data).toEqual(firstBody.data);
-    expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(1);
 
     const stored = await getDb(env)
@@ -1703,8 +1688,8 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
 
-    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_idempotency_conflict_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -1750,7 +1735,7 @@ describe("payment transfer batches", () => {
     expect(conflict.status).toBe(422);
     const conflictBody = (await conflict.json()) as { error: { code: string } };
     expect(conflictBody.error.code).toBe("IDEMPOTENCY_KEY_REUSED");
-    expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(1);
   });
 
@@ -1773,8 +1758,8 @@ describe("payment transfer batches", () => {
       return sourceSigner;
     });
 
-    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_idempotency_race_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -1815,7 +1800,7 @@ describe("payment transfer batches", () => {
     expect(duplicate.headers.get("Retry-After")).toBeTruthy();
     expect((await first).status).toBe(200);
     expect(signerCallCount).toBe(1);
-    expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
 
     const count = await getDb(env)
       .prepare(
@@ -1862,11 +1847,11 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
 
-    const signAndSendMock = vi
+    const signingOutcomeMock = vi
       .fn()
       .mockResolvedValueOnce(FIRST_SIGNATURE)
       .mockResolvedValueOnce(SECOND_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_without_idempotency_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -1921,7 +1906,7 @@ describe("payment transfer batches", () => {
     const firstBody = (await first.json()) as { data: { batch: { id: string } } };
     const secondBody = (await second.json()) as { data: { batch: { id: string } } };
     expect(secondBody.data.batch.id).not.toBe(firstBody.data.batch.id);
-    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(2);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(2);
 
     const count = await getDb(env)
@@ -1966,8 +1951,8 @@ describe("payment transfer batches", () => {
       } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
       answerSourceTokenAccount(expectedMint);
 
-      const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
-      createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+      const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+      createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
       const counterpartyId = await seedCounterparty(`batch_token_counterparty_${label}`);
       const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -2028,7 +2013,7 @@ describe("payment transfer batches", () => {
           signature: actualSignature(FIRST_SIGNATURE),
         },
       ]);
-      expect(signAndSendMock).toHaveBeenCalledTimes(1);
+      expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
       getSignatureStatusesMock.mockResolvedValueOnce([
         {
           slot: 103n,
@@ -2135,8 +2120,8 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
 
-    const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_timeout_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -2176,7 +2161,7 @@ describe("payment transfer batches", () => {
     expect(body.data.transfers).toMatchObject([
       { status: "processing", signature: actualSignature(FIRST_SIGNATURE) },
     ]);
-    expect(signAndSendMock).toHaveBeenCalledTimes(1);
+    expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
   });
 
@@ -2185,8 +2170,8 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
 
-    const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_onchain_error_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -2251,7 +2236,7 @@ describe("payment transfer batches", () => {
       .fn()
       .mockResolvedValueOnce(FIRST_SIGNATURE)
       .mockResolvedValueOnce(SECOND_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingMock));
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingMock));
 
     const counterpartyId = await seedCounterparty("batch_identical_chunks_counterparty");
     const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -2302,11 +2287,11 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
 
-    const signAndSendMock = vi
+    const signingOutcomeMock = vi
       .fn()
       .mockResolvedValueOnce(FIRST_SIGNATURE)
       .mockResolvedValueOnce(SECOND_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_settlement_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -2419,10 +2404,10 @@ describe("payment transfer batches", () => {
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
       let signatureIndex = 0;
-      const signAndSendMock = vi.fn(
+      const signingOutcomeMock = vi.fn(
         async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature
       );
-      createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+      createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
       const counterpartyId = await seedCounterparty("batch_stranded_counterparty");
       const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -2511,8 +2496,8 @@ describe("payment transfer batches", () => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-      const signAndSendMock = vi.fn(async () => FIRST_SIGNATURE as Signature);
-      createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+      const signingOutcomeMock = vi.fn(async () => FIRST_SIGNATURE as Signature);
+      createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
       const counterpartyId = await seedCounterparty("batch_link_failure_counterparty");
       const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -2547,7 +2532,7 @@ describe("payment transfer batches", () => {
           transfers: Array<{ status: string }>;
         };
       };
-      expect(signAndSendMock).not.toHaveBeenCalled();
+      expect(signingOutcomeMock).not.toHaveBeenCalled();
       expect(body.data.batch.status).toBe("failed");
       expect(body.data.transfers).toHaveLength(0);
       expect(body.data.recipients).toHaveLength(1);
@@ -2613,8 +2598,8 @@ describe("payment transfer batches", () => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-      const signAndSendMock = vi.fn(async () => FIRST_SIGNATURE as Signature);
-      createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+      const signingOutcomeMock = vi.fn(async () => FIRST_SIGNATURE as Signature);
+      createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
       const counterpartyId = await seedCounterparty("batch_settle_failure_counterparty");
       const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -2645,7 +2630,7 @@ describe("payment transfer batches", () => {
       const body = (await res.json()) as {
         data: { batch: { id: string; status: string } };
       };
-      expect(signAndSendMock).toHaveBeenCalledTimes(1);
+      expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
       expect(sendTransactionMock).not.toHaveBeenCalled();
       expect(body.data.batch.status).toBe("failed");
 
@@ -2703,8 +2688,8 @@ describe("payment transfer batches", () => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-      const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
-      createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+      const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+      createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
       const counterpartyId = await seedCounterparty("batch_midflight_counterparty");
       const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -2752,11 +2737,11 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-    const signAndSendMock = vi
+    const signingOutcomeMock = vi
       .fn()
       .mockResolvedValueOnce(FIRST_SIGNATURE)
       .mockResolvedValueOnce(SECOND_SIGNATURE);
-    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
 
     const counterpartyId = await seedCounterparty("batch_concurrent_settle_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -2829,7 +2814,7 @@ describe("payment transfer batches", () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-    createFeePaymentAdapterMock.mockReturnValueOnce(
+    createKoraAdapterMock.mockReturnValueOnce(
       ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
     );
 
@@ -2928,8 +2913,10 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
     let signatureIndex = 0;
-    const signAndSendMock = vi.fn(async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn(
+      async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature
+    );
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
     const counterpartyId = await seedCounterparty("batch_stress_counterparty");
     const destinationSigners = await Promise.all(
       Array.from({ length: 500 }, () => generateKeyPairSigner())
@@ -2968,7 +2955,7 @@ describe("payment transfer batches", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { batch: { id: string } } };
     expect(performance.now() - startedAt).toBeLessThan(15_000);
-    expect(signAndSendMock).toHaveBeenCalled();
+    expect(signingOutcomeMock).toHaveBeenCalled();
     expect(confirmTransactionMock).not.toHaveBeenCalled();
 
     const detailRes = await app.request(
@@ -3001,8 +2988,10 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
     let signatureIndex = 0;
-    const signAndSendMock = vi.fn(async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature);
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+    const signingOutcomeMock = vi.fn(
+      async () => `${FIRST_SIGNATURE}${signatureIndex++}` as Signature
+    );
+    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
     const counterpartyId = await seedCounterparty("batch_burst_counterparty");
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
       counterpartyId,

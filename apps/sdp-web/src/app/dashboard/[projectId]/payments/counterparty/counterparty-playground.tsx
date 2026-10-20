@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
-import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
 import { useTranslations } from "@/i18n/provider";
 import {
   buildCounterpartyPlaygroundEndpointConfigs,
@@ -11,15 +10,11 @@ import {
 
 interface CounterpartyPlaygroundProps {
   apiBaseUrl?: string | null;
-  apiKeyId: string | null;
-  hasActiveApiKeys: boolean;
   counterparties: CounterpartyPlaygroundView[];
 }
 
 export function CounterpartyPlayground({
   apiBaseUrl,
-  apiKeyId,
-  hasActiveApiKeys,
   counterparties,
 }: CounterpartyPlaygroundProps) {
   const t = useTranslations();
@@ -34,9 +29,6 @@ export function CounterpartyPlayground({
       endpoints={endpoints}
       defaultEndpointId="list-counterparties"
       apiBaseUrl={apiBaseUrl}
-      apiKeyId={apiKeyId}
-      apiKeySelector={<PlaygroundApiKeySelector />}
-      requiresApiKey={!hasActiveApiKeys}
       leftMessages={[]}
     />
   );

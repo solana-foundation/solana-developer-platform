@@ -81,12 +81,12 @@ async function assertRingsWalletInScope(
   c: AppContext,
   wallet: HeliusRingsWalletRow
 ): Promise<void> {
-  const { walletAccess } = getAuth(c);
-  if (walletAccess.scope === "all") return;
+  const auth = getAuth(c);
+  if (auth.walletAccess.scope === "all") return;
   const custodyWalletId =
     wallet.custody_wallet_id ??
     resolveWallet((await resolveScope(c)).wallets, wallet.sdp_wallet_id).id;
-  assertCallerWalletInScope(walletAccess, custodyWalletId);
+  assertCallerWalletInScope(auth, custodyWalletId);
 }
 
 export function getHeliusRingsZoneRepository(c: AppContext) {

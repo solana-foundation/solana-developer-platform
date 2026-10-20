@@ -18,6 +18,7 @@
         "method": "POST",
         "path": "/v1/wallets/initialize",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -43,6 +44,7 @@
         "method": "POST",
         "path": "/v1/wallets",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -83,6 +85,7 @@
         "method": "DELETE",
         "path": "/v1/wallets",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -113,6 +116,7 @@
         "method": "GET",
         "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "provider",
@@ -225,6 +229,7 @@
         "method": "GET",
         "path": "/v1/wallets/configs",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -253,6 +258,7 @@
         "method": "GET",
         "path": "/v1/wallets/aggregate?provider={provider}",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "provider",
@@ -336,6 +342,7 @@
         "method": "GET",
         "path": "/v1/wallets/public-key?walletId={walletId}",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "walletId",
@@ -357,6 +364,7 @@
         "method": "POST",
         "path": "/v1/wallets/signer-check",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -392,6 +400,7 @@
         "method": "GET",
         "path": "/v1/wallets/{walletId}?includeBalance={includeBalance}",
         "releaseModule": "custody",
+        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"],
         "pathFields": [
           {
             "key": "walletId",
@@ -448,6 +457,7 @@
         "method": "PATCH",
         "path": "/v1/wallets/{walletId}",
         "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "walletId",
@@ -498,6 +508,7 @@
         "method": "GET",
         "path": "/v1/payments/wallets/{walletId}/balances?minimumSlot={minimumSlot}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "walletId",
@@ -549,6 +560,7 @@
         "method": "POST",
         "path": "/v1/payments/transfers",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -633,6 +645,7 @@
         "method": "GET",
         "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "custodyWalletId",
@@ -906,6 +919,7 @@
         "method": "GET",
         "path": "/v1/payments/transfers/{transferId}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "transferId",
@@ -988,6 +1002,7 @@
         "method": "POST",
         "path": "/v1/payments/transfer-batches/estimate",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -1026,6 +1041,7 @@
         "method": "POST",
         "path": "/v1/payments/transfer-batches",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -1144,6 +1160,7 @@
         "method": "GET",
         "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "sourceCustodyWalletId",
@@ -1253,6 +1270,7 @@
         "method": "GET",
         "path": "/v1/payments/transfer-batches/{batchId}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "batchId",
@@ -1369,6 +1387,7 @@
         "method": "POST",
         "path": "/v1/payments/recurring-payments",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -1427,6 +1446,7 @@
         "method": "GET",
         "path": "/v1/payments/recurring-payments?counterpartyId={counterpartyId}&status={status}&page={page}&pageSize={pageSize}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -1548,6 +1568,7 @@
         "method": "PATCH",
         "path": "/v1/payments/recurring-payments/{id}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1614,6 +1635,7 @@
         "method": "GET",
         "path": "/v1/payments/recurring-payments/{id}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1670,6 +1692,7 @@
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/activate",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1726,6 +1749,7 @@
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/cancel",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1782,6 +1806,7 @@
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/collect",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1915,6 +1940,7 @@
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/resume",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1971,6 +1997,7 @@
         "method": "POST",
         "path": "/v1/payments/subscription-plans",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -2019,6 +2046,7 @@
         "method": "GET",
         "path": "/v1/payments/subscription-plans?status={status}&page={page}&pageSize={pageSize}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "status",
@@ -2099,6 +2127,7 @@
         "method": "POST",
         "path": "/v1/payments/subscription-plans/{planId}/prepare-create",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2162,6 +2191,7 @@
         "method": "GET",
         "path": "/v1/payments/subscription-plans/{planId}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2208,6 +2238,7 @@
         "method": "PATCH",
         "path": "/v1/payments/subscription-plans/{planId}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2264,6 +2295,7 @@
         "method": "POST",
         "path": "/v1/payments/subscriptions",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -2312,6 +2344,7 @@
         "method": "GET",
         "path": "/v1/payments/subscriptions?planId={planId}&counterpartyId={counterpartyId}&status={status}&dueBefore={dueBefore}&page={page}&pageSize={pageSize}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2419,6 +2452,7 @@
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2483,6 +2517,7 @@
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2545,6 +2580,7 @@
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2607,6 +2643,7 @@
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2690,6 +2727,7 @@
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2736,6 +2774,7 @@
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
         "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2832,6 +2871,7 @@
         "method": "GET",
         "path": "/v1/payments/ramps/onramp/currency?source={source}&dest={dest}&provider={provider}",
         "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "source",
@@ -3068,6 +3108,7 @@
         "method": "GET",
         "path": "/v1/payments/ramps/offramp/currency?source={source}&dest={dest}&provider={provider}",
         "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "source",
@@ -3304,6 +3345,7 @@
         "method": "POST",
         "path": "/v1/payments/ramps/onramp/quote",
         "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -3339,6 +3381,7 @@
         "method": "POST",
         "path": "/v1/payments/ramps/sandbox/simulate",
         "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -3360,6 +3403,7 @@
         "method": "GET",
         "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "module",
@@ -3497,6 +3541,7 @@
         "method": "GET",
         "path": "/v1/counterparties/metadata",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -3524,6 +3569,7 @@
         "method": "GET",
         "path": "/v1/counterparties?page={page}&pageSize={pageSize}&includeArchived={includeArchived}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "page",
@@ -3595,6 +3641,7 @@
         "method": "POST",
         "path": "/v1/counterparties",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -3635,6 +3682,7 @@
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}",
         "releaseModule": "payments",
+        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3673,6 +3721,7 @@
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3721,6 +3770,7 @@
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3740,6 +3790,7 @@
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
         "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3973,6 +4024,7 @@
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts?page={page}&pageSize={pageSize}&includeArchived={includeArchived}&accountKind={accountKind}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4069,6 +4121,7 @@
         "method": "POST",
         "path": "/v1/counterparties/{counterpartyId}/accounts",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4121,6 +4174,7 @@
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/provider-accounts?provider={provider}&fiatCurrency={fiatCurrency}&destinationCountry={destinationCountry}",
         "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5205,6 +5259,7 @@
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5254,6 +5309,7 @@
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5313,6 +5369,7 @@
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
         "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5341,6 +5398,7 @@
         "method": "GET",
         "path": "/v1/issuance/templates",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -5375,6 +5433,7 @@
         "method": "GET",
         "path": "/v1/issuance/templates/{templateId}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "templateId",
@@ -5415,6 +5474,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -5503,6 +5563,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens?page={page}&pageSize={pageSize}&search={search}&status={status}&deploymentStatus={deploymentStatus}&template={template}&createdAfter={createdAfter}&createdBefore={createdBefore}&sortBy={sortBy}&sortDirection={sortDirection}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "page",
@@ -5709,6 +5770,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/facets",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -5739,6 +5801,7 @@
         "method": "GET",
         "path": "/v1/issuance/transactions?custodyWalletId={custodyWalletId}&walletId={walletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "custodyWalletId",
@@ -5856,6 +5919,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}",
         "releaseModule": "issuance",
+        "shadowedBy": ["/v1/issuance/tokens/facets"],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6014,6 +6078,7 @@
         "method": "PATCH",
         "path": "/v1/issuance/tokens/{tokenId}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6110,6 +6175,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/metadata.json",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6132,6 +6198,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/supply/refresh",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6218,6 +6285,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/transactions?type={type}&status={status}&page={page}&pageSize={pageSize}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6362,6 +6430,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/audit?action={action}&page={page}&pageSize={pageSize}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6424,6 +6493,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6520,6 +6590,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6563,6 +6634,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6659,6 +6731,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6697,6 +6770,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/mint/prepare",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6764,6 +6838,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/mint",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6820,6 +6895,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/burn/prepare",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6886,6 +6962,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/burn",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6941,6 +7018,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/seize/prepare",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7007,6 +7085,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/seize",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7062,6 +7141,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7128,6 +7208,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/force-burn",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7183,6 +7264,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/authority/prepare",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7249,6 +7331,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/authority",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7304,6 +7387,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/pause",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7359,6 +7443,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/unpause",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7414,6 +7499,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/freeze",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7461,6 +7547,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/unfreeze",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7508,6 +7595,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/frozen?page={page}&pageSize={pageSize}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7564,6 +7652,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist?page={page}&pageSize={pageSize}&search={search}&label={label}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7633,6 +7722,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7679,6 +7769,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist/labels",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7707,6 +7798,7 @@
         "method": "DELETE",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7740,6 +7832,7 @@
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/holders",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7764,6 +7857,7 @@
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/holders",
         "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7793,68 +7887,6 @@
       }
     ]
   },
-  "routeOwners": [
-    {
-      "pattern": "^\\/v1\\/payments\\/ramps(\\/|$)",
-      "owner": "ramps"
-    },
-    {
-      "pattern": "^\\/webhooks\\/payments\\/ramps\\/",
-      "owner": "ramps"
-    },
-    {
-      "pattern": "^\\/v1\\/counterparties\\/:counterpartyId\\/(requirements|provider-accounts)(\\/|$)",
-      "owner": "ramps"
-    },
-    {
-      "pattern": "^\\/v1\\/issuance(\\/|$)",
-      "owner": "issuance"
-    },
-    {
-      "pattern": "^\\/v1\\/earn(\\/|$)",
-      "owner": "earn"
-    },
-    {
-      "pattern": "^\\/v1\\/dvp(\\/|$)",
-      "owner": "dvp"
-    },
-    {
-      "pattern": "^\\/v1\\/private-channels(\\/|$)",
-      "owner": "private_channels"
-    },
-    {
-      "pattern": "^\\/(v1|internal\\/dashboard)\\/helius-rings(\\/|$)",
-      "owner": "helius_rings"
-    },
-    {
-      "pattern": "^\\/v1\\/payments\\/(recurring-payments|subscription-plans|subscriptions)(\\/|$)",
-      "owner": "recurring_payments"
-    },
-    {
-      "pattern": "^\\/(v1\\/payments|v1\\/counterparties|v1\\/transactions|pay)(\\/|$)",
-      "owner": "payments"
-    },
-    {
-      "pattern": "^\\/(v1\\/wallets|internal\\/dashboard\\/(custody|wallets))(\\/|$)",
-      "owner": "custody"
-    },
-    {
-      "pattern": "^\\/v1\\/compliance(\\/|$)",
-      "owner": "compliance"
-    },
-    {
-      "pattern": "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground|internal\\/dashboard\\/network)(\\/|$)",
-      "owner": "core"
-    },
-    {
-      "pattern": "^\\/v1\\/(members|organizations|projects|onboarding|places|api-keys)(\\/|$)",
-      "owner": "core"
-    },
-    {
-      "pattern": "^\\/$",
-      "owner": "core"
-    }
-  ],
   "valueGates": {
     "transfers.read": {
       "module": "payments"

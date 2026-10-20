@@ -138,19 +138,6 @@ export function isApiKeyAlreadyRotated(
   return "alreadyRotatedTo" in result;
 }
 
-export interface ApiKeyIdentity {
-  id: string;
-  name: string;
-  keyPrefix: string;
-}
-
-export interface VerifyApiKeyOwnershipInput {
-  apiKey: string;
-  organizationId: string;
-  projectId: string;
-  pepper?: string;
-}
-
 interface ApiKeyListRow {
   id: string;
   name: string;
@@ -216,48 +203,6 @@ export class ApiKeyService {
     if (!scope.projectId) {
       throw new TenantScopeViolationError("ApiKeyService requires a project tenant scope");
     }
-  }
-
-  /**
-   * Verifies full API-key material against the current tenant boundary.
-   *
-   * Display prefixes are intentionally not used here: they are short, public,
-   * and not unique. The raw key is hashed in memory and is never stored.
-   */
-  /**
-   * Resolves key material to the key it IS, not just to a yes or no. The match is
-   * an exact hash lookup inside the org and project boundary, so the identity it
-   * returns is the real row rather than anything inferred from the visible prefix.
-   * Callers that only need usability can read the null.
-   */
-  async resolveUsableApiKey(input: VerifyApiKeyOwnershipInput): Promise<ApiKeyIdentity | null> {
-    assertTenantClaim(this.scope, input, "ApiKeyService.resolveUsableApiKey");
-    const keyHash = await hashString(input.apiKey, input.pepper);
-    const row = await this.db
-      .prepare(
-        `SELECT id, name, key_prefix, status, expires_at
-         FROM api_keys
-         WHERE key_hash = ? AND organization_id = ? AND project_id = ?
-         LIMIT 1`
-      )
-      .bind(keyHash, input.organizationId, input.projectId)
-      .first<{
-        id: string;
-        name: string;
-        key_prefix: string;
-        status: ApiKeyStatus;
-        expires_at: string | null;
-      }>();
-
-    if (row?.status !== "active") {
-      return null;
-    }
-
-    if (row.expires_at && new Date(row.expires_at) < new Date()) {
-      return null;
-    }
-
-    return { id: row.id, name: row.name, keyPrefix: row.key_prefix };
   }
 
   async listForProject(projectId: string): Promise<ApiKeyListItem[]> {

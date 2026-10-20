@@ -7,10 +7,7 @@ import {
   type KnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/[projectId]/playground-api-data";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
@@ -102,15 +99,13 @@ async function CustodyPage() {
       );
     }
 
-    const [configsResult, walletsResult, apiKeysResult, providerAvailabilityResult] =
-      await Promise.all([
-        trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
-        trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
-        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
-        trace.step("fetch_provider_availability", () =>
-          settle(fetchProjectProviderAvailability(projectClient))
-        ),
-      ]);
+    const [configsResult, walletsResult, providerAvailabilityResult] = await Promise.all([
+      trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
+      trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
+      trace.step("fetch_provider_availability", () =>
+        settle(fetchProjectProviderAvailability(projectClient))
+      ),
+    ]);
 
     const connectedProviders: KnownCustodyProvider[] = configsResult.ok
       ? configsResult.value.configs
@@ -129,7 +124,6 @@ async function CustodyPage() {
       : walletsResult.error instanceof Error
         ? walletsResult.error.message
         : t("DashboardCustody.unableToLoadWallets");
-    const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
     // Availability only drives the create area, so a failed read closes that
     // area instead of taking down the existing wallets.
     const custodyAvailability: CustodyAvailabilityResult = providerAvailabilityResult.ok
@@ -145,14 +139,12 @@ async function CustodyPage() {
         ? null
         : String(providerAvailabilityResult.error),
       walletCount: walletsResult.ok ? walletsResult.value.length : 0,
-      apiKeyCount: apiKeys.length,
     });
 
     return (
       <Suspense fallback={<WalletsOverviewSkeleton />}>
         <WalletsWorkspace
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-          apiKeys={apiKeys}
           connectedProviders={connectedProviders}
           custodyAvailability={custodyAvailability}
           configsError={configsError}

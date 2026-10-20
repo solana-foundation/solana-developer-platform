@@ -49,13 +49,6 @@ const IssuancePlayground = dynamic(
   }
 );
 
-interface IssuanceApiKeyOption {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  environment: string;
-}
-
 interface IssuanceTemplateOption {
   id: string;
   name: string;
@@ -72,7 +65,6 @@ interface IssuanceWorkspaceProps {
   initialTotal: number;
   facets: IssuanceTokenFacets;
   templates: IssuanceTemplateOption[];
-  apiKeys: IssuanceApiKeyOption[];
   apiBaseUrl: string | null;
   templatesError: string | null;
   tokensNotice: string | null;
@@ -353,18 +345,8 @@ function IssuanceResults({
   );
 }
 
-function useIssuancePlaygroundKeyId({
-  apiKeys,
-  isPlaygroundTab,
-}: {
-  apiKeys: IssuanceWorkspaceProps["apiKeys"];
-  isPlaygroundTab: boolean;
-}) {
-  const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-  useEffect(() => {
-    setPlaygroundApiKeys(apiKeys);
-  }, [apiKeys, setPlaygroundApiKeys]);
-
+/** Loads the playground's code while the browser is idle, until its tab is opened. */
+function usePreloadIssuancePlayground(isPlaygroundTab: boolean) {
   useEffect(() => {
     if (isPlaygroundTab) {
       return;
@@ -382,8 +364,6 @@ function useIssuancePlaygroundKeyId({
     const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
     return () => globalThis.clearTimeout(timeoutId);
   }, [isPlaygroundTab]);
-
-  return apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId)?.id ?? null;
 }
 
 export function IssuanceWorkspace({
@@ -393,7 +373,6 @@ export function IssuanceWorkspace({
   initialTotal,
   facets,
   templates,
-  apiKeys,
   apiBaseUrl,
   templatesError,
   tokensNotice,
@@ -438,7 +417,7 @@ export function IssuanceWorkspace({
     router.push(href(CREATE_DRAFT_PATH));
   };
 
-  const playgroundApiKeyId = useIssuancePlaygroundKeyId({ apiKeys, isPlaygroundTab });
+  usePreloadIssuancePlayground(isPlaygroundTab);
 
   // Template options for the filter popover. Sourced from the project-wide facet
   // counts rather than the loaded rows, so the choices don't shrink to whatever
@@ -457,8 +436,6 @@ export function IssuanceWorkspace({
   const playgroundContent = (
     <IssuancePlayground
       apiBaseUrl={apiBaseUrl}
-      apiKeyId={playgroundApiKeyId}
-      hasActiveApiKeys={apiKeys.length > 0}
       templates={templates}
       templatesError={templatesError}
       tokens={playgroundTokens}

@@ -9,15 +9,15 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./chain-reads": {
+      "types": "./src/chain-reads.ts",
+      "import": "./src/chain-reads.ts",
+      "default": "./src/chain-reads.ts"
+    },
     "./kora.adapter": {
       "types": "./src/kora.adapter.ts",
       "import": "./src/kora.adapter.ts",
       "default": "./src/kora.adapter.ts"
-    },
-    "./native.adapter": {
-      "types": "./src/native.adapter.ts",
-      "import": "./src/native.adapter.ts",
-      "default": "./src/native.adapter.ts"
     },
     "./port": {
       "types": "./src/port.ts",
@@ -33,7 +33,6 @@
   "dependencies": {
     "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
-    "@solana/codecs": "catalog:",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.3"
   },

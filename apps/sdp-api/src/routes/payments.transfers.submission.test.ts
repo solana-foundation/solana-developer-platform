@@ -1,4 +1,3 @@
-import type { createFeePaymentAdapter } from "@sdp/fee-payment";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { confirmTransaction } from "@sdp/rpc/solana";
 import {
@@ -19,7 +18,7 @@ import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
-  createFeePaymentAdapterMock,
+  createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
   sendTransactionMock,
@@ -27,14 +26,17 @@ import {
   TEST_ORG,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
+  testKoraAdapter,
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
 import {
   listTransferRows,
   postTransfer,
+  readErrorResponse,
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — signed submission", () => {
@@ -73,23 +75,22 @@ describe("Payments routes — signed submission", () => {
             const fullySigned = await partiallySignTransaction([sponsor.keyPair], sourceSigned);
             return new Uint8Array(getTransactionEncoder().encode(fullySigned));
           });
-      const signAndSend = vi.fn().mockRejectedValue(new Error("legacy signAndSend was used"));
-      createFeePaymentAdapterMock.mockReturnValue({
-        providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
-        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
-          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
-          signerAddress: sponsor.address,
-        }),
-        signAsFeePayer,
-        signAndSend,
-      } as ReturnType<typeof createFeePaymentAdapter>);
+      createKoraAdapterMock.mockReturnValue(
+        testKoraAdapter({
+          getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
+          getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+            ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+            signerAddress: sponsor.address,
+          }),
+          signAsFeePayer,
+        })
+      );
 
-      return { signAsFeePayer, signAndSend };
+      return { signAsFeePayer };
     }
 
     it("persists the exact signed transaction before its first broadcast", async () => {
-      const { signAsFeePayer, signAndSend } = await mockSignedSubmissionAdapter();
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
 
       let persistedSignature: string | null = null;
       sendTransactionMock.mockImplementationOnce(async (_rpc, signedBytes) => {
@@ -114,7 +115,6 @@ describe("Payments routes — signed submission", () => {
       expect(json.data.transfer.signature).toBe(persistedSignature);
       expect(json.data.transfer.serializedTx).toBeNull();
       expect(signAsFeePayer).toHaveBeenCalledOnce();
-      expect(signAndSend).not.toHaveBeenCalled();
       expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
 
@@ -159,7 +159,7 @@ describe("Payments routes — signed submission", () => {
     });
 
     it("returns the durable processing transfer when its first broadcast is ambiguous", async () => {
-      const { signAsFeePayer, signAndSend } = await mockSignedSubmissionAdapter();
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
       sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
       const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
       const idempotencyKey = "signed-broadcast-timeout";
@@ -184,7 +184,6 @@ describe("Payments routes — signed submission", () => {
       const replayJson = await readTransferResponse(replay);
       expect(replayJson.data.transfer.id).toBe(json.data.transfer.id);
       expect(signAsFeePayer).toHaveBeenCalledOnce();
-      expect(signAndSend).not.toHaveBeenCalled();
       expect(sendTransactionMock).toHaveBeenCalledOnce();
       expect(warn).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -203,8 +202,22 @@ describe("Payments routes — signed submission", () => {
       warn.mockRestore();
     });
 
+    it("fails a transfer whose first broadcast preflight refuses, keeping its signature", async () => {
+      await mockSignedSubmissionAdapter();
+      sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBe(400);
+      expect((await readErrorResponse(res)).error.code).toBe("TRANSACTION_FAILED");
+      const row = await latestTransferRow();
+      expect(row.status).toBe("failed");
+      expect(row.signature).toBeTruthy();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+    });
+
     it("fails without broadcasting when sponsored signing is rejected", async () => {
-      const { signAndSend } = await mockSignedSubmissionAdapter({
+      await mockSignedSubmissionAdapter({
         signError: new FeePaymentError("insufficient balance", "INSUFFICIENT_BALANCE"),
       });
 
@@ -213,24 +226,23 @@ describe("Payments routes — signed submission", () => {
       expect(res.status).toBeGreaterThanOrEqual(400);
       const row = await latestTransferRow();
       expect(row).toMatchObject({ status: "failed", signature: null });
-      expect(signAndSend).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
     });
 
     it("records a pre-send admission rejection as a plain failed transfer", async () => {
-      const signAndSendMock = vi.fn();
-      createFeePaymentAdapterMock.mockReturnValue({
-        providerId: "mock",
-        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-        getSponsorshipConfiguration: vi.fn().mockRejectedValue(new Error("Kora config timed out")),
-        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-        signAndSend: signAndSendMock,
-      } as ReturnType<typeof createFeePaymentAdapter>);
+      createKoraAdapterMock.mockReturnValue(
+        testKoraAdapter({
+          getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+          getSponsorshipConfiguration: vi
+            .fn()
+            .mockRejectedValue(new Error("Kora config timed out")),
+          signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+        })
+      );
 
       const res = await transferRequest("1");
 
       expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(signAndSendMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
       const row = await latestTransferRow();
       expect(row).toMatchObject({ status: "failed", signature: null });
@@ -340,7 +352,7 @@ describe("Payments routes — signed submission", () => {
     });
 
     it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {
-      const { signAsFeePayer, signAndSend } = await mockSignedSubmissionAdapter();
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
       confirmTransactionMock.mockRejectedValueOnce(new Error("confirmation timed out"));
 
       const idempotencyKey = "submitted-unconfirmed-key";
@@ -359,7 +371,6 @@ describe("Payments routes — signed submission", () => {
       const replayJson = await readTransferResponse(replay);
       expect(replayJson.data.transfer.id).toBe(json.data.transfer.id);
       expect(signAsFeePayer).toHaveBeenCalledOnce();
-      expect(signAndSend).not.toHaveBeenCalled();
       expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
   });

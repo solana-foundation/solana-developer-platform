@@ -225,7 +225,6 @@ export async function saveApiKeyAuthoringAction(
         level: "success",
         message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
         key: created.apiKey.key,
-        apiKeyId: created.apiKey.id,
         keyPrefix: created.apiKey.keyPrefix,
       });
       revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
@@ -314,7 +313,6 @@ export async function rotateApiKeyAction(formData: FormData) {
         deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(locale),
       }),
       key: response.apiKey.key,
-      apiKeyId: response.apiKey.id,
       keyPrefix: response.apiKey.keyPrefix,
     });
   } catch (error) {

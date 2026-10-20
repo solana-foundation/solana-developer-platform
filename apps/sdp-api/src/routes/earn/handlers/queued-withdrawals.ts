@@ -22,6 +22,7 @@ import {
   buildEarnVaultQueuedWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
@@ -304,6 +305,9 @@ async function resolveCustodyQueueTarget(
       projectId,
     });
     wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
+    // The custody signer's scope refusal, made before a request or
+    // cancellation is recorded (ADR 0007 addendum).
+    assertCallerWalletInScope(auth, wallet.id);
   }
 
   return {

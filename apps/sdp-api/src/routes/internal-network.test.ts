@@ -44,7 +44,13 @@ const STATUS_BODY = {
 };
 
 const responseSchema = z.object({ data: networkSnapshotSchema });
-const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+const errorSchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    details: z.record(z.string(), z.unknown()).optional(),
+  }),
+});
 const realFetch = globalThis.fetch;
 
 /** Answers data.solana.com and status.solana.com; everything else goes out as usual. */
@@ -163,6 +169,7 @@ describe("GET /internal/dashboard/network", () => {
     expect(errorSchema.parse(await response.json()).error).toEqual({
       code: "FORBIDDEN",
       message: HUMAN_SESSION_REQUIRED_MESSAGE,
+      details: { reason: "human_session_required" },
     });
     expect(sourceCalls(fetchSpy, "data.solana.com")).toBe(0);
   });

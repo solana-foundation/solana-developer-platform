@@ -82,7 +82,6 @@ fi
 # the local Koras are plain HTTP, and a Doppler audience would reject them), and the
 # mainnet RPCs point at the fork so the API, its fee preflight and its paymaster see one chain.
 {
-  echo "FEE_PAYMENT_PROVIDER=kora"
   echo "KORA_DEVNET_URL=http://127.0.0.1:${DEVNET_PORT}"
   echo "KORA_DEVNET_CLOUD_RUN_AUDIENCE="
   if [ -n "${surfpool_rpc_url}" ]; then

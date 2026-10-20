@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { KoraAdapter, type KoraAdapterConfig } from "./kora.adapter";
-import { FeePaymentError } from "./port";
+import { FeePaymentError, type FeePaymentErrorCode } from "./port";
 
 type KoraTransport = NonNullable<KoraAdapterConfig["client"]>;
 
@@ -43,7 +43,6 @@ function makeAdapter(getConfig: () => Promise<unknown>): KoraAdapter {
   const transport = {
     getPayerSigner: async () => ({ signer_address: SIGNER }),
     signTransaction: async () => ({ signed_transaction: "" }),
-    signAndSendTransaction: async () => ({ signed_transaction: "" }),
     estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
     getSupportedTokens: async () => ({ tokens: [] }),
     getConfig,
@@ -51,65 +50,44 @@ function makeAdapter(getConfig: () => Promise<unknown>): KoraAdapter {
   return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
 }
 
-function makeAdapterRejectingSend(rpcError: string | Error): KoraAdapter {
-  const transport = {
-    getPayerSigner: async () => ({ signer_address: SIGNER }),
-    signTransaction: async () => ({ signed_transaction: "" }),
-    signAndSendTransaction: async () => {
-      throw typeof rpcError === "string" ? new Error(rpcError) : rpcError;
-    },
-    estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
-    getSupportedTokens: async () => ({ tokens: [] }),
-    getConfig: async () => ({}),
-  } as unknown as KoraTransport;
-  return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
+const USER_ID = "user_fee_payment_test";
+
+function syntheticSigner(read: number): string {
+  return `${"1".repeat(31)}${read + 1}`;
 }
 
-function makeAdapterFlakySend(failures: number, failure: () => Error): KoraAdapter {
-  let attempts = 0;
-  const transport = {
-    getPayerSigner: async () => ({ signer_address: SIGNER }),
-    signTransaction: async () => ({ signed_transaction: "" }),
-    signAndSendTransaction: async () => {
-      attempts += 1;
-      if (attempts <= failures) throw failure();
-      return { signature: "sig111" };
-    },
-    estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
-    getSupportedTokens: async () => ({ tokens: [] }),
-    getConfig: async () => ({}),
-  } as unknown as KoraTransport;
-  return new KoraAdapter({ rpcUrl: "https://kora.example", userId: "u1", client: transport });
+async function unstubbed(): Promise<never> {
+  throw new Error("not stubbed in this test");
+}
+
+function koraTransport(
+  stubs: Pick<KoraTransport, "getPayerSigner" | "signTransaction">
+): KoraTransport {
+  return {
+    ...stubs,
+    estimateTransactionFee: unstubbed,
+    getSupportedTokens: unstubbed,
+    getConfig: unstubbed,
+  };
+}
+
+function refusalGate(): { promise: Promise<never>; refuse: (error: Error) => void } {
+  let refuse: (error: Error) => void = () => {};
+  const promise = new Promise<never>((_resolve, reject) => {
+    refuse = reject;
+  });
+  return { promise, refuse };
 }
 
 describe("KoraAdapter transient-failure handling", () => {
-  it("retries signAndSend through a connection-level failure", async () => {
-    const adapter = makeAdapterFlakySend(2, () => new TypeError("fetch failed"));
-    const signature = await adapter.signAndSend(new Uint8Array([1]));
-    assert.equal(signature, "sig111");
-  });
-
-  it("gives up after exhausting retries on connection-level failures", async () => {
-    const adapter = makeAdapterFlakySend(3, () => new TypeError("fetch failed"));
-    await assert.rejects(
-      adapter.signAndSend(new Uint8Array([1])),
-      (error: unknown) => error instanceof FeePaymentError && error.message.includes("fetch failed")
-    );
-  });
-
   it("fails a hung call at the configured timeout instead of hanging", async () => {
-    const transport = {
-      getPayerSigner: () => new Promise(() => {}),
-      signTransaction: async () => ({ signed_transaction: "" }),
-      signAndSendTransaction: async () => ({ signed_transaction: "" }),
-      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
-      getSupportedTokens: async () => ({ tokens: [] }),
-      getConfig: async () => ({}),
-    } as unknown as KoraTransport;
     const adapter = new KoraAdapter({
-      rpcUrl: "https://kora.example",
-      userId: "u1",
-      client: transport,
+      rpcUrl: "https://kora-hung.mock.invalid",
+      userId: USER_ID,
+      client: koraTransport({
+        getPayerSigner: () => new Promise<never>(() => {}),
+        signTransaction: unstubbed,
+      }),
       timeoutMs: 20,
     });
     await assert.rejects(
@@ -119,93 +97,185 @@ describe("KoraAdapter transient-failure handling", () => {
   });
 });
 
-describe("KoraAdapter.getFeePayer caching", () => {
-  it("caches the first fee payer instead of re-reading the transport", async () => {
-    let calls = 0;
-    const transport = {
-      // A distinct address per call: a non-caching adapter would surface the
-      // second address, so identical results prove the cache, not the API.
+describe("KoraAdapter fee-payer address cache", () => {
+  it("serves one read of a Kora's address to every adapter on its URL, and only its URL", async () => {
+    let reads = 0;
+    const client = koraTransport({
       getPayerSigner: async () => {
-        calls += 1;
-        return { signer_address: `Signer${calls}` };
+        reads += 1;
+        return { signer_address: syntheticSigner(reads) };
       },
-      signTransaction: async () => ({ signed_transaction: "" }),
-      signAndSendTransaction: async () => ({ signed_transaction: "" }),
-      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
-      getSupportedTokens: async () => ({ tokens: [] }),
-      getConfig: async () => ({}),
-    } as unknown as KoraTransport;
+      signTransaction: unstubbed,
+    });
+    const sharedUrl = "https://kora-shared.mock.invalid";
+    const first = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_a", client });
+    const second = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_b", client });
+
+    assert.deepEqual(await Promise.all([first.getFeePayer(), second.getFeePayer()]), [
+      syntheticSigner(1),
+      syntheticSigner(1),
+    ]);
+    const later = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_c", client });
+    assert.equal(await later.getFeePayer(), syntheticSigner(1));
+    const otherKora = new KoraAdapter({
+      rpcUrl: "https://kora-other.mock.invalid",
+      userId: "user_a",
+      client,
+    });
+    assert.equal(await otherKora.getFeePayer(), syntheticSigner(2));
+    assert.equal(reads, 2);
+  });
+
+  it("never stores a failed read, including an answer that is not an address", async () => {
+    let reads = 0;
     const adapter = new KoraAdapter({
-      rpcUrl: "https://kora.example",
-      userId: "u1",
-      client: transport,
+      rpcUrl: "https://kora-fails-once.mock.invalid",
+      userId: USER_ID,
+      client: koraTransport({
+        getPayerSigner: async () => {
+          reads += 1;
+          return { signer_address: reads === 1 ? "not-an-address" : SIGNER };
+        },
+        signTransaction: unstubbed,
+      }),
     });
 
-    const first = await adapter.getFeePayer();
-    const second = await adapter.getFeePayer();
+    await assert.rejects(adapter.getFeePayer(), FeePaymentError);
+    assert.equal(await adapter.getFeePayer(), SIGNER);
+    assert.equal(reads, 2);
+  });
 
-    assert.equal(second, first);
-    assert.equal(calls, 1);
+  it("rejects a refused sign as PROVIDER_REJECTED and re-reads only for the refused adapter", async () => {
+    let reads = 0;
+    const signerKeys: Array<string | undefined> = [];
+    const firstRefusal = refusalGate();
+    const lateRefusal = refusalGate();
+    const client = koraTransport({
+      getPayerSigner: async () => {
+        reads += 1;
+        return { signer_address: syntheticSigner(reads) };
+      },
+      signTransaction: (request) => {
+        signerKeys.push(request.signer_key);
+        return signerKeys.length === 1 ? firstRefusal.promise : lateRefusal.promise;
+      },
+    });
+    const rotatingUrl = "https://kora-rotating.mock.invalid";
+    const adapter = new KoraAdapter({ rpcUrl: rotatingUrl, userId: USER_ID, client });
+    const bystander = new KoraAdapter({ rpcUrl: rotatingUrl, userId: "user_bystander", client });
+
+    assert.equal(await adapter.getFeePayer(), syntheticSigner(1));
+    assert.equal(await bystander.getFeePayer(), syntheticSigner(1));
+    const refusedFirst = adapter.signAsFeePayer(new Uint8Array([1]));
+    const refusedLate = adapter.signAsFeePayer(new Uint8Array([2]));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(signerKeys, [syntheticSigner(1), syntheticSigner(1)]);
+
+    firstRefusal.refuse(new Error("RPC Error -32001: signer_key is not a Kora signer"));
+    await assert.rejects(
+      refusedFirst,
+      (error: unknown) => error instanceof FeePaymentError && error.code === "PROVIDER_REJECTED"
+    );
+    assert.equal(await adapter.getFeePayer(), syntheticSigner(2));
+    assert.equal(await bystander.getFeePayer(), syntheticSigner(1));
+
+    lateRefusal.refuse(new Error("RPC Error -32001: signer_key is not a Kora signer"));
+    await assert.rejects(refusedLate, FeePaymentError);
+    assert.equal(await adapter.getFeePayer(), syntheticSigner(2));
+    assert.equal(reads, 2);
+  });
+
+  it("rejects a sign that failed without a JSON-RPC code as NETWORK_ERROR and keeps the address", async () => {
+    let reads = 0;
+    const client = koraTransport({
+      getPayerSigner: async () => {
+        reads += 1;
+        return { signer_address: SIGNER };
+      },
+      signTransaction: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const unreachableUrl = "https://kora-unreachable.mock.invalid";
+    const adapter = new KoraAdapter({ rpcUrl: unreachableUrl, userId: USER_ID, client });
+
+    await assert.rejects(
+      adapter.signAsFeePayer(new Uint8Array([1])),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
+    );
+    const nextRequest = new KoraAdapter({ rpcUrl: unreachableUrl, userId: USER_ID, client });
+    assert.equal(await nextRequest.getFeePayer(), SIGNER);
+    assert.equal(reads, 1);
   });
 });
 
-describe("KoraAdapter error classification", () => {
-  it("treats a Kora internal server error as ambiguous, not a deterministic rejection", async () => {
-    const adapter = makeAdapterRejectingSend("RPC Error -32090: server exploded");
-    await assert.rejects(
-      adapter.signAndSend(new Uint8Array(64)),
-      (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
-    );
+describe("KoraAdapter sign refusals", () => {
+  it("maps each Kora refusal of a sign to its FeePaymentError code", async () => {
+    const refusals: Array<[Error, FeePaymentErrorCode]> = [
+      [new Error("RPC Error -32090: server exploded"), "NETWORK_ERROR"],
+      [new Error("RPC Error -32000: Invalid transaction: simulation failed"), "PROVIDER_REJECTED"],
+      [
+        new Error("Kora Error -32001: Validation error: mutable mint authority"),
+        "PROVIDER_REJECTED",
+      ],
+      [
+        Object.assign(new Error("Kora Error -32603: wrapped"), { code: -32003 }),
+        "INSUFFICIENT_BALANCE",
+      ],
+      [new Error("RPC Error -32602: invalid params"), "SIGNING_FAILED"],
+      [new Error("Kora Error -32030: Rate limit exceeded"), "RATE_LIMITED"],
+    ];
+    for (const [refusal, expectedCode] of refusals) {
+      const adapter = new KoraAdapter({
+        rpcUrl: "https://kora-refusals.mock.invalid",
+        userId: USER_ID,
+        client: koraTransport({
+          getPayerSigner: async () => ({ signer_address: SIGNER }),
+          signTransaction: async () => {
+            throw refusal;
+          },
+        }),
+      });
+      await assert.rejects(
+        adapter.signAsFeePayer(new Uint8Array([1])),
+        (error: unknown) => error instanceof FeePaymentError && error.code === expectedCode,
+        refusal.message
+      );
+    }
   });
+});
 
-  it("treats an invalid transaction as a deterministic rejection", async () => {
-    const adapter = makeAdapterRejectingSend(
-      "RPC Error -32000: Invalid transaction: simulation failed"
-    );
-    await assert.rejects(
-      adapter.signAndSend(new Uint8Array(64)),
-      (error: unknown) => error instanceof FeePaymentError && error.code === "PROVIDER_REJECTED"
-    );
-  });
+describe("KoraAdapter Cloud Run identity token cache", () => {
+  it("shares one metadata fetch per audience across adapters and never stores a failed one", async (t) => {
+    const koraUrl = "https://kora-identity.mock.invalid";
+    let metadataFetches = 0;
+    t.mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+      if (String(input).startsWith("http://metadata.google.internal/")) {
+        metadataFetches += 1;
+        return metadataFetches === 1
+          ? new Response("", { status: 503 })
+          : new Response("synthetic-identity-token");
+      }
+      return Response.json({ jsonrpc: "2.0", id: 1, result: { tokens: [] } });
+    });
+    const first = new KoraAdapter({
+      rpcUrl: koraUrl,
+      userId: "user_a",
+      identityTokenAudience: koraUrl,
+    });
+    const second = new KoraAdapter({
+      rpcUrl: koraUrl,
+      userId: "user_b",
+      identityTokenAudience: koraUrl,
+    });
 
-  it("classifies a Kora policy rejection from the SDK error format as deterministic", async () => {
-    // @solana/kora throws KoraError, whose message reads "Kora Error <code>: ...".
-    const adapter = makeAdapterRejectingSend(
-      "Kora Error -32001: Validation error: Mutable transfer-hook authority found on mint account CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM"
-    );
-    await assert.rejects(
-      adapter.signAndSend(new Uint8Array(64)),
-      (error: unknown) =>
-        error instanceof FeePaymentError &&
-        error.code === "PROVIDER_REJECTED" &&
-        error.message.includes("Mutable transfer-hook authority")
-    );
-  });
-
-  it("prefers a numeric code property over parsing the message", async () => {
-    const adapter = makeAdapterRejectingSend(
-      Object.assign(new Error("Kora Error -32603: wrapped"), { code: -32003 })
-    );
-    await assert.rejects(
-      adapter.signAndSend(new Uint8Array(64)),
-      (error: unknown) => error instanceof FeePaymentError && error.code === "INSUFFICIENT_BALANCE"
-    );
-  });
-
-  it("keeps invalid-request rejections deterministic", async () => {
-    const adapter = makeAdapterRejectingSend("RPC Error -32602: invalid params");
-    await assert.rejects(
-      adapter.signAndSend(new Uint8Array(64)),
-      (error: unknown) => error instanceof FeePaymentError && error.code === "SIGNING_FAILED"
-    );
-  });
-
-  it("keeps rate limits deterministic and releasable", async () => {
-    const adapter = makeAdapterRejectingSend("Kora Error -32030: Rate limit exceeded");
-    await assert.rejects(
-      adapter.signAndSend(new Uint8Array(64)),
-      (error: unknown) => error instanceof FeePaymentError && error.code === "RATE_LIMITED"
-    );
+    await assert.rejects(first.getSupportedTokens(), FeePaymentError);
+    assert.deepEqual(await Promise.all([first.getSupportedTokens(), second.getSupportedTokens()]), [
+      [],
+      [],
+    ]);
+    assert.deepEqual(await second.getSupportedTokens(), []);
+    assert.equal(metadataFetches, 2);
   });
 });
 

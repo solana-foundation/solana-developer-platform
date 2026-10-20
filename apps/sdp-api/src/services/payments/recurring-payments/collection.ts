@@ -300,6 +300,8 @@ function createRecurringCollectionSignedSubmissionStore(input: {
       submissionStarted = current?.submission_started_at !== null && current !== null;
       return submissionStarted;
     },
+    // A definite refusal marks the attempt and its transfer failed in the caller.
+    clearSigned: async () => {},
     submittedRow: async () => (submissionStarted ? row : null),
   };
 }

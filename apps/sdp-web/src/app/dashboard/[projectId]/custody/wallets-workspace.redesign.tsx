@@ -3,7 +3,7 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { cn } from "@sdp/ui/cn";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
   dashboardWorkspaceOverviewPanelClassName,
@@ -26,16 +26,8 @@ const WalletsPlayground = dynamic(
   }
 );
 
-interface WalletsApiKeyOption {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  environment: string;
-}
-
 interface WalletsWorkspaceProps {
   apiBaseUrl: string | null;
-  apiKeys: WalletsApiKeyOption[];
   connectedProviders: KnownCustodyProvider[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
@@ -44,19 +36,13 @@ interface WalletsWorkspaceProps {
 
 export function WalletsWorkspace({
   apiBaseUrl,
-  apiKeys,
   connectedProviders,
   configsError,
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
-  const { dashboardAccess, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
-    useDashboardWorkspace();
+  const { dashboardAccess } = useDashboardWorkspace();
   const isPlaygroundTab = useDashboardTab() === "playground";
-
-  useEffect(() => {
-    setPlaygroundApiKeys(apiKeys);
-  }, [apiKeys, setPlaygroundApiKeys]);
 
   useEffect(() => {
     if (isPlaygroundTab) {
@@ -76,10 +62,6 @@ export function WalletsWorkspace({
     return () => globalThis.clearTimeout(timeoutId);
   }, [isPlaygroundTab]);
 
-  const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
   return (
     <div className="h-full min-h-0 w-full" data-wallet-root>
       <DashboardWorkspaceTabShell
@@ -105,10 +87,8 @@ export function WalletsWorkspace({
             content: (
               <WalletsPlayground
                 apiBaseUrl={apiBaseUrl}
-                apiKeyId={selectedPlaygroundApiKey?.id ?? null}
                 connectedProviders={connectedProviders}
                 configsError={configsError}
-                hasActiveApiKeys={apiKeys.length > 0}
                 wallets={wallets.map((wallet) => ({
                   walletId: wallet.walletId,
                   label: wallet.label,

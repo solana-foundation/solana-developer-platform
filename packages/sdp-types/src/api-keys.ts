@@ -23,7 +23,7 @@ export const API_KEY_WALLET_SCOPES = ["all", "selected"] as const;
 /**
  * Which custody wallets an API key may sign with (HOO-2099): every wallet in
  * its project, or only the ones it lists. A selected key that lists none
- * signs nothing.
+ * signs with no custody wallet (the fee sponsor is outside wallet scope).
  */
 export type ApiKeyWalletScope = (typeof API_KEY_WALLET_SCOPES)[number];
 

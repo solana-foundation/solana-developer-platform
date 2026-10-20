@@ -12,7 +12,6 @@ trap cleanup EXIT
 
 # shellcheck source=scripts/kora-surfpool/kora-url.sh
 . "${ROOT_DIR}/scripts/kora-surfpool/kora-url.sh"
-export FEE_PAYMENT_PROVIDER="${FEE_PAYMENT_PROVIDER:-kora}"
 export RUN_INTEGRATION_TESTS="${RUN_INTEGRATION_TESTS:-true}"
 export KORA_SURFPOOL_SHIM="${KORA_SURFPOOL_SHIM:-true}"
 export PRIVY_APP_ID="${PRIVY_APP_ID:-kora-surfpool-local}"

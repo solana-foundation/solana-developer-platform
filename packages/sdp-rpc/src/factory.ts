@@ -55,6 +55,18 @@ const ENDPOINT_COOLDOWN_MS = 30_000;
 /** Pool key (cluster plus its endpoint URLs) to the memoized client. */
 const clusterRpcs = new Map<string, SolanaRpc>();
 
+/** Each cluster's Kora upstream: the Solana RPC that cluster's Kora simulates against. */
+export const KORA_UPSTREAM_RPC_ENV_KEYS = {
+  devnet: "KORA_DEVNET_RPC_URL",
+  "mainnet-beta": "KORA_MAINNET_RPC_URL",
+} as const satisfies Record<SolanaCluster, string>;
+
+/**
+ * Kora upstream key (cluster plus URL) to the memoized client. Kept apart from `clusterRpcs` so a
+ * Kora URL that is also a pool endpoint never shares the pool's client or cooldown state.
+ */
+const koraUpstreamRpcs = new Map<string, SolanaRpc>();
+
 /**
  * Bound every request through `transport` by `timeoutMs`, combined with the caller's own signal
  * when it has one, so a caller signal never removes the deadline. Whichever fires first aborts.
@@ -349,7 +361,7 @@ function managedEndpointUrls(cluster: SolanaCluster): string[] {
  */
 export function createClusterRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
-  return pooledClusterRpc(cluster, managedEndpointUrls(cluster));
+  return pooledClusterRpc(cluster, managedEndpointUrls(cluster), clusterRpcs);
 }
 
 /**
@@ -370,20 +382,52 @@ export function createClusterHistoryRpc(): SolanaRpc {
     cluster,
     heliusUrl
       ? [heliusUrl, ...endpointUrls.filter((endpointUrl) => endpointUrl !== heliusUrl)]
-      : endpointUrls
+      : endpointUrls,
+    clusterRpcs
   );
 }
 
 /**
- * One memoized pooled client per cluster and ordered endpoint list.
+ * The Solana RPC the open scope's cluster's Kora simulates against, for the Fee Payer's own reads
+ * (fee pricing, budget reconciliation), so they never share endpoints or failover state with the
+ * managed pool. One endpoint, no failover, with the pool's attempt deadline, dead-socket re-send
+ * and genesis guard. Memoized per process by cluster and URL. Biome restricts it to
+ * `@sdp/fee-payment`.
+ *
+ * @returns The Kora upstream RPC client for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster's `KORA_<CLUSTER>_RPC_URL` is unset.
+ */
+export function createKoraUpstreamRpc(): SolanaRpc {
+  const { cluster } = currentClusterScope();
+  const envKey = KORA_UPSTREAM_RPC_ENV_KEYS[cluster];
+  const endpointUrl = process.env[envKey]?.trim();
+  if (!endpointUrl) {
+    throw new SdpRpcError(
+      "RPC_NOT_CONFIGURED",
+      `No Kora upstream RPC is configured for ${cluster}: set ${envKey}`,
+      { cluster }
+    );
+  }
+  return pooledClusterRpc(cluster, [endpointUrl], koraUpstreamRpcs);
+}
+
+/**
+ * One memoized pooled client per cluster and ordered endpoint list. A single endpoint is a pool
+ * that never fails over; the pool transport still unwraps a failed genesis probe's error.
  *
  * @param cluster - The cluster every endpoint must serve.
  * @param endpointUrls - The endpoints in failover order.
+ * @param memoizedRpcs - The memo the client is kept in.
  * @returns The pooled RPC client.
  */
-function pooledClusterRpc(cluster: SolanaCluster, endpointUrls: string[]): SolanaRpc {
+function pooledClusterRpc(
+  cluster: SolanaCluster,
+  endpointUrls: string[],
+  memoizedRpcs: Map<string, SolanaRpc>
+): SolanaRpc {
   const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
-  const memoizedRpc = clusterRpcs.get(poolKey);
+  const memoizedRpc = memoizedRpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
   const endpointTransports = endpointUrls.map((endpointUrl) =>
     withAttemptDeadline(
@@ -396,6 +440,6 @@ function pooledClusterRpc(cluster: SolanaCluster, endpointUrls: string[]): Solan
     )
   );
   const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports));
-  clusterRpcs.set(poolKey, rpc);
+  memoizedRpcs.set(poolKey, rpc);
   return rpc;
 }

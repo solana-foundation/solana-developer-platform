@@ -106,7 +106,6 @@ export const CAPABILITIES = [
     id: "fee-payment-adapter",
     why: "Builds a fee payer that can sponsor-sign; only the sponsorship waist may.",
     symbols: [
-      { file: `${FEE_PAYMENT}/index.ts`, name: "createFeePaymentAdapter" },
       { file: `${FEE_PAYMENT}/index.ts`, name: "createKoraAdapter" },
       { file: `${FEE_PAYMENT}/kora.adapter.ts`, name: "KoraAdapter" },
     ],
@@ -145,12 +144,9 @@ export const CAPABILITIES = [
     ],
   },
   {
-    id: "native-fee-payer",
-    why: "Signs as fee payer with a process key and no budget; the sponsorship waist builds fee payers.",
-    symbols: [
-      { file: `${FEE_PAYMENT}/native.adapter.ts`, name: "NativeAdapter" },
-      { module: "@solana/kora", name: "KoraClient" },
-    ],
+    id: "kora-client",
+    why: "Asks Kora to sign as fee payer with no budget; the sponsorship waist builds fee payers.",
+    symbols: [{ module: "@solana/kora", name: "KoraClient" }],
     owners: [FEE_PAYMENT_PACKAGE],
     allow: [],
   },
@@ -187,7 +183,6 @@ export const CAPABILITIES = [
       `${API}/services/domain/signing.service.ts`,
       // Each builds the keypair inside a constructor that is pinned itself.
       `${KEYCHAIN}/keychain-memory.adapter.ts`,
-      `${FEE_PAYMENT}/native.adapter.ts`,
     ],
   },
 ];
