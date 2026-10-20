@@ -31,6 +31,29 @@ export interface SignedSubmissionStore {
 }
 
 /**
+ * A sponsored send the RPC refused at preflight, so nothing was broadcast. It answers as the
+ * mapped refusal (same code, message and details) and carries what a caller needs to classify it
+ * by type: the unwrapped simulation error (an instruction error names its instruction index and
+ * program code) and the refused transaction's signature, whose saved slot the store has cleared.
+ */
+export class SponsoredSendRefusedError extends AppError {
+  readonly refusal: unknown;
+  readonly signature: Signature;
+
+  /**
+   * @param mapped - The refusal as the public money-path error contract maps it.
+   * @param cause - The preflight error with its simulation wrapper removed.
+   * @param signature - The refused transaction's signature.
+   */
+  constructor(mapped: AppError, cause: unknown, signature: Signature) {
+    super(mapped.code, mapped.message, mapped.details);
+    this.name = "SponsoredSendRefusedError";
+    this.refusal = cause;
+    this.signature = signature;
+  }
+}
+
+/**
  * Identifies a submission error that proves the transaction was not broadcast.
  *
  * @param error - The error returned by the sponsored submission path.
@@ -78,6 +101,7 @@ export function mapPreflightError(error: unknown): AppError | null {
  *
  * @param input - Sponsorship, RPC, transaction lifetime, and durable lifecycle store.
  * @returns The signature of the submitted transaction.
+ * @throws SponsoredSendRefusedError when the RPC refuses the send at preflight.
  */
 export async function submitSponsoredTransaction(input: {
   feePayment: SponsorshipFeePayment;
@@ -134,7 +158,11 @@ export async function submitSponsoredTransaction(input: {
       // definitive chain verdict so the payment cannot remain processing.
     }
     await input.store.clearSigned(submission.signature);
-    throw outcome.mapped;
+    throw new SponsoredSendRefusedError(
+      outcome.mapped,
+      unwrapSimulationError(outcome.cause),
+      submission.signature
+    );
   }
   const submittedSignature = outcome.signature;
   if (submittedSignature !== submission.signature) {

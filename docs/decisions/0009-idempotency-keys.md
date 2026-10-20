@@ -135,7 +135,9 @@ A run that resumes a step an earlier run reached reads it through the step reade
 accounts at `confirmed` from a bank at that slot or later. The step is in one of four states
 (`GLOSSARY.md`): landed when its effect shows, so it is not sent again; unsent when no signature is
 saved, so it is sent; dropped when a signature is saved, the effect is absent and the chain is past
-the saved expiry, so the send can never land and the step fails; pending otherwise. No signature
+the saved expiry, so the send can never land: its signature is cleared and the step takes its
+failure action (an update's plan, setup, authorization or plan update fails the update back to
+`active` on what it had; its old subscription's cancel is sent again); pending otherwise. No signature
 status is read: the effect and the expiry decide, which also covers a send that failed on chain.
 A pending step (its send may still land, or the read failed) answers 409 and leaves the attempt in
 flight, never failed or reset, so recovery finishes it.
