@@ -259,6 +259,7 @@ exports[`route actions > pins each route's action 1`] = `
   "wallets.configure POST /internal/dashboard/custody/provider-credentials/:credentialId/rotate",
   "wallets.configure POST /v1/wallets/initialize",
   "wallets.execute DELETE /v1/wallets",
+  "wallets.execute POST /internal/dashboard/wallets/:walletId/faucet",
   "wallets.execute POST /v1/wallets/signer-check",
   "wallets.manage PATCH /v1/wallets/:walletId",
   "wallets.manage POST /v1/wallets",
@@ -268,7 +269,6 @@ exports[`route actions > pins each route's action 1`] = `
   "wallets.read GET /v1/wallets/aggregate",
   "wallets.read GET /v1/wallets/configs",
   "wallets.read GET /v1/wallets/public-key",
-  "wallets.read POST /internal/dashboard/wallets/:walletId/faucet",
 ]
 `;
 

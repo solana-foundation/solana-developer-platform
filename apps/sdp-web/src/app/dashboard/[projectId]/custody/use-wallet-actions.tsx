@@ -135,5 +135,14 @@ export function useWalletActions({
     });
   };
 
-  return { isBusy, canRunSignerCheck, runSignerCheck, requestDevnetSol, lastProof };
+  const canRequestDevnetSol = dashboardAccess.capabilities.canUseWalletFaucet;
+
+  return {
+    isBusy,
+    canRunSignerCheck,
+    runSignerCheck,
+    canRequestDevnetSol,
+    requestDevnetSol,
+    lastProof,
+  };
 }

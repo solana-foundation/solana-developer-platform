@@ -53,10 +53,11 @@ export function WalletActionsMenu({
 }: WalletActionsMenuProps) {
   const t = useTranslations();
   const { dashboardAccess } = useDashboardWorkspace();
-  const { isBusy, canRunSignerCheck, runSignerCheck, requestDevnetSol } = useWalletActions({
-    walletId,
-    supportsSignerCheck,
-  });
+  const { isBusy, canRunSignerCheck, runSignerCheck, canRequestDevnetSol, requestDevnetSol } =
+    useWalletActions({
+      walletId,
+      supportsSignerCheck,
+    });
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
   const resolvedTriggerLabel = triggerLabel ?? t("DashboardCustody.actions");
 
@@ -115,9 +116,13 @@ export function WalletActionsMenu({
                 : t("DashboardCustody.proveOwnershipAdminOnly")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy}>
+        <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy || !canRequestDevnetSol}>
           <Droplets className="h-4 w-4" />
-          {isBusy ? t("DashboardCustody.requesting") : t("DashboardCustody.requestDevnetSol")}
+          {isBusy
+            ? t("DashboardCustody.requesting")
+            : canRequestDevnetSol
+              ? t("DashboardCustody.requestDevnetSol")
+              : t("DashboardCustody.requestDevnetSolAdminOnly")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

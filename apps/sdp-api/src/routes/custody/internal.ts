@@ -23,9 +23,7 @@ internalWallets.use("*", projectContextMiddleware());
 
 internalWallets.post(
   "/:walletId/faucet",
-  // A read, so members fund their own sandbox wallets: the faucet stores
-  // nothing and moves only free devnet SOL, and no key reaches this mount.
-  requireAction("wallets.read"),
+  requireAction("wallets.execute"),
   validateParams(walletIdParamsSchema),
   validateBody(walletFaucetSchema),
   authorize(authorizeWalletFaucet),

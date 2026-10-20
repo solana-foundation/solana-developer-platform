@@ -266,9 +266,13 @@ function TokensBlock({
 }) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const { isBusy, requestDevnetSol } = useWalletActions({ walletId: wallet.walletId });
-  // The faucet funds devnet, so it is offered on a sandbox project to a wallet that can sign.
-  const offersFaucet = sdpEnvironment === "sandbox" && wallet.isRuntimeExecutionAllowed;
+  const { isBusy, canRequestDevnetSol, requestDevnetSol } = useWalletActions({
+    walletId: wallet.walletId,
+  });
+  // The faucet funds devnet, so it is offered on a sandbox project to a wallet that can sign,
+  // and to an admin: funding is wallets.execute.
+  const offersFaucet =
+    sdpEnvironment === "sandbox" && wallet.isRuntimeExecutionAllowed && canRequestDevnetSol;
   return (
     <RecordBlock
       title={t("DashboardCustody.walletTokens")}

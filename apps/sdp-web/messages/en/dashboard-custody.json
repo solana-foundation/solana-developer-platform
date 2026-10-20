@@ -351,6 +351,7 @@
     "proveOwnershipAdminOnly": "Prove ownership (admin only)",
     "requesting": "Requesting...",
     "requestDevnetSol": "Request devnet SOL",
+    "requestDevnetSolAdminOnly": "Request devnet SOL (admin only)",
     "playgroundProviderField": "Provider",
     "playgroundLabelField": "Label",
     "playgroundPurposeField": "Purpose",

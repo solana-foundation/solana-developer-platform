@@ -193,9 +193,16 @@ export function WalletActionsMenu({
                 : t("DashboardCustody.proveOwnershipAdminOnly")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy}>
+        <DropdownMenuItem
+          onSelect={requestDevnetSol}
+          disabled={isBusy || !dashboardAccess.capabilities.canUseWalletFaucet}
+        >
           <Droplets className="h-4 w-4" />
-          {isBusy ? t("DashboardCustody.requesting") : t("DashboardCustody.requestDevnetSol")}
+          {isBusy
+            ? t("DashboardCustody.requesting")
+            : dashboardAccess.capabilities.canUseWalletFaucet
+              ? t("DashboardCustody.requestDevnetSol")
+              : t("DashboardCustody.requestDevnetSolAdminOnly")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
