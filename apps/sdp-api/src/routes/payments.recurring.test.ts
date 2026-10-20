@@ -8064,6 +8064,109 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
       });
 
+      it("the cron reads a stale replacement's plan refused as already existing from the chain, and finishes through the old-subscription cancel", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        sendTransactionMock
+          .mockRejectedValueOnce(
+            sendTransactionPreflightError(
+              subscriptionsProgram.SUBSCRIPTIONS_ERROR__PLAN_ALREADY_EXISTS
+            )
+          )
+          .mockRejectedValueOnce(new Error("RPC response lost"));
+        delegationsBesideActiveOld(oldSubscriptionPda, null, DEFAULT_RECURRING_CHAIN);
+        const key = crypto.randomUUID();
+        const update = await app.request(
+          actionPath(activated.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+          env
+        );
+        expect(update.status).toBe(409);
+        const authorizationSignature = required(poolSentSignatures()[3]);
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          plan_creation_signature: null,
+          authorization_signature: authorizationSignature,
+        });
+        await leaveUpdateCrashedAt(activated.id, key);
+        delegationsBesideActiveOld(oldSubscriptionPda, 0n, DEFAULT_RECURRING_CHAIN);
+        const sent = sends();
+
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+          recovered: 1,
+          collected: 0,
+          failed: 0,
+          skipped: 0,
+          refused: 0,
+        });
+
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(required(sent.mock.calls[0])[0].slot).toEqual({
+          row: "update_attempt",
+          column: "old_cancel_signature",
+        });
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          plan_creation_signature: null,
+          authorization_signature: authorizationSignature,
+          old_cancel_signature: required(poolSentSignatures()[4]),
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+      });
+
+      it("the cron finishes a stale account-changing replacement on its plan's destination after the new account is archived", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+          counterpartyId: activated.counterpartyId,
+          address: TEST_SOLANA_ADDRESSES.wallet3,
+        });
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(oldSubscriptionPda, null, DEFAULT_RECURRING_CHAIN);
+        const key = crypto.randomUUID();
+        const update = await app.request(
+          actionPath(activated.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ counterpartyAccountId }) },
+          env
+        );
+        expect(update.status).toBe(409);
+        await leaveUpdateCrashedAt(activated.id, key);
+        const archived = await app.request(
+          `/v1/counterparties/${activated.counterpartyId}/accounts/${counterpartyAccountId}`,
+          { method: "DELETE", headers: RECURRING_HEADERS },
+          env
+        );
+        expect(archived.status).toBe(204);
+        delegationsBesideActiveOld(oldSubscriptionPda, 0n, DEFAULT_RECURRING_CHAIN);
+        const sent = sends();
+
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+          recovered: 1,
+          collected: 0,
+          failed: 0,
+          skipped: 0,
+          refused: 0,
+        });
+
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(required(sent.mock.calls[0])[0].slot).toEqual({
+          row: "update_attempt",
+          column: "old_cancel_signature",
+        });
+        const current = await app.request(
+          actionPath(activated.id),
+          { headers: RECURRING_HEADERS },
+          env
+        );
+        expect((await parseRecurringResponse(current)).data.recurringPayment).toMatchObject({
+          status: "active",
+          counterpartyAccountId,
+          destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
+        });
+      });
+
       it("the cron fails a stale metadata update whose wallet can no longer sign back to active on its old terms, sending nothing", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
@@ -8088,10 +8191,10 @@ describe("Payments routes — recurring", () => {
         const sent = sends();
 
         expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
-          recovered: 0,
+          recovered: 1,
           collected: 0,
           failed: 0,
-          skipped: 1,
+          skipped: 0,
           refused: 0,
         });
 
@@ -8139,10 +8242,10 @@ describe("Payments routes — recurring", () => {
         const sent = sends();
 
         expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
-          recovered: 0,
+          recovered: 1,
           collected: 0,
           failed: 0,
-          skipped: 1,
+          skipped: 0,
           refused: 0,
         });
 
@@ -8222,6 +8325,68 @@ describe("Payments routes — recurring", () => {
           .bind(activated.id)
           .first<{ status: string; updated_at: string }>();
         expect(schedule).toEqual({ status: "updating", updated_at: claimedAt });
+      });
+
+      it("refuses a stale same-key PATCH whose update the cron finished before its claim, opening no attempt", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const key = crypto.randomUUID();
+        const metadataUri = "https://example.com/recurring/cron-finished.json";
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ metadataUri }) },
+            env
+          );
+        sendTransactionMock.mockRejectedValueOnce(new Error("process died after broadcast"));
+        expect((await request()).status).toBe(409);
+        await leaveUpdateCrashedAt(activated.id, key);
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          plan: () => ({ createdAt: 1_770_000_000n, metadataUri }),
+        });
+        const cronTicks: Awaited<ReturnType<typeof collectDueRecurringPaymentsIn>>[] = [];
+        let cronStarted = false;
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => {
+            const repository = createRepository(db);
+            return {
+              ...repository,
+              claimRecurringPaymentUpdate: async (input) => {
+                // The PATCH read the schedule `updating`; the cron finishes it before this claim.
+                if (!cronStarted) {
+                  cronStarted = true;
+                  cronTicks.push(await collectDueRecurringPaymentsIn("sandbox", new Date()));
+                }
+                return repository.claimRecurringPaymentUpdate(input);
+              },
+            };
+          });
+        onTestFinished(() => repositorySpy.mockRestore());
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(409);
+        expect(errorResponseSchema.parse(await retry.json()).error).toMatchObject({
+          code: "CONFLICT",
+          message: "Recurring payment update finished before it was resumed",
+        });
+        expect(cronTicks).toEqual([
+          { recovered: 1, collected: 0, failed: 0, skipped: 0, refused: 0 },
+        ]);
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+        expect(await recurringMetadataUri(activated.id)).toBe(metadataUri);
       });
 
       const activate = (recurringPaymentId: string, key: string) =>
