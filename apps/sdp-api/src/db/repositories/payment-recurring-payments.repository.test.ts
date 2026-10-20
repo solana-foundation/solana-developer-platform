@@ -1,4 +1,5 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import type { PaymentRecurringPaymentAttemptStatus } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
@@ -236,7 +237,17 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   };
   const SIBLING_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
   const STEP_UPDATED_AT = "2026-06-29T12:05:00.000Z";
-  const UNSIGNED_SLOTS = {
+  type ActivationSlotValues = {
+    planCreationSignature: string | null;
+    authorizationSetupSignature: string | null;
+    lastValidBlockHeight: string | null;
+  };
+  type SavedActivationSlots = {
+    plan_creation_signature: string | null;
+    authorization_setup_signature: string | null;
+    last_valid_block_height: string | null;
+  };
+  const UNSIGNED_SLOTS: SavedActivationSlots = {
     plan_creation_signature: null,
     authorization_setup_signature: null,
     last_valid_block_height: null,
@@ -286,14 +297,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     );
   }
 
-  async function fillActivationSlots(
-    attemptId: string,
-    slots: {
-      planCreationSignature: string | null;
-      authorizationSetupSignature: string | null;
-      lastValidBlockHeight: string | null;
-    }
-  ) {
+  async function fillActivationSlots(attemptId: string, slots: ActivationSlotValues) {
     await getDb(env)
       .prepare(
         `UPDATE payment_recurring_payment_activation_attempts
@@ -321,15 +325,12 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
           WHERE id = ?`
       )
       .bind(attemptId)
-      .first<{
-        plan_creation_signature: string | null;
-        authorization_setup_signature: string | null;
-        last_valid_block_height: string | null;
-      }>();
+      .first<SavedActivationSlots>();
   }
 
   it("clears a step's signature and expiry only while its slot still holds that signature", async () => {
     const attempt = await createUnsignedActivationAttempt("prpa_repo_clear_signature");
+    const sibling = await createUnsignedActivationAttempt("prpa_repo_clear_signature_sibling");
     await fillActivationSlots(attempt.id, {
       planCreationSignature: testSignature(1),
       authorizationSetupSignature: testSignature(3),
@@ -337,6 +338,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     });
     const clear = (input: {
       slot: RecurringPaymentStepSignatureSlot;
+      recurringPaymentId: string;
       projectId: string;
       signature: string;
     }) =>
@@ -348,13 +350,36 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       });
 
     expect(
-      await clear({ slot: PLAN_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(2) })
+      await clear({
+        slot: PLAN_SLOT,
+        recurringPaymentId: attempt.recurring_payment_id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(2),
+      })
     ).toBe(false);
     expect(
-      await clear({ slot: SETUP_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(1) })
+      await clear({
+        slot: SETUP_SLOT,
+        recurringPaymentId: attempt.recurring_payment_id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(1),
+      })
     ).toBe(false);
     expect(
-      await clear({ slot: PLAN_SLOT, projectId: SIBLING_PROJECT_ID, signature: testSignature(1) })
+      await clear({
+        slot: PLAN_SLOT,
+        recurringPaymentId: attempt.recurring_payment_id,
+        projectId: SIBLING_PROJECT_ID,
+        signature: testSignature(1),
+      })
+    ).toBe(false);
+    expect(
+      await clear({
+        slot: PLAN_SLOT,
+        recurringPaymentId: sibling.recurring_payment_id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(1),
+      })
     ).toBe(false);
     expect(await savedActivationSlots(attempt.id)).toEqual({
       plan_creation_signature: testSignature(1),
@@ -363,7 +388,12 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     });
 
     expect(
-      await clear({ slot: PLAN_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(1) })
+      await clear({
+        slot: PLAN_SLOT,
+        recurringPaymentId: attempt.recurring_payment_id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(1),
+      })
     ).toBe(true);
     expect(await savedActivationSlots(attempt.id)).toEqual({
       plan_creation_signature: null,
@@ -371,7 +401,12 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       last_valid_block_height: null,
     });
     expect(
-      await clear({ slot: SETUP_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(3) })
+      await clear({
+        slot: SETUP_SLOT,
+        recurringPaymentId: attempt.recurring_payment_id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(3),
+      })
     ).toBe(true);
     expect(await savedActivationSlots(attempt.id)).toEqual(UNSIGNED_SLOTS);
   });
@@ -379,6 +414,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   describe("setStepSignature", () => {
     const setPlanSignature = (input: {
       id: string;
+      recurringPaymentId: string;
       projectId: string;
       signature: string;
       lastValidBlockHeight: string;
@@ -395,6 +431,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
       const saved = await setPlanSignature({
         id: attempt.id,
+        recurringPaymentId: attempt.recurring_payment_id,
         projectId: TEST_PROJECT_ID,
         signature: testSignature(1),
         lastValidBlockHeight: "301",
@@ -408,10 +445,18 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       });
     });
 
-    it.each([
+    it.each<{
+      refused: string;
+      projectId: string;
+      scheduleOf: "attempt" | "sibling";
+      status: PaymentRecurringPaymentAttemptStatus;
+      held: ActivationSlotValues;
+      expected: SavedActivationSlots;
+    }>([
       {
         refused: "a slot that already holds a signature",
         projectId: TEST_PROJECT_ID,
+        scheduleOf: "attempt",
         status: "processing",
         held: {
           planCreationSignature: testSignature(1),
@@ -427,6 +472,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       {
         refused: "another project's write",
         projectId: SIBLING_PROJECT_ID,
+        scheduleOf: "attempt",
         status: "processing",
         held: {
           planCreationSignature: null,
@@ -438,7 +484,20 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       {
         refused: "a settled attempt",
         projectId: TEST_PROJECT_ID,
+        scheduleOf: "attempt",
         status: "failed",
+        held: {
+          planCreationSignature: null,
+          authorizationSetupSignature: null,
+          lastValidBlockHeight: null,
+        },
+        expected: UNSIGNED_SLOTS,
+      },
+      {
+        refused: "a write under another schedule",
+        projectId: TEST_PROJECT_ID,
+        scheduleOf: "sibling",
+        status: "processing",
         held: {
           planCreationSignature: null,
           authorizationSetupSignature: null,
@@ -448,8 +507,9 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       },
     ])(
       "refuses $refused and leaves the row unchanged",
-      async ({ projectId, status, held, expected }) => {
+      async ({ projectId, scheduleOf, status, held, expected }) => {
         const attempt = await createUnsignedActivationAttempt("prpa_repo_set_signature_refused");
+        const sibling = await createUnsignedActivationAttempt("prpa_repo_set_signature_sibling");
         await fillActivationSlots(attempt.id, held);
         await getDb(env)
           .prepare(
@@ -460,6 +520,8 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
         const saved = await setPlanSignature({
           id: attempt.id,
+          recurringPaymentId:
+            scheduleOf === "attempt" ? attempt.recurring_payment_id : sibling.recurring_payment_id,
           projectId,
           signature: testSignature(2),
           lastValidBlockHeight: "302",
@@ -476,6 +538,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       await expect(
         setPlanSignature({
           id: attempt.id,
+          recurringPaymentId: attempt.recurring_payment_id,
           projectId: TEST_PROJECT_ID,
           signature: testSignature(1),
           lastValidBlockHeight: "18446744073709551616",
