@@ -1,3 +1,4 @@
+import * as feePaymentChainReads from "@sdp/fee-payment/chain-reads";
 import { address } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipReconciliationReservation } from "@/db/repositories/sponsorship-budget.repository";
@@ -10,18 +11,10 @@ import {
 } from "./reconcile-sponsorship-budgets";
 
 const logEvent = vi.hoisted(() => vi.fn());
-const getSponsoredTransaction = vi.hoisted(() => vi.fn());
-const isSponsoredBlockhashValid = vi.hoisted(() => vi.fn());
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
   logEvent,
-}));
-
-vi.mock("@sdp/fee-payment/chain-reads", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/fee-payment/chain-reads")>()),
-  getSponsoredTransaction,
-  isSponsoredBlockhashValid,
 }));
 
 const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
@@ -167,8 +160,12 @@ describe("reconcileSponsorshipBudgets", () => {
 
   it("reads chain state through the Fee Payer's own upstream when no reads are injected", async () => {
     const { repository, budgetRedis } = harness(reservation());
-    getSponsoredTransaction.mockResolvedValueOnce(null);
-    isSponsoredBlockhashValid.mockResolvedValueOnce(true);
+    const getSponsoredTransaction = vi
+      .spyOn(feePaymentChainReads, "getSponsoredTransaction")
+      .mockResolvedValueOnce(null);
+    const isSponsoredBlockhashValid = vi
+      .spyOn(feePaymentChainReads, "isSponsoredBlockhashValid")
+      .mockResolvedValueOnce(true);
 
     await runInEnvironmentClusterScope("sandbox", () =>
       reconcileSponsorshipBudgets(testEnv, {

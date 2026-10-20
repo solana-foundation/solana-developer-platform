@@ -597,8 +597,12 @@ async function fetchCloudRunIdentityToken(audience: string): Promise<string> {
   );
   endpoint.searchParams.set("audience", audience);
   endpoint.searchParams.set("format", "full");
+  // Bounded inside the shared load: a stalled fetch would otherwise hold the cache's in-flight
+  // entry, and every later request for the audience would wait on it. The signal also bounds the
+  // body read below.
   const response = await fetch(endpoint, {
     headers: { "Metadata-Flavor": "Google" },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`Cloud Run identity token request failed with HTTP ${response.status}`);
