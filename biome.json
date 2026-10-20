@@ -276,8 +276,39 @@
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/factory": {
+                    "importNames": ["createClusterHistoryRpc", "createKoraUpstreamRpc"],
+                    "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Only @sdp/fee-payment may read through createKoraUpstreamRpc (the Fee Payer's own RPC, kept off the managed pool); call its sponsoredNetworkFee, getSponsoredTransaction or isSponsoredBlockhashValid. Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
+                },
+                "patterns": [
+                  {
+                    "group": ["../**", "!../package.json"],
+                    "message": "Parent-relative imports are banned (ADR 0010). Use @/ in an app, #/ inside a package, @sdp/<pkg>/<subpath> across workspaces."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/packages/sdp-fee-payment/src/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sdp/rpc/scope": {
+                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@sdp/rpc/factory": {
                     "importNames": ["createClusterHistoryRpc"],
-                    "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                    "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). The Fee Payer reads through createKoraUpstreamRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
                 },
@@ -320,8 +351,8 @@
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/factory": {
-                    "importNames": ["createClusterHistoryRpc"],
-                    "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                    "importNames": ["createClusterHistoryRpc", "createKoraUpstreamRpc"],
+                    "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Only @sdp/fee-payment may read through createKoraUpstreamRpc (the Fee Payer's own RPC, kept off the managed pool); call its sponsoredNetworkFee, getSponsoredTransaction or isSponsoredBlockhashValid. Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
                 },
