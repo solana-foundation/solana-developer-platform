@@ -4,6 +4,11 @@ import { mapTransferRow } from "./mappers";
 
 const SALE_REFERENCE = "826ca171-dd61-46e8-bfa1-8a22c7372f64";
 
+/** The transfer as the API sends it: JSON drops the fields a row doesn't have. */
+function onTheWire(row: PaymentTransferRow): unknown {
+  return JSON.parse(JSON.stringify(mapTransferRow(row)));
+}
+
 function offrampRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransferRow {
   return {
     id: "xfr_mapper_payout",
@@ -68,7 +73,7 @@ describe("mapTransferRow payout and confirmation", () => {
 
   it("omits the payout when the settlement belongs to another provider transaction", () => {
     const row = offrampRow({ provider_reference: "a-later-sale" });
-    expect(mapTransferRow(row)).not.toHaveProperty("fiatPayout");
+    expect(onTheWire(row)).not.toHaveProperty("fiatPayout");
   });
 
   it("omits the payout when the provider never named its currency", () => {
@@ -77,12 +82,12 @@ describe("mapTransferRow payout and confirmation", () => {
         providerSettlement: { reference: SALE_REFERENCE, receivedAmount: "20.82" },
       },
     });
-    expect(mapTransferRow(row)).not.toHaveProperty("fiatPayout");
+    expect(onTheWire(row)).not.toHaveProperty("fiatPayout");
   });
 
   it("never reads an on-ramp's delivered tokens as a fiat payout", () => {
     const row = offrampRow({ type: "onramp", kind: "onramp", direction: "inbound" });
-    expect(mapTransferRow(row)).not.toHaveProperty("fiatPayout");
+    expect(onTheWire(row)).not.toHaveProperty("fiatPayout");
   });
 
   it("shows a delivery hold, and drops a hold the provider's next report cleared", () => {
@@ -101,13 +106,13 @@ describe("mapTransferRow payout and confirmation", () => {
       provider_data: { deliveryMismatch: hold },
     });
     expect(mapTransferRow(held)).toMatchObject({ deliveryMismatch: hold });
-    expect(
-      mapTransferRow({ ...held, provider_data: { deliveryMismatch: null } })
-    ).not.toHaveProperty("deliveryMismatch");
+    expect(onTheWire({ ...held, provider_data: { deliveryMismatch: null } })).not.toHaveProperty(
+      "deliveryMismatch"
+    );
   });
 
   it("omits confirmedAt until the transfer is confirmed", () => {
     const row = offrampRow({ status: "settling", confirmed_at: null });
-    expect(mapTransferRow(row)).not.toHaveProperty("confirmedAt");
+    expect(onTheWire(row)).not.toHaveProperty("confirmedAt");
   });
 });

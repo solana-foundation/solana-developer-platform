@@ -191,12 +191,9 @@ async function holdDelivery(
       ? (settled.receivedAmount ?? settled.onchain?.amount)
       : settled.onchain?.amount;
   const checkedAt = new Date().toISOString();
-  const hold: RampDeliveryMismatch = {
-    reason: verdict.reason,
-    checkedAt,
-    ...(reportedAmount === undefined ? {} : { reportedAmount }),
-    ...(verdict.observedAmount === undefined ? {} : { observedAmount: verdict.observedAmount }),
-  };
+  const hold: RampDeliveryMismatch = { reason: verdict.reason, checkedAt };
+  if (reportedAmount !== undefined) hold.reportedAmount = reportedAmount;
+  if (verdict.observedAmount !== undefined) hold.observedAmount = verdict.observedAmount;
   const held = await repo.holdRampDeliveryMismatch({
     transferId: transfer.id,
     providerSettlement: settled,

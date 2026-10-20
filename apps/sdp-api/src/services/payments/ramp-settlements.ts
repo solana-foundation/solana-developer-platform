@@ -332,12 +332,8 @@ export async function applyRampSettlementEvent(
       transition: update.transition,
       fromStatus: transfer.status,
       providerObservedAt: event.providerObservedAt ?? null,
-      ...("receivedAmount" in event && event.receivedAmount !== undefined
-        ? { receivedAmount: event.receivedAmount }
-        : {}),
-      ...("receivedCurrency" in event && event.receivedCurrency !== undefined
-        ? { receivedCurrency: event.receivedCurrency }
-        : {}),
+      receivedAmount: event.kind === "settled" ? (event.receivedAmount ?? null) : null,
+      receivedCurrency: event.kind === "settled" ? (event.receivedCurrency ?? null) : null,
     });
   }
 

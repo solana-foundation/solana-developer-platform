@@ -710,7 +710,7 @@ export class MoonpayRampClient implements RampProvider {
     const { response } = await providerFetch(this.id, url, {
       method: "DELETE",
       headers: { Authorization: `Api-Key ${config.secretKey}` },
-      ...(signal === undefined ? {} : { signal }),
+      signal,
     });
     if (response.ok) return "canceled";
     if (response.status === 404) return "not_found";

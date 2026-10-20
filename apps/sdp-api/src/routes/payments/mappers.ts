@@ -54,11 +54,12 @@ function rampFiatPayout(row: TransferRow): RampFiatPayout | undefined {
   if (settled?.receivedAmount === undefined || settled.receivedCurrency === undefined) {
     return undefined;
   }
-  return {
+  const payout: RampFiatPayout = {
     amount: settled.receivedAmount,
     currency: settled.receivedCurrency,
-    ...(settled.observedAt ? { reportedAt: settled.observedAt } : {}),
   };
+  if (settled.observedAt) payout.reportedAt = settled.observedAt;
+  return payout;
 }
 
 export function mapTransferRow(row: TransferRow) {
@@ -76,7 +77,7 @@ export function mapTransferRow(row: TransferRow) {
     serializedTx: row.serialized_tx,
     slot: row.slot,
     blockTime: row.block_time,
-    ...(row.confirmed_at ? { confirmedAt: row.confirmed_at } : {}),
+    confirmedAt: row.confirmed_at ?? undefined,
     fee: row.fee,
     error: row.error,
     ...(row.initiated_by_key_id
@@ -111,8 +112,6 @@ export function mapTransferRow(row: TransferRow) {
 
   const settlement = rampTransferSettlement(row.provider, row.provider_data);
   const cryptoDeposit = row.provider_data.cryptoDeposit as RampCryptoDeposit | null | undefined;
-  const fiatPayout = rampFiatPayout(row);
-  const deliveryMismatch = readDeliveryMismatch(row.provider_data);
   const providerReference = rampProviderReference(row);
   return {
     ...base,
@@ -123,8 +122,8 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
     ...(cryptoDeposit ? { cryptoDeposit } : {}),
-    ...(fiatPayout ? { fiatPayout } : {}),
-    ...(deliveryMismatch ? { deliveryMismatch } : {}),
+    fiatPayout: rampFiatPayout(row),
+    deliveryMismatch: readDeliveryMismatch(row.provider_data),
   };
 }
 
