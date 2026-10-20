@@ -640,9 +640,10 @@ export interface PaymentRecurringPaymentsRepository {
     input: UpdatePaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
   /**
-   * Save a step's signature and expiry before its send, only while the slot is empty.
+   * Save a step's signature and expiry before its send, only while the slot is empty and the
+   * attempt is still in flight.
    *
-   * @returns False when the slot already holds a signature.
+   * @returns False when the slot already holds a signature or the attempt has settled.
    */
   setStepSignature(input: SetPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
   /**

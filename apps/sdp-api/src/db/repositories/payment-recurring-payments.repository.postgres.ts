@@ -1,6 +1,7 @@
 import {
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
+  IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   LIVE_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES,
   PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
@@ -1240,6 +1241,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
+              AND status = ANY(?::text[])
               AND ${column} IS NULL`
         )
         .bind(
@@ -1248,7 +1250,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.updatedAt,
           input.id,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          [...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES]
         )
         .run();
       return rowsAffected > 0;
