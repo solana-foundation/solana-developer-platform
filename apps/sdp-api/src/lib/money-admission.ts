@@ -16,7 +16,7 @@ import { normalizeOrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
-import { type ApiKeyContext, type WalletAccess, walletAccessAllows } from "@/lib/auth";
+import { type ApiKeyContext, walletAccessAllows } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import {
   currentMoneyPrincipal,
