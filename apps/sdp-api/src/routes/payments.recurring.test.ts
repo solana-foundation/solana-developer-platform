@@ -6742,27 +6742,28 @@ describe("Payments routes — recurring", () => {
         ]);
       });
 
-      it("finishes a resume whose send landed without sending it again", async () => {
+      it("finishes a resume refused as not canceled once the chain shows it resumed, sending nothing again", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        const lifecycle = (action: "cancel" | "resume", key: string) =>
+        const lifecycle = (action: PaymentRecurringPaymentLifecycleOperation) =>
           app.request(
             actionPath(activated.id, action),
-            { method: "POST", headers: keyed(key), body: "{}" },
+            { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
             env
           );
-        expect((await lifecycle("cancel", crypto.randomUUID())).status).toBe(200);
-        const key = crypto.randomUUID();
-        expect((await lifecycle("resume", key)).status).toBe(200);
-        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "resume", key });
-        // The chain shows the resume: the cancellation's end is cleared.
+        expect((await lifecycle("cancel")).status).toBe(200);
+        sendTransactionMock.mockRejectedValueOnce(
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__SUBSCRIPTION_NOT_CANCELLED
+          )
+        );
         recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
         const sent = sends();
 
-        const retry = await lifecycle("resume", crypto.randomUUID());
+        const resume = await lifecycle("resume");
 
-        expect(retry.status).toBe(200);
-        expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("active");
-        expect(sent).not.toHaveBeenCalled();
+        expect(resume.status).toBe(200);
+        expect((await parseRecurringResponse(resume)).data.recurringPayment.status).toBe("active");
+        expect(sent).toHaveBeenCalledTimes(1);
         expect((await lifecycleAttempts(activated.id, "resume")).results).toEqual([
           { status: "confirmed", stage: "finalize", signature: null },
         ]);
@@ -7756,84 +7757,53 @@ describe("Payments routes — recurring", () => {
         expect(sendTransactionMock).toHaveBeenCalledTimes(2);
       });
 
-      it("finishes a stale activation whose subscription landed without sending it again", async () => {
+      it("finishes an activation whose subscribe is refused as already subscribed once the chain shows the delegation", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        const planId = `psp_${crypto.randomUUID()}`;
-        const subscriptionId = `psub_${crypto.randomUUID()}`;
-        const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
-        await seedPlanRow(planId, "active", staleAt);
-        await getDb(env)
-          .prepare(
-            `INSERT INTO payment_subscriptions (
-               id, organization_id, project_id, plan_id, counterparty_id, subscriber_address,
-               status, created_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, 'pending_authorization', ?, ?, ?)`
+        rejectPoolSendAfter(
+          1,
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__ALREADY_SUBSCRIBED
           )
-          .bind(
-            subscriptionId,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            planId,
-            created.counterpartyId,
-            recurringExecution.sourceSigner().address,
-            TEST_USER.id,
-            staleAt,
-            staleAt
-          )
-          .run();
-        // The earlier run sent the subscription after recording its address, and died.
-        await getDb(env)
-          .prepare(
-            `UPDATE payment_recurring_payments
-                SET status = 'activating', plan_id = ?, subscription_id = ?, plan_pda = ?,
-                    plan_created_at = '1770000000', plan_creation_signature = ?,
-                    subscription_pda = ?, updated_at = ?
-              WHERE id = ?`
-          )
-          .bind(
-            planId,
-            subscriptionId,
-            TEST_SOLANA_ADDRESSES.wallet3,
-            testSignature(1),
-            TEST_SOLANA_ADDRESSES.wallet3,
-            staleAt,
-            created.id
-          )
-          .run();
-        await getDb(env)
-          .prepare(
-            `INSERT INTO payment_recurring_payment_activation_attempts (
-               id, organization_id, project_id, recurring_payment_id, status, stage,
-               plan_creation_signature, authorization_signature, error, metadata,
-               created_at, updated_at
-             ) VALUES (?, ?, ?, ?, 'processing', 'authorize_subscription', ?, NULL, NULL,
-               '{}'::jsonb, ?, ?)`
-          )
-          .bind(
-            `prpa_${crypto.randomUUID()}`,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            created.id,
-            testSignature(1),
-            staleAt,
-            staleAt
-          )
-          .run();
+        );
         const sent = sends();
 
-        const retry = await app.request(
-          actionPath(created.id, "activate"),
-          { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
-          env
-        );
+        const activation = await activate(created.id, crypto.randomUUID());
 
-        expect(retry.status).toBe(200);
-        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+        expect(activation.status).toBe(200);
+        expect((await parseRecurringResponse(activation)).data.recurringPayment).toMatchObject({
           status: "active",
-          planCreationSignature: testSignature(1),
+          planCreationSignature: poolSentSignatures()[0],
           authorizationSignature: null,
         });
-        expect(sent).not.toHaveBeenCalled();
+        // The plan, then the refused subscribe.
+        expect(sent).toHaveBeenCalledTimes(2);
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          authorization_signature: null,
+        });
+      });
+
+      it("keeps an activation in flight when its subscribe is refused as already subscribed but the chain shows no delegation", async () => {
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        rejectPoolSendAfter(
+          1,
+          sendTransactionPreflightError(
+            subscriptionsProgram.SUBSCRIPTIONS_ERROR__ALREADY_SUBSCRIBED
+          )
+        );
+        recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
+
+        const activation = await activate(created.id, crypto.randomUUID());
+
+        expect(activation.status).toBe(409);
+        expect(await errorCode(activation)).toBe("CONFLICT");
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: null,
+        });
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
       });
 
       it("fails a cancel whose saved send passed its expiry without landing, reading no signature status", async () => {
