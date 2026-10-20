@@ -1861,7 +1861,7 @@ describe("Payments routes — recurring", () => {
             owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
           } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
     );
-    const sent = vi.spyOn(recurringShared, "sendSubscriptionInstructions");
+    const sent = vi.spyOn(recurringShared, "sendRecurringPaymentStep");
     onTestFinished(() => sent.mockRestore());
 
     const activateRes = await app.request(
@@ -6452,9 +6452,9 @@ describe("Payments routes — recurring", () => {
     });
 
     describe("a resumed attempt reads the chain before it sends a step again (HOO-2044)", () => {
-      /** Every subscription send. */
+      /** Every activation, update and lifecycle step send. */
       const sends = () => {
-        const spy = vi.spyOn(recurringShared, "sendSubscriptionInstructions");
+        const spy = vi.spyOn(recurringShared, "sendRecurringPaymentStep");
         onTestFinished(() => spy.mockRestore());
         return spy;
       };
@@ -7496,7 +7496,7 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
       });
 
-      it("keeps a resumed replacement in flight when its unwind finds the new delegation on chain", async () => {
+      it("finishes a resumed replacement through the old cancel when its unwind finds the new delegation on chain", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         // The subscribe is refused as already subscribed and the chain shows the new delegation,
         // so its slot stays empty; the old subscription's cancel is then refused.
@@ -7531,41 +7531,54 @@ describe("Payments routes — recurring", () => {
         vi.spyOn(subscriptionsProgram, "fetchMaybeSubscriptionAuthority").mockRejectedValue(
           new Error("subscription authority read failed")
         );
+        const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+        onTestFinished(() => warnLog.mockRestore());
         const sent = sends();
 
         const retry = await update();
 
-        expect(retry.status).toBe(409);
-        expect(await errorCode(retry)).toBe("CONFLICT");
-        expect(sent).not.toHaveBeenCalled();
-        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
-          status: "processing",
-          authorization_signature: null,
-        });
-        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+        expect(retry.status).toBe(200);
         const newSubscription = required(
           await getDb(env)
             .prepare(
-              `SELECT s.subscription_pda FROM payment_subscriptions s
+              `SELECT s.id, s.subscription_pda FROM payment_subscriptions s
                  JOIN payment_recurring_payment_update_attempts a ON a.new_subscription_id = s.id
                 WHERE a.recurring_payment_id = ?`
             )
             .bind(activated.id)
-            .first<{ subscription_pda: string | null }>()
+            .first<{ id: string; subscription_pda: string | null }>()
         );
-        const refused = errorLog.mock.calls.filter(([payload]) => {
-          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
-          return (
-            parsed.success &&
-            parsed.data.event === "sdp_api_recurring_payment_unwind_refused_delegation_live"
-          );
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          subscriptionId: newSubscription.id,
+          authorizationSignature: null,
         });
-        expect(refused).toHaveLength(1);
-        expect(required(refused[0])[0]).toEqual(
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(required(sent.mock.calls[0])[0].slot).toEqual({
+          row: "update_attempt",
+          column: "old_cancel_signature",
+        });
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          authorization_signature: null,
+          old_cancel_signature: poolSentSignatures()[5],
+        });
+        const loggedEvents = (log: typeof errorLog, event: string) =>
+          log.mock.calls.filter(([payload]) => {
+            const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+            return parsed.success && parsed.data.event === event;
+          });
+        expect(
+          loggedEvents(errorLog, "sdp_api_recurring_payment_unwind_refused_delegation_live")
+        ).toEqual([]);
+        const landed = loggedEvents(warnLog, "sdp_api_recurring_payment_unwind_found_step_landed");
+        expect(landed).toHaveLength(1);
+        expect(required(landed[0])[0]).toEqual(
           expect.objectContaining({
             recurring_payment_id: activated.id,
             step: "authorize_subscription",
-            delegation_state: "landed",
             subscription_pda: newSubscription.subscription_pda,
           })
         );
@@ -7863,8 +7876,8 @@ describe("Payments routes — recurring", () => {
         expect(sent).not.toHaveBeenCalled();
       });
 
-      it("keeps an activation in flight when its unwind finds the delegation on chain after its saved subscribe read as dropped", async () => {
-        const { created, subscribeSignature } = await leaveSubscribeInFlight();
+      it("finishes an activation from its saved subscribe when its unwind finds the delegation on chain after the subscribe read as dropped", async () => {
+        const { created, planSignature, subscribeSignature } = await leaveSubscribeInFlight();
         // The subscribe read and the unwind's check reach different nodes: only the check sees it.
         let delegationReads = 0;
         recurringExecution.showChain({
@@ -7876,40 +7889,42 @@ describe("Payments routes — recurring", () => {
             return delegationReads === 1 ? null : 1_800_000_000n;
           },
         });
-        const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
-        onTestFinished(() => errorLog.mockRestore());
+        const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+        onTestFinished(() => warnLog.mockRestore());
         const sent = sends();
 
         const retry = await activate(created.id, crypto.randomUUID());
 
-        expect(retry.status).toBe(409);
-        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(retry.status).toBe(200);
         expect(sent).not.toHaveBeenCalled();
         expect(await onlyActivationAttempt(created.id)).toMatchObject({
-          status: "processing",
-          stage: "authorize_subscription",
+          status: "confirmed",
+          stage: "finalize",
           authorization_signature: subscribeSignature,
         });
-        expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
+        expect(await scheduleSignatures(created.id)).toEqual({
+          status: "active",
+          plan_creation_signature: planSignature,
+          authorization_signature: subscribeSignature,
+        });
         const recorded = required(
           await getDb(env)
             .prepare("SELECT subscription_pda FROM payment_recurring_payments WHERE id = ?")
             .bind(created.id)
             .first<{ subscription_pda: string | null }>()
         );
-        const refused = errorLog.mock.calls.filter(([payload]) => {
+        const landed = warnLog.mock.calls.filter(([payload]) => {
           const parsed = recurringPaymentLogEventSchema.safeParse(payload);
           return (
             parsed.success &&
-            parsed.data.event === "sdp_api_recurring_payment_unwind_refused_delegation_live"
+            parsed.data.event === "sdp_api_recurring_payment_unwind_found_step_landed"
           );
         });
-        expect(refused).toHaveLength(1);
-        expect(required(refused[0])[0]).toEqual(
+        expect(landed).toHaveLength(1);
+        expect(required(landed[0])[0]).toEqual(
           expect.objectContaining({
             recurring_payment_id: created.id,
             step: "authorize_subscription",
-            delegation_state: "landed",
             subscription_pda: required(recorded.subscription_pda),
           })
         );
@@ -7936,6 +7951,8 @@ describe("Payments routes — recurring", () => {
       });
 
       it("leaves a resumed activation in flight when another run saved a subscribe into the slot before its refused subscribe unwinds", async () => {
+        // A byte-identical resend never reaches the pool, so its queued refusal would leak.
+        mockDistinctRecentBlockhashes();
         const { created, planSignature } = await leaveSubscribeInFlight();
         // The crashed run claimed subscribe but saved nothing, so the resume sends it again.
         expect(

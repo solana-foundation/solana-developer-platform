@@ -528,6 +528,7 @@ export function installPaymentsRouteTestHooks(): void {
       confirmationStatus: "confirmed",
       err: null,
     });
+    sendTransactionMock.mockReset();
     sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
     );
@@ -546,6 +547,7 @@ export function installPaymentsRouteTestHooks(): void {
         },
       },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+    fetchMaybeSubscriptionAuthorityMock.mockReset();
     fetchMaybeSubscriptionAuthorityMock.mockResolvedValue({
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),

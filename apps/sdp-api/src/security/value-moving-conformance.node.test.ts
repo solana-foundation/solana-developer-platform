@@ -91,7 +91,8 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "fresh_blockhash_per_attempt",
         file: "apps/sdp-api/src/routes/payments.recurring.test.ts",
-        evidence: "journals failed on-chain activation attempts and retries with a fresh signature",
+        evidence:
+          "journals an activation whose plan failed on-chain and expired, and retries with a fresh signature",
       },
     ],
   },
