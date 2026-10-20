@@ -8,6 +8,7 @@ import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
+import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -36,6 +37,7 @@ import {
   planMetadataUpdatedEffect,
   type RecurringPaymentStepEffect,
   type RecurringPaymentStepLogContext,
+  readConfirmedAccounts,
   readRecurringPaymentStep,
 } from "./shared";
 
@@ -496,4 +498,69 @@ describe("readRecurringPaymentStep", () => {
       });
     });
   });
+});
+
+describe("readConfirmedAccounts", () => {
+  const rpc = installClusterRpcResponder();
+
+  function answerChain(input: {
+    accountsSlot: number;
+    accounts: readonly (StubEncodedAccount | null)[];
+  }) {
+    rpc.respond("getEpochInfo", () => ({
+      result: epochInfoResult({ absoluteSlot: TIP_SLOT, blockHeight: 4_000 }),
+    }));
+    rpc.respond("getMultipleAccounts", () => ({
+      result: multipleAccountsResult(input.accountsSlot, input.accounts),
+    }));
+  }
+
+  function readStepAccount(minContextSlot: bigint | null) {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      readConfirmedAccounts({ addresses: [STEP_ACCOUNT], minContextSlot })
+    );
+  }
+
+  it.each([
+    { floor: "above", minContextSlot: BigInt(TIP_SLOT + 100), bankSlot: TIP_SLOT + 100 },
+    { floor: "below", minContextSlot: BigInt(TIP_SLOT - 100), bankSlot: TIP_SLOT },
+  ])(
+    "asks for a bank at the higher of the epoch read's slot and a minimum $floor it, and reports the epoch read's block height",
+    async ({ minContextSlot, bankSlot }) => {
+      answerChain({ accountsSlot: bankSlot, accounts: [null] });
+
+      expect(await readStepAccount(minContextSlot)).toEqual({
+        blockHeight: 4_000n,
+        accounts: [{ address: STEP_ACCOUNT, exists: false }],
+      });
+      const reads = rpc.requests.filter(({ method }) => method !== "getGenesisHash");
+      expect(reads.map(({ method }) => method)).toEqual(["getEpochInfo", "getMultipleAccounts"]);
+      expect(multipleAccountsRead(required(reads[1])).minContextSlot).toBe(bankSlot);
+    }
+  );
+
+  it.each([
+    {
+      failure: "the bank is above the epoch read's slot but below the minimum",
+      minContextSlot: BigInt(TIP_SLOT + 100),
+      accountsSlot: TIP_SLOT + 50,
+      accounts: [null],
+    },
+    {
+      failure: "the answer lists fewer accounts than were asked for",
+      minContextSlot: null,
+      accountsSlot: TIP_SLOT,
+      accounts: [],
+    },
+  ])(
+    "throws SOLANA_RPC_ERROR when $failure",
+    async ({ minContextSlot, accountsSlot, accounts }) => {
+      answerChain({ accountsSlot, accounts });
+
+      const read = readStepAccount(minContextSlot);
+
+      await expect(read).rejects.toThrow(AppError);
+      await expect(read).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR" });
+    }
+  );
 });
