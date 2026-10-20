@@ -25,9 +25,11 @@ import {
   subscriptionAuthorityAccount,
   subscriptionDelegationAccount,
   tokenAccount,
+  tokenMintAccount,
 } from "@/test/helpers/subscription-accounts";
 import {
   authorizationSetupEffect,
+  collectionPulledEffect,
   delegationCanceledEffect,
   delegationCreatedEffect,
   planCreatedEffect,
@@ -390,6 +392,108 @@ describe("readRecurringPaymentStep", () => {
       expect(errors("sdp_api_recurring_payment_plan_changed_outside_attempt")).toHaveLength(
         changedOutside
       );
+    });
+  });
+
+  describe("collection pull", () => {
+    const COLLECT_LOG_CONTEXT = {
+      recurring_payment_id: "prp_step_reader",
+      attempt_id: "psca_step_reader",
+      step: "collect",
+    } as const satisfies RecurringPaymentStepLogContext;
+    const PERIOD_START = 1_770_000_000n;
+    const NEXT_PERIOD_START = PERIOD_START + 86_400n;
+    const effect = collectionPulledEffect({
+      subscriptionPda: STEP_ACCOUNT,
+      mint: MINT,
+      amount: "25",
+      preImage: { periodStartTs: PERIOD_START, amountPulled: 25_000_000n },
+      logContext: COLLECT_LOG_CONTEXT,
+    });
+    const mint = (decimals: number) =>
+      tokenMintAccount({ programAddress: TOKEN_PROGRAM_ADDRESS, decimals });
+    const delegation = (currentPeriodStartTs: bigint, amountPulledInPeriod: bigint) =>
+      subscriptionDelegationAccount({
+        expiresAtTs: 0n,
+        currentPeriodStartTs,
+        amountPulledInPeriod,
+      });
+
+    it.each([
+      {
+        chain: "opened a new period with the amount pulled in it",
+        accounts: [delegation(NEXT_PERIOD_START, 25_000_000n), mint(6)],
+        state: "landed",
+      },
+      {
+        chain: "opened a new period with less than the amount pulled in it",
+        accounts: [delegation(NEXT_PERIOD_START, 24_999_999n), mint(6)],
+        state: "dropped",
+      },
+      {
+        chain: "kept the period and grew the pulled amount by the amount",
+        accounts: [delegation(PERIOD_START, 50_000_000n), mint(6)],
+        state: "landed",
+      },
+      {
+        chain: "kept the period and shows only the earlier pull",
+        accounts: [delegation(PERIOD_START, 25_000_000n), mint(6)],
+        state: "dropped",
+      },
+      {
+        chain: "kept the period and grew the pulled amount by less than the amount",
+        accounts: [delegation(PERIOD_START, 49_999_999n), mint(6)],
+        state: "dropped",
+      },
+      {
+        chain: "grew the pulled amount by the amount at six decimals, on a nine-decimal mint",
+        accounts: [delegation(PERIOD_START, 50_000_000n), mint(9)],
+        state: "dropped",
+      },
+    ] as const)(
+      "reads a saved pull past its expiry as $state when the delegation $chain",
+      async ({ accounts, state }) => {
+        answerChain({ blockHeight: 4_000, accountsSlot: TIP_SLOT, accounts });
+
+        expect((await readSavedStep({ effect, lastValidBlockHeight: "3990" })).state).toBe(state);
+        const accountsRead = rpc.requests.filter(({ method }) => method === "getMultipleAccounts");
+        expect(accountsRead.map((request) => multipleAccountsRead(request).addresses)).toEqual([
+          [STEP_ACCOUNT, MINT],
+        ]);
+      }
+    );
+
+    it("keeps a saved pull past its expiry pending and logs an error when its delegation is absent", async () => {
+      const errors = spyLogEvents("error");
+      spyLogEvents("warn");
+      answerChain({ blockHeight: 4_000, accountsSlot: TIP_SLOT, accounts: [null, mint(6)] });
+
+      expect(await readSavedStep({ effect, lastValidBlockHeight: "3990" })).toEqual({
+        state: "pending",
+      });
+      expect(errors("sdp_api_recurring_payment_collection_delegation_absent")).toEqual([
+        [
+          {
+            event: "sdp_api_recurring_payment_collection_delegation_absent",
+            ...COLLECT_LOG_CONTEXT,
+            subscription_pda: STEP_ACCOUNT,
+          },
+          "sdp_api_recurring_payment_collection_delegation_absent",
+        ],
+      ]);
+    });
+
+    it("keeps a saved pull past its expiry pending when its mint is absent", async () => {
+      spyLogEvents("warn");
+      answerChain({
+        blockHeight: 4_000,
+        accountsSlot: TIP_SLOT,
+        accounts: [delegation(PERIOD_START, 25_000_000n), null],
+      });
+
+      expect(await readSavedStep({ effect, lastValidBlockHeight: "3990" })).toEqual({
+        state: "pending",
+      });
     });
   });
 });

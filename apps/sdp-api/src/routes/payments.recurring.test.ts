@@ -25,6 +25,7 @@ import {
   getTransactionDecoder,
   lamports,
   removeNullCharacters,
+  type Signature,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   signature,
 } from "@solana/kit";
@@ -41,6 +42,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { RecurringPaymentStepSignatureSlots } from "@/db/repositories/payment-recurring-payments.repository";
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import type { CollectionAttemptDelegationPreImage } from "@/db/repositories/payment-subscriptions.repository";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
@@ -103,6 +105,7 @@ import {
   parseRecurringResponse,
   poolSentSignatures,
   RECURRING_FIXTURE_PRE_IMAGE,
+  RECURRING_FIXTURE_PULL_BASE_UNITS,
   RECURRING_HEADERS,
   type RecordedPlanParties,
   type RecurringChainView,
@@ -114,6 +117,7 @@ import {
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
+import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
 import {
   planAccount,
   soleDestination,
@@ -3416,6 +3420,355 @@ describe("Payments routes — recurring", () => {
       signature: collectBody.data.collectionAttempt.signature,
     });
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+  });
+
+  describe("a lost collection pull (HOO-2194)", () => {
+    interface StartedCollection {
+      recurringPaymentId: string;
+      subscriptionPda: string;
+      dueAt: string;
+      attemptId: string;
+      transferId: string;
+      signature: Signature;
+    }
+
+    const stepReads = () =>
+      recurringExecution.rpc.requests.filter(
+        ({ method }) => method === "getEpochInfo" || method === "getMultipleAccounts"
+      );
+    const staleAt = () => new Date(Date.now() - 16 * 60 * 1000).toISOString();
+
+    async function seedStartedCollection(input: {
+      attemptedAt: string;
+      preImage: CollectionAttemptDelegationPreImage | null;
+    }): Promise<StartedCollection> {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const started: StartedCollection = {
+        recurringPaymentId: activated.id,
+        subscriptionPda: required(activated.subscriptionPda),
+        dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+        attemptId: `psca_${crypto.randomUUID()}`,
+        transferId: `xfr_${crypto.randomUUID()}`,
+        signature: testSignature(41),
+      };
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: started.dueAt,
+      });
+      await seedRecurringCollectionJournal({
+        stage: "submitted",
+        attemptId: started.attemptId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        collectionDueAt: started.dueAt,
+        token: DEVNET_USDC_MINT,
+        amount: DEFAULT_RECURRING_FIXTURE.amount,
+        attemptedAt: input.attemptedAt,
+        transfer: {
+          id: started.transferId,
+          walletId: TEST_WALLET_ID,
+          counterpartyId: activated.counterpartyId,
+          sourceAddress: recurringExecution.sourceSigner().address,
+          destinationAddress: DEFAULT_RECURRING_FIXTURE.destinationAddress,
+          signature: started.signature,
+          lastValidBlockHeight: "1000",
+          submissionStartedAt: input.attemptedAt,
+        },
+        preImage: input.preImage,
+      });
+      return started;
+    }
+
+    async function startedCollectionRows(started: StartedCollection) {
+      const db = getDb(env);
+      const attempt = await db
+        .prepare(
+          `SELECT status, error, signature, metadata, updated_at,
+                  delegation_period_start_ts_before, delegation_amount_pulled_before
+             FROM payment_subscription_collection_attempts
+            WHERE id = ?`
+        )
+        .bind(started.attemptId)
+        .first<{
+          status: string;
+          error: string | null;
+          signature: string | null;
+          metadata: PaymentSubscriptionCollectionAttemptMetadata;
+          updated_at: string;
+          delegation_period_start_ts_before: number | null;
+          delegation_amount_pulled_before: string | null;
+        }>();
+      const transfer = await db
+        .prepare("SELECT status, error, signature, updated_at FROM payment_transfers WHERE id = ?")
+        .bind(started.transferId)
+        .first<{
+          status: string;
+          error: string | null;
+          signature: string | null;
+          updated_at: string;
+        }>();
+      return { attempt: required(attempt), transfer: required(transfer) };
+    }
+
+    function collect(recurringPaymentId: string) {
+      return app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+    }
+
+    it("fails a lost pull on the first cron tick past its expiry from one chain read, and leaves it alone on the next", async () => {
+      const started = await seedStartedCollection({
+        attemptedAt: staleAt(),
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        absoluteSlot: 2_900,
+        blockHeight: 1_001,
+        delegation: () => unpulledDelegation(0n),
+      });
+      const confirms = confirmTransactionMock.mock.calls.length;
+      const transactionReads = getTransactionMock.mock.calls.length;
+      const sends = sendTransactionMock.mock.calls.length;
+      const readsBefore = stepReads().length;
+
+      expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 1,
+        refused: 0,
+      });
+
+      const failed = await startedCollectionRows(started);
+      expect(failed.attempt).toMatchObject({
+        status: "failed",
+        error: PUBLIC_INTERNAL_ERROR_MESSAGE,
+        signature: started.signature,
+        metadata: { source: "retry", retryAfterAt: expect.any(String) },
+      });
+      expect(failed.transfer).toMatchObject({
+        status: "failed",
+        error: PUBLIC_INTERNAL_ERROR_MESSAGE,
+        signature: started.signature,
+      });
+      expect(confirmTransactionMock).toHaveBeenCalledTimes(confirms);
+      expect(getTransactionMock).toHaveBeenCalledTimes(transactionReads);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sends);
+      const reads = stepReads().slice(readsBefore);
+      expect(reads.map(({ method }) => method)).toEqual(["getEpochInfo", "getMultipleAccounts"]);
+      expect(multipleAccountsRead(required(reads[1])).addresses).toEqual([
+        started.subscriptionPda,
+        DEVNET_USDC_MINT,
+      ]);
+      expect((await recurringPaymentDueAt(started.recurringPaymentId)).dueAt).toBe(
+        new Date(started.dueAt).getTime()
+      );
+
+      expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 0,
+        refused: 0,
+      });
+      expect(await startedCollectionRows(started)).toEqual(failed);
+      expect(stepReads()).toHaveLength(readsBefore + 2);
+    });
+
+    it("answers 409 and writes nothing while a lost pull can still land", async () => {
+      const started = await seedStartedCollection({
+        attemptedAt: staleAt(),
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        absoluteSlot: 2_900,
+        blockHeight: 1_000,
+        delegation: () => unpulledDelegation(0n),
+      });
+      const before = await startedCollectionRows(started);
+      const readsBefore = stepReads().length;
+
+      const response = await collect(started.recurringPaymentId);
+
+      expect(response.status).toBe(409);
+      expect(errorResponseSchema.parse(await response.json()).error.code).toBe("CONFLICT");
+      expect(before.attempt.status).toBe("processing");
+      expect(await startedCollectionRows(started)).toEqual(before);
+      expect(
+        stepReads()
+          .slice(readsBefore)
+          .map(({ method }) => method)
+      ).toEqual(["getEpochInfo", "getMultipleAccounts"]);
+      expect(confirmTransactionMock).not.toHaveBeenCalledWith(
+        expect.anything(),
+        started.signature,
+        expect.anything()
+      );
+      expect(getTransactionMock).not.toHaveBeenCalledWith(expect.anything(), started.signature);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("counts a lost pull that can still land as skipped on every cron tick, reading it each time", async () => {
+      const started = await seedStartedCollection({
+        attemptedAt: staleAt(),
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        delegation: () => unpulledDelegation(0n),
+      });
+      const before = await startedCollectionRows(started);
+      const readsBefore = stepReads().length;
+
+      for (const tick of [1, 2]) {
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+          recovered: 0,
+          collected: 0,
+          failed: 0,
+          skipped: 1,
+          refused: 0,
+        });
+        expect(await startedCollectionRows(started)).toEqual(before);
+        expect(stepReads()).toHaveLength(readsBefore + 2 * tick);
+      }
+      expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps a pull signed before its pre-image was saved pending past its expiry, with a warning and no chain read", async () => {
+      const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+      onTestFinished(() => warnLog.mockRestore());
+      const started = await seedStartedCollection({ attemptedAt: staleAt(), preImage: null });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        absoluteSlot: 2_900,
+        blockHeight: 1_001,
+        delegation: () => unpulledDelegation(0n),
+      });
+      const before = await startedCollectionRows(started);
+      const readsBefore = stepReads().length;
+
+      const response = await collect(started.recurringPaymentId);
+
+      expect(response.status).toBe(409);
+      expect(errorResponseSchema.parse(await response.json()).error.code).toBe("CONFLICT");
+      expect(await startedCollectionRows(started)).toEqual(before);
+      expect(stepReads()).toHaveLength(readsBefore);
+      const missing = warnLog.mock.calls.filter(([payload]) => {
+        const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+        return (
+          parsed.success &&
+          parsed.data.event === "sdp_api_recurring_payment_collection_pre_image_missing"
+        );
+      });
+      expect(missing).toEqual([
+        [
+          {
+            event: "sdp_api_recurring_payment_collection_pre_image_missing",
+            recurring_payment_id: started.recurringPaymentId,
+            attempt_id: started.attemptId,
+            step: "collect",
+            signature: started.signature,
+          },
+          "sdp_api_recurring_payment_collection_pre_image_missing",
+        ],
+      ]);
+    });
+
+    it("saves the delegation's pre-image on a fresh collection from one chain read before it signs", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        delegation: () => ({
+          expiresAtTs: 0n,
+          currentPeriodStartTs: RECURRING_FIXTURE_PRE_IMAGE.periodStartTs + 86_400n,
+          amountPulledInPeriod: RECURRING_FIXTURE_PULL_BASE_UNITS,
+        }),
+      });
+      const readsBefore = stepReads().length;
+      const readsAtSigning: string[][] = [];
+      recurringExecution.signAsFeePayerMock().mockImplementationOnce(async (transaction) => {
+        readsAtSigning.push(
+          stepReads()
+            .slice(readsBefore)
+            .map(({ method }) => method)
+        );
+        return fullySignTestTransaction(transaction);
+      });
+
+      const response = await collect(activated.id);
+
+      expect(response.status).toBe(200);
+      const { collectionAttempt } = (await parseCollectionResponse(response)).data;
+      expect(readsAtSigning).toEqual([["getEpochInfo", "getMultipleAccounts"]]);
+      const reads = stepReads().slice(readsBefore);
+      expect(reads.map(({ method }) => method)).toEqual(["getEpochInfo", "getMultipleAccounts"]);
+      expect(multipleAccountsRead(required(reads[1]))).toEqual({
+        addresses: [required(activated.subscriptionPda)],
+        commitment: "confirmed",
+        minContextSlot: DEFAULT_RECURRING_CHAIN.absoluteSlot,
+        encoding: "base64",
+      });
+      expect(
+        await getDb(env)
+          .prepare(
+            `SELECT delegation_period_start_ts_before, delegation_amount_pulled_before
+               FROM payment_subscription_collection_attempts
+              WHERE id = ?`
+          )
+          .bind(collectionAttempt.id)
+          .first<{
+            delegation_period_start_ts_before: number | null;
+            delegation_amount_pulled_before: string | null;
+          }>()
+      ).toEqual({
+        delegation_period_start_ts_before: Number(
+          RECURRING_FIXTURE_PRE_IMAGE.periodStartTs + 86_400n
+        ),
+        delegation_amount_pulled_before: RECURRING_FIXTURE_PULL_BASE_UNITS.toString(),
+      });
+    });
+
+    it("refuses a metadata PATCH with no write while the schedule's lost pull can still land", async () => {
+      const started = await seedStartedCollection({
+        attemptedAt: new Date().toISOString(),
+        preImage: RECURRING_FIXTURE_PRE_IMAGE,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        delegation: () => unpulledDelegation(0n),
+      });
+      const schedule = await recurringExecutionSnapshot(started.recurringPaymentId);
+      const before = await startedCollectionRows(started);
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${started.recurringPaymentId}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ metadataUri: "https://example.com/recurring/blocked.json" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(errorResponseSchema.parse(await response.json()).error.code).toBe("CONFLICT");
+      expect(await recurringExecutionSnapshot(started.recurringPaymentId)).toEqual(schedule);
+      expect(await startedCollectionRows(started)).toEqual(before);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   it.each(SUCCESSFUL_PAYMENT_TRANSFER_STATUSES)(
