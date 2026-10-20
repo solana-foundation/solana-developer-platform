@@ -22,7 +22,13 @@ import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import { DatabaseUnavailableError } from "@/db/client";
-import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
+import {
+  AppError,
+  answeredFailure,
+  badRequest,
+  payloadTooLarge,
+  serviceUnavailable,
+} from "@/lib/errors";
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
@@ -405,7 +411,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Error Handling
   // ═══════════════════════════════════════════════════════════════════════════
 
-  app.onError((err, c) => {
+  app.onError((thrown, c) => {
+    const err = answeredFailure(thrown);
     const requestId = c.get("requestId");
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");

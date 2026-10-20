@@ -15,7 +15,7 @@ import {
   type StoredIdempotentResponse,
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
-import { AppError, internalError } from "@/lib/errors";
+import { AppError, answeredFailure, internalError } from "@/lib/errors";
 import {
   canonicalJson,
   deriveProviderRequestId,
@@ -235,16 +235,21 @@ async function snapshot(response: Response, operation: string): Promise<StoredId
 
 /**
  * The answer an error thrown past a composite caller's checks stands for, when
- * this step can know it: an AppError carries its own status. Any other error
- * is mapped by the app's error handler, which this step cannot see, so it
+ * this step can know it: an AppError carries its own status, read through
+ * `answeredFailure` as the app's error handler reads it. Any other error is
+ * mapped by the app's error handler, which this step cannot see, so it
  * returns null and the key is never stored for it.
  */
 function thrownResponse(error: unknown): Response | null {
   if (!(error instanceof AppError)) {
     return null;
   }
-  return new Response(JSON.stringify(error.toResponse()), {
-    status: error.statusCode,
+  const answer = answeredFailure(error);
+  if (!(answer instanceof AppError)) {
+    return null;
+  }
+  return new Response(JSON.stringify(answer.toResponse()), {
+    status: answer.statusCode,
     headers: { "content-type": "application/json" },
   });
 }

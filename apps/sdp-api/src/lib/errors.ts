@@ -235,6 +235,26 @@ export class AppError extends Error {
   }
 }
 
+/**
+ * An `AppError` thrown in place of the error a request answers with, so the code that catches it
+ * can still tell what happened (a recurring payment step failure whose flow already failed back)
+ * while the response is exactly `answer`'s, whatever kind of error that is. `app.onError` and the
+ * idempotency step read every thrown error through `answeredFailure` before mapping it.
+ */
+export abstract class AnsweredFailureError extends AppError {
+  abstract readonly answer: Error;
+}
+
+/**
+ * The error a thrown error answers as.
+ *
+ * @param error - The thrown error.
+ * @returns The `answer` of an `AnsweredFailureError`, otherwise the error itself.
+ */
+export function answeredFailure(error: Error): Error {
+  return error instanceof AnsweredFailureError ? error.answer : error;
+}
+
 export function badRequest(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("BAD_REQUEST", message, details);
 }

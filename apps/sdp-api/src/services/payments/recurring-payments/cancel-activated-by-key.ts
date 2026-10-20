@@ -1,6 +1,7 @@
 import { isCollectableRecurringPaymentStatus } from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import { answeredFailure } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { Env } from "@/types/env";
@@ -83,7 +84,7 @@ export async function cancelRecurringPaymentsActivatedByKey(
           project_id: scope.projectId,
           api_key_id: scope.apiKeyId,
           recurring_payment_id: recurringPayment.id,
-          error: error.message,
+          error: answeredFailure(error).message,
         },
         "A recurring payment the revoked key activated could not be canceled"
       );

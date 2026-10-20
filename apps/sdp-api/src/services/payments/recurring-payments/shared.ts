@@ -58,6 +58,7 @@ import {
 } from "@/db/repositories/repository-factory";
 import type { ApiKeyLifecycleColumns } from "@/lib/api-key-rotation";
 import {
+  AnsweredFailureError,
   AppError,
   badRequest,
   conflict,
@@ -537,12 +538,13 @@ async function observeRecurringPaymentStep(
  * past its expiry, or failed with nothing in flight. The flow fails back to its last stable status
  * in one transaction fenced on the step's slot: a dropped send's saved signature is cleared only
  * while the slot still holds it, and with nothing dropped the slot must still be empty, so a run
- * that took the attempt over and saved a send of its own is never unwound. An `AppError` failure
- * lends it its code, message and details, so once the flow has failed back it is thrown in the
- * failure's place and answers exactly as the failure would, while the cron can still tell a
- * completed fail-back from an error (`recurringPaymentStepFailureAnswer`).
+ * that took the attempt over and saved a send of its own is never unwound. Once the flow has
+ * failed back it is thrown in the failure's place: the request answers with `failure`
+ * (`AnsweredFailureError`), and the cron can tell a completed fail-back from an error. An
+ * `AppError` failure also lends it its code, message and details, so code that reads it as an
+ * `AppError` sees the failure's.
  */
-export class RecurringPaymentStepFailedError extends AppError {
+export class RecurringPaymentStepFailedError extends AnsweredFailureError {
   readonly failure: Error;
   readonly slot: RecurringPaymentStepSignatureSlot;
   readonly droppedSignature: Signature | null;
@@ -570,20 +572,11 @@ export class RecurringPaymentStepFailedError extends AppError {
     this.slot = input.slot;
     this.droppedSignature = input.droppedSignature;
   }
-}
 
-/**
- * What a flow throws once it has failed back for a step failure: the step failure itself when its
- * failure is an `AppError` (it answers identically, and tells the cron the flow reached its last
- * stable status), otherwise the failure raw, so `app.onError` maps it as before.
- *
- * @param stepFailure - The step failure the flow failed back for.
- * @returns The error to throw.
- */
-export function recurringPaymentStepFailureAnswer(
-  stepFailure: RecurringPaymentStepFailedError
-): Error {
-  return stepFailure.failure instanceof AppError ? stepFailure : stepFailure.failure;
+  /** The error the request answers with: the failure. */
+  get answer(): Error {
+    return this.failure;
+  }
 }
 
 /**

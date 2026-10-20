@@ -105,7 +105,6 @@ import {
   readRecurringPaymentStep,
   readSavedRecurringPaymentStep,
   recurringPaymentErrorMessage,
-  recurringPaymentStepFailureAnswer,
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
@@ -3002,7 +3001,7 @@ export async function updateRecurringPayment(input: {
  * @param input.startsAllowed - False for the cron, which sends no new update step.
  * @returns The schedule after the update.
  * @throws RecurringPaymentStepFailedError, answering as its failure, once the update failed back
- *   to `active`; the failure itself when it is not an `AppError`.
+ *   to `active`.
  */
 async function runClaimedRecurringPaymentUpdate(input: {
   env: Env;
@@ -3077,7 +3076,7 @@ async function runClaimedRecurringPaymentUpdate(input: {
         attempt,
         stepFailure,
       });
-      throw recurringPaymentStepFailureAnswer(stepFailure);
+      throw stepFailure;
     }
     await journalInFlightRecurringPaymentAttempt({
       write: () =>
@@ -3309,7 +3308,7 @@ export async function resumeRecurringPaymentUpdate(input: {
       attempt,
       stepFailure,
     });
-    throw recurringPaymentStepFailureAnswer(stepFailure);
+    throw stepFailure;
   }
 
   return runClaimedRecurringPaymentUpdate({
