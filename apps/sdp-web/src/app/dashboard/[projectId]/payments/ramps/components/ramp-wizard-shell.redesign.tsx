@@ -313,7 +313,12 @@ function shellFooter({
   footerActions: ReactNode;
   t: ReturnType<typeof useTranslations>;
 }): ReactNode {
-  const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
+  // A refresh Cancel alone keeps the footer: an open sale waiting on its deposit address.
+  const showFooter =
+    hideSecondary !== true ||
+    hidePrimary !== true ||
+    footerActions != null ||
+    (refresh && onCancel !== undefined);
   if (!showFooter) {
     return undefined;
   }

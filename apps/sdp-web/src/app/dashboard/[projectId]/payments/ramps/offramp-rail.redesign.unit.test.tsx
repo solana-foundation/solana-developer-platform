@@ -219,6 +219,13 @@ describe("OfframpRail cancel on refresh surfaces", () => {
     expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", true);
   });
 
+  it("keeps Cancel payout while the provider has not named a deposit address", () => {
+    renderRefreshRail(offrampWizard({ depositTarget: null, hasCryptoDepositInstruction: false }));
+
+    expect(screen.queryByRole("button", { name: /^Send/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", false);
+  });
+
   it("offers Cancel payout while the sale is open", () => {
     renderRefreshRail(offrampWizard({}));
 
