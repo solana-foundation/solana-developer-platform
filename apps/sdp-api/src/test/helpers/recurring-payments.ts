@@ -9,6 +9,7 @@ import {
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
+import { runWithDatabaseIdentity } from "@/db/identity";
 import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -16,7 +17,15 @@ import {
   paymentRecurringPaymentResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcResponder, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
+import {
+  type ClusterRpcResponder,
+  epochInfoResult,
+  installClusterRpcResponder,
+  multipleAccountsRead,
+  multipleAccountsResult,
+  type StubEncodedAccount,
+  tokenSupplyResult,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
@@ -32,6 +41,11 @@ import {
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import {
+  planAccount,
+  type StubPlan,
+  subscriptionDelegationAccount,
+} from "@/test/helpers/subscription-accounts";
 import { withIdempotencyKeys } from "./idempotency-keys";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
@@ -51,6 +65,109 @@ export function testSignature(seed: number): Signature {
   return signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
 }
 
+/**
+ * The chain a resumed recurring step reads at `confirmed`: the tip `getEpochInfo` reports, and
+ * the plan or delegation at each address SDP recorded as one (an address it never recorded
+ * does not exist).
+ */
+export interface RecurringChainView {
+  absoluteSlot: number;
+  blockHeight: number;
+  plan: (planPda: string) => StubPlan | null;
+  /** A delegation's `expiresAtTs`, or null when it does not exist. */
+  delegation: (subscriptionPda: string) => bigint | null;
+}
+
+/**
+ * Every recorded plan on chain as the fixtures create it, and every recorded delegation
+ * canceled, as the codama fetch stubs answer; the tip is below the default blockhash's expiry.
+ */
+export const DEFAULT_RECURRING_CHAIN: RecurringChainView = {
+  absoluteSlot: 1_250,
+  blockHeight: 940,
+  plan: () => ({ createdAt: 1_770_000_000n, metadataUri: "" }),
+  delegation: () => 1_800_000_000n,
+};
+
+/**
+ * Whether SDP recorded `address` as a plan or a subscription delegation.
+ *
+ * @param address - An address a step read asked for.
+ * @returns The account kind, or null when no plan or subscription row names it.
+ */
+async function recordedSubscriptionAccountKind(
+  address: string
+): Promise<"plan" | "delegation" | null> {
+  // The stub runs inside the request's tenant identity; the chain sees every tenant's rows.
+  const recorded = required(
+    await runWithDatabaseIdentity({ kind: "system", component: "vitest-chain" }, () =>
+      getDb(env)
+        .prepare(
+          `SELECT EXISTS (SELECT 1 FROM payment_subscription_plans WHERE plan_pda = ?) AS plan,
+                  EXISTS (SELECT 1 FROM payment_subscriptions WHERE subscription_pda = ?) AS delegation`
+        )
+        .bind(address, address)
+        .first<{ plan: boolean; delegation: boolean }>()
+    )
+  );
+  if (recorded.plan) return "plan";
+  if (recorded.delegation) return "delegation";
+  return null;
+}
+
+/**
+ * The account `view` shows at `address`.
+ *
+ * @param view - The chain to read.
+ * @param address - The requested address.
+ * @returns The encoded account, or null when it does not exist.
+ */
+async function recurringChainAccount(
+  view: RecurringChainView,
+  address: string
+): Promise<StubEncodedAccount | null> {
+  const kind = await recordedSubscriptionAccountKind(address);
+  switch (kind) {
+    case "plan": {
+      const plan = view.plan(address);
+      return plan === null ? null : planAccount(plan);
+    }
+    case "delegation": {
+      const expiresAtTs = view.delegation(address);
+      return expiresAtTs === null ? null : subscriptionDelegationAccount(expiresAtTs);
+    }
+    case null:
+      return null;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`Unexpected subscription account kind ${exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Answer the current test's step reads (`getEpochInfo`, then `getMultipleAccounts` at the tip's
+ * slot) from `view`, replacing any earlier view.
+ *
+ * @param rpc - The suite's responder.
+ * @param view - The chain the reads see.
+ */
+function answerRecurringChain(rpc: ClusterRpcResponder, view: RecurringChainView): void {
+  rpc.respond("getEpochInfo", () => ({
+    result: epochInfoResult({ absoluteSlot: view.absoluteSlot, blockHeight: view.blockHeight }),
+  }));
+  rpc.respond("getMultipleAccounts", async (request) => ({
+    result: multipleAccountsResult(
+      view.absoluteSlot,
+      await Promise.all(
+        multipleAccountsRead(request).addresses.map((address) =>
+          recurringChainAccount(view, address)
+        )
+      )
+    ),
+  }));
+}
+
 export function installRecurringExecutionHooks() {
   const rpc = installClusterRpcResponder();
   let sourceSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
@@ -63,6 +180,7 @@ export function installRecurringExecutionHooks() {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
     rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+    answerRecurringChain(rpc, DEFAULT_RECURRING_CHAIN);
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
       .mockImplementation(async (transaction) => fullySignTestTransaction(transaction));
@@ -77,6 +195,7 @@ export function installRecurringExecutionHooks() {
 
   return {
     rpc,
+    showChain: (view: RecurringChainView) => answerRecurringChain(rpc, view),
     sourceSigner: () => sourceSigner,
     signAsFeePayerMock: () => signAsFeePayerMock,
   };
