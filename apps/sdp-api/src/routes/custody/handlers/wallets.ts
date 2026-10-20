@@ -3,11 +3,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import {
-  type CustodyWalletSummary,
-  type CustodyWalletTokenBalance,
-  SDP_RAMP_PROVIDER_STAGES,
-} from "@sdp/types";
+import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -49,10 +45,7 @@ import {
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import {
-  assertCustodyProviderAvailable,
-  getRequestProviderAvailability,
-} from "@/services/provider-availability.service";
+import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import type {
@@ -106,21 +99,11 @@ async function queryWalletSummaries(
     return [];
   }
   const actor = resolveActor(c);
-  const wallets = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).listWalletsWithAvailability(
-    {
-      organizationId: actor.organizationId,
-      projectId: filters.projectId,
-      provider: filters.provider,
-    },
-    // Custody entries only: ramp provider stages cannot change them.
-    getRequestProviderAvailability(c, actor.organizationId, {
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-    })
-  );
+  const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
+    organizationId: actor.organizationId,
+    projectId: filters.projectId,
+    provider: filters.provider,
+  });
   return allowedWalletIds === null
     ? wallets
     : wallets.filter((wallet) => allowedWalletIds.includes(wallet.id));

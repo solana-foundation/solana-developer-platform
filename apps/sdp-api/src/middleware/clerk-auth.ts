@@ -23,7 +23,7 @@ import {
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
-import { admitSessionOrganization, organizationNotActive } from "@/lib/organization-access";
+import { enforceOrganizationAccess, organizationNotActive } from "@/lib/organization-access";
 import {
   loadOrganizationEntitlements,
   recordOrganizationEntitlements,
@@ -74,9 +74,6 @@ async function resolveClerkOrganization(db: DatabaseClient, clerkOrgId: string) 
  * {@link resolveClerkUser}: a COALESCE prefers whichever copy is non-null, and the
  * corrupted one is a placeholder string rather than a NULL. This is the path taken for an
  * established user, so it is the one a repaired database still has to keep clean.
- *
- * The organization row (status, tier, settings) comes back in the same statement,
- * for the access check the caller makes before it writes anything.
  */
 async function resolveExistingClerkContext(
   db: DatabaseClient,
@@ -112,13 +109,8 @@ async function resolveExistingClerkContext(
            WHERE p.organization_id = aoi.organization_id
              AND p.slug = 'default-production'
              AND p.status = 'active'
-         ) AS has_default_production,
-         o.status AS organization_status,
-         o.tier AS organization_tier,
-         o.settings AS organization_settings
+         ) AS has_default_production
        FROM auth_organization_identities aoi
-       LEFT JOIN organizations o
-         ON o.id = aoi.organization_id
        LEFT JOIN auth_user_identities aui
          ON aui.provider = 'clerk' AND aui.provider_user_id = ?
        LEFT JOIN users u
@@ -140,9 +132,6 @@ async function resolveExistingClerkContext(
       role: string | null;
       has_default_sandbox: boolean | number;
       has_default_production: boolean | number;
-      organization_status: string | null;
-      organization_tier: string | null;
-      organization_settings: string | null;
     }>();
 }
 
@@ -449,25 +438,22 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   // fresh active membership. Only an organization that already exists can be
   // deleted or carry a restriction; one first provisioned by this request
   // cannot, so the callers need no second check.
-  //
-  // One statement reads the organization mapping, the organization row and the
-  // member's identity, so an established member's request costs one read here.
-  // It only reads: the organization is admitted before anything below writes.
+  const knownOrganization = await resolveClerkOrganization(
+    getDb(c.env),
+    organizationClaims.organizationId
+  );
+  if (knownOrganization) {
+    recordOrganizationEntitlements(
+      c,
+      await enforceOrganizationAccess(c, knownOrganization.organization_id)
+    );
+  }
+
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
     clerkOrgId: organizationClaims.organizationId,
     fallbackOrgSlug: organizationClaims.organizationSlug,
   });
-  if (existingContext) {
-    recordOrganizationEntitlements(
-      c,
-      admitSessionOrganization(c, existingContext.organization_id, {
-        status: existingContext.organization_status,
-        tier: existingContext.organization_tier,
-        settings: existingContext.organization_settings,
-      })
-    );
-  }
 
   if (existingContext?.organization_id && existingContext.user_id && existingContext.role) {
     const role = normalizeOrganizationRole(existingContext.role);
@@ -555,7 +541,7 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   );
 
   const permissions = getPermissionsForOrgRole(role);
-  if (!existingContext) {
+  if (!knownOrganization) {
     // First provisioned by this request: no allowlist read recorded them yet.
     await loadOrganizationEntitlements(c, resolvedOrgIdentity.organization_id);
   }

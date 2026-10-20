@@ -67,79 +67,22 @@ export function organizationNotActive(): AppError {
 }
 
 /**
- * The organization row authentication read for this request: the raw settings
- * (allowlist, entitlements) and the tier (provider entitlements). Recorded on
- * the request so a handler that needs either uses this read instead of reading
- * the row again. Like the entitlements it is never carried across requests: the
- * next request reads the row again.
- */
-export interface OrganizationProviderState {
-  organizationId: string;
-  tier: string;
-  settings: string | null;
-}
-
-export function recordOrganizationProviderState(
-  c: Context<{ Bindings: Env }>,
-  state: OrganizationProviderState
-): void {
-  c.set("organizationProviderState", state);
-}
-
-/**
  * The session doors' uncached organization read: the organization must exist
- * and be `active`. Returns its tier and raw settings.
+ * and be `active`. Returns its raw settings.
  */
-export async function readActiveOrganization(
+export async function readActiveOrganizationSettings(
   env: Env,
   organizationId: string
-): Promise<{ tier: string; settings: string | null }> {
+): Promise<string | null> {
   const row = await getDb(env)
-    .prepare("SELECT status, tier, settings FROM organizations WHERE id = ?")
+    .prepare("SELECT status, settings FROM organizations WHERE id = ?")
     .bind(organizationId)
-    .first<{ status: string; tier: string; settings: string | null }>();
+    .first<{ status: string; settings: string | null }>();
 
   if (!row || !organizationStatusMayAuthenticate(row.status)) {
     throw organizationNotActive();
   }
-  return { tier: row.tier, settings: row.settings };
-}
-
-/**
- * The organization columns a session door reads in the same statement as its
- * identity lookup. Every column is null when the join found no organization row.
- */
-export interface SessionOrganizationRead {
-  status: string | null;
-  tier: string | null;
-  settings: string | null;
-}
-
-/**
- * The decision {@link enforceOrganizationAccess} makes, for a door that already
- * read the organization columns: the organization must exist and be `active`,
- * and the origin must pass its allowlist. Records the organization's tier and
- * settings for the request and returns the raw settings.
- */
-export function admitSessionOrganization(
-  c: Context<{ Bindings: Env }>,
-  organizationId: string,
-  read: SessionOrganizationRead
-): string | null {
-  if (
-    read.status === null ||
-    read.tier === null ||
-    !organizationStatusMayAuthenticate(read.status)
-  ) {
-    throw organizationNotActive();
-  }
-  enforceIpAllowlist(c, read.settings);
-  recordOrganizationProviderState(c, {
-    organizationId,
-    tier: read.tier,
-    settings: read.settings,
-  });
-  return read.settings;
+  return row.settings;
 }
 
 /**
@@ -151,10 +94,9 @@ export async function enforceOrganizationAccess(
   c: Context<{ Bindings: Env }>,
   organizationId: string
 ): Promise<string | null> {
-  const organization = await readActiveOrganization(c.env, organizationId);
-  enforceIpAllowlist(c, organization.settings);
-  recordOrganizationProviderState(c, { organizationId, ...organization });
-  return organization.settings;
+  const settings = await readActiveOrganizationSettings(c.env, organizationId);
+  enforceIpAllowlist(c, settings);
+  return settings;
 }
 
 /**
@@ -194,7 +136,7 @@ export async function enforceApiKeyOrganizationAccess(
 ): Promise<ApiKeyOrganizationAccess> {
   const row = await getDb(c.env)
     .prepare(
-      `SELECT o.status AS organization_status, o.tier, o.settings,
+      `SELECT o.status AS organization_status, o.settings,
               ak.status, ak.expires_at, ak.rotation_deadline,
               ak.signing_wallet_id, wb.wallet_bindings
          FROM organizations o
@@ -253,7 +195,6 @@ export async function enforceApiKeyOrganizationAccess(
     .first<
       {
         organization_status: string;
-        tier: string;
         settings: string | null;
         wallet_bindings: unknown;
       } & (
@@ -283,11 +224,6 @@ export async function enforceApiKeyOrganizationAccess(
     throw new AppError("EXPIRED_API_KEY");
   }
   enforceIpAllowlist(c, row.settings);
-  recordOrganizationProviderState(c, {
-    organizationId,
-    tier: row.tier,
-    settings: row.settings,
-  });
   return {
     settings: row.settings,
     walletAuthorization: resolveApiKeyWalletAuthorization(
