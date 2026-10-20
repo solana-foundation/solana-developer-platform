@@ -7914,6 +7914,37 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceling");
       });
 
+      it("keeps a resume recoverable while its saved send can still land", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const lifecycle = (action: PaymentRecurringPaymentLifecycleOperation, key: string) =>
+          app.request(
+            actionPath(activated.id, action),
+            { method: "POST", headers: keyed(key), body: "{}" },
+            env
+          );
+        expect((await lifecycle("cancel", crypto.randomUUID())).status).toBe(200);
+        const key = crypto.randomUUID();
+        expect((await lifecycle("resume", key)).status).toBe(200);
+        await leaveSavedSend({ recurringPaymentId: activated.id, operation: "resume", key });
+        // Still canceled on chain, at the saved send's last valid block height.
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          blockHeight: SAVED_LIFECYCLE_SEND_EXPIRY,
+          absoluteSlot: 2_900,
+          delegation: () => 1_800_000_000n,
+        });
+        const sent = sends();
+
+        const retry = await lifecycle("resume", crypto.randomUUID());
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        expect((await lifecycleAttempts(activated.id, "resume")).results).toEqual([
+          { status: "processing", stage: "submit", signature: testSignature(7) },
+        ]);
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("resuming");
+      });
+
       it("continues a reset activation retry whose plan creation is refused as already existing once the chain shows the plan", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const planId = `psp_${crypto.randomUUID()}`;
