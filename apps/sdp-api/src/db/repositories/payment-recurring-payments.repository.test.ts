@@ -547,6 +547,96 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       expect(await savedActivationSlots(attempt.id)).toEqual(UNSIGNED_SLOTS);
     });
   });
+
+  it("reads back each attempt row's saved step signature and expiry", async () => {
+    const activation = await createUnsignedActivationAttempt("prpa_repo_read_expiry");
+    const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const recurringPaymentId = activation.recurring_payment_id;
+    const lifecycle = required(
+      await repo.createLifecycleAttempt({
+        ...tenant,
+        id: "prpl_repo_read_expiry",
+        recurringPaymentId,
+        operation: "cancel",
+        status: "processing",
+        stage: "submit",
+        signature: null,
+        error: null,
+        metadata: {},
+        createdAt: activation.created_at,
+        updatedAt: activation.created_at,
+      })
+    );
+    const update = required(
+      await repo.createUpdateAttempt({
+        ...tenant,
+        id: "prpu_repo_read_expiry",
+        recurringPaymentId,
+        mode: "replacement",
+        status: "processing",
+        stage: "create_plan",
+        oldPlanId: null,
+        oldSubscriptionId: null,
+        newPlanId: null,
+        newSubscriptionId: null,
+        newSourceCustodyWalletId: null,
+        planUpdateSignature: null,
+        planCreationSignature: null,
+        authorizationSetupSignature: null,
+        authorizationSignature: null,
+        oldCancelSignature: null,
+        changedFields: ["amount"],
+        beforeValues: {},
+        afterValues: {},
+        error: null,
+        createdBy: null,
+        createdAt: activation.created_at,
+        updatedAt: activation.created_at,
+      })
+    );
+    const save = (
+      slot: RecurringPaymentStepSignatureSlot,
+      id: string,
+      seed: number,
+      height: string
+    ) =>
+      repo.setStepSignature({
+        ...tenant,
+        slot,
+        id,
+        signature: testSignature(seed),
+        lastValidBlockHeight: height,
+        updatedAt: STEP_UPDATED_AT,
+      });
+    expect(await save(SETUP_SLOT, activation.id, 4, "401")).toBe(true);
+    expect(
+      await save({ row: "lifecycle_attempt", column: "signature" }, lifecycle.id, 5, "402")
+    ).toBe(true);
+    expect(
+      await save({ row: "update_attempt", column: "plan_creation_signature" }, update.id, 6, "403")
+    ).toBe(true);
+
+    expect(await repo.getLatestActivationAttempt({ ...tenant, recurringPaymentId })).toEqual({
+      ...activation,
+      authorization_setup_signature: testSignature(4),
+      last_valid_block_height: "401",
+      updated_at: expect.any(String),
+    });
+    expect(
+      await repo.getLatestLifecycleAttempt({ ...tenant, recurringPaymentId, operation: "cancel" })
+    ).toEqual({
+      ...lifecycle,
+      signature: testSignature(5),
+      last_valid_block_height: "402",
+      updated_at: expect.any(String),
+    });
+    expect(await repo.getLatestUpdateAttempt({ ...tenant, recurringPaymentId })).toEqual({
+      ...update,
+      plan_creation_signature: testSignature(6),
+      last_valid_block_height: "403",
+      updated_at: expect.any(String),
+    });
+  });
 });
 
 describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", () => {
