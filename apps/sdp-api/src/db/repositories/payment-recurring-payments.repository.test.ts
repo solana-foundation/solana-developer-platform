@@ -17,6 +17,7 @@ import { createPostgresCounterpartyAccountsRepository } from "./counterparty-acc
 import type {
   PaymentRecurringPaymentsRepository,
   RecurringPaymentStepSignatureSlot,
+  UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
@@ -637,6 +638,59 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       last_valid_block_height: "403",
       updated_at: expect.any(String),
     });
+  });
+
+  it("writes an update attempt only while it holds the expected status", async () => {
+    const activation = await createUnsignedActivationAttempt("prpa_repo_update_fence");
+    const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    const recurringPaymentId = activation.recurring_payment_id;
+    const confirmed = required(
+      await repo.createUpdateAttempt({
+        ...tenant,
+        id: "prpu_repo_update_fence",
+        recurringPaymentId,
+        mode: "replacement",
+        status: "confirmed",
+        stage: "finalize",
+        oldPlanId: null,
+        oldSubscriptionId: null,
+        newPlanId: null,
+        newSubscriptionId: null,
+        newSourceCustodyWalletId: null,
+        planUpdateSignature: null,
+        planCreationSignature: null,
+        authorizationSetupSignature: null,
+        authorizationSignature: null,
+        oldCancelSignature: null,
+        changedFields: ["amount"],
+        beforeValues: {},
+        afterValues: {},
+        error: null,
+        createdBy: null,
+        createdAt: activation.created_at,
+        updatedAt: activation.created_at,
+      })
+    );
+    const failure: UpdatePaymentRecurringPaymentUpdateAttemptInput = {
+      ...tenant,
+      attemptId: confirmed.id,
+      status: "failed",
+      error: "Recurring payment step failed",
+      updatedAt: STEP_UPDATED_AT,
+    };
+
+    expect(await repo.updateUpdateAttempt({ ...failure, expectedStatus: "processing" })).toBeNull();
+    expect(await repo.getLatestUpdateAttempt({ ...tenant, recurringPaymentId })).toEqual(confirmed);
+
+    const applied = await repo.updateUpdateAttempt(failure);
+
+    expect(applied).toEqual({
+      ...confirmed,
+      status: "failed",
+      error: "Recurring payment step failed",
+      updated_at: expect.any(String),
+    });
+    expect(await repo.getLatestUpdateAttempt({ ...tenant, recurringPaymentId })).toEqual(applied);
   });
 });
 

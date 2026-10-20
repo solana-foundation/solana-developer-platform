@@ -7246,6 +7246,61 @@ describe("Payments routes — recurring", () => {
         );
       });
 
+      it("clears a fresh old-subscription cancel found dropped after its confirmation timed out, keeping the update in flight", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        delegationsBesideActiveOld(oldSubscriptionPda, 0n, DEFAULT_RECURRING_CHAIN);
+        const confirmed = required(confirmTransactionMock.getMockImplementation());
+        confirmTransactionMock.mockImplementation(async (rpc, signature, options) => {
+          if (signature !== poolSentSignatures()[4]) return confirmed(rpc, signature, options);
+          // The cancel's wait outlives its blockhash: the re-read tip is one block past it.
+          delegationsBesideActiveOld(oldSubscriptionPda, 0n, {
+            absoluteSlot: 2_900,
+            blockHeight: 1_001,
+          });
+          throw new Error("confirmation timed out");
+        });
+        const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+        onTestFinished(() => errorLog.mockRestore());
+        const loggedEvents = (event: string) =>
+          errorLog.mock.calls.filter(([payload]) => {
+            const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+            return parsed.success && parsed.data.event === event;
+          });
+
+        const update = await app.request(
+          actionPath(activated.id),
+          {
+            method: "PATCH",
+            headers: keyed(crypto.randomUUID()),
+            body: JSON.stringify({ amount: "35.00" }),
+          },
+          env
+        );
+
+        expect(update.status).toBe(400);
+        expect(await errorCode(update)).toBe("TRANSACTION_FAILED");
+        const oldCancelSignature = poolSentSignatures()[4];
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "cancel_old_subscription",
+          old_cancel_signature: null,
+          error: "Recurring payment old subscription cancellation failed on-chain",
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+        const dropped = loggedEvents("sdp_api_recurring_payment_old_cancel_dropped");
+        expect(dropped).toHaveLength(1);
+        expect(required(dropped[0])[0]).toEqual(
+          expect.objectContaining({
+            recurring_payment_id: activated.id,
+            step: "cancel_old_subscription",
+            signature: oldCancelSignature,
+            old_subscription_pda: oldSubscriptionPda,
+          })
+        );
+        expect(loggedEvents("sdp_api_recurring_payment_old_cancel_failed")).toHaveLength(1);
+      });
+
       it("keeps an update in flight when its old-subscription cancel is refused, and sends the cancel again on the next run", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         rejectPoolSendAfter(2, sendTransactionPreflightError());
@@ -7534,6 +7589,66 @@ describe("Payments routes — recurring", () => {
 
         expect(retry.status).toBe(409);
         expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: authorizationSignature,
+          error: null,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+      });
+
+      it("leaves a dropped authorization in flight when another run re-claimed the schedule before the failure lands", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(oldSubscriptionPda, null, DEFAULT_RECURRING_CHAIN);
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await update()).status).toBe(409);
+        const authorizationSignature = poolSentSignatures()[3];
+        await leaveUpdateCrashedAt(activated.id, key);
+        await seedSavedSendExpiry(activated.id);
+        delegationsBesideActiveOld(oldSubscriptionPda, null, PAST_SAVED_EXPIRY);
+        // Another run re-claims the schedule between this run's clear and its schedule write.
+        const createRepository =
+          paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+        const clears = vi.fn<(cleared: boolean) => void>();
+        const repositorySpy = vi
+          .spyOn(
+            paymentRecurringPaymentsRepositoryPostgres,
+            "createPostgresPaymentRecurringPaymentsRepository"
+          )
+          .mockImplementation((db) => {
+            const repository = createRepository(db);
+            return {
+              ...repository,
+              clearStepSignature: async (input) => {
+                const cleared = await repository.clearStepSignature(input);
+                clears(cleared);
+                await getDb(env)
+                  .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+                  .bind(new Date(Date.now() + 1000).toISOString(), activated.id)
+                  .run();
+                return cleared;
+              },
+            };
+          });
+        onTestFinished(() => repositorySpy.mockRestore());
+
+        const retry = await update();
+
+        expect(retry.status).toBe(409);
+        expect(errorResponseSchema.parse(await retry.json()).error).toMatchObject({
+          code: "CONFLICT",
+          message: "Recurring payment update changed concurrently",
+        });
+        expect(clears.mock.calls).toEqual([[true]]);
         expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
           status: "processing",
           stage: "authorize_subscription",
