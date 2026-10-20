@@ -19,20 +19,20 @@ const ALL_STATUSES = [
   "failed",
 ] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
 
-// Type-level exhaustiveness guard: this tuple only stays empty (and therefore
-// typechecks as never[]) while every member of the union is listed above. A
-// status added to EarnVaultWithdrawalRequestStatus without being added to
-// ALL_STATUSES surfaces here as a type error, not a silent skip.
-const UNCOVERED_STATUSES: Exclude<
+// Type-level exhaustiveness guard, enforced by `pnpm typecheck` (this file is
+// inside the tsconfig include): the initializer only typechecks while every
+// member of the union is listed in ALL_STATUSES above. A status added to
+// EarnVaultWithdrawalRequestStatus without being added to ALL_STATUSES makes
+// the Exclude<...>[] value unassignable to never[], so the build fails here
+// instead of the tests below silently skipping the new status. The annotation
+// must demand never[]: an empty array literal is assignable to ANY array type,
+// so annotating the value itself (the old `Exclude<...>[] = []`) never errors.
+const _UNCOVERED_STATUSES: never[] = [] as Exclude<
   EarnVaultWithdrawalRequestStatus,
   (typeof ALL_STATUSES)[number]
->[] = [];
+>[];
 
 describe("queued withdrawal lifecycle presentation", () => {
-  it("lists every status in the union", () => {
-    expect(UNCOVERED_STATUSES).toEqual([]);
-  });
-
   it("shares terminal truth across every queue surface", () => {
     const terminal = ALL_STATUSES.filter((status) => isEarnVaultQueuedWithdrawalTerminal(status));
     // Only the three outcomes end the request; everything else is in flight

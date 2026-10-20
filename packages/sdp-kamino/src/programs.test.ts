@@ -66,8 +66,14 @@ describe("kaminoProgramAllowlist", () => {
 describe("@sdp/types re-export", () => {
   it("keeps the named devnet constant identical to the table entry", () => {
     // @sdp/earn imports the named constant; @sdp/kamino reads the table. They
-    // must never drift, which is why one is derived from the other.
-    expect(KAMINO_DEVNET_KVAULT_PROGRAM_ID).toBe(KAMINO_KVAULT_PROGRAM_IDS.devnet);
+    // must never drift, which is why one is derived from the other — deriving
+    // one from the other makes THIS test a tautology, so pin both to the
+    // on-chain addresses verified 2026-08-15 (see the table's header in
+    // @sdp/types): a derivation re-pointed at the other cluster's entry, or a
+    // table edit, fails here instead of silently filtering
+    // `getProgramAccounts` against the wrong program.
+    expect(KAMINO_DEVNET_KVAULT_PROGRAM_ID).toBe("devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY");
+    expect(KAMINO_KVAULT_PROGRAM_IDS.devnet).toBe("devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY");
   });
 });
 
