@@ -4630,8 +4630,104 @@ describe("Payments routes — recurring", () => {
     ).toEqual({ plan_creation_signature: testSignature(9), last_valid_block_height: "77" });
   });
 
-  it("clears failed authorization signatures when finalization cannot find the subscription", async () => {
-    const _sourceSigner = recurringExecution.sourceSigner();
+  it("saves an ambiguous plan send's signature and expiry only on its attempt, and writes it to the schedule once a resume finds the plan landed", async () => {
+    getRecentBlockhashMock.mockResolvedValue({
+      blockhash: blockhash("EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"),
+      lastValidBlockHeight: 4242n,
+    });
+    const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+    // The run dies before it journals the failure, so the attempt stays in flight for the cron.
+    const createRepository =
+      paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+    const repositorySpy = vi
+      .spyOn(
+        paymentRecurringPaymentsRepositoryPostgres,
+        "createPostgresPaymentRecurringPaymentsRepository"
+      )
+      .mockImplementation((db) => {
+        const repository = createRepository(db);
+        return {
+          ...repository,
+          updateActivationAttempt: async (input) => {
+            if (input.status === "failed") {
+              throw new Error("activation journal unavailable");
+            }
+            return repository.updateActivationAttempt(input);
+          },
+        };
+      });
+
+    const ambiguous = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    repositorySpy.mockRestore();
+
+    expect(ambiguous.status).toBe(500);
+    const [planSignature] = poolSentSignatures();
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT plan_creation_signature, authorization_signature
+             FROM payment_recurring_payments
+            WHERE id = ?`
+        )
+        .bind(recurringPayment.id)
+        .first<{ plan_creation_signature: string | null; authorization_signature: string | null }>()
+    ).toEqual({ plan_creation_signature: null, authorization_signature: null });
+    const afterAmbiguous = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect((await parseRecurringResponse(afterAmbiguous)).data.recurringPayment).toMatchObject({
+      status: "activating",
+      planCreationSignature: null,
+      authorizationSignature: null,
+    });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT status, plan_creation_signature,
+                  last_valid_block_height::text AS last_valid_block_height
+             FROM payment_recurring_payment_activation_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(recurringPayment.id)
+        .first<{
+          status: PaymentRecurringPaymentAttemptStatus;
+          plan_creation_signature: string | null;
+          last_valid_block_height: string | null;
+        }>()
+    ).toEqual({
+      status: "processing",
+      plan_creation_signature: planSignature,
+      last_valid_block_height: "4242",
+    });
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+      .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), recurringPayment.id)
+      .run();
+
+    expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
+      recovered: 1,
+      refused: 0,
+    });
+
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT status, plan_creation_signature FROM payment_recurring_payments WHERE id = ?"
+        )
+        .bind(recurringPayment.id)
+        .first<{ status: string; plan_creation_signature: string | null }>()
+    ).toEqual({ status: "active", plan_creation_signature: planSignature });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the landed plan's signature and no authorization signature on the schedule when finalization cannot find the subscription", async () => {
     mockDistinctRecentBlockhashes();
     fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
       exists: false,
