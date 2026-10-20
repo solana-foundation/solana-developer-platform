@@ -7515,6 +7515,60 @@ describe("Payments routes — recurring", () => {
         });
         expect(sent).toHaveBeenCalledTimes(1);
       });
+
+      it("drops a pending schedule's landed plan when its terms change, and keeps it for a first-collection edit", async () => {
+        const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const planId = `psp_${crypto.randomUUID()}`;
+        await seedPlanRow(planId, "active", new Date().toISOString());
+        // An earlier activation created the plan on chain, then reset to pending.
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payments
+                SET plan_id = ?, plan_pda = ?, plan_created_at = '1770000000',
+                    plan_creation_signature = ?
+              WHERE id = ?`
+          )
+          .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, testSignature(3), created.id)
+          .run();
+        const planReference = () =>
+          getDb(env)
+            .prepare(
+              `SELECT status, plan_id, plan_pda, plan_created_at, plan_creation_signature
+                 FROM payment_recurring_payments WHERE id = ?`
+            )
+            .bind(created.id)
+            .first<{
+              status: string;
+              plan_id: string | null;
+              plan_pda: string | null;
+              plan_created_at: string | null;
+              plan_creation_signature: string | null;
+            }>();
+        const patch = (body: Record<string, string>) =>
+          app.request(
+            actionPath(created.id),
+            { method: "PATCH", headers: keyed(crypto.randomUUID()), body: JSON.stringify(body) },
+            env
+          );
+
+        expect((await patch({ firstCollectionAt: "2027-01-01T00:00:00.000Z" })).status).toBe(200);
+        expect(await planReference()).toEqual({
+          status: "pending_activation",
+          plan_id: planId,
+          plan_pda: TEST_SOLANA_ADDRESSES.wallet3,
+          plan_created_at: "1770000000",
+          plan_creation_signature: testSignature(3),
+        });
+
+        expect((await patch({ amount: "35.00" })).status).toBe(200);
+        expect(await planReference()).toEqual({
+          status: "pending_activation",
+          plan_id: null,
+          plan_pda: null,
+          plan_created_at: null,
+          plan_creation_signature: null,
+        });
+      });
     });
   });
 });
