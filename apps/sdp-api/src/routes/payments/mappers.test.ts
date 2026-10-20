@@ -85,6 +85,27 @@ describe("mapTransferRow payout and confirmation", () => {
     expect(mapTransferRow(row)).not.toHaveProperty("fiatPayout");
   });
 
+  it("shows a delivery hold, and drops a hold the provider's next report cleared", () => {
+    const hold = {
+      reason: "amount_mismatch",
+      checkedAt: "2026-10-19T23:30:00.000Z",
+      reportedAmount: "20",
+      observedAmount: "0.5",
+    };
+    const held = offrampRow({
+      type: "onramp",
+      kind: "onramp",
+      direction: "inbound",
+      status: "settling",
+      confirmed_at: null,
+      provider_data: { deliveryMismatch: hold },
+    });
+    expect(mapTransferRow(held)).toMatchObject({ deliveryMismatch: hold });
+    expect(
+      mapTransferRow({ ...held, provider_data: { deliveryMismatch: null } })
+    ).not.toHaveProperty("deliveryMismatch");
+  });
+
   it("omits confirmedAt until the transfer is confirmed", () => {
     const row = offrampRow({ status: "settling", confirmed_at: null });
     expect(mapTransferRow(row)).not.toHaveProperty("confirmedAt");

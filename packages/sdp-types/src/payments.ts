@@ -464,6 +464,37 @@ export interface RampFiatPayout {
   reportedAt?: string;
 }
 
+/** Why SDP holds a provider-settled ramp instead of completing it. */
+export const RAMP_DELIVERY_MISMATCH_REASONS = [
+  /** The provider's report contradicts SDP's record of the ramp (its wallet, deposit or amount). */
+  "provider_report_mismatch",
+  /** The delivery transaction failed onchain. */
+  "transaction_failed",
+  /** The transaction landed before SDP created the transfer, so it delivered something else. */
+  "predates_transfer",
+  /** The transaction moved none of the quoted asset to the quoted wallet. */
+  "not_delivered",
+  /** It delivered a different amount than the provider reported, or less than quoted. */
+  "amount_mismatch",
+  /** No finalized transaction carries the reported signature an hour after the report. */
+  "transaction_not_found",
+] as const;
+export type RampDeliveryMismatchReason = (typeof RAMP_DELIVERY_MISMATCH_REASONS)[number];
+
+/**
+ * A provider-settled ramp the chain contradicts. SDP holds it in `settling`
+ * for review instead of completing it, until the provider reports again.
+ */
+export interface RampDeliveryMismatch {
+  reason: RampDeliveryMismatchReason;
+  /** When SDP's delivery check reached this verdict. */
+  checkedAt: string;
+  /** What the provider reported delivering, in display units, when it said. */
+  reportedAmount?: string;
+  /** What the chain shows the quoted wallet received, in display units. */
+  observedAmount?: string;
+}
+
 export interface PaymentTransferSummary {
   id: string;
   custodyWalletId: string | null;
@@ -491,6 +522,7 @@ export interface PaymentTransferSummary {
   settlement?: RampTransferSettlement;
   cryptoDeposit?: RampCryptoDeposit;
   fiatPayout?: RampFiatPayout;
+  deliveryMismatch?: RampDeliveryMismatch;
   /** When SDP confirmed the transfer; a ramp is confirmed once its delivery is verified onchain. */
   confirmedAt?: string;
   createdAt?: string;

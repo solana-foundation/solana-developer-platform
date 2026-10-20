@@ -75,6 +75,8 @@ function settlementObservationFields(
   if (receivedCurrency !== undefined) observation.receivedCurrency = receivedCurrency;
   if (event.refundAddress !== undefined) observation.refundAddress = event.refundAddress;
   providerData.observedDelivery = observation;
+  // A new provider report supersedes the one SDP held as contradicted by the chain.
+  providerData.deliveryMismatch = null;
   if (event.kind === "settled") {
     const settlement: Record<string, unknown> = { reference: event.reference };
     if (event.providerObservedAt) settlement.observedAt = event.providerObservedAt;

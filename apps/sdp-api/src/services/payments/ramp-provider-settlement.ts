@@ -1,3 +1,4 @@
+import { RAMP_DELIVERY_MISMATCH_REASONS, type RampDeliveryMismatch } from "@sdp/types/payments";
 import { z } from "zod";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 
@@ -33,4 +34,20 @@ export function currentProviderSettlement(
   return parsed.success && parsed.data.reference === transfer.provider_reference
     ? parsed.data
     : null;
+}
+
+/** A delivery hold as `provider_data.deliveryMismatch` stores it; the verifier is its only writer. */
+const deliveryMismatchSchema = z.object({
+  reason: z.enum(RAMP_DELIVERY_MISMATCH_REASONS),
+  checkedAt: z.string(),
+  reportedAmount: z.string().optional(),
+  observedAmount: z.string().optional(),
+});
+
+/** The delivery hold a ramp row carries, or undefined while none holds it. */
+export function readDeliveryMismatch(
+  providerData: PaymentTransferRow["provider_data"]
+): RampDeliveryMismatch | undefined {
+  const parsed = deliveryMismatchSchema.safeParse(providerData.deliveryMismatch);
+  return parsed.success ? parsed.data : undefined;
 }

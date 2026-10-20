@@ -9,7 +9,10 @@ import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/type
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
-import { currentProviderSettlement } from "@/services/payments/ramp-provider-settlement";
+import {
+  currentProviderSettlement,
+  readDeliveryMismatch,
+} from "@/services/payments/ramp-provider-settlement";
 
 /** The stored provider reference for a ramp transfer, including retired providers. */
 function rampProviderReference(row: TransferRow): string | undefined {
@@ -109,6 +112,7 @@ export function mapTransferRow(row: TransferRow) {
   const settlement = rampTransferSettlement(row.provider, row.provider_data);
   const cryptoDeposit = row.provider_data.cryptoDeposit as RampCryptoDeposit | null | undefined;
   const fiatPayout = rampFiatPayout(row);
+  const deliveryMismatch = readDeliveryMismatch(row.provider_data);
   const providerReference = rampProviderReference(row);
   return {
     ...base,
@@ -120,6 +124,7 @@ export function mapTransferRow(row: TransferRow) {
     ...(settlement ? { settlement } : {}),
     ...(cryptoDeposit ? { cryptoDeposit } : {}),
     ...(fiatPayout ? { fiatPayout } : {}),
+    ...(deliveryMismatch ? { deliveryMismatch } : {}),
   };
 }
 

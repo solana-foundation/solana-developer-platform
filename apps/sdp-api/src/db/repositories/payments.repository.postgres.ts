@@ -736,12 +736,39 @@ export function createPostgresPaymentsRepository(
            WHERE p.environment = ? AND pt.status = 'settling'
              AND pt.type = ANY(?)
              AND jsonb_typeof(pt.provider_data->'providerSettlement') = 'object'
+             AND jsonb_typeof(pt.provider_data->'deliveryMismatch') IS DISTINCT FROM 'object'
            ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
            LIMIT ?`
         )
         .bind(environment, [...RAMP_TRANSFER_TYPES], limit)
         .all<PaymentTransferProjectionRow>();
       return rows.results.map(mapTransferRow);
+    },
+
+    async holdRampDeliveryMismatch({ transferId, providerSettlement, mismatch, updatedAt }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.holdRampDeliveryMismatch is system-only"
+        );
+      }
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET provider_data = provider_data || jsonb_build_object('deliveryMismatch', ?::jsonb),
+               updated_at = ?
+           WHERE id = ? AND status = 'settling' AND type = ANY(?)
+             AND provider_data->'providerSettlement' = ?::jsonb
+           RETURNING id`
+        )
+        .bind(
+          JSON.stringify(mismatch),
+          updatedAt,
+          transferId,
+          [...RAMP_TRANSFER_TYPES],
+          JSON.stringify(providerSettlement)
+        )
+        .first<{ id: string }>();
+      return row !== null;
     },
 
     async markRampTransfersVerificationPolled({ transferIds, polledAt }) {
