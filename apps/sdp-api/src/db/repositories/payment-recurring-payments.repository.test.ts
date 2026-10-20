@@ -7,6 +7,7 @@ import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparti
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { CHECK_VIOLATION } from "@/test/helpers/migration-db";
 import { seedRecurringDatabaseTenant, testSignature } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -225,12 +226,28 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     ).toEqual(before);
   });
 
-  it("clears a step's signature only while its slot still holds that signature", async () => {
+  const PLAN_SLOT: RecurringPaymentStepSignatureSlot = {
+    row: "activation_attempt",
+    column: "plan_creation_signature",
+  };
+  const SETUP_SLOT: RecurringPaymentStepSignatureSlot = {
+    row: "activation_attempt",
+    column: "authorization_setup_signature",
+  };
+  const SIBLING_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
+  const STEP_UPDATED_AT = "2026-06-29T12:05:00.000Z";
+  const UNSIGNED_SLOTS = {
+    plan_creation_signature: null,
+    authorization_setup_signature: null,
+    last_valid_block_height: null,
+  };
+
+  async function createUnsignedActivationAttempt(attemptId: string) {
     const { account, counterparty } = await seedCounterpartyAccount();
     const createdAt = "2026-06-29T12:00:00.000Z";
     const created = required(
       await repo.createRecurringPayment({
-        id: "recpay_repo_clear_signature",
+        id: `recpay_${attemptId}`,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -251,78 +268,198 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         idempotencyFingerprint: null,
       })
     );
-    const attempt = required(
+    return required(
       await repo.createActivationAttempt({
-        id: "prpa_repo_clear_signature",
+        id: attemptId,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         recurringPaymentId: created.id,
         status: "processing",
-        stage: "authorize_subscription",
+        stage: "create_plan",
         planCreationSignature: null,
         authorizationSignature: null,
         error: null,
-        metadata: { authorizationSetupSignature: testSignature(3) },
+        metadata: {},
         createdAt,
         updatedAt: createdAt,
       })
     );
+  }
+
+  async function fillActivationSlots(
+    attemptId: string,
+    slots: {
+      planCreationSignature: string | null;
+      authorizationSetupSignature: string | null;
+      lastValidBlockHeight: string | null;
+    }
+  ) {
     await getDb(env)
-      .prepare("UPDATE payment_recurring_payments SET plan_creation_signature = ? WHERE id = ?")
-      .bind(testSignature(1), created.id)
+      .prepare(
+        `UPDATE payment_recurring_payment_activation_attempts
+            SET plan_creation_signature = ?,
+                authorization_setup_signature = ?,
+                last_valid_block_height = ?::numeric
+          WHERE id = ?`
+      )
+      .bind(
+        slots.planCreationSignature,
+        slots.authorizationSetupSignature,
+        slots.lastValidBlockHeight,
+        attemptId
+      )
       .run();
-    const planSlot: RecurringPaymentStepSignatureSlot = {
-      row: "recurring_payment",
-      column: "plan_creation_signature",
-    };
-    const setupSlot: RecurringPaymentStepSignatureSlot = {
-      row: "activation_attempt",
-      column: "metadata.authorizationSetupSignature",
-    };
+  }
+
+  async function savedActivationSlots(attemptId: string) {
+    return getDb(env)
+      .prepare(
+        `SELECT plan_creation_signature,
+                authorization_setup_signature,
+                last_valid_block_height::text AS last_valid_block_height
+           FROM payment_recurring_payment_activation_attempts
+          WHERE id = ?`
+      )
+      .bind(attemptId)
+      .first<{
+        plan_creation_signature: string | null;
+        authorization_setup_signature: string | null;
+        last_valid_block_height: string | null;
+      }>();
+  }
+
+  it("clears a step's signature and expiry only while its slot still holds that signature", async () => {
+    const attempt = await createUnsignedActivationAttempt("prpa_repo_clear_signature");
+    await fillActivationSlots(attempt.id, {
+      planCreationSignature: testSignature(1),
+      authorizationSetupSignature: testSignature(3),
+      lastValidBlockHeight: "301",
+    });
     const clear = (input: {
       slot: RecurringPaymentStepSignatureSlot;
-      id: string;
       projectId: string;
       signature: string;
     }) =>
       repo.clearStepSignature({
         ...input,
+        id: attempt.id,
         organizationId: TEST_ORG.id,
-        updatedAt: "2026-06-29T12:05:00.000Z",
+        updatedAt: STEP_UPDATED_AT,
       });
-    const savedSignatures = () =>
-      getDb(env)
-        .prepare(
-          `SELECT rp.plan_creation_signature,
-                  a.metadata ->> 'authorizationSetupSignature' AS setup_signature
-             FROM payment_recurring_payments rp
-             JOIN payment_recurring_payment_activation_attempts a ON a.recurring_payment_id = rp.id
-            WHERE rp.id = ?`
-        )
-        .bind(created.id)
-        .first<{ plan_creation_signature: string | null; setup_signature: string | null }>();
 
-    const planHeld = { slot: planSlot, id: created.id, projectId: TEST_PROJECT_ID };
-    const setupHeld = { slot: setupSlot, id: attempt.id, projectId: TEST_PROJECT_ID };
-    expect(await clear({ ...planHeld, signature: testSignature(2) })).toBe(false);
-    expect(await clear({ ...setupHeld, signature: testSignature(2) })).toBe(false);
     expect(
-      await clear({
-        ...planHeld,
-        projectId: `${TEST_PROJECT_ID}_production`,
-        signature: testSignature(1),
-      })
+      await clear({ slot: PLAN_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(2) })
     ).toBe(false);
-    expect(await savedSignatures()).toEqual({
+    expect(
+      await clear({ slot: SETUP_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(1) })
+    ).toBe(false);
+    expect(
+      await clear({ slot: PLAN_SLOT, projectId: SIBLING_PROJECT_ID, signature: testSignature(1) })
+    ).toBe(false);
+    expect(await savedActivationSlots(attempt.id)).toEqual({
       plan_creation_signature: testSignature(1),
-      setup_signature: testSignature(3),
+      authorization_setup_signature: testSignature(3),
+      last_valid_block_height: "301",
     });
 
-    expect(await clear({ ...planHeld, signature: testSignature(1) })).toBe(true);
-    expect(await clear({ ...setupHeld, signature: testSignature(3) })).toBe(true);
-    expect(await savedSignatures()).toEqual({
+    expect(
+      await clear({ slot: PLAN_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(1) })
+    ).toBe(true);
+    expect(await savedActivationSlots(attempt.id)).toEqual({
       plan_creation_signature: null,
-      setup_signature: null,
+      authorization_setup_signature: testSignature(3),
+      last_valid_block_height: null,
+    });
+    expect(
+      await clear({ slot: SETUP_SLOT, projectId: TEST_PROJECT_ID, signature: testSignature(3) })
+    ).toBe(true);
+    expect(await savedActivationSlots(attempt.id)).toEqual(UNSIGNED_SLOTS);
+  });
+
+  describe("setStepSignature", () => {
+    const setPlanSignature = (input: {
+      id: string;
+      projectId: string;
+      signature: string;
+      lastValidBlockHeight: string;
+    }) =>
+      repo.setStepSignature({
+        ...input,
+        slot: PLAN_SLOT,
+        organizationId: TEST_ORG.id,
+        updatedAt: STEP_UPDATED_AT,
+      });
+
+    it("saves the signature and its expiry into an empty slot", async () => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_set_signature");
+
+      const saved = await setPlanSignature({
+        id: attempt.id,
+        projectId: TEST_PROJECT_ID,
+        signature: testSignature(1),
+        lastValidBlockHeight: "301",
+      });
+
+      expect(saved).toBe(true);
+      expect(await savedActivationSlots(attempt.id)).toEqual({
+        plan_creation_signature: testSignature(1),
+        authorization_setup_signature: null,
+        last_valid_block_height: "301",
+      });
+    });
+
+    it.each([
+      {
+        refused: "a slot that already holds a signature",
+        projectId: TEST_PROJECT_ID,
+        held: {
+          planCreationSignature: testSignature(1),
+          authorizationSetupSignature: null,
+          lastValidBlockHeight: "301",
+        },
+        expected: {
+          plan_creation_signature: testSignature(1),
+          authorization_setup_signature: null,
+          last_valid_block_height: "301",
+        },
+      },
+      {
+        refused: "another project's write",
+        projectId: SIBLING_PROJECT_ID,
+        held: {
+          planCreationSignature: null,
+          authorizationSetupSignature: null,
+          lastValidBlockHeight: null,
+        },
+        expected: UNSIGNED_SLOTS,
+      },
+    ])("refuses $refused and leaves the row unchanged", async ({ projectId, held, expected }) => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_set_signature_refused");
+      await fillActivationSlots(attempt.id, held);
+
+      const saved = await setPlanSignature({
+        id: attempt.id,
+        projectId,
+        signature: testSignature(2),
+        lastValidBlockHeight: "302",
+      });
+
+      expect(saved).toBe(false);
+      expect(await savedActivationSlots(attempt.id)).toEqual(expected);
+    });
+
+    it("refuses a block height past u64 through the sdp_u64 domain", async () => {
+      const attempt = await createUnsignedActivationAttempt("prpa_repo_set_signature_u64");
+
+      await expect(
+        setPlanSignature({
+          id: attempt.id,
+          projectId: TEST_PROJECT_ID,
+          signature: testSignature(1),
+          lastValidBlockHeight: "18446744073709551616",
+        })
+      ).rejects.toMatchObject({ code: CHECK_VIOLATION, constraint: "sdp_u64_check" });
+      expect(await savedActivationSlots(attempt.id)).toEqual(UNSIGNED_SLOTS);
     });
   });
 });

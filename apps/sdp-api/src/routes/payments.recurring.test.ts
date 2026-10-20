@@ -4582,6 +4582,54 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
   });
 
+  it("refuses an activation step whose attempt slot another run filled first, sending nothing", async () => {
+    const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const createRepository =
+      paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+    const repositorySpy = vi
+      .spyOn(
+        paymentRecurringPaymentsRepositoryPostgres,
+        "createPostgresPaymentRecurringPaymentsRepository"
+      )
+      .mockImplementation((db) => {
+        const repository = createRepository(db);
+        return {
+          ...repository,
+          setStepSignature: async (input) => {
+            await getDb(env)
+              .prepare(
+                `UPDATE payment_recurring_payment_activation_attempts
+                    SET plan_creation_signature = ?, last_valid_block_height = 77
+                  WHERE id = ?`
+              )
+              .bind(testSignature(9), input.id)
+              .run();
+            return repository.setStepSignature(input);
+          },
+        };
+      });
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    repositorySpy.mockRestore();
+
+    expect(response.status).toBe(409);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT plan_creation_signature, last_valid_block_height::text AS last_valid_block_height
+             FROM payment_recurring_payment_activation_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(recurringPayment.id)
+        .first<{ plan_creation_signature: string | null; last_valid_block_height: string | null }>()
+    ).toEqual({ plan_creation_signature: testSignature(9), last_valid_block_height: "77" });
+  });
+
   it("clears failed authorization signatures when finalization cannot find the subscription", async () => {
     const _sourceSigner = recurringExecution.sourceSigner();
     mockDistinctRecentBlockhashes();
