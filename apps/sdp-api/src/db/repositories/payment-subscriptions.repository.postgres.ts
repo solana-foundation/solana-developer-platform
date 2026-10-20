@@ -87,6 +87,8 @@ const attemptRowSchema = z.object({
   updated_at: z.string(),
 });
 
+const lastConfirmedCollectionSlotSchema = z.object({ slot: z.string().nullable() });
+
 function mapPlanRow(row: Record<string, unknown>): PaymentSubscriptionPlanRow {
   return planRowSchema.parse(row);
 }
@@ -515,6 +517,26 @@ export function createPostgresPaymentSubscriptionsRepository(
         rows: rows.results.map(mapSubscriptionRow),
         total: countRow?.total ?? 0,
       } satisfies ListPaymentSubscriptionsResult;
+    },
+
+    async getLastConfirmedCollectionSlot({ organizationId, projectId, subscriptionId }) {
+      const row = await db
+        .prepare(
+          `SELECT MAX(t.slot)::text AS slot
+             FROM payment_subscription_collection_attempts a
+             JOIN payment_transfers t
+               ON t.id = a.transfer_id
+              AND t.organization_id = a.organization_id
+              AND t.project_id = a.project_id
+            WHERE a.organization_id = ?
+              AND a.project_id = ?
+              AND a.subscription_id = ?
+              AND a.status = 'confirmed'`
+        )
+        .bind(organizationId, projectId, subscriptionId)
+        .first<Record<string, unknown>>();
+      const { slot } = lastConfirmedCollectionSlotSchema.parse(row);
+      return slot === null ? null : BigInt(slot);
     },
 
     async createCollectionAttempt(input: CreatePaymentSubscriptionCollectionAttemptInput) {

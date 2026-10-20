@@ -266,6 +266,15 @@ export interface PaymentSubscriptionsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  /**
+   * The highest slot any of the subscription's confirmed collections landed in, as finalize
+   * recorded it on their transfers; null when none recorded one.
+   */
+  getLastConfirmedCollectionSlot(params: {
+    organizationId: string;
+    projectId: string;
+    subscriptionId: string;
+  }): Promise<bigint | null>;
   createCollectionAttempt(
     input: CreatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;

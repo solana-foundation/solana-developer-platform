@@ -11,6 +11,7 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   assertNever,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
+  COLLECTION_ATTEMPT_STATUSES_FAILABLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
   FAILED_COLLECTION_ATTEMPT_STATUSES,
   hasRecoverableRecurringPaymentCollection,
@@ -31,6 +32,7 @@ import {
   isInstructionForProgram,
   isInstructionWithAccounts,
   isInstructionWithData,
+  isSolanaError,
   type Signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
@@ -345,33 +347,38 @@ function createRecurringCollectionSignedSubmissionStore(input: {
  * is claimed and signed: the pre-image recovery proves the pull against. The answering bank must
  * reach the cluster's confirmed slot and the slot the subscription's last proven pull landed in,
  * so a node behind that pull cannot hand back a pre-image a later dropped pull would read as
- * landed. A read that fails writes nothing, so the cron retries it next tick without a cooldown.
+ * landed. A read that fails writes nothing, so the cron retries it next tick without a cooldown;
+ * an RPC refusal (every endpoint below the floor, say) answers as an RPC error.
  *
  * @param input - The subscription to read.
  * @param input.subscriptionsRepo - The tenant's subscriptions repository.
- * @param input.paymentsRepo - The tenant's payments repository.
  * @param input.organizationId - The subscription's organization.
  * @param input.projectId - The subscription's project.
  * @param input.subscriptionId - The subscription whose last proven pull sets the slot floor.
  * @param input.subscriptionPda - The delegation the pull draws on.
  * @returns The delegation's pre-image.
- * @throws AppError SOLANA_RPC_ERROR when the answer comes from a bank below the floor.
+ * @throws AppError SOLANA_RPC_ERROR when the RPC refuses the read or answers from a bank below
+ *   the floor.
  * @throws AppError CONFLICT when the delegation is not on chain.
  */
 async function readCollectionDelegationPreImage(input: {
   subscriptionsRepo: PaymentSubscriptionsRepository;
-  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
   organizationId: string;
   projectId: string;
   subscriptionId: string;
   subscriptionPda: Address;
 }): Promise<CollectionAttemptDelegationPreImage> {
-  const {
-    accounts: [delegationAccount],
-  } = await readConfirmedAccounts({
-    addresses: [input.subscriptionPda],
-    minContextSlot: await lastProvenCollectionSlot(input),
-  });
+  const minContextSlot = await input.subscriptionsRepo.getLastConfirmedCollectionSlot(input);
+  let read: Awaited<ReturnType<typeof readConfirmedAccounts>>;
+  try {
+    read = await readConfirmedAccounts({ addresses: [input.subscriptionPda], minContextSlot });
+  } catch (error) {
+    if (isSolanaError(error)) {
+      throw solanaRpcError("Recurring payment subscription delegation could not be read; retry");
+    }
+    throw error;
+  }
+  const [delegationAccount] = read.accounts;
   if (!delegationAccount.exists) {
     throw conflict("Recurring payment subscription delegation is not on chain");
   }
@@ -380,51 +387,6 @@ async function readCollectionDelegationPreImage(input: {
     periodStartTs: delegation.currentPeriodStartTs,
     amountPulled: delegation.amountPulledInPeriod,
   };
-}
-
-/**
- * The slot the subscription's most recent confirmed collection landed in, as finalize recorded it
- * on its transfer.
- *
- * @param input - The subscription to look up.
- * @param input.subscriptionsRepo - The tenant's subscriptions repository.
- * @param input.paymentsRepo - The tenant's payments repository.
- * @param input.organizationId - The subscription's organization.
- * @param input.projectId - The subscription's project.
- * @param input.subscriptionId - The subscription.
- * @returns The slot, or null when the subscription has no confirmed collection or its transfer
- *   carries no slot.
- * @throws AppError INTERNAL_ERROR when a confirmed attempt has no transfer.
- */
-async function lastProvenCollectionSlot(input: {
-  subscriptionsRepo: PaymentSubscriptionsRepository;
-  paymentsRepo: ReturnType<typeof createPaymentsRepository>;
-  organizationId: string;
-  projectId: string;
-  subscriptionId: string;
-}): Promise<bigint | null> {
-  const confirmed = await input.subscriptionsRepo.listCollectionAttempts({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    subscriptionId: input.subscriptionId,
-    status: "confirmed",
-    limit: 1,
-    offset: 0,
-  });
-  if (confirmed.rows.length === 0) return null;
-  const [lastConfirmed] = confirmed.rows;
-  if (lastConfirmed.transfer_id === null) {
-    throw internalError("Confirmed collection attempt has no transfer");
-  }
-  const transfer = await input.paymentsRepo.getTransferById({
-    transferId: lastConfirmed.transfer_id,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-  });
-  if (!transfer) {
-    throw internalError("Confirmed collection transfer not found");
-  }
-  return transfer.slot === null ? null : BigInt(transfer.slot);
 }
 
 async function resolveDestinationTokenAccount(input: {
@@ -844,6 +806,34 @@ async function hasRecentCollectionFailure(
 }
 
 /**
+ * Refuses an automated collection whose period failed within the retry cooldown, before its
+ * pre-image read spends RPC calls on a claim the lock would refuse anyway. A manual collection
+ * is never cooled down.
+ *
+ * @param input - The collection about to be claimed.
+ * @param input.subscriptionsRepo - The tenant's subscriptions repository.
+ * @param input.collectionSource - Who starts the collection.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.recurringPayment - The schedule's due cycle.
+ * @param input.attemptedAt - When the collection starts.
+ * @throws AppError CONFLICT while the period is cooling down.
+ */
+async function refuseCoolingDownCollection(input: {
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  collectionSource: RecurringCollectionSource;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: RecurringPaymentCollectionCycleRow;
+  attemptedAt: string;
+}): Promise<void> {
+  if (input.collectionSource !== "automated") return;
+  if (await hasRecentCollectionFailure(input.subscriptionsRepo, input)) {
+    throw conflict("Recurring payment collection is cooling down after a failed attempt");
+  }
+}
+
+/**
  * Claims a due period for a collection: under the lock collectors take before
  * they sign, one transaction writes the attempt (carrying the request's
  * Idempotency-Key, HOO-1918) and the transfer it will submit, linked. Every
@@ -1149,7 +1139,7 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           WHERE id = ?
             AND organization_id = ?
             AND project_id = ?
-            AND status IN ('pending', 'processing', 'failed')`
+            AND status = ANY(?::text[])`
       )
       .bind(
         transfer !== null,
@@ -1161,7 +1151,8 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
         failedAt,
         input.attempt.id,
         input.organizationId,
-        input.projectId
+        input.projectId,
+        [...COLLECTION_ATTEMPT_STATUSES_FAILABLE]
       )
       .run();
     if (attemptRows === 0) {
@@ -1368,7 +1359,9 @@ async function safeJournalRecurringPaymentCollectionError(input: {
   try {
     await journalRecurringPaymentCollectionError(input);
   } catch (journalError) {
-    if (!(journalError instanceof Error)) throw journalError;
+    if (!(journalError instanceof Error) || journalError instanceof ResumedStepUnsettledError) {
+      throw journalError;
+    }
     getLogger().error(
       {
         attempt_id: input.attempt.id,
@@ -1562,6 +1555,18 @@ async function recoverRecurringPaymentCollection(input: {
   });
   switch (step.state) {
     case "dropped":
+      // The tracker saw this signature succeed while the delegation shows no pull: only the
+      // signature can settle it, so it is verified as a landed pull past its expiry.
+      if (isSuccessfulPaymentTransferStatus(transfer.status)) {
+        await adoptRecoveredCollectionAttempt({ ...input, attempt: existing });
+        return finishLandedRecurringPaymentCollection({
+          ...input,
+          attempt: existing,
+          transfer,
+          signature: recoveredSignature,
+          pastExpiry: true,
+        });
+      }
       await markRecurringPaymentCollectionFailedAtomically({
         env: input.env,
         organizationId: input.organizationId,
@@ -1583,7 +1588,9 @@ async function recoverRecurringPaymentCollection(input: {
         attempt: existing,
         transfer,
         signature: recoveredSignature,
-        blockHeight: step.blockHeight,
+        pastExpiry:
+          transfer.last_valid_block_height !== null &&
+          step.blockHeight > BigInt(transfer.last_valid_block_height),
       });
     case "unsent":
       throw internalError("Recurring payment collection read its saved pull as unsent");
@@ -1679,13 +1686,13 @@ async function adoptRecoveredCollectionAttempt(input: {
 /**
  * Finalizes a recovered pull the step reader saw land: re-reads the schedule and subscription,
  * verifies the confirmed transaction against them, and confirms the transfer and attempt and
- * advances the due date in one transaction. The delegation shows a pull, but only the signature
- * proves it was this attempt's: until the saved send's expiry an unproven one stays pending. Past
- * it, a signature that failed on chain or carries another instruction contradicts the pre-image,
- * so it is logged and the attempt failed; the program's per-period cap refuses a second pull in
- * the same period, so the retry cannot charge twice. A signature still not indexed past expiry is
- * logged and stays pending: the pool may lack the transaction's history, and failing a pull that
- * moved money would retry it into the next period.
+ * advances the due date in one transaction. Only the signature proves the pull was this
+ * attempt's: until the saved send's expiry an unproven one stays pending. Past it, a signature
+ * that failed on chain cannot have moved money, so it is logged and the attempt failed; the
+ * program's per-period cap refuses a second pull in the same period. A signature still not
+ * indexed, or one whose instruction the matcher does not recognize (a transfer-hook account
+ * resolved differently since), may still be a pull that moved money, and failing it would retry
+ * it into the next period, so it is logged by kind and stays pending.
  *
  * @param input - The recovered attempt and the schedule it collects for.
  * @param input.env - The API environment.
@@ -1699,7 +1706,7 @@ async function adoptRecoveredCollectionAttempt(input: {
  * @param input.attempt - The recovered attempt.
  * @param input.transfer - The attempt's transfer.
  * @param input.signature - The landed pull's signature.
- * @param input.blockHeight - The `confirmed` block height the step read saw.
+ * @param input.pastExpiry - Whether the step read saw the chain past the saved send's expiry.
  * @returns The finalized rows, or null when the attempt was failed.
  * @throws ResumedStepUnsettledError when the pull is not proven and the attempt stays in flight.
  */
@@ -1715,7 +1722,7 @@ async function finishLandedRecurringPaymentCollection(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow;
   signature: Signature;
-  blockHeight: bigint;
+  pastExpiry: boolean;
 }): Promise<{
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
@@ -1768,8 +1775,7 @@ async function finishLandedRecurringPaymentCollection(input: {
       proof: verification.proof,
     });
   }
-  const expiry = input.transfer.last_valid_block_height;
-  if (expiry === null || input.blockHeight <= BigInt(expiry)) {
+  if (!input.pastExpiry) {
     throw new ResumedStepUnsettledError();
   }
   const unproven = {
@@ -1778,22 +1784,32 @@ async function finishLandedRecurringPaymentCollection(input: {
     recurring_payment_id: input.recurringPayment.id,
     attempt_id: input.attempt.id,
     transfer_id: input.transfer.id,
+    transfer_status: input.transfer.status,
     signature: input.signature,
-    reason: verification.kind,
-    block_height: input.blockHeight.toString(),
-    last_valid_block_height: expiry,
+    last_valid_block_height: input.transfer.last_valid_block_height,
   };
-  if (verification.kind === "not_indexed") {
-    logEvent("error", {
-      event: "sdp_api_recurring_payment_collection_unindexed_past_expiry",
-      ...unproven,
-    });
-    throw new ResumedStepUnsettledError();
+  switch (verification.kind) {
+    case "not_indexed":
+      logEvent("error", {
+        event: "sdp_api_recurring_payment_collection_unindexed_past_expiry",
+        ...unproven,
+      });
+      throw new ResumedStepUnsettledError();
+    case "instruction_mismatch":
+      logEvent("error", {
+        event: "sdp_api_recurring_payment_collection_instruction_mismatch_past_expiry",
+        ...unproven,
+      });
+      throw new ResumedStepUnsettledError();
+    case "failed_on_chain":
+      logEvent("error", {
+        event: "sdp_api_recurring_payment_collection_failed_on_chain_past_expiry",
+        ...unproven,
+      });
+      break;
+    default:
+      return assertNever(verification);
   }
-  logEvent("error", {
-    event: "sdp_api_recurring_payment_collection_unproven_past_expiry",
-    ...unproven,
-  });
   await markRecurringPaymentCollectionFailedAtomically({
     env: input.env,
     organizationId: input.organizationId,
@@ -1970,9 +1986,16 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Subscription must be active before collection");
     }
 
+    await refuseCoolingDownCollection({
+      subscriptionsRepo,
+      collectionSource: input.collectionSource,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment,
+      attemptedAt: nowIso,
+    });
     const delegationPreImage = await readCollectionDelegationPreImage({
       subscriptionsRepo,
-      paymentsRepo,
       organizationId: input.organizationId,
       projectId: input.projectId,
       subscriptionId: subscription.id,

@@ -854,6 +854,12 @@ export const COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER = [
 export const FAILED_COLLECTION_ATTEMPT_STATUSES = [
   "failed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+/** The collection attempts a failure may still be written on: not confirmed or skipped. */
+export const COLLECTION_ATTEMPT_STATUSES_FAILABLE = [
+  "pending",
+  "processing",
+  "failed",
+] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
 export const COLLECTION_ATTEMPT_INITIAL_STATUSES = [
   "processing",
   "failed",
