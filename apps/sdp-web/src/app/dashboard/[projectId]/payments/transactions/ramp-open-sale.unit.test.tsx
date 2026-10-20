@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -11,7 +12,7 @@ import type { PaymentTransferDetail } from "./transaction-detail.data";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-const DEVNET_USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const DEVNET_USDC = wellKnownMint("USDC", "devnet") ?? "";
 const DEPOSIT_ADDRESS = "2HWz9YwbM56YK1EazmmxFivwRs4n8KND7c1p8eYxS2Ao";
 
 function wrapper({ children }: { children: ReactNode }) {

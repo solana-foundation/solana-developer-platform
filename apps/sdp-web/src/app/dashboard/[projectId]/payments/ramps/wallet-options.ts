@@ -1,3 +1,4 @@
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { ComboboxOption } from "@sdp/ui/combobox";
 import {
@@ -41,9 +42,10 @@ export function exceedsWalletBalance(
   token: string,
   amount: string
 ): boolean {
-  if (!wallet || amount.trim() === "") return false;
+  const wanted = amount.trim();
+  if (!wallet || !isDecimalString(wanted)) return false;
   const held = findWalletBalanceForToken(wallet, token)?.uiAmount ?? "0";
-  return Number(amount) > Number(held);
+  return isDecimalString(held) && compareDecimalAmounts(wanted, held) > 0;
 }
 
 export function walletBalanceAssetOptions(
