@@ -16,7 +16,7 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@jup-ag/lend": "0.3.0",
+    "@jup-ag/lend": "0.4.0",
     "@sdp/earn": "workspace:*",
     "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@types/bn.js": "5.2.0",
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.5",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   }

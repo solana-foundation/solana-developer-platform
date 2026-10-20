@@ -194,16 +194,16 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@base-ui/react": "1.8.0",
+    "@base-ui/react": "1.9.0",
     "@sdp/design-tokens": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@solana/design-system": "1.0.1",
     "clsx": "2.1.1",
     "date-fns": "4.4.0",
-    "lucide-react": "1.48.0",
+    "lucide-react": "1.55.0",
     "motion": "13.4.4",
-    "radix-ui": "1.6.7",
-    "react-day-picker": "10.0.1",
+    "radix-ui": "1.8.1",
+    "react-day-picker": "10.0.2",
     "tailwind-merge": "3.7.0"
   },
   "peerDependencies": {
@@ -215,7 +215,7 @@
     "@testing-library/user-event": "14.6.7",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "jsdom": "30.1.1",
+    "jsdom": "30.1.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "typescript": "6.0.3",

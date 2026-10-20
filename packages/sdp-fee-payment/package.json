@@ -38,7 +38,7 @@
     "@solana/kora": "0.3.0-beta.3"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.5",
     "tsx": "4.23.15",
     "typescript": "6.0.3"
   }
