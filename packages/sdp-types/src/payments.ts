@@ -1367,11 +1367,37 @@ export interface RampProviderEstimateRefusal {
   reason: StagedProviderRefusalReason;
 }
 
+/** Why a provider refuses an amount for a pair. */
+export const RAMP_AMOUNT_LIMIT_REASONS = ["amount_below_minimum", "amount_above_maximum"] as const;
+export type RampAmountLimitReason = (typeof RAMP_AMOUNT_LIMIT_REASONS)[number];
+
+export function isRampAmountLimitReason(value: unknown): value is RampAmountLimitReason {
+  return (
+    typeof value === "string" && (RAMP_AMOUNT_LIMIT_REASONS as readonly string[]).includes(value)
+  );
+}
+
+/** The bound an amount crossed, in the currency the amount was given in. */
+export interface RampAmountLimit {
+  amount: string;
+  currency: string;
+}
+
+/** The provider takes no such amount for this pair: a refusal with its bound, not a fault. */
+export interface RampProviderEstimateOutOfRange {
+  provider: RampProviderId;
+  status: "error";
+  error: string;
+  reason: RampAmountLimitReason;
+  limit: RampAmountLimit;
+}
+
 export type RampProviderEstimateResult =
   | RampProviderEstimateSuccess
   | RampProviderEstimateUnsupported
   | RampProviderEstimateFailure
-  | RampProviderEstimateRefusal;
+  | RampProviderEstimateRefusal
+  | RampProviderEstimateOutOfRange;
 
 export interface PaymentRampEstimateEnvelope {
   data?: {

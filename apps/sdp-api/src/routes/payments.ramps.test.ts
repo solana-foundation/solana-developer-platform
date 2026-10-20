@@ -20,6 +20,7 @@ import {
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { stubOfframpQuoteReads } from "@/test/helpers/offramp-quote";
 import {
   installPaymentsRouteTestHooks,
   seedCachedKey,
@@ -719,6 +720,7 @@ describe("Payments routes — ramps", () => {
 
   it("creates a hosted MoonPay off-ramp quote with the transfer id", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_offramp_quote" });
+    stubOfframpQuoteReads();
 
     const response = await app.request(
       "/v1/payments/ramps/offramp/quote",
@@ -784,6 +786,7 @@ describe("Payments routes — ramps", () => {
 
   it("quotes MoonPay USDC on Solana in both directions", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_usdc_quotes" });
+    stubOfframpQuoteReads();
     const hostedQuoteSchema = z.object({
       data: z.object({ quote: z.object({ hostedUrl: z.string() }) }),
     });

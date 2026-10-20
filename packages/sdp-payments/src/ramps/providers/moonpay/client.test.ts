@@ -5,7 +5,7 @@ import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types
 import { type CryptoRailId, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import type { PaymentRampQuote } from "@sdp/types/payments";
 import { addDecimalAmounts, subtractDecimalAmounts } from "#/decimal";
-import { SdpPaymentsError } from "#/errors";
+import { rampAmountLimitOf, SdpPaymentsError } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
 import { replayExchanges } from "#/ramps/test-kit";
 import type {
@@ -174,6 +174,91 @@ describe("MoonpayRampClient currency codes", () => {
       client.createOfframpQuote(runtimeContext, { ...offrampInput, assetRail }),
       unsupported
     );
+  });
+});
+
+describe("MoonpayRampClient off-ramp limits", () => {
+  // MoonPay's sandbox answers, 2026-10-20: a sale under the minimum is a 400
+  // naming it, while one over the maximum still quotes.
+  const UNDER_MINIMUM = {
+    errors: [
+      { property: "minSellFiatAmount", message: "16.18043935029837951066", children: [] },
+      { property: "fiatCurrencyCode", message: "usd", children: [] },
+      { property: "minSellCryptoAmount", message: "19.92405", children: [] },
+      { property: "cryptoCurrencyCode", message: "usdc_sol", children: [] },
+    ],
+    message: "The minimum order amount is 19.92405 USDC_SOL / $16.18",
+    type: "BadRequestError",
+  };
+  const SELL_QUOTE = {
+    baseCurrencyAmount: 25,
+    quoteCurrencyAmount: 20.69,
+    baseCurrencyPrice: 0.9873727923981503,
+    feeAmount: 3.99,
+    extraFeeAmount: 0,
+    baseCurrency: { code: "usdc_sol", minSellAmount: 19.92405, maxSellAmount: 10000 },
+  };
+
+  function answer(status: number, body: unknown): void {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+  }
+
+  function estimateUsdc(cryptoAmount: string) {
+    return new MoonpayRampClient().estimateOfframp(runtimeContext, {
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      cryptoAmount,
+    });
+  }
+
+  it("names MoonPay's minimum when it refuses a sale under it", async () => {
+    answer(400, UNDER_MINIMUM);
+
+    await assert.rejects(estimateUsdc("5"), (error: unknown) => {
+      assert.deepEqual(rampAmountLimitOf(error), {
+        reason: "amount_below_minimum",
+        limit: { amount: "19.92405", currency: "USDC" },
+      });
+      assert.ok(error instanceof SdpPaymentsError);
+      assert.doesNotMatch(error.message, /USDC_SOL/);
+      return true;
+    });
+  });
+
+  it("refuses a sale over the maximum MoonPay would still quote", async () => {
+    answer(200, { ...SELL_QUOTE, baseCurrencyAmount: 10001 });
+
+    await assert.rejects(estimateUsdc("10001"), (error: unknown) => {
+      assert.deepEqual(rampAmountLimitOf(error), {
+        reason: "amount_above_maximum",
+        limit: { amount: "10000", currency: "USDC" },
+      });
+      return true;
+    });
+  });
+
+  it("quotes the payout for a sale inside both bounds", async () => {
+    answer(200, SELL_QUOTE);
+
+    const estimate = await estimateUsdc("25");
+
+    assert.equal(estimate.fiatAmount, "20.69");
+    assert.equal(estimate.cryptoAmount, "25");
+  });
+
+  it("keeps any other refusal a plain provider error", async () => {
+    answer(400, { message: "Invalid currency", type: "BadRequestError" });
+
+    await assert.rejects(estimateUsdc("25"), (error: unknown) => {
+      assert.equal(rampAmountLimitOf(error), null);
+      assert.ok(error instanceof SdpPaymentsError);
+      assert.equal(error.code, "BAD_REQUEST");
+      return true;
+    });
   });
 });
 

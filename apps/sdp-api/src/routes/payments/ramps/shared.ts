@@ -1,5 +1,5 @@
 import type { CounterpartyRow } from "@sdp/payments/counterparty";
-import { SdpPaymentsError } from "@sdp/payments/errors";
+import { rampAmountLimitOf, SdpPaymentsError } from "@sdp/payments/errors";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction/credentials";
 import { isStagedProviderRefusalReason } from "@sdp/types/custody";
@@ -314,6 +314,10 @@ export async function estimateAcrossProviders(
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
+        }
+        const outOfRange = rampAmountLimitOf(error);
+        if (outOfRange !== null && error instanceof Error) {
+          return { provider, status: "error", error: error.message, ...outOfRange };
         }
         const cause = error instanceof Error ? error : new Error(String(error));
         logEvent("error", {

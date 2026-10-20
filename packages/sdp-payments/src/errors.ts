@@ -1,4 +1,9 @@
-import type { RampDirection } from "@sdp/types/payments";
+import {
+  isRampAmountLimitReason,
+  type RampAmountLimit,
+  type RampAmountLimitReason,
+  type RampDirection,
+} from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 
@@ -94,6 +99,51 @@ export function providerUnavailable(
   diagnostics?: Record<string, unknown>
 ): SdpPaymentsError {
   return new SdpPaymentsError("PROVIDER_UNAVAILABLE", message, details, diagnostics);
+}
+
+const AMOUNT_LIMIT_MESSAGES: Record<RampAmountLimitReason, string> = {
+  amount_below_minimum: "Amount is below this provider's minimum of",
+  amount_above_maximum: "Amount is above this provider's maximum of",
+};
+
+/**
+ * A provider refuses the amount for this pair. The bound rides in `details`
+ * so a caller can say what amount would work.
+ *
+ * @param reason - Which bound the amount crossed.
+ * @param limit - The bound, in the currency the amount was given in.
+ * @returns The 400 to throw.
+ */
+export function rampAmountOutOfRange(
+  reason: RampAmountLimitReason,
+  limit: RampAmountLimit
+): SdpPaymentsError {
+  return new SdpPaymentsError(
+    "BAD_REQUEST",
+    `${AMOUNT_LIMIT_MESSAGES[reason]} ${limit.amount} ${limit.currency}`,
+    { reason, limit }
+  );
+}
+
+/** The bound a `rampAmountOutOfRange` error carries, or null for any other error. */
+export function rampAmountLimitOf(
+  error: unknown
+): { reason: RampAmountLimitReason; limit: RampAmountLimit } | null {
+  if (!(error instanceof SdpPaymentsError) || error.code !== "BAD_REQUEST") return null;
+  const reason = error.details?.reason;
+  const limit = error.details?.limit;
+  if (
+    !isRampAmountLimitReason(reason) ||
+    typeof limit !== "object" ||
+    limit === null ||
+    !("amount" in limit) ||
+    !("currency" in limit) ||
+    typeof limit.amount !== "string" ||
+    typeof limit.currency !== "string"
+  ) {
+    return null;
+  }
+  return { reason, limit: { amount: limit.amount, currency: limit.currency } };
 }
 
 export function estimateNotAvailable(

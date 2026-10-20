@@ -1,3 +1,4 @@
+import { rampAmountLimitOf } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { OFFRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { PaymentRampQuote } from "@sdp/types/payments";
@@ -28,6 +29,7 @@ import {
   type estimateOfframpSchema,
   listOfframpCurrenciesQuerySchema,
 } from "./schemas";
+import { assertOfframpSourceFunded } from "./source-funds";
 
 type OfframpCurrencyPair = {
   source: (typeof OFFRAMP_SUPPORT)[number]["source"];
@@ -92,6 +94,24 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   let precreatedTransferId: string | undefined;
   switch (input.provider) {
     case "moonpay": {
+      const fiatCurrency = input.fiatCurrency ?? "USD";
+      const token = rampTransferTokenMint(input.assetRail);
+      // One provider estimate and one balance read, side by side, before any
+      // row: the estimate is the payout SDP quotes and refuses an amount
+      // MoonPay would not take; the read refuses a sale the wallet cannot fund.
+      const [estimated, funded] = await Promise.allSettled([
+        RAMP_PROVIDER_CLIENTS.moonpay.estimateOfframp(rampRuntime(c), {
+          assetRail: input.assetRail,
+          fiatCurrency,
+          cryptoAmount: input.cryptoAmount,
+        }),
+        assertOfframpSourceFunded(sourceWalletAddress, token, input.cryptoAmount),
+      ]);
+      if (estimated.status === "rejected" && rampAmountLimitOf(estimated.reason) !== null) {
+        throw estimated.reason;
+      }
+      if (funded.status === "rejected") throw funded.reason;
+      if (estimated.status === "rejected") throw estimated.reason;
       const apiKey = c.get("apiKey");
       const pendingMoonpayTransfer = await getPaymentsRepository(c).createTransfer({
         id: reservedTransferId,
@@ -102,7 +122,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: sourceWalletAddress,
         destinationAddress: null,
-        token: rampTransferTokenMint(input.assetRail),
+        token,
         amount: input.cryptoAmount,
         memo: null,
         type: "offramp",
@@ -111,8 +131,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         provider: "moonpay",
         providerReference: null,
         deliveryMode: null,
-        fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
-        fiatAmount: null,
+        fiatCurrency,
+        fiatAmount: estimated.value.fiatAmount,
         rampsMemo: input.rampsMemo,
         providerData: {},
         serializedTx: null,
@@ -127,7 +147,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       try {
         quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOfframpQuote(rampRuntime(c), {
           assetRail: input.assetRail,
-          fiatCurrency: input.fiatCurrency,
+          fiatCurrency,
           cryptoAmount: input.cryptoAmount,
           sourceWalletAddress,
           externalCustomerId: counterparty.id,

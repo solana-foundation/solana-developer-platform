@@ -1,14 +1,18 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Counterparty } from "@sdp/types/counterparties";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
-import type { CryptoRailId, RampCurrencyLimit } from "@sdp/types/payment-rails";
+import {
+  type CryptoRailId,
+  getCryptoRailAssetLabel,
+  type RampCurrencyLimit,
+} from "@sdp/types/payment-rails";
 import type { PaymentRampEstimate, PaymentRampQuote, RampTransferType } from "@sdp/types/payments";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@solana/kit";
 import { z } from "zod";
-import { compareDecimalAmounts, sumDecimalAmounts } from "#/decimal";
-import { providerNotConfigured, SdpPaymentsError } from "#/errors";
-import { providerFetchJson } from "#/ramps/fetch";
+import { compareDecimalAmounts, decimalStringFromNumber, sumDecimalAmounts } from "#/decimal";
+import { providerNotConfigured, rampAmountOutOfRange, SdpPaymentsError } from "#/errors";
+import { providerFetch, providerFetchJson, readProviderJson } from "#/ramps/fetch";
 import { readyCounterparty } from "#/ramps/requirements";
 import {
   isActiveIso4217CurrencyCode,
@@ -71,7 +75,17 @@ const moonpaySellQuoteSchema = z.object({
   baseCurrencyPrice: z.number(),
   feeAmount: z.number(),
   extraFeeAmount: z.number(),
+  // MoonPay quotes a sale over its maximum, so SDP reads the bound itself.
+  baseCurrency: z.object({ maxSellAmount: z.number().nullish() }).optional(),
 });
+
+/** The minimum, in the crypto sold, that MoonPay names when it refuses a sale under it. */
+const moonpaySellMinimumSchema = z
+  .object({ errors: z.array(z.object({ property: z.string(), message: z.string() })) })
+  .transform(
+    (body) => body.errors.find((entry) => entry.property === "minSellCryptoAmount")?.message
+  )
+  .pipe(z.string().regex(/^\d+(\.\d+)?$/));
 
 /** The env keys SDP's managed MoonPay credentials and widget overrides live under. */
 interface MoonpayManagedEnv {
@@ -217,12 +231,16 @@ const MOONPAY_ONRAMP_LIMITS: ReadonlyMap<string, RampCurrencyLimit> = new Map(
   Object.entries(RAMP_PROVIDER_SUPPORT_DETAILS.moonpay.onramp.currencies)
 );
 
-function compareMoonpayFiatAmount(fiatAmount: string, bound: string): number {
+function compareMoonpayAmount(
+  field: "fiatAmount" | "cryptoAmount",
+  amount: string,
+  bound: string
+): number {
   try {
-    return compareDecimalAmounts(fiatAmount, bound);
+    return compareDecimalAmounts(amount, bound);
   } catch (error) {
     if (isSolanaError(error, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE)) {
-      throw new SdpPaymentsError("BAD_REQUEST", "fiatAmount is out of range");
+      throw new SdpPaymentsError("BAD_REQUEST", `${field} is out of range`);
     }
     throw error;
   }
@@ -233,13 +251,13 @@ function assertMoonpayOnrampAmount(fiatCurrency: RampFiatCurrency, fiatAmount: s
   if (limit === undefined) {
     throw new SdpPaymentsError("BAD_REQUEST", `MoonPay on-ramp does not support ${fiatCurrency}`);
   }
-  if (limit.min !== null && compareMoonpayFiatAmount(fiatAmount, limit.min) < 0) {
+  if (limit.min !== null && compareMoonpayAmount("fiatAmount", fiatAmount, limit.min) < 0) {
     throw new SdpPaymentsError(
       "BAD_REQUEST",
       `MoonPay on-ramp requires fiatAmount to be at least ${limit.min} ${fiatCurrency}`
     );
   }
-  if (limit.max !== null && compareMoonpayFiatAmount(fiatAmount, limit.max) > 0) {
+  if (limit.max !== null && compareMoonpayAmount("fiatAmount", fiatAmount, limit.max) > 0) {
     throw new SdpPaymentsError(
       "BAD_REQUEST",
       `MoonPay on-ramp requires fiatAmount to be at most ${limit.max} ${fiatCurrency}`
@@ -570,12 +588,29 @@ export class MoonpayRampClient implements RampProvider {
     url.searchParams.set("apiKey", config.apiKey);
     url.searchParams.set("quoteCurrencyCode", input.fiatCurrency.toLowerCase());
     url.searchParams.set("baseCurrencyAmount", input.cryptoAmount);
-    const quote = await providerFetchJson(
-      this.id,
-      url.toString(),
-      { method: "GET" },
-      moonpaySellQuoteSchema
-    );
+    const answer = await providerFetch(this.id, url.toString(), { method: "GET" });
+    const asset = getCryptoRailAssetLabel(input.assetRail);
+    if (answer.response.status === 400) {
+      const minimum = moonpaySellMinimumSchema.safeParse(answer.parsed);
+      if (minimum.success) {
+        throw rampAmountOutOfRange("amount_below_minimum", {
+          amount: minimum.data,
+          currency: asset,
+        });
+      }
+    }
+    const quote = readProviderJson(this.id, answer, moonpaySellQuoteSchema);
+    const maximum = quote.baseCurrency?.maxSellAmount;
+    if (
+      maximum !== undefined &&
+      maximum !== null &&
+      compareMoonpayAmount("cryptoAmount", input.cryptoAmount, decimalStringFromNumber(maximum)) > 0
+    ) {
+      throw rampAmountOutOfRange("amount_above_maximum", {
+        amount: decimalStringFromNumber(maximum),
+        currency: asset,
+      });
+    }
     return {
       provider: this.id,
       direction: "offramp",
