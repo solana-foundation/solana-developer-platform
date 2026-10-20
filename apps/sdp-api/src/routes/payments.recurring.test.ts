@@ -1178,6 +1178,31 @@ describe("Payments routes — recurring", () => {
     });
   });
 
+  it("finishes a metadata update refused as a stale approval once the plan shows the new URI", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const metadataUri = "https://example.com/recurring/already-written.json";
+    sendTransactionMock.mockRejectedValueOnce(
+      sendTransactionPreflightError(subscriptionsProgram.SUBSCRIPTIONS_ERROR__STALE_PLAN_APPROVAL)
+    );
+    recurringExecution.showChain({
+      ...DEFAULT_RECURRING_CHAIN,
+      plan: () => ({ createdAt: 1_770_000_000n, metadataUri }),
+    });
+
+    const update = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ metadataUri }) },
+      env
+    );
+
+    expect(update.status).toBe(200);
+    expect((await parseRecurringResponse(update)).data.recurringPayment).toMatchObject({
+      status: "active",
+      metadataUri,
+    });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+  });
+
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const replacementCustodyWalletId = "cwlt_recurring_replacement";
