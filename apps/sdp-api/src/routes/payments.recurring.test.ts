@@ -21,7 +21,6 @@ import {
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
-  removeNullCharacters,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   signature,
@@ -92,6 +91,7 @@ import {
   parseRecurringResponse,
   poolSentSignatures,
   RECURRING_HEADERS,
+  type RecurringChainView,
   rejectPoolSendAfter,
   seedRecurringCollectionJournal,
   setRecurringCollectionDue,
@@ -6722,7 +6722,7 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).not.toBe("active");
       });
 
-      it("keeps a resumed metadata update in flight when the chain read fails, then resends it expecting the recorded plan", async () => {
+      it("keeps a resumed metadata update in flight when the chain read fails", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
         const metadataUri = "https://example.com/recurring/unsettled.json";
@@ -6733,15 +6733,9 @@ describe("Payments routes — recurring", () => {
             env
           );
         sendTransactionMock.mockRejectedValueOnce(new Error("process died after broadcast"));
-        expect((await request()).status).toBe(500);
+        expect((await request()).status).toBe(409);
+        const planUpdateSignature = required(poolSentSignatures()[2]);
         await leaveUpdateCrashedAt(activated.id, key);
-        await getDb(env)
-          .prepare(
-            `UPDATE payment_recurring_payment_update_attempts SET stage = 'update_plan'
-              WHERE recurring_payment_id = ?`
-          )
-          .bind(activated.id)
-          .run();
         recurringExecution.rpc.respond("getEpochInfo", () => ({
           error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "Internal error" },
         }));
@@ -6755,45 +6749,19 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
         const attempt = await getDb(env)
           .prepare(
-            "SELECT status FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+            `SELECT status, stage, plan_update_signature
+               FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?`
           )
           .bind(activated.id)
-          .first<{ status: PaymentRecurringPaymentAttemptStatus }>();
-        expect(attempt?.status).toBe("processing");
-
-        await leaveUpdateCrashedAt(activated.id, key);
-        await getDb(env)
-          .prepare(
-            `UPDATE payment_recurring_payment_update_attempts
-                SET plan_update_signature = NULL, last_valid_block_height = NULL
-              WHERE recurring_payment_id = ?`
-          )
-          .bind(activated.id)
-          .run();
-        // Recreated outside this attempt: neither the recorded plan nor the target.
-        recurringExecution.showChain({
-          ...DEFAULT_RECURRING_CHAIN,
-          plan: () => ({
-            createdAt: 1_770_000_001n,
-            metadataUri: "https://example.com/recurring/elsewhere.json",
-          }),
-        });
-
-        await request();
-
-        expect(sent).toHaveBeenCalledTimes(1);
-        const [{ instructions }] = required(sent.mock.calls[0]);
-        const { updatePlanData } = subscriptionsProgram
-          .getUpdatePlanInstructionDataDecoder()
-          .decode(required(required(instructions[0]).data));
-        expect({
-          expectedCreatedAt: updatePlanData.expectedCreatedAt,
-          expectedMetadataUri: removeNullCharacters(updatePlanData.expectedMetadataUri),
-          metadataUri: removeNullCharacters(updatePlanData.metadataUri),
-        }).toEqual({
-          expectedCreatedAt: 1_770_000_000n,
-          expectedMetadataUri: "",
-          metadataUri,
+          .first<{
+            status: PaymentRecurringPaymentAttemptStatus;
+            stage: PaymentRecurringPaymentUpdateAttemptStage;
+            plan_update_signature: string | null;
+          }>();
+        expect(attempt).toEqual({
+          status: "processing",
+          stage: "update_plan",
+          plan_update_signature: planUpdateSignature,
         });
       });
 
@@ -6931,8 +6899,13 @@ describe("Payments routes — recurring", () => {
       it("finishes an update whose old-subscription cancel went out with no answer, without sending it again", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         // The plan and the subscription land; the old subscription's cancel is
-        // sent and its answer is lost.
+        // sent, its answer is lost, and the chain does not show it yet.
         rejectPoolSendAfter(2, new Error("RPC response lost"));
+        delegationsBesideActiveOld(
+          required(activated.subscriptionPda),
+          0n,
+          DEFAULT_RECURRING_CHAIN
+        );
         const key = crypto.randomUUID();
         const request = () =>
           app.request(
@@ -6940,7 +6913,7 @@ describe("Payments routes — recurring", () => {
             { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
             env
           );
-        expect((await request()).status).toBe(500);
+        expect((await request()).status).toBe(409);
         const [, , , authorizationSignature, oldCancelSignature] = poolSentSignatures();
         const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
         await getDb(env)
@@ -7016,73 +6989,87 @@ describe("Payments routes — recurring", () => {
         await crashIdempotencyKey(key);
       }
 
-      /** Delegations by address: the old subscription active, any other at `otherExpiresAtTs`. */
+      /**
+       * Delegations by address at `tip`: the old subscription active, any other at
+       * `otherExpiresAtTs`.
+       */
       function delegationsBesideActiveOld(
         oldSubscriptionPda: string,
-        otherExpiresAtTs: bigint | null
+        otherExpiresAtTs: bigint | null,
+        tip: Pick<RecurringChainView, "absoluteSlot" | "blockHeight">
       ) {
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
+          absoluteSlot: tip.absoluteSlot,
+          blockHeight: tip.blockHeight,
           delegation: (subscriptionPda) =>
             subscriptionPda === oldSubscriptionPda ? 0n : otherExpiresAtTs,
         });
       }
 
-      it("finishes an update whose replacement plan landed without sending it again", async () => {
+      it("continues an update whose replacement plan send failed but landed, without sending it again", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        sendTransactionMock.mockRejectedValueOnce(new Error("process died after broadcast"));
-        const key = crypto.randomUUID();
-        const request = () =>
-          app.request(
-            actionPath(activated.id),
-            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
-            env
-          );
-        expect((await request()).status).toBe(500);
-        await leaveUpdateCrashedAt(activated.id, key);
+        sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
         // The plan is on chain (the default plan read); no replacement subscription yet.
-        delegationsBesideActiveOld(required(activated.subscriptionPda), null);
+        delegationsBesideActiveOld(
+          required(activated.subscriptionPda),
+          null,
+          DEFAULT_RECURRING_CHAIN
+        );
         const sent = sends();
 
-        const retry = await request();
+        const update = await app.request(
+          actionPath(activated.id),
+          {
+            method: "PATCH",
+            headers: keyed(crypto.randomUUID()),
+            body: JSON.stringify({ amount: "35.00" }),
+          },
+          env
+        );
 
-        expect(retry.status).toBe(200);
-        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+        expect(update.status).toBe(200);
+        expect((await parseRecurringResponse(update)).data.recurringPayment).toMatchObject({
           status: "active",
           amount: "35.00",
           planCreationSignature: poolSentSignatures()[2],
         });
-        // Subscribe and the old subscription's cancel; the plan is not sent again.
-        expect(sent).toHaveBeenCalledTimes(2);
+        // The plan, then subscribe and the old subscription's cancel; the plan is not sent again.
+        expect(sent).toHaveBeenCalledTimes(3);
+        expect(poolSentSignatures()).toHaveLength(5);
       });
 
-      it("finishes an update whose replacement subscription landed without sending it again", async () => {
+      it("continues an update whose replacement subscription send failed but landed, without sending it again", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        rejectPoolSendAfter(1, new Error("process died after broadcast"));
-        const key = crypto.randomUUID();
-        const request = () =>
-          app.request(
-            actionPath(activated.id),
-            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
-            env
-          );
-        expect((await request()).status).toBe(500);
-        await leaveUpdateCrashedAt(activated.id, key);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
         // The replacement subscription is on chain and active; the old one still active.
-        delegationsBesideActiveOld(required(activated.subscriptionPda), 0n);
+        delegationsBesideActiveOld(
+          required(activated.subscriptionPda),
+          0n,
+          DEFAULT_RECURRING_CHAIN
+        );
         const sent = sends();
 
-        const retry = await request();
+        const update = await app.request(
+          actionPath(activated.id),
+          {
+            method: "PATCH",
+            headers: keyed(crypto.randomUUID()),
+            body: JSON.stringify({ amount: "35.00" }),
+          },
+          env
+        );
 
-        expect(retry.status).toBe(200);
-        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+        expect(update.status).toBe(200);
+        expect((await parseRecurringResponse(update)).data.recurringPayment).toMatchObject({
           status: "active",
           amount: "35.00",
           planCreationSignature: poolSentSignatures()[2],
           authorizationSignature: poolSentSignatures()[3],
         });
-        // Only the old subscription's cancel.
-        expect(sent).toHaveBeenCalledTimes(1);
+        // The plan, subscribe, then only the old subscription's cancel.
+        expect(sent).toHaveBeenCalledTimes(3);
+        expect(poolSentSignatures()).toHaveLength(5);
       });
 
       it("finishes a stale activation whose subscription landed without sending it again", async () => {
