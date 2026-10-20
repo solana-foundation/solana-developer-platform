@@ -225,6 +225,9 @@ records its outcome after all, which is then replayed). A released claim (a refu
     replayed for 24 hours with `Idempotent-Replayed: true`. Only after the key expires does the same
     key run the action again, because the failed attempt row no longer answers it. To try sooner,
     send a new key.
+- An off-ramp deposit that fails before anything is signed puts its row back as it was
+  (`markIdempotencyReleased`): the sale awaits its deposit again, the refusal is not stored, and a
+  same-key retry, such as the dashboard's, sends the deposit again.
 - `serverErrors` is required: each route states which applies. `rerun` is only for a route whose
   handler writes its own row under a unique key before it moves anything and answers a retry from
   that row; every other route stores the 5xx.
