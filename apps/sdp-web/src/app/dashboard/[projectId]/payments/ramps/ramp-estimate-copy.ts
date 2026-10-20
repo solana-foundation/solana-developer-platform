@@ -1,6 +1,10 @@
 import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type { PaymentRampEstimate, RampProviderEstimateResult } from "@sdp/types/payments";
+import type {
+  PaymentRampEstimate,
+  PaymentRampEstimateFees,
+  RampProviderEstimateResult,
+} from "@sdp/types/payments";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 
@@ -47,10 +51,50 @@ export function estimateRateCopy(
   locale: string
 ): string | null {
   const rate = estimate.exchangeRate;
-  if (!isDecimalString(rate) || compareDecimalAmounts(rate, "0") <= 0) return null;
+  if (!isPositiveDecimal(rate)) return null;
   return t("DashboardPayments.ramps.rateLine", {
     asset: getCryptoRailAssetLabel(estimate.assetRail),
     rate: formatEstimateFigure(rate, locale),
     fiat: estimate.fiatCurrency,
   });
+}
+
+/**
+ * The fee beside an estimate: the provider's and the network's apart when they
+ * are charged in different currencies, else the total.
+ */
+export function estimateFeeCopy(
+  t: Translate,
+  fees: PaymentRampEstimateFees,
+  locale: string,
+  minimumFractionDigits = 2
+): string {
+  const { provider, network, providerCurrency, networkCurrency } = fees;
+  if (
+    provider !== undefined &&
+    isPositiveDecimal(provider) &&
+    network !== undefined &&
+    isPositiveDecimal(network) &&
+    providerCurrency &&
+    networkCurrency &&
+    providerCurrency !== networkCurrency
+  ) {
+    return t("DashboardPayments.ramps.fees", {
+      providerFee: formatEstimateFigure(provider, locale, minimumFractionDigits),
+      providerCurrency,
+      networkFee: formatEstimateFigure(network, locale, minimumFractionDigits),
+      networkCurrency,
+    });
+  }
+  if (isDecimalString(fees.total) && compareDecimalAmounts(fees.total, "0") === 0) {
+    return t("DashboardPayments.ramps.noFees");
+  }
+  return t("DashboardPayments.ramps.fee", {
+    amount: formatEstimateFigure(fees.total, locale, minimumFractionDigits),
+    currency: fees.currency,
+  });
+}
+
+function isPositiveDecimal(value: string): boolean {
+  return isDecimalString(value) && compareDecimalAmounts(value, "0") > 0;
 }

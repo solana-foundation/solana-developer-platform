@@ -2,7 +2,12 @@ import type { PaymentRampEstimate, RampProviderEstimateResult } from "@sdp/types
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
 import { type TranslationValues, translate } from "@/i18n/translate";
-import { estimateLimitCopy, estimateRateCopy, formatEstimateFigure } from "./ramp-estimate-copy";
+import {
+  estimateFeeCopy,
+  estimateLimitCopy,
+  estimateRateCopy,
+  formatEstimateFigure,
+} from "./ramp-estimate-copy";
 
 const messages = getMessages("en");
 const t = (key: MessageKey, values?: TranslationValues) => translate(messages, key, values);
@@ -73,5 +78,43 @@ describe("estimateLimitCopy", () => {
       })
     ).toBeNull();
     expect(estimateLimitCopy(t, undefined)).toBeNull();
+  });
+});
+
+describe("estimateFeeCopy", () => {
+  it("splits the fees only when they are charged in different currencies", () => {
+    expect(
+      estimateFeeCopy(
+        t,
+        {
+          currency: "USD",
+          total: "4.00",
+          provider: "3.99",
+          providerCurrency: "USD",
+          network: "0.01",
+          networkCurrency: "SOL",
+        },
+        "en"
+      )
+    ).toBe(
+      t("DashboardPayments.ramps.fees", {
+        providerFee: "3.99",
+        providerCurrency: "USD",
+        networkFee: "0.01",
+        networkCurrency: "SOL",
+      })
+    );
+    expect(estimateFeeCopy(t, { currency: "USD", total: "3.99" }, "en")).toBe(
+      t("DashboardPayments.ramps.fee", { amount: "3.99", currency: "USD" })
+    );
+  });
+
+  it("says there are no fees for a zero total, and keeps the legacy cards' figures bare", () => {
+    expect(estimateFeeCopy(t, { currency: "USD", total: "0.00" }, "en")).toBe(
+      t("DashboardPayments.ramps.noFees")
+    );
+    expect(estimateFeeCopy(t, { currency: "USD", total: "2" }, "en", 0)).toBe(
+      t("DashboardPayments.ramps.fee", { amount: "2", currency: "USD" })
+    );
   });
 });

@@ -1,20 +1,19 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type { PaymentRampEstimateFees, RampProviderEstimateResult } from "@sdp/types/payments";
+import type { RampProviderEstimateResult } from "@sdp/types/payments";
 import { cn } from "@sdp/ui/cn";
-import { Loader2Icon } from "lucide-react";
 import { domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
 import {
+  estimateFeeCopy,
   estimateLimitCopy,
   estimateRateCopy,
   formatEstimateFigure,
 } from "@/app/dashboard/[projectId]/payments/ramps/ramp-estimate-copy";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import type { TranslationValues } from "@/i18n/translate";
 import { RAMP_PROVIDER_LOGOS, type RampProviderOption } from "@/lib/ramps";
+import { ProviderCardEstimate } from "./provider-card-estimate";
 
 interface ProviderCardProps {
   option: RampProviderOption;
@@ -22,103 +21,6 @@ interface ProviderCardProps {
   estimate?: RampProviderEstimateResult;
   estimateLoading?: boolean;
   onSelect: () => void;
-}
-
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-function buildFeeLabel(t: Translate, fees: PaymentRampEstimateFees, locale: string): string {
-  const networkFee = fees.network;
-  const providerFee = fees.provider;
-  const network = networkFee !== undefined ? Number(networkFee) : undefined;
-  const provider = providerFee !== undefined ? Number(providerFee) : undefined;
-  const providerCurrency = fees.providerCurrency;
-  const networkCurrency = fees.networkCurrency;
-
-  if (
-    providerFee !== undefined &&
-    provider !== undefined &&
-    provider > 0 &&
-    networkFee !== undefined &&
-    network !== undefined &&
-    network > 0 &&
-    providerCurrency &&
-    networkCurrency &&
-    providerCurrency !== networkCurrency
-  ) {
-    return t("DashboardPayments.ramps.fees", {
-      providerFee: formatEstimateFigure(providerFee, locale),
-      providerCurrency,
-      networkFee: formatEstimateFigure(networkFee, locale),
-      networkCurrency,
-    });
-  }
-
-  if (Number(fees.total) === 0) {
-    return t("DashboardPayments.ramps.noFees");
-  }
-
-  return t("DashboardPayments.ramps.fee", {
-    amount: formatEstimateFigure(fees.total, locale),
-    currency: fees.currency,
-  });
-}
-
-function ProviderCardEstimate({
-  estimate,
-  estimateLoading,
-}: {
-  estimate?: RampProviderEstimateResult;
-  estimateLoading?: boolean;
-}) {
-  const t = useTranslations();
-  const locale = useLocale();
-  if (estimateLoading) {
-    return <Loader2Icon className="size-4 shrink-0 animate-spin text-tertiary" />;
-  }
-
-  if (estimate?.status === "ok") {
-    const { direction, fiatCurrency, assetRail, fiatAmount, cryptoAmount, fees } =
-      estimate.estimate;
-    const isFiatOut = direction === "offramp";
-    const amount = formatEstimateFigure(isFiatOut ? fiatAmount : cryptoAmount, locale);
-    const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
-    const feeLabel = buildFeeLabel(t, fees, locale);
-    // A payout is the crypto at the rate, less the fee; without the rate the numbers don't add up.
-    const rate = isFiatOut ? estimateRateCopy(t, estimate.estimate, locale) : null;
-
-    return (
-      <div className="shrink-0 text-right leading-none">
-        <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.1em] text-tertiary">
-          {t("DashboardPayments.ramps.estimatedReceived")}
-        </p>
-        <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-          <span className="text-sm leading-none font-semibold text-primary">{`≈ ${amount} ${unit}`}</span>
-          <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary">
-            {feeLabel}
-          </span>
-        </div>
-        {rate ? <p className="mt-1 text-xs text-tertiary">{rate}</p> : null}
-      </div>
-    );
-  }
-
-  if (estimate?.status === "unsupported") {
-    return (
-      <p className="shrink-0 text-sm text-tertiary">
-        {t("DashboardPayments.ramps.rateKnownAtQuote")}
-      </p>
-    );
-  }
-
-  if (estimate?.status === "error") {
-    return (
-      <p className="shrink-0 text-sm text-tertiary">
-        {estimateLimitCopy(t, estimate) ?? t("DashboardPayments.ramps.unavailable")}
-      </p>
-    );
-  }
-
-  return null;
 }
 
 export function ProviderCard({
@@ -246,7 +148,7 @@ function QuoteCardEstimate({
         </span>
       </span>
       <span className="mt-1 block text-meta text-tertiary">
-        {buildFeeLabel(t, ok.fees, locale)}
+        {estimateFeeCopy(t, ok.fees, locale)}
         {saleRate ? ` · ${saleRate}` : null}
       </span>
     </span>
