@@ -1,4 +1,4 @@
-import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
+import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -55,10 +55,7 @@ export function withIssuedTokenLabels<T extends { mint: string; token: string }>
   });
 }
 
-export async function resolveMintDecimals(
-  rpc: ReturnType<typeof createRpc>,
-  mint: Address
-): Promise<number> {
+export async function resolveMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number> {
   const response = await rpc.getTokenSupply(mint, { commitment: "confirmed" }).send();
   const decimals = response.value.decimals;
 
@@ -84,7 +81,7 @@ function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
 }
 
 export async function getSplTokenBalances(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   options?: GetSplTokenBalancesOptions
 ): Promise<
@@ -141,7 +138,7 @@ export async function getSplTokenBalances(
 }
 
 export async function getSplTokenAccountAddresses(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address
 ): Promise<Address[]> {
   const addresses: Address[] = [];
@@ -180,10 +177,7 @@ function assertSupportedTokenProgram(program: string): Address {
   throw badRequest("Unsupported token program for mint");
 }
 
-export async function resolveMintTokenProgram(
-  rpc: ReturnType<typeof createRpc>,
-  mint: Address
-): Promise<Address> {
+export async function resolveMintTokenProgram(rpc: SolanaRpc, mint: Address): Promise<Address> {
   const mintAccountInfo = await getAccountInfo(rpc, mint);
   if (!mintAccountInfo) {
     throw badRequest("Token mint account does not exist");
@@ -192,7 +186,7 @@ export async function resolveMintTokenProgram(
 }
 
 export async function resolveSourceTokenAccount(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
@@ -210,7 +204,7 @@ export async function resolveSourceTokenAccount(
 }
 
 export async function resolveSourceTokenAccountOrAta(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
@@ -238,7 +232,7 @@ export async function resolveSourceTokenAccountOrAta(
  * transferChecked from the authority's largest token account.
  */
 export async function buildSplTransferInstructions(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   input: {
     authority: TransactionSigner;
     destination: Address;
@@ -288,7 +282,7 @@ export async function buildSplTransferInstructions(
 }
 
 async function findSourceTokenAccount(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address

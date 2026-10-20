@@ -1,6 +1,5 @@
 import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import type { PrivateChannelTransfer } from "@sdp/types/private-channels";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -23,8 +22,8 @@ import { env } from "@/test/helpers/env";
 import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const { createChannelTransferMock, resolveGatewayAuthMock } = vi.hoisted(() => ({
   createChannelTransferMock: vi.fn(),
@@ -227,25 +226,22 @@ function transferDto(overrides: Partial<PrivateChannelTransfer>): PrivateChannel
 async function seedRouteState(): Promise<void> {
   const db = getDb(env);
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  const cachedApiKey: CachedApiKey = {
+  const cachedApiKey: SeededApiKey = {
     id: API_KEY.id,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
-    role: "api_admin",
-    permissions: ["payments:read", "payments:write"],
+    grants: ["private_channels.execute"],
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
-  await seedCachedApiKey(env, keyHash, cachedApiKey);
-  await seedCachedApiKey(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
+  await seedApiKeyRow(env, keyHash, cachedApiKey);
+  await seedApiKeyRow(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
     ...cachedApiKey,
     id: SCOPED_API_KEY.id,
     walletScope: "selected",
-    walletBindings: [{ walletId: OTHER_USER_WALLET_ID, permissions: ["payments:write"] }],
   });
 
   await db.batch([
@@ -278,26 +274,19 @@ async function seedRouteState(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     projectId: `${PROJECT_ID}_production`,
     createdBy: ACTOR_USER_ID,
-    role: "api_admin",
-    permissions: ["payments:read"],
+    grants: ["private_channels.read"],
   });
   await db.batch([
     db
       .prepare(
         `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-            role, permissions, status)
-         VALUES (?, ?, ?, ?, 'PC transfer key', ?, ?, 'api_admin', ?, 'active')`
+            grants, status)
+         VALUES (?, ?, ?, ?, 'PC transfer key', ?, ?, ?, 'active')`
       )
-      .bind(
-        API_KEY.id,
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        ACTOR_USER_ID,
-        API_KEY.prefix,
-        keyHash,
-        JSON.stringify(cachedApiKey.permissions)
-      ),
+      .bind(API_KEY.id, ORGANIZATION_ID, PROJECT_ID, ACTOR_USER_ID, API_KEY.prefix, keyHash, [
+        ...cachedApiKey.grants,
+      ]),
     db
       .prepare(
         `INSERT INTO private_channel_instances
@@ -316,8 +305,9 @@ async function seedRouteState(): Promise<void> {
       ),
     db
       .prepare(`INSERT INTO api_keys
-      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, 'api_admin', ?, 'active')`)
+      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status,
+       wallet_scope)
+      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active', 'selected')`)
       .bind(
         SCOPED_API_KEY.id,
         ORGANIZATION_ID,
@@ -325,12 +315,12 @@ async function seedRouteState(): Promise<void> {
         ACTOR_USER_ID,
         SCOPED_API_KEY.prefix,
         await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER),
-        JSON.stringify(cachedApiKey.permissions)
+        [...cachedApiKey.grants]
       ),
     db
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-      VALUES ('akwp-pct', ?, ?, ?)`)
-      .bind(SCOPED_API_KEY.id, OTHER_USER_WALLET_ID, JSON.stringify(["payments:write"])),
+      .prepare(`INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+      SELECT ?, id FROM custody_wallets WHERE wallet_id = ?`)
+      .bind(SCOPED_API_KEY.id, OTHER_USER_WALLET_ID),
     db
       .prepare(
         `INSERT INTO private_channels
@@ -545,13 +535,9 @@ describe("Private Channels — transfer access and routes", () => {
   });
 
   it.each([false, true])(
-    "uses role permissions for transfer execution and replay (replay=%s)",
+    "executes and replays a transfer with private_channels.execute (replay=%s)",
     async (replay) => {
       if (replay) await keyTransfer("pct_role_replay", false);
-      await getDb(env)
-        .prepare("UPDATE api_keys SET permissions = NULL WHERE id = ?")
-        .bind(API_KEY.id)
-        .run();
       await clearKVStores(env);
 
       const response = await postTransfer(
@@ -668,11 +654,8 @@ describe("Private Channels — transfer access and routes", () => {
       await useConnectionSource();
       custodyReleaseChannel.outOfChannelMode = "byok";
       await getDb(env)
-        .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
-        .bind(
-          JSON.stringify(write ? ["payments:read", "payments:write"] : ["payments:read"]),
-          API_KEY.id
-        )
+        .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+        .bind(write ? ["private_channels.execute"] : ["private_channels.read"], API_KEY.id)
         .run();
       const response = await postTransfer(
         {
@@ -697,12 +680,15 @@ describe("Private Channels — transfer access and routes", () => {
     }
   );
 
-  it.each(['["payments:write"]', '["payments:read", "payments:write"]'])(
-    "rechecks the winner's original source after losing an idempotency reservation (%s)",
-    async (permissions) => {
+  it.each([
+    [["private_channels.execute"]],
+    [["private_channels.read", "private_channels.execute"]],
+  ])(
+    "rechecks the winner's original source after losing an idempotency reservation (%j)",
+    async (grants) => {
       await getDb(env)
-        .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
-        .bind(permissions, API_KEY.id)
+        .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+        .bind(grants, API_KEY.id)
         .run();
       createChannelTransferMock.mockImplementationOnce(async (_env, input) => {
         await keyTransfer("pct_race_winner", false);
@@ -862,7 +848,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     expect(response.status).toBe(403);
     expect(JSON.stringify(await response.json())).toContain(
-      "not authorized for the requested wallet"
+      "The credential may not sign with this wallet"
     );
     expect(createChannelTransferMock).not.toHaveBeenCalled();
   });

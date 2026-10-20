@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SdpApiResponseError } from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
@@ -236,121 +236,51 @@ describe("createCustodySetupWalletAction", () => {
 
 describe("requestDevnetSolanaFaucetAction", () => {
   const client = { fetch: vi.fn() };
-  const WALLET_ADDRESS = "11111111111111111111111111111111";
-
-  function relay(response: unknown) {
-    return {
-      provider: { id: "helius", endpoint: "https://rpc.example" },
-      upstream: { ok: true, status: 200, statusText: "OK" },
-      response,
-    };
-  }
-
-  function statuses(confirmationStatus: string | null) {
-    return relay({ result: { value: [confirmationStatus ? { confirmationStatus } : null] } });
-  }
 
   beforeEach(() => {
     vi.clearAllMocks();
-    client.fetch.mockReset();
-    vi.useFakeTimers();
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("waits for the airdrop to confirm before revalidating the wallet pages", async () => {
-    client.fetch
-      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
-      .mockResolvedValueOnce(statuses("processed"))
-      .mockResolvedValueOnce(statuses("confirmed"));
-
-    const pending = requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
-    await vi.advanceTimersByTimeAsync(5_000);
-    const result = await pending;
-
-    expect(result).toMatchObject({ status: "success", signature: "sig_airdrop" });
-    expect(client.fetch).toHaveBeenCalledTimes(3);
-    expect(JSON.parse(String(client.fetch.mock.calls[1]?.[1]?.body))).toMatchObject({
-      method: "getSignatureStatuses",
-      params: [["sig_airdrop"]],
+  it("revalidates the wallet pages once the API has waited for the airdrop", async () => {
+    client.fetch.mockResolvedValue({
+      signature: "sig_airdrop",
+      status: "confirmed",
+      lamports: "1000000000",
     });
-    expect(client.fetch.mock.calls[1]?.[1]?.signal).toBeInstanceOf(AbortSignal);
-    const lastStatusCheck = client.fetch.mock.invocationCallOrder[2] ?? 0;
+
+    const result = await requestDevnetSolanaFaucetAction("wallet_one");
+
+    expect(result).toEqual({
+      status: "success",
+      walletId: "wallet_one",
+      signature: "sig_airdrop",
+      amountSol: 1,
+    });
+    expect(client.fetch).toHaveBeenCalledWith("/internal/dashboard/wallets/wallet_one/faucet", {
+      method: "POST",
+    });
     expect(mocks.revalidatePath.mock.calls).toEqual([
       [`/dashboard/${PRODUCTION_PROJECT.id}/custody`],
       [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
       [`/dashboard/${PRODUCTION_PROJECT.id}/custody/wallet_one`],
       [`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`],
     ]);
-    for (const order of mocks.revalidatePath.mock.invocationCallOrder) {
-      expect(order).toBeGreaterThan(lastStatusCheck);
-    }
   });
 
   it("reports an airdrop that failed on-chain instead of success", async () => {
-    client.fetch
-      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
-      .mockResolvedValueOnce(
-        relay({ result: { value: [{ err: { InstructionError: [0, {}] } }] } })
-      );
+    client.fetch.mockResolvedValue({
+      signature: "sig_airdrop",
+      status: "failed",
+      lamports: "1000000000",
+    });
 
-    const pending = requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
-    await vi.advanceTimersByTimeAsync(5_000);
-    const result = await pending;
+    const result = await requestDevnetSolanaFaucetAction("wallet_one");
 
     expect(result).toEqual({
       status: "error",
-      message: "DashboardCustody.devnetFaucetProviderGenericError",
+      message: "DashboardCustody.devnetFaucetTransactionFailed",
     });
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
-  });
-
-  it("logs a failed status request and keeps waiting for confirmation", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    client.fetch
-      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
-      .mockRejectedValueOnce(new Error("relay unavailable"))
-      .mockResolvedValueOnce(statuses("confirmed"));
-
-    const pending = requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
-    await vi.advanceTimersByTimeAsync(1_000);
-    const result = await pending;
-
-    expect(result).toMatchObject({ status: "success", signature: "sig_airdrop" });
-    expect(client.fetch).toHaveBeenCalledTimes(3);
-    expect(mocks.revalidatePath).toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("wallet_faucet_confirmation_check_failed")
-    );
-    warn.mockRestore();
-  });
-
-  it("does not log when the status request hits the confirmation deadline", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    client.fetch
-      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
-      .mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));
-
-    const result = await requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
-
-    expect(result).toMatchObject({ status: "success", signature: "sig_airdrop" });
-    expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it("still succeeds and revalidates when confirmation does not arrive in time", async () => {
-    client.fetch
-      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
-      .mockResolvedValue(statuses(null));
-
-    const pending = requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
-    await vi.advanceTimersByTimeAsync(20_000);
-    const result = await pending;
-
-    expect(result).toMatchObject({ status: "success", signature: "sig_airdrop" });
-    expect(mocks.revalidatePath).toHaveBeenCalled();
   });
 });

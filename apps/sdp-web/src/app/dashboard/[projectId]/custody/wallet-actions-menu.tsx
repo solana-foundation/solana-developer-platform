@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
-import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
+import { ChevronDown, Ellipsis, ShieldCheck } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
@@ -19,6 +19,7 @@ import {
   requestDevnetSolanaFaucetAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
+import { DevnetSolMenuItem } from "@/app/dashboard/[projectId]/custody/devnet-sol-menu-item";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
@@ -113,13 +114,11 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
-          (error) => ({
-            status: "error" as const,
-            message:
-              error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
-          })
-        );
+        const result = await requestDevnetSolanaFaucetAction(walletId).catch((error) => ({
+          status: "error" as const,
+          message:
+            error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
+        }));
 
         if (result.status === "success") {
           // The action waited for confirmation, so a refetch now reads the funded balance.
@@ -195,10 +194,11 @@ export function WalletActionsMenu({
                 : t("DashboardCustody.proveOwnershipAdminOnly")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={requestDevnetSol} disabled={isBusy}>
-          <Droplets className="h-4 w-4" />
-          {isBusy ? t("DashboardCustody.requesting") : t("DashboardCustody.requestDevnetSol")}
-        </DropdownMenuItem>
+        <DevnetSolMenuItem
+          isBusy={isBusy}
+          canRequest={dashboardAccess.capabilities.canUseWalletFaucet}
+          onSelect={requestDevnetSol}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

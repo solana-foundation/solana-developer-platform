@@ -480,13 +480,12 @@ other's balance.
   caller-supplied `destinationAddress` out of the organization's provider
   account, so a selected-scope key bound to one low-value wallet must not be
   able to drain the program to any address.
-  A program is a provider ACCOUNT, not a custody wallet, so there is nothing
-  for `assertApiKeyWalletAccess` to name: a wallet-scoped key is refused
-  outright (`assertApiKeyNotWalletScoped`) rather than silently treated as
-  unbound. The same refusal is on `withdrawal-preview`, which discloses live
+  A program is a provider ACCOUNT, not a custody wallet, so no wallet scope
+  can name it and no custody signer decides its payouts: a wallet-scoped key
+  is refused outright (`assertProgramKeyIsNotWalletScoped`) rather than
+  silently treated as unscoped. The same refusal is on `withdrawal-preview`, which discloses live
   lane liquidity through the identical chain. The route is gated by
-  authentication, `earn:write` and the key's Allowed Operations
-  (`earn_program_withdrawal`), nothing else.
+  authentication and the `earn.execute` action, nothing else.
   **Replay resolution lives in the HANDLER, not in the gate's
   `findIdempotentKeyReplay` hook**: that hook only runs for callers using the
   `Idempotency-Key` header, and this route equally accepts the key as body
@@ -567,8 +566,7 @@ transaction signed by the organization custody wallet or external owner.
   that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
   required `Idempotency-Key` header; body `requestId` is rejected.
   Registered as
-  `requirePermissions("earn:write", "wallets:read")` →
-  `requireAllowedOperation("earn_vault_deposit")` → `requestGate` → handler.
+  `requireAction("earn.execute")` → `requestGate` → handler.
   The caller names a CATALOGUE row, never a raw vault address, so the sync's
   admission gates still bound this path.
   - **`requestGate`.** `requestGate({ extract: extractEarnVaultDeposit })`
@@ -680,14 +678,12 @@ transaction signed by the organization custody wallet or external owner.
     race on Postgres).
     An anonymous build has no SDP submit or durable movement row, so it receives
     only the admission decision and is outside the ledgered exposure figure.
-  - Wallet binding takes **`earn:write`**, not `wallets:read`. A read-only
-    binding must not be able to spend. Note this is the first `earn:*` scope
-    asserted on a BINDING: a selected-scope key provisioned only with
-    payments-family binding permissions will now 403 here.
+  - The route takes `earn.execute`; whether the key may sign with the wallet
+    is the custody signer's decision against its wallet scope (HOO-2099),
+    refused early by `assertCallerWalletInScope` before any work.
     `custodyWalletId` is the exact `custody_wallets.id` (`cwlt_…`) returned by
     the wallet surface, never the provider-local `walletId` or public key. The
-    latter can repeat across configurations; a selected binding whose provider
-    id maps to multiple scoped rows fails closed.
+    latter can repeat across configurations.
   - Simulates before signing. The instructions come from a third-party SDK built
     against live vault state, so a stale reserve set surfaces as a readable
     program error instead of a landed, failed transaction the customer paid for.
@@ -801,7 +797,7 @@ transaction signed by the organization custody wallet or external owner.
   no wallet, no request gate, no idempotency key — it moves nothing — but it
   exists only to open a NEW position, so it takes the deposit's own gate order
   deliberately. The optional-auth router validates a presented credential and
-  its `earn:read` scope, then the handler applies the environment fail-close
+  its `earn.read` action, then the handler applies the environment fail-close
   (`isVaultDirectDepositEnabled`, 403), catalogue row (404), deposit style
   (400), authenticated provider availability (surfacing alone, via
   `assertAnonymousEarnProviderOffered`, for an anonymous caller),
@@ -837,8 +833,8 @@ transaction signed by the organization custody wallet or external owner.
   newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
   re-derive which of its deposits are still in flight after losing local state,
   the way the custodial side re-derives withdrawals from its ledger. Scoped by
-  organization, environment, direction, PROJECT and wallet binding — the same
-  five rules as the detail read.
+  organization, environment, direction and PROJECT — the same four rules as
+  the detail read. Earn reads are project-scoped (HOO-2099).
   - `?requestId=` narrows to the caller's own idempotency key, which is how a
     caller that lost the response finds the deposit recorded under it.
   - A key is caller-chosen `[\x20-\x7e]{1,255}` (`middleware/idempotency-key.ts`),
@@ -907,12 +903,10 @@ transaction signed by the organization custody wallet or external owner.
   value are never persisted: for a non-custodial vault the chain IS the provider.
   Takes **no provider gate at all** — it is a read of money the org already
   holds, and hiding it when a provider is un-offered would close the door out.
-  It DOES take wallet-binding scope: `getAllowedApiKeyWalletIdsForPermissions(auth,
-  ["earn:read"])`, applied in the repository query before any chain read. Mind
-  the id spaces — that helper returns provider `walletId`s (`privy_…`) while
-  `earn_positions.custody_wallet_id` is the `cwlt_…` row id, so the handler
-  translates through `scope.wallets`. Passing the allow-list straight through
-  matches nothing and silently returns an empty page.
+  It is project-scoped (HOO-2099): a key's wallet scope narrows only the wallet
+  list and what SDP signs with. Mind the id spaces anyway —
+  `earn_positions.custody_wallet_id` is the `cwlt_…` row id, never a provider
+  `walletId` (`privy_…`).
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
   The "live hydration unavailable" warning carries `causeChain`, the flattened
@@ -985,13 +979,10 @@ transaction signed by the organization custody wallet or external owner.
 - `POST /vault-withdrawal-previews` — the exit QUOTE the dashboard derives its
   `minAmountOut` floor from (`supportsVaultWithdrawQuote`; 501 for a provider
   without the capability), the deposit preview's mirror with deliberately
-  DIFFERENT gates: EXIT gates only (ADR 0002) — position scoping and the
-  read-side wallet binding, both 404 — no surfacing, no entitlement, no
-  admission, no environment capability. Registered as
-  `requirePermissions("earn:read", "wallets:read")`: `wallets:read` is not a
-  money-in gate, and for a key with NO wallet bindings the binding check is a
-  documented no-op, so dropping it would let an earn:read-only key read any
-  org position's live payout while `GET /vault-positions` answers it 403.
+  DIFFERENT gates: EXIT gates only (ADR 0002) — position scoping (404) — no
+  surfacing, no entitlement, no admission, no environment capability.
+  Registered as `requireAction("earn.read")` and project-scoped, exactly as
+  `GET /vault-positions` answers the same key.
   The dashboard fingerprints each flow's idempotency key on the USER'S
   tolerance (reproducible after a reload) and remembers the floor a held key
   was minted with separately, because the API's own fingerprint includes the
@@ -1015,9 +1006,8 @@ registered-client path (or equivalent durable contract), or switching the flag
 off would misclassify an atomic movement as a provider order.
 
 The every-minute vault reconciliation worker consumes
-`idx_earn_movements_unsettled` in bounded pages. Both the embedded cron and the
-dedicated Cloud Run job use the same transition service as the interactive
-detail reads. The job additionally rebroadcasts the recorded signed bytes while
+`idx_earn_movements_unsettled` in bounded pages. The Worker's Cron Definition uses the same transition service as the
+interactive detail reads. The sweep additionally rebroadcasts the recorded signed bytes while
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
 
@@ -1030,15 +1020,14 @@ that money had stopped settling. Now a completed tick emits
 `sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
 counts plus the backlog gauges read AFTER the tick, and any failure (a status
 read, a block-height read, or a per-movement error) marks the tick
-error-level and THROWS so `runWithCronRunEvent` records `status: "error"`.
+error-level and THROWS so the Worker's run event records `status: "error"`.
 Per-movement errors count too, deliberately: reads can answer perfectly while
 the write side is down (pool exhaustion, a send-side RPC outage), and an ok
 tick over a batch where nothing settled is the same silence. The sponsorship
 reconciler takes the identical posture, emitting its tick and then throwing
-when any item failed. Both runners absorb the throw: the managed job's
-`collect` records the failure without starving later ticks, and
-`NodeBackgroundRunner.run` attaches its own catch. Do not "helpfully" swallow
-it.
+when any item failed. The Worker absorbs the throw: it logs the `error` run
+event and `NodeBackgroundRunner.run` attaches its own catch, so later slots
+still run. Do not "helpfully" swallow it.
 
 Three details that look like bugs and are not:
 
@@ -1056,14 +1045,14 @@ Three details that look like bugs and are not:
 - **"Completed tick" is the honest qualifier.** A rejection from the claim or
   backlog QUERY skips the event, exactly as the sponsorship reconciler skips
   its tick when its own candidate read fails. The run is still loud
-  (`sdp_cron_run` error, non-zero exit). Do not synthesize a fallback tick: it
+  (`sdp_cron_run` error). Do not synthesize a fallback tick: it
   could only carry a null backlog (invisible to a threshold rule) or a zero,
   which reads as a drained queue and would CLEAR a firing alert mid-incident.
   Alert on the ABSENCE of the tick instead.
 
 Pinned by the "sweep telemetry" describe in
-`../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
-`runWithCronRunEvent` test composes the real wrapper.
+`../../services/jobs/reconcile-earn-vault-movements.test.ts`; the runner logs
+the `sdp_cron_run` error event itself via `logCronRun` (`src/cron/run-event.ts`).
 
 **Expiring an unknown vault movement takes TWO observations.** A broadcast
 response can be lost after landing while the durable row still says `requested`.
@@ -1090,16 +1079,16 @@ expiry describes of `services/jobs/reconcile-earn-vault-movements.test.ts`.
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
   legs + broadcast in order**. Body `{positionId, shares, minAmountOut?}` and a required
   `Idempotency-Key` header (body `requestId` rejected, same as deposits).
-  Registered `requirePermissions("earn:write", "wallets:read")` →
-  `requireAllowedOperation("earn_vault_withdrawal")` → `requestGate` (extractor
+  Registered `requireAction("earn.execute")` → `requestGate` (extractor
   `extractEarnVaultWithdrawal`) → handler. Registered as the second `earn` entry in
   `value-moving-conformance.node.test.ts`.
   - **The caller names its own POSITION, never a strategy and never a raw
     vault address.** The position row carries the vault, the signing wallet
     and both mints, so the exit has NO catalogue dependency — a delisted vault
     stays exitable. `expectedAssetIdentity` is the position's stored mints.
-  - **Gates: 404 position scoping (org+environment+kind), wallet binding with
-    `earn:write` — and nothing else.** One caller-fixable 400
+  - **Gates: 404 position scoping (org+environment+kind) and `earn.execute` —
+    and nothing else; the custody signer decides the key's wallet scope, as
+    for every exit (ADR 0007 addendum).** One caller-fixable 400
     sits beside them without being a gate: a provider whose
     `withdrawalSlippage` policy is non-null refuses a floor-less
     `minAmountOut` (PRO-1861 — the wire contract the strategy row documents;
@@ -1157,7 +1146,7 @@ fork a keyed and anonymous route with duplicate behavior.
   with its existing tenant context. With no credential, the request has no
   organization, project, entitlement, custody, or persistence context.
   When a credential is present, the route still enforces its previous
-  `earn:read` or `earn:write` scope.
+  `earn.read` or `earn.execute` action.
 - **No credential downgrade:** a presented credential must resolve completely
   or return 401. That includes an unknown, revoked, or expired API key, a Clerk
   token without organization context.
@@ -1227,8 +1216,8 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   builds, the insert and baseline read are FAIL-CLOSED: money in may
   refuse, and a blind advisory could only ever page on any wallet that held
   the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
-  judges each open advisory on both runners (every minute in-process, at the
-  Managed Reconciliation Cadence in the Cloud Run Job): an in-flight deposit or
+  judges each open advisory every minute (a Cron Definition run by the
+  Worker): an in-flight deposit or
   an unconsumed follow-up BUILD inside a 30-minute window is the partner still
   working; once the swap's blockhash is dead and a 30-minute grace has run, the
   intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`
@@ -1305,10 +1294,10 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
 - `POST /external-wallet/withdrawals`: the keyed submit, mirrored, including
   the `409 TRANSACTION_EXPIRED` pre-record refusal. An anonymous build cannot
   be submitted because no tenant build row exists.
-- **NO requestGate and no `wallets:read`, deliberately** — this is not the
-  vault-deposit cautionary tale repeating. The custody wallet binding governs the org's own
-  custody and stands between a request and `createOrgSignerForCustodyWallet`; these routes
-  never resolve a signer and never touch custody. The owner's own signature
+- **NO requestGate and no wallet scope, deliberately** — this is not the
+  vault-deposit cautionary tale repeating. A key's wallet scope governs the org's own
+  custody at `createOrgSignerForCustodyWallet`; these routes never resolve a signer and
+  never touch custody. The owner's own signature
   IS the authorization, and there is no signing sink here for
   `value-moving-conformance.node.test.ts` to inventory.
 - **Keyed scoping is org AND project**, stricter than custody vault claims:
@@ -1324,8 +1313,8 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   stays PRO-1744. The response's `sponsored` field is therefore false today.
 
 The keyed per-owner READS (PRO-1772) close the loop the money routes open. All
-three take `earn:read` only. They take no `wallets:read` (end-user wallets carry no custody
-bindings, same as the position reads) and NO provider gate (ADR 0002: they
+three take `earn.read` only. No wallet scope applies (end-user wallets are not custody
+wallets, same as the position reads) and NO provider gate (ADR 0002: they
 report on money that already moved). **None of them 404 an owner**: a wallet
 with nothing in the project's scope (never deposited, fully exited, or claimed
 by another organization) answers 200 with the empty shape (`positions: []`,
@@ -1345,7 +1334,7 @@ is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresse
 is the project's entire end-user address book (threat model EARN-028). It is
 OMITTED by default (PRO-1908; PRO-1873 shipped the flag as an opt-out and the
 default was flipped in the same Earn V2 line): a plain call gets totals and
-`walletCount` only, and an `earn:read` key becomes PII-bearing only by passing
+`walletCount` only, and an `earn.read` key becomes PII-bearing only by passing
 `?includeOwnerAddresses=true`. Omitted, never emptied, so "not requested" cannot
 read as "no owners". Interactive surfaces add `includePositions=true` to receive
 each strategy's already hydrated positions in that same request; it requires

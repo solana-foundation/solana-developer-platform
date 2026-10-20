@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
 import {
@@ -20,6 +22,11 @@ import {
 } from "@sdp/types/payment-rails";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
+import {
+  describeRailSupportShrink,
+  discoverWithShrinkGuard,
+  type RailDiscoveryAttempt,
+} from "./ramp-support-shrink-guard";
 
 const RAMP_SUPPORT_ROOT_DIR = path.resolve(process.cwd(), ".ramp-support");
 const CURRENCY_SUPPORT_RAW_DUMP_DIR = path.join(RAMP_SUPPORT_ROOT_DIR, "raw");
@@ -27,6 +34,7 @@ const GENERATED_TARGET = path.resolve(
   process.cwd(),
   "../../packages/sdp-types/src/generated/ramp.generated.ts"
 );
+const SHRINK_RETRY_DELAY_MS = 30_000;
 
 const rawDumpSchema = z.object({
   status: z.number(),
@@ -223,6 +231,15 @@ async function readCurrencySupportSnapshot(
   const text = await readFile(currencySupportSnapshotFile(provider), "utf8");
   const parsed: unknown = JSON.parse(text);
   return providerRailSupportSnapshotSchema.parse(parsed);
+}
+
+async function readCommittedCurrencySupportSnapshot(
+  provider: RampProviderId
+): Promise<ProviderRailSupportSnapshot | undefined> {
+  if (!existsSync(currencySupportSnapshotFile(provider))) {
+    return undefined;
+  }
+  return readCurrencySupportSnapshot(provider);
 }
 
 async function readCurrencySupportSnapshots(): Promise<CurrencySupportSnapshots> {
@@ -724,8 +741,28 @@ async function writeCurrencySnapshot(
   );
 }
 
+async function discoverProviderRails(
+  provider: RampProviderId,
+  offline: boolean
+): Promise<RailDiscoveryAttempt> {
+  const distillation = await RAMP_PROVIDER_CLIENTS[provider].discoverCurrencyAndRails({
+    env: process.env,
+    fetchJson,
+    fetchText,
+    writeDump: writeCurrencySupportDump,
+    readDump: readCurrencySupportRawDump,
+    offline,
+  });
+  const stats = CURRENCY_DISCOVERY_SUMMARY[provider];
+  if (stats !== undefined && stats.failed > 0) {
+    return { outcome: "requests-failed" };
+  }
+  return { outcome: "distilled", distillation };
+}
+
 async function runCurrencyDiscovery(args: readonly string[]): Promise<void> {
   const offline = args.includes("--offline");
+  const allowShrink = args.includes("--allow-shrink");
   const selectedProviders = parseProviderArgs(args);
   await mkdir(CURRENCY_SUPPORT_RAW_DUMP_DIR, { recursive: true });
 
@@ -736,24 +773,39 @@ async function runCurrencyDiscovery(args: readonly string[]): Promise<void> {
   }
 
   const failedProviders: string[] = [];
+  const shrunkProviders: string[] = [];
   for (const provider of selectedProviders) {
     if (!offline) {
       console.log(`\n[${provider}] fetch`);
     }
-    const distillation = await RAMP_PROVIDER_CLIENTS[provider].discoverCurrencyAndRails({
-      env: process.env,
-      fetchJson,
-      fetchText,
-      writeDump: writeCurrencySupportDump,
-      readDump: readCurrencySupportRawDump,
+    const discovery = await discoverWithShrinkGuard({
+      committed: await readCommittedCurrencySupportSnapshot(provider),
+      allowShrink,
       offline,
+      discover: () => discoverProviderRails(provider, offline),
+      beforeRetry: async (shrinks) => {
+        console.warn(
+          `[${provider}] ${describeRailSupportShrink(shrinks)}; retrying in ${SHRINK_RETRY_DELAY_MS / 1000}s`
+        );
+        await sleep(SHRINK_RETRY_DELAY_MS);
+      },
     });
-    const stats = CURRENCY_DISCOVERY_SUMMARY[provider];
-    if (stats !== undefined && stats.failed > 0) {
-      failedProviders.push(`${provider} (${stats.failed} failed)`);
-      continue;
+    switch (discovery.outcome) {
+      case "requests-failed":
+        failedProviders.push(`${provider} (${providerSummary(provider).failed} failed)`);
+        break;
+      case "shrunk":
+        console.error(
+          `[${provider}] ${describeRailSupportShrink(discovery.shrinks)}; kept the committed snapshot`
+        );
+        shrunkProviders.push(provider);
+        break;
+      case "distilled":
+        await writeCurrencySnapshot(provider, discovery.distillation);
+        break;
+      default:
+        assertNever(discovery);
     }
-    await writeCurrencySnapshot(provider, distillation);
   }
 
   if (!offline) {
@@ -768,6 +820,11 @@ async function runCurrencyDiscovery(args: readonly string[]): Promise<void> {
   if (failedProviders.length > 0) {
     throw new Error(
       `Currency-support discovery had failed requests: ${failedProviders.join(", ")}.`
+    );
+  }
+  if (shrunkProviders.length > 0) {
+    throw new Error(
+      `Currency-support discovery would shrink ${shrunkProviders.join(", ")} (see above). Once the provider confirms the drop, rerun with --allow-shrink.`
     );
   }
 }

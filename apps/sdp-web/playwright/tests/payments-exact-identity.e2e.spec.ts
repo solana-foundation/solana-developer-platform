@@ -423,7 +423,7 @@ test.describe
       await expect(
         page.getByText(alias.label ?? "Wallet Identity B", { exact: true })
       ).toBeVisible();
-      // Cancellation preserves wallet authorization without requiring an executable wallet.
+      // Project-authorized cancellation does not require an executable wallet.
       await db.query("UPDATE custody_wallets SET status = 'inactive' WHERE id = $1", [alias.id]);
       try {
         const cancelled = await page.evaluate(

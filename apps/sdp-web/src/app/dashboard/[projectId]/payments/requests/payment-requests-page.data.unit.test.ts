@@ -1,7 +1,9 @@
 import type { PaymentRequest } from "@sdp/types/payments";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import {
   fetchPaymentRequestDetail,
+  fetchPaymentRequestLinkToken,
   loadPaymentRequestsList,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
   PAYMENT_REQUESTS_PAGE_SIZE,
@@ -11,28 +13,35 @@ import {
   paymentRequestsListHref,
 } from "./payment-requests-page.data";
 
-function requestRow(id: string): PaymentRequest {
-  return { id } as PaymentRequest;
+function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): PaymentRequest {
+  return {
+    id,
+    organizationId: "org_1",
+    projectId: "prj_1",
+    counterpartyId: null,
+    walletId: "wal_1",
+    destinationAddress: "11111111111111111111111111111111",
+    token: MAINNET_USDC,
+    amount: "1",
+    reference: "ref_1",
+    status: "awaiting_payment",
+    expiresAt: null,
+    fulfilledByTransferId: null,
+    canceledBy: null,
+    lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
+    createdBy: null,
+    createdAt: "2026-09-14T00:00:00.000Z",
+    updatedAt: "2026-09-14T00:00:00.000Z",
+    ...overrides,
+  };
 }
 
-/** A list API over `total` requests, newest first, that records each page it serves. */
-function listApi(total: number) {
-  const pages: number[] = [];
-  const request = async (path: string) => {
-    const query = new URL(path, "https://sdp.test").searchParams;
-    const page = Number(query.get("page"));
-    const pageSize = Number(query.get("pageSize"));
-    pages.push(page);
-    const start = (page - 1) * pageSize;
-    const ids = Array.from(
-      { length: Math.max(0, Math.min(pageSize, total - start)) },
-      (_, index) => `preq_${start + index}`
-    );
-    return Response.json({
-      data: { paymentRequests: ids.map(requestRow), total, page, pageSize },
-    });
-  };
-  return { request, pages };
+const MAINNET_USDC = mainnetUsdc();
+
+function mainnetUsdc(): string {
+  const mint = wellKnownMint("USDC", "mainnet-beta");
+  if (!mint) throw new Error("USDC has no mainnet mint");
+  return mint;
 }
 
 describe("parsePaymentRequestsListParams", () => {
@@ -58,14 +67,12 @@ describe("parsePaymentRequestsListParams", () => {
 });
 
 describe("paymentRequestMatchesSearch", () => {
-  const request = {
-    id: "preq_1",
+  const request = requestRow("preq_1", {
     amount: "12.5",
-    token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     counterpartyId: "cp_1",
     destinationAddress: "Dest1111111111111111111111111111111111111111",
     reference: "INV-42",
-  } as PaymentRequest;
+  });
   const names = new Map([["cp_1", "Jane Doe"]]);
 
   it("matches the amount, token symbol, payer, destination or reference, ignoring case", () => {
@@ -83,34 +90,56 @@ describe("paymentRequestMatchesSearch", () => {
 });
 
 describe("fetchPaymentRequestDetail", () => {
-  it("stops at the page that holds the request", async () => {
-    const api = listApi(250);
-    const result = await fetchPaymentRequestDetail(
-      api.request as Parameters<typeof fetchPaymentRequestDetail>[0],
-      "preq_120"
-    );
-    expect(result).toEqual({ status: "found", request: requestRow("preq_120") });
-    expect(api.pages).toEqual([1, 2]);
+  function detailApi(response: Response) {
+    const paths: string[] = [];
+    const request: Parameters<typeof fetchPaymentRequestDetail>[0] = async (path) => {
+      paths.push(path);
+      return response;
+    };
+    return { request, paths };
+  }
+
+  it("reads the request by id", async () => {
+    const row = requestRow("preq_120");
+    const api = detailApi(Response.json({ data: row }));
+    const result = await fetchPaymentRequestDetail(api.request, "preq_120");
+    expect(result).toEqual({ status: "found", request: row });
+    expect(api.paths).toEqual(["/v1/payments/requests/preq_120"]);
   });
 
-  it("reaches requests older than any list cap", async () => {
-    const api = listApi(720);
-    const result = await fetchPaymentRequestDetail(
-      api.request as Parameters<typeof fetchPaymentRequestDetail>[0],
-      "preq_710"
-    );
-    expect(result).toEqual({ status: "found", request: requestRow("preq_710") });
-    expect(api.pages).toHaveLength(8);
+  it("is not found on a 404", async () => {
+    const api = detailApi(new Response(null, { status: 404 }));
+    expect(await fetchPaymentRequestDetail(api.request, "preq_missing")).toEqual({
+      status: "not_found",
+    });
+  });
+});
+
+describe("fetchPaymentRequestLinkToken", () => {
+  function linkApi(response: Response) {
+    const paths: string[] = [];
+    const request: Parameters<typeof fetchPaymentRequestLinkToken>[0] = async (path) => {
+      paths.push(path);
+      return response;
+    };
+    return { request, paths };
+  }
+
+  it("reads the token from the link endpoint", async () => {
+    const api = linkApi(Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }));
+    expect(await fetchPaymentRequestLinkToken(api.request, "preq_1")).toEqual({
+      ok: true,
+      publicToken: "tok_1",
+    });
+    expect(api.paths).toEqual(["/v1/payments/requests/preq_1/link"]);
   });
 
-  it("is not found once the pages run out", async () => {
-    const api = listApi(150);
-    const result = await fetchPaymentRequestDetail(
-      api.request as Parameters<typeof fetchPaymentRequestDetail>[0],
-      "preq_missing"
-    );
-    expect(result).toEqual({ status: "not_found" });
-    expect(api.pages).toEqual([1, 2]);
+  it("answers no token when the member may not manage payment requests", async () => {
+    const api = linkApi(new Response(null, { status: 403 }));
+    expect(await fetchPaymentRequestLinkToken(api.request, "preq_1")).toEqual({
+      ok: true,
+      publicToken: null,
+    });
   });
 });
 

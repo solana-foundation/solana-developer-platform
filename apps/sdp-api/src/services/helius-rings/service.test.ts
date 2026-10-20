@@ -1394,6 +1394,33 @@ describe("HeliusRingsService", () => {
       expect(submit).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["organization_inactive", false],
+      // A background resume of a build that died: the caller's retry signs as them.
+      ["principal_missing", true],
+    ] as const)("records a %s refusal as retryable: %s", async (reason, retryable) => {
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+
+      await service({
+        gateway,
+        signOuterTransaction: async () => {
+          throw new MoneyMovementRefusedError(reason);
+        },
+        submitOuterTransaction: async () => OUTER_TX.signature,
+      })
+        .prepareOperation(operationInput({ clientNonce: `nonce-refused-${reason}` }))
+        .catch(() => undefined);
+
+      const stored = await getDb(env)
+        .prepare(
+          "SELECT state, failure_code, retryable FROM helius_rings_operations ORDER BY created_at DESC LIMIT 1"
+        )
+        .first<{ state: string; failure_code: string; retryable: boolean }>();
+      expect(stored).toEqual({ state: "failed", failure_code: "signer_failed", retryable });
+    });
+
     it("rejects changed signer message bytes before signed-byte persistence", async () => {
       const sign = vi.fn(async () => CHANGED_OUTER_TX.signedTxBase64);
       const submit = vi.fn(async () => OUTER_TX.signature);

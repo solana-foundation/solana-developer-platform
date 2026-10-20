@@ -1,8 +1,7 @@
 import { Hono } from "hono";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
-import { requirePermissions } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { requestGate } from "@/middleware/request-gate";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -15,18 +14,17 @@ import { createOfframpQuoteSchema, estimateOfframpSchema } from "./schemas";
 
 export const offramp = new Hono<{ Bindings: Env }>();
 
-offramp.get("/currency", requirePermissions("payments:read"), listOfframpCurrencies);
+offramp.get("/currency", requireAction("offramp.read"), listOfframpCurrencies);
 offramp.post(
   "/estimate",
-  requirePermissions("payments:read"),
+  requireAction("offramp.read"),
   validateBody(estimateOfframpSchema),
   meteredQuota({ name: "ramp-estimate", actorMax: 30, orgMax: 120 }),
   estimateOfframp
 );
 offramp.post(
   "/quote",
-  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
-  requireAllowedOperation("ramp_offramp_quote"),
+  requireAction("offramp.execute"),
   validateBody(createOfframpQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   requestGate({ extract: extractOfframpQuoteRequest }),

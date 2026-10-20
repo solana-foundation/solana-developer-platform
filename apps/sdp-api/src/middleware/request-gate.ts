@@ -37,8 +37,8 @@ export interface RequestGateContext<TBody = unknown, TResolved = unknown> {
 /**
  * Run a route's extraction, idempotent-key replay and new-work admission
  * ahead of its handler (ADR 0006). The gate decides nothing about whether the
- * caller may perform the operation: authentication, permissions, the key's
- * wallet binding and its Allowed Operations all run before it.
+ * caller may perform the operation: authentication, the route's action
+ * (`requireAction`) and the key's wallet binding all run before it.
  *
  * Steps, first exit wins:
  *

@@ -5,8 +5,7 @@ import type { SdpRampProviderStages } from "@sdp/types/release-channels";
  *
  * `createApp(deps)` builds the Hono instance with all middleware, routes, and
  * error handling wired up, while transport and process lifecycle concerns stay
- * in `server.ts`. Observability remains injected so tests can use a lightweight
- * implementation without initializing the production SDK.
+ * in `server.ts`.
  */
 
 import { SigningError } from "@sdp/custody/signing";
@@ -14,7 +13,7 @@ import { SdpEarnError } from "@sdp/earn/errors";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
-import { scrubError, scrubTelemetry } from "@sdp/redaction/scrub";
+import { scrubTelemetry } from "@sdp/redaction/scrub";
 import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -22,7 +21,8 @@ import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
-import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
+import { DatabaseUnavailableError } from "@/db/client";
+import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
@@ -31,6 +31,7 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import { publicRoute } from "@/middleware/require-action";
 import { requireModule } from "@/middleware/require-module";
 import { allowlist } from "@/routes/allowlist";
 import { apiKeys } from "@/routes/api-keys";
@@ -38,6 +39,7 @@ import { assetProfiles } from "@/routes/asset-profiles";
 import { compliance } from "@/routes/compliance";
 import { counterparties } from "@/routes/counterparties";
 import { wallets } from "@/routes/custody";
+import { internalWallets } from "@/routes/custody/internal";
 import { docs } from "@/routes/docs";
 import { dvp } from "@/routes/dvp";
 import { earnRoutes as earn } from "@/routes/earn";
@@ -58,12 +60,10 @@ import { places } from "@/routes/places";
 import { playgroundInternal } from "@/routes/playground-internal";
 import { privateChannels } from "@/routes/private-channels";
 import { projects } from "@/routes/projects";
-import { rpc } from "@/routes/rpc";
 import { transactions } from "@/routes/transactions";
 import { webhooks } from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
-import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {
@@ -72,7 +72,6 @@ export interface SdpPlugin {
 }
 
 export interface AppDeps {
-  observability: Observability;
   plugins?: SdpPlugin[];
   /**
    * Ramp provider stages to run the release channel against. Production passes
@@ -108,8 +107,8 @@ const KV_FREE_PATHS = [
 ];
 
 // Backstop bound for any /v1 request body. Handler-side schemas are far
-// smaller; the webhooks and rpc routers already enforce this same ceiling on
-// their subsets, and no public /v1 route accepts file uploads.
+// smaller; the webhooks router already enforces this same ceiling on its
+// subset, and no public /v1 route accepts file uploads.
 const MAX_API_BODY_BYTES = 1024 * 1024;
 
 function mapSigningError(err: SigningError): {
@@ -238,47 +237,32 @@ function getFireblocksBlockedError(err: Error): {
   };
 }
 
-function captureUnexpectedError(
-  observability: Observability,
-  err: Error,
-  c: Context<{ Bindings: Env }>
-): void {
-  const requestId = c.get("requestId");
-  const traceId = c.get("traceId");
-  const requestSource = c.get("requestSource");
-  const path = new URL(c.req.url).pathname;
+/** How long a client is told to wait after the database could not take its request. */
+const DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS = 2;
 
-  observability.withScope((scope) => {
-    scope.setTag("request_id", requestId);
-    scope.setTag("trace_id", traceId);
-    scope.setTag("request_source", requestSource);
-    scope.setTag("http_method", c.req.method);
-    scope.setTag("http_path", path);
-
-    const apiKey = c.get("apiKey");
-    const clerk = c.get("clerk");
-
-    if (apiKey) {
-      scope.setTag("auth_type", "api_key");
-      scope.setTag("organization_id", apiKey.organizationId);
-      if (apiKey.projectId) {
-        scope.setTag("project_id", apiKey.projectId);
-      }
-      scope.setUser({ id: `api_key:${apiKey.id}` });
-    } else if (clerk) {
-      scope.setTag("auth_type", "clerk");
-      scope.setTag("organization_id", clerk.organizationId);
-      if (clerk.orgSlug) {
-        scope.setTag("organization_slug", clerk.orgSlug);
-      }
-      scope.setUser({ id: clerk.userId });
-    }
-
-    // Scrubbed here as well as in Sentry's `beforeSend`: the hook is the
-    // backstop for payloads the SDK builds itself, this is the payload we hand
-    // it deliberately, and neither should depend on the other being present.
-    observability.captureException(scrubError(err));
-  });
+/**
+ * The response for an error nothing else recognized, after it was logged. A
+ * database with no connection to give is the one retryable case: a 503 with
+ * `Retry-After` tells the client to back off where a 500 told it the API was
+ * broken. It is still logged as an unexpected error, with the pool counters in
+ * the message, so the alert on those keeps seeing a saturated pool.
+ */
+function unexpectedErrorResponse(c: Context<{ Bindings: Env }>, err: Error): Response {
+  if (err instanceof DatabaseUnavailableError) {
+    c.header("Retry-After", String(DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS));
+    return appErrorResponse(c, serviceUnavailable());
+  }
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json(
+    {
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "An internal error occurred",
+      },
+      meta: { requestId: c.get("requestId") },
+    },
+    500
+  );
 }
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
@@ -289,7 +273,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   app.use("*", async (c, next) => {
-    c.set("observability", deps.observability);
     c.set("rampProviderStages", deps.rampProviderStages);
     c.set("egressReadiness", deps.egressReadiness);
     await next();
@@ -309,7 +292,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Backstop body bound for the whole public API: request handlers buffer the
   // body whole before zod validation runs, so without a ceiling a single
   // authenticated request could make the instance buffer unbounded bytes.
-  // Route-level limits (webhooks, rpc) are equal or stricter.
+  // Route-level limits (webhooks) are equal or stricter.
   app.use(
     "/v1/*",
     bodyLimit({
@@ -375,7 +358,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/counterparties", counterparties);
   v1.route("/members", members);
   v1.route("/projects", projects);
-  v1.route("/rpc", rpc);
   // Asset profiles live under the issuance namespace, as a sibling of
   // /issuance/tokens. The router is self-contained (own auth + feature-flag + project
   // middleware).
@@ -392,6 +374,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/places", places);
   v1.route("/private-channels", privateChannels);
   v1.route("/helius-rings", heliusRings);
+  v1.use("/compliance/*", requireModule("compliance"));
   v1.route("/compliance", compliance);
 
   const registeredPluginNames = new Set<string>();
@@ -410,6 +393,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/playground", playgroundInternal);
   app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
+  app.use("/internal/dashboard/wallets/*", requireModule("custody"));
+  app.route("/internal/dashboard/wallets", internalWallets);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
   app.route("/internal/dashboard/network", internalNetwork);
 
@@ -417,7 +402,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/admin/allowlist", allowlist);
 
   // Root redirect to health
-  app.get("/", (c) => c.redirect("/health"));
+  app.get("/", publicRoute("root: redirects to the health check"), (c) => c.redirect("/health"));
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Error Handling
@@ -578,19 +563,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       }),
       "Unexpected error"
     );
-    captureUnexpectedError(deps.observability, err, c);
 
-    c.header("X-SDP-Trace-ID", traceId);
-    return c.json(
-      {
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "An internal error occurred",
-        },
-        meta: { requestId },
-      },
-      500
-    );
+    return unexpectedErrorResponse(c, err);
   });
 
   // 404 handler

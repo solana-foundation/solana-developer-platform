@@ -150,11 +150,11 @@ describe("Clerk auth into a deleted organization", () => {
   it("refuses to provision a membership when the deletion lands after the door's read", async () => {
     // The door read the organization as active; the deletion commits before
     // the membership insert, which must then find the organization gone.
-    const original = organizationAccess.enforceOrganizationAccess;
+    const original = organizationAccess.readActiveOrganizationSettings;
     const spy = vi
-      .spyOn(organizationAccess, "enforceOrganizationAccess")
-      .mockImplementation(async (c, organizationId) => {
-        const settings = await original(c, organizationId);
+      .spyOn(organizationAccess, "readActiveOrganizationSettings")
+      .mockImplementation(async (workerEnv, organizationId) => {
+        const settings = await original(workerEnv, organizationId);
         await deleteOrganization();
         return settings;
       });

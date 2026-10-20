@@ -22,12 +22,12 @@ const EVERY_FAMILY = integrationsSkeletonLayout({
   privateChannels: true,
 });
 
-// What `stable` serves today: Custody and Compliance, no ramp provider, no Private Channels.
+// What `stable` serves today: Custody, no ramp provider, Compliance or Private Channels.
 const STABLE = integrationsSkeletonLayout({
   releaseChannel: "stable",
   custody: true,
   ramps: false,
-  compliance: true,
+  compliance: false,
   privateChannels: false,
 });
 
@@ -79,11 +79,11 @@ describe("integration detail skeleton", () => {
   it("draws no section for a family the release channel hides", () => {
     // Drawing every family on `stable` showed Ramps and Privacy placeholders that
     // vanished once the page loaded (HOO-1978).
-    expect(STABLE.families).toEqual(["custody", "compliance"]);
+    expect(STABLE.families).toEqual(["custody"]);
     const markup = renderToStaticMarkup(<IntegrationsSkeleton layout={STABLE} />);
-    expect(markup.match(SECTION)).toHaveLength(2);
+    expect(markup.match(SECTION)).toHaveLength(1);
     expect(markup.match(CARD)).toHaveLength(
-      CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length + COMPLIANCE_PROVIDERS.length
+      CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length
     );
   });
 
@@ -122,7 +122,7 @@ describe("integration detail skeleton", () => {
     // The shell's flag snapshot on `stable`: every non-stable module capped off.
     const STABLE_FLAGS: DashboardFlags = {
       assetProfiles: false,
-      compliance: true,
+      compliance: false,
       custody: true,
       dvp: false,
       earn: false,

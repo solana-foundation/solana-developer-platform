@@ -19,7 +19,7 @@ import { walletBalancesQuerySchema } from "./schemas";
 const BALANCE_READ_TIMEOUT_MS = 3_000;
 
 export async function getWalletBalances(c: AppContext) {
-  const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const { wallet } = await resolveWalletFromParams(c);
 
   const parsed = walletBalancesQuerySchema.safeParse(c.req.query());
   if (!parsed.success) throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });

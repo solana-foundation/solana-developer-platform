@@ -52,9 +52,13 @@ _Avoid_: Custody wallet, token account, provider account data
 A payments product flow that repeatedly sends a fixed SPL token amount from an SDP custody source wallet to a **Counterparty Account** on a configured period. Initial records are created as pending activation; execution endpoints add the on-chain lifecycle.
 _Avoid_: Low-level subscription record, billing plan template, native SOL transfer
 
-**Allowed Operations**:
-The list of operation families and types an API key may perform on the custody wallets it can access. An empty list places no restriction. An operation not in a non-empty list is refused before anything executes.
-_Avoid_: API key policy, wallet policy, rule, approval, permission scope
+**Action**:
+One thing a route does, named `module.verb` (for example `transfers.execute`). Every route declares exactly one. The verbs are `read`, `manage` (reversible SDP changes), `execute` (irreversible or leaves SDP: money, chain, providers, or where money goes), `configure` (provider and credential setup), plus issuance's `enforce` and `authority`.
+_Avoid_: permission, scope, role, operation family
+
+**Grant**:
+An action an API key holds. A key holds an explicit list of grants, never a role or a wildcard; a module's `manage` or `execute` also covers its `read`. A key can never hold key, member, organization or project administration, or any `configure`.
+_Avoid_: API key role, permission, Allowed Operations, API key policy
 
 **Payment Request**:
 A payments v2 product flow that asks a payer to complete a payment through a Solana Pay payload or a hosted payment link.
@@ -82,9 +86,9 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - SPC cannot delete principals. Legacy per-user SPC identities may remain orphaned upstream; SDP stops using them and does not create new per-user credentials.
 - A **Counterparty** may have one or more **Counterparty Accounts**.
 - A **Recurring Payment** pays a **Counterparty Account** from an SDP custody source wallet.
-- **Allowed Operations** belong to one API key and apply to every custody wallet that key can access.
-- **Allowed Operations** are checked once, when a request arrives; they refuse an operation or let it run, and never pause it.
-- **Allowed Operations** narrow what a permission scope grants and never widen it.
+- A route answers a caller only if the caller holds the route's **Action**: an API key through its **Grants**, a signed-in member through their organization role.
+- **Grants** belong to one API key and apply to every custody wallet that key can access; they refuse a request or let it run, and never pause it.
+- An **Action** added to SDP later is granted to no existing key.
 - A **Payment Request** may be delivered by email, but the email is not the **Payment Request**.
 - Every managed reconciler in one managed run follows the **Managed Reconciliation Cadence**, while its self-hosted equivalent may run at a different cadence.
 
@@ -96,8 +100,8 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 > **Dev:** "Should we make this organization enterprise so it can use Fireblocks?"
 > **Domain expert:** "No. Activate Fireblocks for that organization; provider access is independent of customer tiers."
 
-> **Dev:** "This key has `payments:write`. Can it request an off-ramp quote?"
-> **Domain expert:** "Only if its Allowed Operations are empty, or include the ramp family or the off-ramp quote type. The scope opens the door; the list says which actions may walk through it."
+> **Dev:** "This key has `transfers.execute`. Can it request an off-ramp quote?"
+> **Domain expert:** "No. The quote route declares `offramp.execute`, so the key needs that grant too. Each route names one action, and the key either holds it or is refused."
 
 > **Dev:** "Should the API hard-code the production interval into its Sentry monitors?"
 > **Domain expert:** "No. Monitoring must consume the deployment-owned Managed Reconciliation Cadence so its expectation cannot drift from execution."
@@ -108,4 +112,4 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - "Team", "organization", and "enterprise" were previously mixed with provider access; resolved: every user operates through an **Organization**, and manually onboarded providers are activated independently of organization type.
 - "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
 - "Reconciliation cadence" previously meant either the deployment's execution schedule or Sentry's expected schedule; resolved: the **Managed Reconciliation Cadence** is deployment-owned, and managed monitoring derives from it.
-- "Policy" for custody controls used to mean wallet policies, API key policies, evaluations and approvals; resolved: those concepts no longer exist (ADR 0006). The only per-key operation control is **Allowed Operations**. Provider-native policy and approval flows are configured in the custody provider, not in SDP.
+- "Policy" for custody controls used to mean wallet policies, API key policies, evaluations and approvals; resolved: those concepts no longer exist (ADR 0006). The only per-key control is the key's **Grants** (HOO-2099), which replaced Allowed Operations and roles. Provider-native policy and approval flows are configured in the custody provider, not in SDP.

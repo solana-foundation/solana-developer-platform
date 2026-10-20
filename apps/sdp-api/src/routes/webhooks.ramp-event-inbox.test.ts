@@ -8,7 +8,6 @@ import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { app } from "@/index";
-import { noopObservability } from "@/runtime/observability";
 import * as replayJobs from "@/services/jobs/replay-ramp-webhook-events";
 import {
   applyStoredRampWebhookEvent,
@@ -174,6 +173,7 @@ describe("Ramp webhook event inbox", () => {
     data: {
       id: MOONPAY_TRANSACTION_ID,
       status: "completed",
+      updatedAt: "2026-06-18T11:00:00.000Z",
       externalTransactionId: TRANSFER_ID,
       failureReason: null,
       baseCurrencyAmount: 47.73,
@@ -229,7 +229,7 @@ describe("Ramp webhook event inbox", () => {
     const { res } = await sendMoonpayWebhook(completedPayload);
     expect(res.status).toBe(200);
 
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
     expect(await readInboxRows()).toMatchObject([
       {
         status: "discharged",
@@ -480,7 +480,7 @@ describe("Ramp webhook event inbox", () => {
     const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
 
     expect(applied).toBe(1);
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
     expect(await readInboxRows()).toMatchObject([{ status: "discharged" }]);
   });
 
@@ -494,7 +494,7 @@ describe("Ramp webhook event inbox", () => {
 
     expect(stored.rawBody).toBe(rawBody);
     expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(true);
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
   });
 
   it("does not claim events still inside the background pass's window", async () => {
@@ -773,7 +773,7 @@ describe("Ramp webhook event inbox", () => {
 
     expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(1);
 
-    expect(await readTransferStatus()).toBe("completed");
+    expect(await readTransferStatus()).toBe("settling");
     expect(await readInboxRows()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: unknown, status: "pending", attempts: 0, last_error: null }),
@@ -788,7 +788,6 @@ describe("Ramp webhook event inbox", () => {
     const MOONPAY_ONLY: SdpRampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
     const betaEnv = (): Env => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
     const betaApp = createApp({
-      observability: noopObservability,
       rampProviderStages: MOONPAY_ONLY,
     });
 
@@ -797,7 +796,7 @@ describe("Ramp webhook event inbox", () => {
         target: { app: betaApp, env: betaEnv() },
       });
       expect(res.status).toBe(200);
-      expect(await readTransferStatus()).toBe("completed");
+      expect(await readTransferStatus()).toBe("settling");
 
       const refused = await betaApp.request(
         "/webhooks/payments/ramps/sandbox/stripe",
@@ -860,7 +859,7 @@ describe("Ramp webhook event inbox", () => {
       const applied = await replayRampWebhookEvents(betaEnv(), MOONPAY_ONLY);
 
       expect(applied).toBe(1);
-      expect(await readTransferStatus()).toBe("completed");
+      expect(await readTransferStatus()).toBe("settling");
       const rows = await getDb(env)
         .prepare("SELECT id, status, attempts, last_error FROM ramp_webhook_events")
         .all<{ id: string; status: string; attempts: number; last_error: string | null }>();

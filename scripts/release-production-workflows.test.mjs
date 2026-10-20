@@ -142,7 +142,7 @@ test("the production API deploy releases the sdp-web production gate for the dep
 test("the deploy job exposes the revision it promoted, and promotion and the canary as separate outcomes", () => {
   const deploy = jobBlock(readWorkflow(prodDeployFile), "deploy");
   assertLine(deploy, `      revision: ${expression("steps.promote.outputs.revision")}`);
-  const promote = stepBlock(deploy, "Promote service and cron with rollback");
+  const promote = stepBlock(deploy, "Promote service and worker with rollback");
   assertLine(promote, "        id: promote");
   assert.match(
     promote,

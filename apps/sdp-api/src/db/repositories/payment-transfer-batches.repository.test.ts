@@ -188,8 +188,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     ).toBeNull();
   });
 
-  it("authorizes exact batches and legacy null-pin history before pagination", async () => {
-    const db = getDb(env);
+  it("filters exact batches and retains null-pin history only in its project", async () => {
     await repo.createTransferBatchWithRecipients({
       batch: {
         ...baseInput,
@@ -198,11 +197,12 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       },
       recipients: [],
     });
+    // A legacy batch with no source wallet must not match the filter.
     const { batch: legacy } = await repo.createTransferBatchWithRecipients({
       batch: { ...baseInput, projectId: TEST_PROJECT_ID },
       recipients: [],
     });
-    await db
+    await getDb(env)
       .prepare("UPDATE payment_transfer_batches SET source_custody_wallet_id = NULL WHERE id = ?")
       .bind(legacy.id)
       .run();
@@ -214,66 +214,40 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       limit: 20,
       offset: 0,
     });
-    const authorized = await repo.listTransferBatches({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: {
-        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-        providerWalletIds: [TEST_WALLET_ID],
-      },
-      limit: 20,
-      offset: 0,
-    });
-    const authorizationDenied = await repo.listTransferBatches({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
-      limit: 20,
-      offset: 0,
-    });
 
     expect(selected.rows).toHaveLength(1);
     expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(authorized.total).toBe(2);
-    expect(authorized.rows).toHaveLength(2);
-    expect(authorized.rows).toContainEqual(
+    const listArgs = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      limit: 20,
+      offset: 0,
+    };
+    const all = await repo.listTransferBatches(listArgs);
+    expect(all.total).toBe(2);
+    expect(all.rows).toHaveLength(2);
+    expect(all.rows).toContainEqual(
       expect.objectContaining({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID })
     );
-    expect(authorized.rows).toContainEqual(
+    expect(all.rows).toContainEqual(
       expect.objectContaining({ id: legacy.id, source_custody_wallet_id: null })
     );
-    const nextPage = await repo.listTransferBatches({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: {
-        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-        providerWalletIds: [TEST_WALLET_ID],
-      },
-      limit: 1,
-      offset: 1,
-    });
-    expect(nextPage).toMatchObject({
-      rows: [expect.objectContaining({ source_wallet_id: TEST_WALLET_ID })],
+    await expect(
+      repo.listTransferBatches({ ...listArgs, limit: 1, offset: 1 })
+    ).resolves.toMatchObject({
+      rows: [expect.objectContaining({ project_id: TEST_PROJECT_ID })],
       total: 2,
     });
-    const providerOnly = await repo.listTransferBatches({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [TEST_WALLET_ID] },
-      limit: 20,
-      offset: 0,
-    });
-    expect(providerOnly.total).toBe(1);
-    expect(providerOnly.rows.map((row) => row.id)).toEqual([legacy.id]);
-    const tenantWide = await repo.listTransferBatches({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      limit: 20,
-      offset: 0,
-    });
-    expect(tenantWide.total).toBe(2);
-    expect(tenantWide.rows).toHaveLength(2);
-    expect(authorizationDenied).toEqual({ rows: [], total: 0 });
+    await expect(
+      repo.listTransferBatches({ ...listArgs, projectId: projects.production.id })
+    ).resolves.toEqual({ rows: [], total: 0 });
+    await expect(
+      repo.getTransferBatchById({
+        batchId: legacy.id,
+        organizationId: TEST_ORG.id,
+        projectId: projects.production.id,
+      })
+    ).resolves.toBeNull();
   });
 });
 

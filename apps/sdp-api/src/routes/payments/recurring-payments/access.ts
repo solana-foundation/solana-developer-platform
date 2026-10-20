@@ -1,6 +1,5 @@
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
-import type { ApiKeyContext } from "@/lib/auth";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, notFound, walletNotFound } from "@/lib/errors";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import {
@@ -15,18 +14,15 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
-import {
-  assertApiKeyCustodyWalletAccess,
-  getAllowedApiKeyWalletAuthorizationForPermissions,
-} from "@/services/api-key-scope.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
 /**
  * Access checks for the recurring-payment routes (HOO-1918, ADR 0009). They
  * run before the Idempotency-Key step, so a replay passes exactly these checks:
- * every id the request names, in the caller's project, and the credential's
- * wallet bindings read fresh (never the cached snapshot, which drops a binding
- * once its wallet is inactive). Access, never state: a wallet deactivated
+ * every id the request names, in the caller's project. Project-scoped: whether
+ * a key may sign with the source wallet is the custody signer's decision, and
+ * a start it may not make is refused before its attempt is claimed (HOO-2099).
+ * Access, never state: a wallet deactivated
  * since, or a schedule whose source wallet is unresolved, still passes here,
  * and the handler and services refuse new work on it.
  */
@@ -48,8 +44,6 @@ export interface AuthorizedRecurringPaymentCreate {
   /** The named source wallet, whatever its status; the handler refuses an inactive one. */
   sourceWallet: CustodyWallet;
 }
-
-const PERMISSIONS = ["payments:write"] as const;
 
 /** The counterparty's account, in the caller's project whatever its status. */
 async function assertCounterpartyAccountInProject(
@@ -122,7 +116,6 @@ export async function authorizeRecurringPaymentCreate(
     counterpartyId: string;
     counterpartyAccountId: string;
   };
-  assertApiKeyCustodyWalletAccess(getAuth(c), body.sourceCustodyWalletId, [...PERMISSIONS]);
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
   // Every id the caller names is checked before the key is claimed: a
@@ -145,9 +138,6 @@ async function authorizeExistingRecurringPayment(
     recurringPaymentId: id,
     organizationId: access.organizationId,
     projectId: requireProjectId(c),
-    walletAuthorization: getAllowedApiKeyWalletAuthorizationForPermissions(access, [
-      ...PERMISSIONS,
-    ]),
   });
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
@@ -159,7 +149,6 @@ async function authorizeExistingRecurringPayment(
     return { scope, recurringPayment, sourceWallet: null };
   }
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
-  assertApiKeyCustodyWalletAccess(access, sourceWallet.id, [...PERMISSIONS]);
   return { scope, recurringPayment, sourceWallet };
 }
 
@@ -193,7 +182,6 @@ export async function authorizeRecurringPaymentUpdate(
     if (!named) {
       throw walletNotFound();
     }
-    assertApiKeyCustodyWalletAccess(access, named.id, [...PERMISSIONS]);
     nextSourceWallet = named;
   }
   await assertNamedCounterpartyIdsInProject(c, body);

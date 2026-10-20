@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { ApiKeyRole } from "@sdp/types/permissions";
+import type { Action } from "@sdp/types/actions";
 import type { DatabaseClient } from "@/db/client";
 import type { Env } from "@/types/env";
 
@@ -14,8 +14,7 @@ export interface SeedProjectApiKeyInput {
   organizationId: string;
   projectId: string;
   createdBy: string;
-  role: ApiKeyRole;
-  permissions: readonly string[];
+  grants: readonly Action[];
 }
 
 /**
@@ -28,8 +27,7 @@ export interface SeedProjectApiKeyInput {
  * @param input.organizationId - Organization that owns the key.
  * @param input.projectId - Project the key is bound to.
  * @param input.createdBy - User recorded as the creator.
- * @param input.role - Key role.
- * @param input.permissions - Granted permission scopes.
+ * @param input.grants - The key's grants.
  * @returns The key hash auth resolves the raw secret to.
  */
 export async function seedProjectApiKey(
@@ -41,8 +39,8 @@ export async function seedProjectApiKey(
   await db
     .prepare(
       `INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
        ON CONFLICT (id) DO NOTHING`
     )
     .bind(
@@ -53,8 +51,7 @@ export async function seedProjectApiKey(
       input.key.id,
       input.key.prefix,
       keyHash,
-      input.role,
-      JSON.stringify(input.permissions)
+      [...input.grants]
     )
     .run();
   return keyHash;

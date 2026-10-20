@@ -1,11 +1,12 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
 import {
-  OPERATION_FAMILIES,
-  OPERATION_FAMILY_BY_TYPE,
-  OPERATION_TYPES,
-  type OperationFamily,
-  type OperationType,
-} from "@sdp/types/allowed-operations";
+  ACTION_MODULE_NAMES,
+  type ActionModule,
+  type ActionVerb,
+  API_KEY_GRANTABLE_ACTIONS,
+  actionsInModule,
+  actionVerbOf,
+} from "@sdp/types/actions";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
   SDP_MODULES,
@@ -15,7 +16,8 @@ import {
 } from "@sdp/types/release-channels";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
-
+import { z } from "zod";
+import { routeActionKey } from "@/routes/route-actions";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
@@ -32,14 +34,14 @@ import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
-import { registerProjectPaths } from "./paths/projects";
-import { registerRpcPaths } from "./paths/rpc";
+import { registerProjectAdministrationPaths, registerProjectPaths } from "./paths/projects";
 import { registerTransactionsPaths } from "./paths/transactions";
 import {
   isValuePublished,
   pruneUnpublishedValues,
   publishedModules,
 } from "./release-channel-values";
+import routeActionsJson from "./route-actions.generated.json";
 
 const EARN_TAG_DESCRIPTION =
   "Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.";
@@ -53,8 +55,11 @@ const OPENAPI_TAG = {
     name: "Wallets",
     description: "Wallet signing provider configuration and wallet management.",
   },
-  PROJECTS: { name: "Projects", description: "Project and project member management." },
-  RPC: { name: "RPC", description: "Managed Solana RPC relay." },
+  PROJECTS: {
+    name: "Projects",
+    description:
+      "Projects and their provider availability. Project members and keys are managed in the dashboard.",
+  },
   ISSUANCE: {
     name: "Issuance",
     description: "Token issuance, allowlists, and lifecycle operations.",
@@ -156,7 +161,6 @@ function usedTags(document: OpenAPIObject, tags: readonly { name: string }[]) {
 
 const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.HEALTH,
-  OPENAPI_TAG.API_KEYS,
   OPENAPI_TAG.WALLETS,
   OPENAPI_TAG.PROJECTS,
   OPENAPI_TAG.ISSUANCE,
@@ -177,7 +181,6 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.MEMBERS,
   OPENAPI_TAG.WALLETS,
   OPENAPI_TAG.PROJECTS,
-  OPENAPI_TAG.RPC,
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
   OPENAPI_TAG.PRIVATE_CHANNELS,
@@ -216,9 +219,10 @@ function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
   });
 }
 
+// Key, member and organization administration answer a signed-in person only
+// (HOO-2099), so the public document, which an API key calls, omits them.
 function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerHealthPaths(registry);
-  registerApiKeyPaths(registry);
   registerCustodyPaths(registry);
   if (publishEarn) {
     registerPublicEarnPaths(registry);
@@ -241,7 +245,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerEarnPaths(registry);
   registerDvpPaths(registry);
   registerProjectPaths(registry, true);
-  registerRpcPaths(registry);
+  registerProjectAdministrationPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
@@ -251,6 +255,48 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerAssetProfilePaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);
+}
+
+const HTTP_METHODS = ["get", "put", "post", "delete", "patch"] as const;
+
+/**
+ * Each route's declared action, generated from the app by
+ * `pnpm -C apps/sdp-api route-actions:generate` (route-actions.test.ts fails
+ * when it drifts). Read from the file, not the app, so the document never
+ * imports what mounts it.
+ */
+const ROUTE_ACTIONS: Readonly<Record<string, string | undefined>> = z
+  .record(z.string(), z.string())
+  .parse(routeActionsJson);
+
+/**
+ * Names each operation's action in its 403, read from the route's own
+ * `requireAction` declaration, so the reference can never say a different
+ * action than the route enforces. An operation that documents no 403 gets one
+ * with the shape of its 401.
+ */
+function describeActionRefusals(document: OpenAPIObject): void {
+  for (const [path, item] of Object.entries(document.paths ?? {})) {
+    for (const method of HTTP_METHODS) {
+      const operation = item[method];
+      if (!operation) continue;
+      const action = ROUTE_ACTIONS[routeActionKey(method, path)];
+      if (!action) continue;
+      const documented = operation.responses["403"];
+      const existing = documented ?? operation.responses["401"];
+      const requirement = `Forbidden. Requires the \`${action}\` action: an API key must hold it (a module's \`manage\` or \`execute\` also covers its \`read\`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and \`error.details.action\` names the action. Any other 403 names its own reason.`;
+      // A route that documents its own 403 reasons (anything but the generic
+      // "Error" from errorResponses) keeps them after the action requirement.
+      const ownReasons =
+        documented && "description" in documented && documented.description !== "Error"
+          ? documented.description
+          : null;
+      operation.responses["403"] = {
+        ...existing,
+        description: ownReasons ? `${requirement}\n\n${ownReasons}` : requirement,
+      };
+    }
+  }
 }
 
 function createDocument({
@@ -300,6 +346,7 @@ function createDocument({
       },
     ],
   });
+  describeActionRefusals(document);
   if (!publicOnly || releaseChannel === undefined) {
     return document;
   }
@@ -326,15 +373,15 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
 /**
  * What a release channel's public surfaces may name, for consumers that cannot
  * load this package (the docs site's MDX pipeline): the modules and ramp
- * providers the public document publishes, Earn's hold included, the API-key
- * operation families and types it documents, and the full vocabularies to
- * validate tags against.
+ * providers the public document publishes, Earn's hold included, the actions
+ * an API key may be granted in it (per module, in registry order), and the
+ * full vocabularies to validate tags against.
  */
 export type PublicSurfaceManifest = {
   releaseChannel: SdpReleaseChannel;
   modules: SdpModule[];
   rampProviders: RampProviderId[];
-  allowedOperations: { family: OperationFamily; types: OperationType[] }[];
+  grantableActions: { module: ActionModule; verbs: ActionVerb[] }[];
   allModules: SdpModule[];
   allRampProviders: RampProviderId[];
 };
@@ -348,12 +395,12 @@ export function createPublicSurfaceManifest(
     releaseChannel,
     modules: SDP_MODULES.filter((module) => modules.has(module)),
     rampProviders: RAMP_PROVIDERS.filter(published),
-    allowedOperations: OPERATION_FAMILIES.filter(published).map((family) => ({
-      family,
-      types: OPERATION_TYPES.filter(
-        (type) => OPERATION_FAMILY_BY_TYPE[type] === family && published(type)
-      ),
-    })),
+    grantableActions: ACTION_MODULE_NAMES.map((module) => ({
+      module,
+      verbs: actionsInModule(module)
+        .filter((action) => API_KEY_GRANTABLE_ACTIONS.includes(action) && published(action))
+        .map(actionVerbOf),
+    })).filter(({ verbs }) => verbs.length > 0),
     allModules: [...SDP_MODULES],
     allRampProviders: [...RAMP_PROVIDERS],
   };

@@ -3,7 +3,7 @@
  *
  * Deposits, withdrawals and member transfers all answer the same question before
  * anything is signed: may value move out of THIS wallet, to THIS destination, on
- * THIS instance? Holding `payments:write` on the project is not enough — it only
+ * THIS instance? Holding `private_channels.execute` on the project is not enough — it only
  * proves the caller may move project funds at all. The control that actually
  * binds a wallet to the channel is `private_channel_verified_wallets`: the record
  * that the wallet completed the challenge → sign → verify handshake under the
@@ -34,8 +34,8 @@ import {
   resolvePrivateChannelCustodyWallet,
 } from "@/services/private-channels/wallet-access";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import type { AppContext } from "./context";
 import {
+  type AppContext,
   getPrivateChannelUserRepository,
   getPrivateChannelVerifiedWalletRepository,
 } from "./context";
@@ -137,9 +137,8 @@ export async function resolveVerifiedSourceWallet(
     allowAddress
   );
   // Enrolment answers whether the wallet may move value on this instance at
-  // all; the key's wallet bindings answer whether THIS credential may spend
-  // from it. Every other money route holds the second line too, and skipping
-  // it here would let a key bound to one wallet spend any enrolled wallet.
+  // all; the key's wallet scope, checked as the wallet resolves, answers
+  // whether THIS credential may spend from it.
 
   const verifiedWallets = await getPrivateChannelVerifiedWalletRepository(c).listByUserAndInstance(
     context.actor.id,

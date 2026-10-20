@@ -6,7 +6,7 @@ import {
 } from "@sdp/types/site";
 import { Hono } from "hono";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
-
+import { publicRoute } from "@/middleware/require-action";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
 
@@ -85,7 +85,7 @@ function renderBody(releaseChannel: SdpReleaseChannel): string {
 /** One body per release channel, built on first request from that channel's document. */
 const bodies = new Map<SdpReleaseChannel, string>();
 
-llms.get("/", (c) => {
+llms.get("/", publicRoute("AI discovery resource"), (c) => {
   const releaseChannel = resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL);
   let body = bodies.get(releaseChannel);
   if (body === undefined) {

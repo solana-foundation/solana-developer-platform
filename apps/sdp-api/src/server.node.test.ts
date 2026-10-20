@@ -22,4 +22,11 @@ describe("server boot checks", () => {
       /SDP_RELEASE_CHANNEL is required/
     );
   });
+
+  it("refuses a DATABASE_PREPARED_STATEMENTS value other than on or off", () => {
+    expect(() => assertRequiredEnv(makeEnv({ DATABASE_PREPARED_STATEMENTS: "off" }))).not.toThrow();
+    expect(() => assertRequiredEnv(makeEnv({ DATABASE_PREPARED_STATEMENTS: "of" }))).toThrow(
+      /DATABASE_PREPARED_STATEMENTS/
+    );
+  });
 });

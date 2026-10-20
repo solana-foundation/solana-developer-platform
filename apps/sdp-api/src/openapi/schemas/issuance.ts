@@ -1012,7 +1012,7 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
     }),
     signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
       description:
-        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare (or resolved from the API key), so the authority can't be changed at confirm time.",
+        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time.",
       example: "privy_wallet_123",
     }),
   })

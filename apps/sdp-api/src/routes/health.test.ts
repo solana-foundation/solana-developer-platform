@@ -11,12 +11,10 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { app } from "@/index";
-import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 
 function appWithEgress(readiness: EgressReadiness) {
   return createApp({
-    observability: noopObservability,
     rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
     egressReadiness: () => readiness,
   });

@@ -1,14 +1,8 @@
 import { badRequest } from "@sdp/payments/errors";
-import type { Permission } from "@sdp/types/permissions";
 import { isAddress } from "@solana/addresses";
 import { getDb } from "@/db/client";
-import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, conflict, walletNotFound } from "@/lib/errors";
-import {
-  assertApiKeyCustodyWalletAccess,
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyCustodyWalletIdsForPermissions,
-} from "@/services/api-key-scope.service";
+import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
+import { conflict, walletNotFound } from "@/lib/errors";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -110,31 +104,12 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
-/**
- * Resolve an exact SDP wallet,
- * honoring the API key's wallet binding. Used by the wallet balances route.
- *
- * @param c - Request context.
- * @param requiredWalletPermissions - Wallet permissions the caller must hold.
- * @returns The auth context and the resolved operational wallet.
- */
-export async function resolveWalletFromParams(
-  c: AppContext,
-  requiredWalletPermissions: Permission[]
-) {
+/** Resolve an exact SDP wallet, enforcing the key's internal wallet scope for balance reads. */
+export async function resolveWalletFromParams(c: AppContext) {
   const auth = getAuth(c);
   const walletId = c.req.param("walletId");
   if (!walletId) {
     throw walletNotFound();
-  }
-  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
-    auth,
-    requiredWalletPermissions
-  );
-  if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(walletId)) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet", {
-      reason: "api_key_wallet_access_denied",
-    });
   }
   const wallet = await new CustodyRuntimeTargets(
     getDb(c.env),
@@ -145,7 +120,7 @@ export async function resolveWalletFromParams(
     projectId: requireProjectId(c),
     custodyWalletId: walletId,
   });
-  if (!wallet) {
+  if (!wallet || !walletAccessAllows(auth.walletAccess, wallet.id)) {
     throw walletNotFound();
   }
   return { auth, wallet };
@@ -174,50 +149,6 @@ export function resolveWalletByCustodyWalletId(
   return wallet;
 }
 
-/**
- * The access check for a route that names a wallet by its provider wallet ID
- * (HOO-1918, ADR 0009): the key's bindings as authentication read them on this
- * request (HOO-2048), deactivated wallets kept, so the replay of a request
- * that ran is never refused. Resolving the wallet (ownership, whether it is
- * active) stays in the handler.
- */
-export function authorizeProviderWallet(
-  c: AppContext,
-  walletId: string,
-  requiredWalletPermissions: Permission[]
-): void {
-  assertApiKeyWalletAccess(getAuth(c), walletId, requiredWalletPermissions);
-}
-
-/**
- * {@link authorizeProviderWallet} for a route that names a custody wallet by
- * its id. A no-op for callers that are not wallet-scoped API keys.
- */
-export function authorizeCustodyPaymentWallet(
-  c: AppContext,
-  custodyWalletId: string,
-  requiredWalletPermissions: Permission[]
-): void {
-  assertApiKeyCustodyWalletAccess(getAuth(c), custodyWalletId, requiredWalletPermissions);
-}
-
-export function assertPaymentWalletExactAccess(
-  c: AppContext,
-  custodyWalletId: string,
-  requiredWalletPermissions: Permission[]
-): void {
-  assertApiKeyCustodyWalletAccess(getAuth(c), custodyWalletId, requiredWalletPermissions);
-}
-
-export async function admitExactPaymentWallet(
-  c: AppContext,
-  wallet: CustodyWallet,
-  requiredWalletPermissions: Permission[]
-): Promise<void> {
-  assertPaymentWalletExactAccess(c, wallet.id, requiredWalletPermissions);
-  await admitPaymentWalletRuntimeExecution(c, wallet);
-}
-
 export async function admitPaymentWalletRuntimeExecution(
   c: AppContext,
   wallet: CustodyWallet
@@ -230,31 +161,10 @@ export async function admitPaymentWalletRuntimeExecution(
   );
 }
 
-export function assertPaymentWalletReadAccess(
-  c: AppContext,
-  wallet: { custodyWalletId: string | null; providerWalletId: string }
-): void {
-  const auth = getAuth(c);
-  if (wallet.custodyWalletId) {
-    const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
-      "payments:read",
-    ]);
-    if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(wallet.custodyWalletId)) {
-      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-    }
-    return;
-  }
-
-  // shortcut: preserve null-pin history access until audited backfill and cutover.
-  assertApiKeyWalletAccess(auth, wallet.providerWalletId, ["payments:read"]);
-}
-
 export function resolveWalletAddress(
   wallets: CustodyWallet[],
   walletIdOrAddress: string,
-  fieldName: string,
-  auth?: ReturnType<typeof getAuth>,
-  requiredWalletPermissions: Permission[] = []
+  fieldName: string
 ): string {
   const matchingWallets = wallets.filter(
     (entry) => entry.walletId === walletIdOrAddress || entry.publicKey === walletIdOrAddress
@@ -264,9 +174,6 @@ export function resolveWalletAddress(
   }
   const matchingWallet = matchingWallets[0];
   if (matchingWallet) {
-    if (auth) {
-      assertApiKeyWalletAccess(auth, matchingWallet.walletId, requiredWalletPermissions);
-    }
     return matchingWallet.publicKey;
   }
   if (!isAddress(walletIdOrAddress)) {

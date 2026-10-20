@@ -1,7 +1,7 @@
 "use client";
 
 import type { Counterparty } from "@sdp/types/counterparties";
-import type { PaymentRequest, PaymentRequestStatus } from "@sdp/types/payments";
+import type { PaymentRequest, PaymentRequestLink, PaymentRequestStatus } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
 import { Button } from "@sdp/ui/button";
@@ -28,6 +28,7 @@ import { PaymentsTableHeader } from "@/app/dashboard/[projectId]/payments/paymen
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
@@ -442,14 +443,32 @@ export function PaymentRequestsWorkspace({
   };
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
-  const copyLink = (request: PaymentRequest) => {
+  const copyLink = (row: PaymentRequest) => {
     // A demo request lives in this browser only, so the public pay page can't open its link.
     if (demo) {
       toast.info(t("DashboardPayments.demo.noPayLink"));
       return;
     }
-    void navigator.clipboard.writeText(`${window.location.origin}/pay/${request.publicToken}`);
-    toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
+    // Reads never carry the pay link (APE-849); the link read returns it only to a
+    // member whose role may manage payment requests. Safari lets a clipboard
+    // write start only inside the click, so the write starts now with the link
+    // read as its pending contents.
+    let refusal: string | null = null;
+    const link = dashboardFetch<{ data: PaymentRequestLink }>(
+      `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
+    ).then((res) => {
+      if (!res.ok) {
+        refusal =
+          res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error;
+        throw new Error(refusal);
+      }
+      const url = `${window.location.origin}/pay/${res.data.data.publicToken}`;
+      return new Blob([url], { type: "text/plain" });
+    });
+    navigator.clipboard.write([new ClipboardItem({ "text/plain": link })]).then(
+      () => toast.success(t("DashboardPayments.requests.paymentLinkCopied")),
+      () => toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"))
+    );
   };
 
   return (

@@ -51,13 +51,12 @@
     }
   },
   "scripts": {
-    "dev": "scripts/doppler/run-with-config.sh turbo run dev dev:db dev:webhook --env-mode=loose --continue=always",
-    "dev:kora": "scripts/doppler/run-with-config.sh scripts/kora-local/dev.sh",
+    "dev": "scripts/doppler/run-with-config.sh scripts/kora-local/dev.sh",
     "dev:webhooks": "scripts/doppler/run-with-config.sh turbo run dev:webhook --env-mode=loose",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web --env-mode=loose",
     "dev:docs": "turbo run dev --filter=sdp-docs",
     "dev:example:embedded-yield": "pnpm -C examples/embedded-yield-bank dev",
-    "dev:api": "scripts/doppler/run-with-config.sh turbo run dev --filter=@sdp/api --env-mode=loose",
+    "dev:api": "scripts/doppler/run-with-config.sh turbo run dev dev:worker --filter=@sdp/api --env-mode=loose --continue=always",
     "build": "turbo run build",
     "check:migration-compat": "node scripts/check-migration-compat.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",

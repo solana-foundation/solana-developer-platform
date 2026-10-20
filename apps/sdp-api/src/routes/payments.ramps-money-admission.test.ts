@@ -117,7 +117,8 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
       expect(admission).toHaveBeenCalledExactlyOnceWith(
         env,
         ADMISSION_SCOPE,
-        admissionContext(movement)
+        admissionContext(movement),
+        { custodyWalletId: TEST_CUSTODY_WALLET_ID }
       );
     }
   );
@@ -158,7 +159,8 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
       expect(admission).toHaveBeenCalledExactlyOnceWith(
         env,
         ADMISSION_SCOPE,
-        admissionContext(movement)
+        admissionContext(movement),
+        { custodyWalletId: TEST_CUSTODY_WALLET_ID }
       );
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(await countCounterpartyTransfers(counterpartyId)).toBe(0);

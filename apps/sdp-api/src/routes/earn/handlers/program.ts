@@ -29,7 +29,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnWithdrawalFingerprint,
   deriveProviderRequestId,
@@ -53,7 +53,6 @@ import {
   earnProgramWithdrawalsListQuerySchema,
 } from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
-import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
   applyEarnWithdrawalObservationByReference,
@@ -613,8 +612,8 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
 
 /**
  * A program is an ACCOUNT at the provider, not an SDP custody wallet, so there
- * is no `custody_wallets` row for a selected-scope key to be bound against and
- * `assertApiKeyWalletAccess` has nothing to assert. Program payouts are
+ * is no `custody_wallets` row a selected-scope key could list, and no custody
+ * signer decides its payouts (HOO-2099). Program payouts are
  * organization-level by design (the link row's `project_id` records
  * provisioning only), so a wallet-scoped key — a key whose whole point is that
  * it may spend from ONE named wallet — is refused outright rather than silently
@@ -622,7 +621,9 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
  * wallet reached the organization's whole provider balance (HOO-1559).
  */
 function assertProgramKeyIsNotWalletScoped(c: AppContext, action: string): void {
-  assertApiKeyNotWalletScoped(getAuth(c), action);
+  if (getAuth(c).walletAccess.scope === "selected") {
+    throw new AppError("FORBIDDEN", `Wallet-scoped API keys cannot ${action}`);
+  }
 }
 
 export const previewEarnProgramWithdrawal = async (

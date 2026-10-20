@@ -4,7 +4,7 @@ Companion to [ADR 0002](../decisions/0002-earn-provider-pluggability.md). The
 current implementation is the contract; this doc maps where every piece of data
 comes from and which existing SDP components Earn rides on instead of
 rebuilding. Rule of thumb: **Earn adds a domain, not a platform**: auth,
-tenancy, custody, signing, fees, RPC, webhooks, cron, compliance, allowed operations, and
+tenancy, custody, signing, fees, RPC, webhooks, cron, compliance, API-key grants, and
 audit all already exist and are reused. For the
 step-by-step of changing what Earn offers (provider / vault / category /
 custodian), see the
@@ -76,7 +76,7 @@ caller broadcasts and tracks them.
 | Embedded Yield activity | `earn_movements`; `GET /external-wallet/movements` + `/:movementId` | Caller-signed deposit and withdrawal submits, recorded before SDP broadcasts | Intent = immediate; detail polls chain finality and the background sweep recovers unattended rows |
 | Queued withdrawal lifecycle | `earn_vault_withdrawal_requests` plus signed action/build rows; external-wallet list/detail and custody request routes | Owner-signed request/cancellation actions, persisted before broadcast; provider PDA/event reads prove Veda maturity and solver fulfilment or Hastra administrator completion, cancellation, and intermediate wYLDS terms | Durable immediately; due-queue reconciliation continues until terminal |
 | Movement history, ALL providers | `earn_movements` (**DB ledger** — `GET /v1/earn/movements`) | Every movement above, one chronological feed across both execution models; no provider gate (ADR 0002 exit safety) | Same as the rows it serves |
-| Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
+| Wallet balances (funding) | Existing wallet/custody surfaces | Existing wallet balance and token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
 > **Ledger vs live.** SDP ledgers every movement it signs or accepts through a
@@ -191,10 +191,10 @@ per-provider movement endpoints or status polling types from git history.
 | Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer; vault positions use direct RPC reads | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
-| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts` scheduled handler, `job.ts` | Catalogue sync, metrics refresh, movement reconciliation, queued-withdrawal reconciliation, and orphaned split-swap detection | ✅ wired and gated by the owning jobs |
+| Cron infra (Worker) | `cron/runner.ts` (`CRON_DEFINITIONS`), one `defineCron` file per job under `cron/` | Catalogue sync (hourly + once on Worker start), metrics refresh, movement reconciliation, queued-withdrawal reconciliation, and orphaned split-swap detection | ✅ wired and gated by each definition's `enabled` |
 | Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_movements` request uniques + queued request/action client-request uniques + `earn_provider_wallets` provider-wallet unique | Movement and queued-action retries return the recorded intent instead of moving shares or assets twice. Program creation remains key-required and the provider-wallet unique is its replay anchor. External-wallet build rows are consumable once. | ✅ wired |
 | Compliance providers | `services/compliance/`, compliance family; provider-native eligibility capability | WisdomTree uses its Connect wallet/product checks before money-in. A generic SDP compliance-provider hook for other RWA strategies remains an open decision. | ✅ WisdomTree · ⏸ generic hook |
-| Allowed operations | `requireAllowedOperation` (API key Allowed Operations, ADR 0006) | Treasury vault deposits and withdrawals are `program` operations (`earn_vault_deposit`, `earn_vault_withdrawal`) checked once on arrival; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
+| Actions | `requireAction` (API key grants by module, HOO-2099) | Every Earn route declares one action (`earn.read`, `earn.manage`, `earn.execute`) checked once on arrival; external-wallet authorization is the owner's signature | ✅ every route |
 | Audit log | `services/audit.service.ts`, `routes/earn/handlers/movement-audit.ts` | Program configuration, movement, queued request, and cancellation audit events | ✅ wired |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
 | OpenAPI to docs pipeline | `openapi/spec.ts` to sdp-docs | 21 public Earn operations with exactly eight optional-auth operations; queued action builds, submits, and tenant reads stay keyed | ✅ source and generated artifacts aligned |
@@ -213,7 +213,7 @@ moved uniqueness onto the provider wallet itself), the unified movement ledger
 (`earn_movements`) and holdings table (`earn_positions`), the separate queued
 withdrawal request/action/build tables introduced by migration 0113 and
 generalized for operator redemption by migration 0116, and the catalogue and
-reconciliation jobs.
+reconciliation Cron Definitions.
 
 ## The custodial portfolio-wallet flow (retired)
 
@@ -239,5 +239,5 @@ ADR 0002's 2026-08-03 addendum.
 3. **Compliance hook** — do RWA deposits require a compliance-provider check
    (Genius-compliant tokens need app whitelisting — JOLT/B-reserves)?
 4. **Control scope** — which of whitelist/buffer/limits/timelocks land in
-   V1. The wallet policy engine is removed (ADR 0006); per-key Allowed
-   Operations are the only control today.
+   V1. The wallet policy engine is removed (ADR 0006); per-key grants
+   by module are the only control today.

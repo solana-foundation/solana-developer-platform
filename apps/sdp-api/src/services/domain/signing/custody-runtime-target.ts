@@ -1,15 +1,16 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
-import type {
-  CustodyConfigStatus,
-  CustodyConnectionCheckStatus,
-  CustodyConnectionLifecycle,
-  CustodyMode,
-  CustodyWalletPurpose,
-  CustodyWalletStatus,
-  ProviderCredentialStatus,
+import {
+  CUSTODY_PROVIDERS,
+  type CustodyConfigStatus,
+  type CustodyConnectionCheckStatus,
+  type CustodyConnectionLifecycle,
+  type CustodyMode,
+  type CustodyProvider,
+  type CustodyWalletPurpose,
+  type CustodyWalletStatus,
+  type ProviderCredentialStatus,
 } from "@sdp/types/custody";
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
 import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
@@ -19,7 +20,7 @@ import type { DatabaseClient } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
-import { decideMovement, readMoneyAdmissionFactsWith } from "@/lib/money-admission";
+import { decideMovement, readMovementFactsWith } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
@@ -188,6 +189,23 @@ interface OperationalConnectionWalletRow extends ConnectionWalletRow {
   wallet_created_at: string;
 }
 
+/** A wallet row of {@link CustodyRuntimeTargets.findOperationalWallets}, told apart by its owner. */
+type OperationalWalletRow =
+  | (OperationalConfigWalletRow & { owner_kind: "config" })
+  | (OperationalConnectionWalletRow & { owner_kind: "connection" });
+
+function isConfigOwnedWalletRow(
+  row: OperationalWalletRow
+): row is OperationalConfigWalletRow & { owner_kind: "config" } {
+  return row.owner_kind === "config";
+}
+
+function isConnectionOwnedWalletRow(
+  row: OperationalWalletRow
+): row is OperationalConnectionWalletRow & { owner_kind: "connection" } {
+  return row.owner_kind === "connection";
+}
+
 interface ConnectionCredentialRow {
   connection_id: string;
   provider: string;
@@ -318,14 +336,15 @@ export class CustodyRuntimeTargets {
     projectId: string;
     provider?: CustodyProvider;
   }): Promise<CustodyRuntimeWalletProjection[]> {
-    const [configRows, connectionRows, availability] = await Promise.all([
-      this.findOperationalConfigWallets(params.organizationId, params.projectId),
-      this.findOperationalConnectionWallets(params.organizationId, params.projectId),
+    const [ownedWallets, availability] = await Promise.all([
+      this.findOperationalWallets(params.organizationId, params.projectId),
       // Custody entries only: ramp provider stages cannot change them.
       getProviderAvailability(this.env, this.db, params.organizationId, {
         rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
       }),
     ]);
+    const configRows = ownedWallets.filter(isConfigOwnedWalletRow);
+    const connectionRows = ownedWallets.filter(isConnectionOwnedWalletRow);
     const managedUseAllowed =
       configRows.length > 0 &&
       (await isManagedCustodyUseAllowed(this.db, {
@@ -633,6 +652,9 @@ export class CustodyRuntimeTargets {
    * it is where money admission is enforced for every module (HOO-1955,
    * APE-564): a start's signer reads the organization's live state each time
    * it signs and refuses if the start is no longer admitted (`admittedSigner`).
+   * The same read checks the ambient principal (HOO-2099): live, holding the
+   * movement's action, and allowed to sign with this exact custody wallet.
+   * Callers never authorize the wallet themselves.
    */
   async getTransactionSignerForWalletRecord(
     organizationId: string,
@@ -663,14 +685,16 @@ export class CustodyRuntimeTargets {
       custodySigningTimeoutMs(this.env)
     );
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-    // A start reads the organization's live row each time it signs; an exit
-    // reads nothing.
+    // Each signature reads the organization's and the ambient principal's
+    // live rows in one statement; an exit with no principal reads nothing.
+    const subject = { custodyWalletId };
     return admittedSigner(
       signer,
       async () =>
         decideMovement(
           movement,
-          await readMoneyAdmissionFactsWith(this.db, { organizationId, projectId })
+          await readMovementFactsWith(this.db, { organizationId, projectId }, movement, subject),
+          subject
         ),
       {
         movement,
@@ -1142,38 +1166,41 @@ export class CustodyRuntimeTargets {
     };
   }
 
-  private async findOperationalConfigWallets(
+  /**
+   * The project's active wallets of both owner kinds in one statement. The
+   * caller sorts them (`sortRuntimeWallets` orders by creation time and id), so
+   * the statement orders nothing.
+   */
+  private async findOperationalWallets(
     organizationId: string,
     projectId: string
-  ): Promise<OperationalConfigWalletRow[]> {
-    return this.db.queryMany<OperationalConfigWalletRow>(
-      `SELECT w.id AS wallet_record_id, w.custody_config_id, c.provider,
+  ): Promise<OperationalWalletRow[]> {
+    return this.db.queryMany<OperationalWalletRow>(
+      `SELECT 'config' AS owner_kind,
+              w.id AS wallet_record_id, w.custody_config_id, c.provider,
               w.wallet_id, w.public_key AS wallet_public_key,
               w.label AS wallet_label, w.purpose AS wallet_purpose,
-              w.created_at AS wallet_created_at
+              w.created_at AS wallet_created_at,
+              NULL::text AS connection_id, NULL::text AS organization_id,
+              NULL::text AS project_id, NULL::text AS connection_status,
+              NULL::text AS last_check_status, NULL::text AS credential_status,
+              NULL::text AS provider_account_fingerprint, NULL::text AS wallet_status
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
        WHERE c.organization_id = ?
          AND c.status = 'active'
          AND w.status = 'active'
          AND c.project_id = ?
-       ORDER BY c.updated_at DESC, c.id DESC, w.created_at ASC`,
-      [organizationId, projectId]
-    );
-  }
-
-  private async findOperationalConnectionWallets(
-    organizationId: string,
-    projectId: string
-  ): Promise<OperationalConnectionWalletRow[]> {
-    return this.db.queryMany<OperationalConnectionWalletRow>(
-      `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
+       UNION ALL
+       SELECT 'connection' AS owner_kind,
+              w.id AS wallet_record_id, NULL::text AS custody_config_id, c.provider,
+              w.wallet_id, w.public_key AS wallet_public_key,
+              w.label AS wallet_label, w.purpose AS wallet_purpose,
+              w.created_at AS wallet_created_at,
+              c.id AS connection_id, c.organization_id, c.project_id,
               c.status AS connection_status, c.last_check_status,
               pc.status AS credential_status, c.provider_account_fingerprint,
-              w.id AS wallet_record_id, w.wallet_id,
-              w.public_key AS wallet_public_key, w.status AS wallet_status,
-              w.label AS wallet_label, w.purpose AS wallet_purpose,
-              w.created_at AS wallet_created_at
+              w.status AS wallet_status
        FROM custody_connections c
        JOIN provider_credentials pc
          ON pc.id = c.provider_credential_id
@@ -1182,9 +1209,8 @@ export class CustodyRuntimeTargets {
        WHERE c.organization_id = ?
          AND c.project_id = ?
          AND c.status = 'active'
-         AND w.status = 'active'
-       ORDER BY c.updated_at DESC, c.id DESC, w.created_at ASC`,
-      [organizationId, projectId]
+         AND w.status = 'active'`,
+      [organizationId, projectId, organizationId, projectId]
     );
   }
 

@@ -111,7 +111,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     return { account, counterparty };
   }
 
-  it("persists exact source identities and retains legacy null-pin history", async () => {
+  it("persists exact source identities and project-scoped null-pin history", async () => {
     const { account, counterparty } = await seedCounterpartyAccount();
     const createdAt = "2026-06-29T12:00:00.000Z";
     const create = (id: string, sourceCustodyWalletId: string) =>
@@ -176,76 +176,33 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       createdAt,
       updatedAt: createdAt,
     });
-    const authorized = await repo.listRecurringPayments({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: {
-        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-        providerWalletIds: [TEST_PROVIDER_WALLET_ID],
-      },
-      limit: 20,
-      offset: 0,
-    });
-
-    expect(attempt).not.toBeNull();
     if (attempt === null) throw new Error("Failed to create recurring payment update attempt");
     expect(exact.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     expect(attempt.new_source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
-    expect(authorized.total).toBe(2);
-    expect(authorized.rows.map((row) => row.id).sort()).toEqual([
+    const listArgs = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      limit: 20,
+      offset: 0,
+    };
+    const all = await repo.listRecurringPayments(listArgs);
+    expect(all.total).toBe(3);
+    expect(all.rows.map((row) => row.id).sort()).toEqual([
       "recpay_repo_exact_filter",
       "recpay_repo_legacy_filter",
+      "recpay_repo_sibling_filter",
     ]);
-    const nextPage = await repo.listRecurringPayments({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: {
-        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-        providerWalletIds: [TEST_PROVIDER_WALLET_ID],
-      },
-      limit: 1,
-      offset: 1,
-    });
-    expect(nextPage).toMatchObject({
-      rows: [expect.objectContaining({ source_wallet_id: TEST_PROVIDER_WALLET_ID })],
-      total: 2,
-    });
-    const providerOnly = await repo.listRecurringPayments({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [TEST_PROVIDER_WALLET_ID] },
-      limit: 20,
-      offset: 0,
-    });
-    expect(providerOnly.total).toBe(1);
-    expect(providerOnly.rows.map((row) => row.id)).toEqual(["recpay_repo_legacy_filter"]);
     await expect(
-      repo.listRecurringPayments({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
-        limit: 20,
-        offset: 0,
-      })
-    ).resolves.toEqual({ rows: [], total: 0 });
-    const tenantWide = await repo.listRecurringPayments({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      walletAuthorization: null,
-      limit: 20,
-      offset: 0,
+      repo.listRecurringPayments({ ...listArgs, limit: 1, offset: 1 })
+    ).resolves.toMatchObject({
+      rows: [expect.objectContaining({ source_wallet_id: TEST_PROVIDER_WALLET_ID })],
+      total: 3,
     });
-    expect(tenantWide.total).toBe(3);
-    expect(tenantWide.rows).toHaveLength(3);
     await expect(
       repo.getRecurringPaymentById({
         recurringPaymentId: "recpay_repo_legacy_filter",
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        walletAuthorization: {
-          custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-          providerWalletIds: [TEST_PROVIDER_WALLET_ID],
-        },
       })
     ).resolves.toMatchObject({ id: "recpay_repo_legacy_filter", source_custody_wallet_id: null });
     await expect(
@@ -253,10 +210,19 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         recurringPaymentId: "recpay_repo_sibling_filter",
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        walletAuthorization: {
-          custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
-          providerWalletIds: [TEST_PROVIDER_WALLET_ID],
-        },
+      })
+    ).resolves.toMatchObject({
+      id: "recpay_repo_sibling_filter",
+      source_custody_wallet_id: TEST_SIBLING_CUSTODY_WALLET_ID,
+    });
+    await expect(
+      repo.listRecurringPayments({ ...listArgs, projectId: `${TEST_PROJECT_ID}_other` })
+    ).resolves.toEqual({ rows: [], total: 0 });
+    await expect(
+      repo.getRecurringPaymentById({
+        recurringPaymentId: exact.id,
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_other`,
       })
     ).resolves.toBeNull();
 
@@ -363,7 +329,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       recurringPaymentId: created.id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      walletAuthorization: null,
     });
 
     const updated = await repo.updateRecurringPaymentActivation({
@@ -382,7 +347,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         recurringPaymentId: created.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        walletAuthorization: null,
       })
     ).toEqual(before);
   });

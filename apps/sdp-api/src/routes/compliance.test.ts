@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -9,8 +8,8 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
-import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
@@ -39,16 +38,14 @@ const TEST_API_KEY = {
   raw: "sk_test_compliance_fixture",
   prefix: "sk_test_com",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_SEEDED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_developer",
-  permissions: ["payments:read"],
+  grants: ["compliance.execute"],
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -73,7 +70,7 @@ let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 
 async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -106,8 +103,8 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -117,8 +114,7 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
         "Compliance Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_developer",
-        JSON.stringify(["payments:read"]),
+        ["compliance.execute"],
         "active"
       ),
   ]);
@@ -130,11 +126,10 @@ async function seedProductionApiKey(): Promise<void> {
     organizationId: TEST_ORG.id,
     projectId: TEST_PRODUCTION_PROJECT_ID,
     createdBy: TEST_USER.id,
-    role: "api_developer",
-    permissions: ["payments:read"],
+    grants: ["compliance.execute"],
   });
-  await seedCachedApiKey(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
+  await seedApiKeyRow(env, keyHash, {
+    ...TEST_SEEDED_API_KEY,
     id: TEST_PRODUCTION_API_KEY.id,
     projectId: TEST_PRODUCTION_PROJECT_ID,
     environment: "production",
@@ -315,6 +310,25 @@ describe("Compliance routes", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("at least one configured compliance provider");
     expect(body.error.message).not.toContain("manual provider activation");
+  });
+
+  // APE-574: screening returns provider risk intelligence about any address, so it
+  // is its own action, never implied by reading payments.
+  it("refuses a key without compliance.execute before any provider call", async () => {
+    env.RANGE_API_KEY = "range_test_api_key";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    await getDb(env)
+      .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+      .bind(["transfers.read", "transactions.read", "counterparties.read"], TEST_API_KEY.id)
+      .run();
+
+    const res = await screenAddress(TEST_API_KEY.raw);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "compliance.execute" } },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns a Range risk score when Range API is configured", async () => {

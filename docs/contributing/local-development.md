@@ -68,6 +68,7 @@ Useful local URLs:
 | --- | --- |
 | API | http://localhost:8787 |
 | API docs | http://localhost:8787/docs |
+| Cron worker (logs under `@sdp/api:dev:worker`) | http://localhost:8789/health |
 | Dashboard | http://localhost:3000 |
 
 ## Provider-Backed Features

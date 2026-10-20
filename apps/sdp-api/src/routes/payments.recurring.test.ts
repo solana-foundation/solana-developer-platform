@@ -45,9 +45,11 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recurring-payments/cancel-activated-by-key";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -204,6 +206,7 @@ const _TEST_COUNTERPARTY_IDENTITY = {
 async function seedCryptoWalletCounterpartyAccount(params: {
   counterpartyId: string;
   address: string;
+  projectId?: string;
 }): Promise<string> {
   const id = `counterparty_account_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -227,7 +230,7 @@ async function seedCryptoWalletCounterpartyAccount(params: {
     .bind(
       id,
       TEST_ORG.id,
-      TEST_PROJECT.id,
+      params.projectId ?? TEST_PROJECT.id,
       params.counterpartyId,
       "crypto_wallet",
       "Recurring payment wallet",
@@ -310,14 +313,12 @@ async function deleteTestOrganization() {
  * after the next request's authentication read, which is that race.
  */
 function deleteTestOrganizationAfterAuth() {
-  const authenticate = organizationAccess.enforceApiKeyOrganizationAccess;
-  vi.spyOn(organizationAccess, "enforceApiKeyOrganizationAccess").mockImplementationOnce(
-    async (...args) => {
-      const settings = await authenticate(...args);
-      await deleteTestOrganization();
-      return settings;
-    }
-  );
+  const authenticate = organizationAccess.authorizeApiKey;
+  vi.spyOn(organizationAccess, "authorizeApiKey").mockImplementationOnce(async (...args) => {
+    const settings = await authenticate(...args);
+    await deleteTestOrganization();
+    return settings;
+  });
 }
 
 async function collectionAttempts(subscriptionId: string) {
@@ -500,20 +501,91 @@ async function seedReplacementCustodyWallet(params: {
   });
 }
 
-async function bindApiKeyToWallet(walletId: string, custodyWalletId: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-       VALUES (?, ?, ?, '["*"]')`
-    )
-    .bind(`akw_${custodyWalletId}`, TEST_API_KEY.id, walletId)
-    .run();
-  await seedCachedKey({
-    walletScope: "selected",
-    signingWalletId: walletId,
-    signingWalletIds: [walletId],
-    walletBindings: [{ walletId, custodyWalletId, permissions: ["*"] }],
+async function bindApiKeyToWallet(custodyWalletId: string): Promise<void> {
+  await seedCachedKey({ walletScope: "selected", walletIds: [custodyWalletId] });
+}
+
+/**
+ * POSTs `path` as the recurring test key while another transaction holds the
+ * key row, and revokes the key there once the request's claim is waiting on
+ * it: the request was admitted with a live key, and its claim reads it after
+ * the revocation commits.
+ */
+async function revokeKeyWhileClaiming(
+  path: string,
+  init: { method: string; body: unknown } = { method: "POST", body: {} },
+  narrowing = "UPDATE api_keys SET status = 'deactivated' WHERE id = ?"
+): Promise<Response> {
+  return narrowWhileClaiming({
+    path,
+    init,
+    headers: RECURRING_HEADERS,
+    table: "api_keys",
+    rowId: TEST_API_KEY.id,
+    narrowing,
   });
+}
+
+/**
+ * Holds the activator's row lock, sends the request, waits until its claim
+ * blocks on that row, then applies `narrowing` and commits, so the narrowing
+ * lands after admission and before the claim reads the row.
+ */
+async function narrowWhileClaiming(input: {
+  path: string;
+  init: { method: string; body: unknown };
+  headers: Record<string, string>;
+  table: "api_keys" | "organization_members";
+  rowId: string;
+  narrowing: string;
+}): Promise<Response> {
+  let narrow: () => void = () => {};
+  const narrowed = new Promise<void>((resolve) => {
+    narrow = resolve;
+  });
+  let locked: () => void = () => {};
+  const holding = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const lockRow =
+    input.table === "api_keys"
+      ? "SELECT id FROM api_keys WHERE id = ? FOR UPDATE"
+      : "SELECT id FROM organization_members WHERE user_id = ? FOR UPDATE";
+  const narrowing = getDb(env).transaction(async (tx) => {
+    await tx.execute(lockRow, [input.rowId]);
+    locked();
+    await narrowed;
+    await tx.execute(input.narrowing, [input.rowId]);
+  });
+  await holding;
+  const request = app.request(
+    input.path,
+    { method: input.init.method, headers: input.headers, body: JSON.stringify(input.init.body) },
+    env
+  );
+  await untilWaitingOnRowLock(input.table);
+  narrow();
+  await narrowing;
+  return request;
+}
+
+/** Waits until a claim's share lock on a row of `table` is blocked behind another transaction. */
+async function untilWaitingOnRowLock(table: "api_keys" | "organization_members"): Promise<void> {
+  for (let attempt = 0; attempt < 250; attempt++) {
+    const waiting = await getDb(env).queryOne<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock'
+          AND datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND position('FOR SHARE' in query) > 0
+          AND position($1 in query) > 0`,
+      [table]
+    );
+    if (!waiting) throw new Error("COUNT(*) returned no row");
+    if (waiting.count > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`No claim started waiting on the ${table} row lock`);
 }
 
 async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPayment> {
@@ -528,79 +600,11 @@ async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPaym
   return body.data.recurringPayment;
 }
 
-const unboundWalletCases: Array<{
-  route: string;
-  expectedStatus: number;
-  expectedMessage: string;
-  request: (payment: SeededPendingRecurringPayment) => {
-    path: string;
-    method?: string;
-    body: Record<string, unknown>;
-  };
-}> = [
-  {
-    route: "create",
-    expectedStatus: 403,
-    expectedMessage: "API key is not authorized for the requested wallet",
-    request: (payment) => ({
-      path: "/v1/payments/recurring-payments",
-      body: {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        counterpartyId: payment.counterpartyId,
-        counterpartyAccountId: payment.counterpartyAccountId,
-        token: DEVNET_USDC_MINT,
-        amount: "25.00",
-        periodHours: 24,
-      },
-    }),
-  },
-  {
-    route: "update",
-    expectedStatus: 404,
-    expectedMessage: "Recurring payment not found",
-    request: (payment) => ({
-      path: `/v1/payments/recurring-payments/${payment.id}`,
-      method: "PATCH",
-      body: { amount: "26.00" },
-    }),
-  },
-  {
-    route: "activate",
-    expectedStatus: 404,
-    expectedMessage: "Recurring payment not found",
-    request: (payment) => ({
-      path: `/v1/payments/recurring-payments/${payment.id}/activate`,
-      body: {},
-    }),
-  },
-  {
-    route: "cancel",
-    expectedStatus: 404,
-    expectedMessage: "Recurring payment not found",
-    request: (payment) => ({
-      path: `/v1/payments/recurring-payments/${payment.id}/cancel`,
-      body: {},
-    }),
-  },
-  {
-    route: "collect",
-    expectedStatus: 404,
-    expectedMessage: "Recurring payment not found",
-    request: (payment) => ({
-      path: `/v1/payments/recurring-payments/${payment.id}/collect`,
-      body: {},
-    }),
-  },
-  {
-    route: "resume",
-    expectedStatus: 404,
-    expectedMessage: "Recurring payment not found",
-    request: (payment) => ({
-      path: `/v1/payments/recurring-payments/${payment.id}/resume`,
-      body: {},
-    }),
-  },
-];
+async function expectWalletOutOfScope(response: Response): Promise<void> {
+  expect(response.status).toBe(403);
+  const body = errorResponseSchema.parse(await response.json());
+  expect(body.error.message).toBe("The credential may not sign with this wallet");
+}
 
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
@@ -678,84 +682,106 @@ describe("Payments routes — recurring", () => {
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
   });
 
-  it("retains authorized legacy recurring history until cutover", async () => {
-    const exact = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const legacy = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const unauthorized = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("UPDATE payment_recurring_payments SET created_at = ? WHERE id = ?")
-        .bind("2026-10-12T00:00:00.000Z", exact.id),
-      getDb(env)
-        .prepare(
-          "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL, created_at = ? WHERE id = ?"
-        )
-        .bind("2026-10-12T00:00:01.000Z", legacy.id),
-      getDb(env)
-        .prepare(
-          "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL, source_wallet_id = ? WHERE id = ?"
-        )
-        .bind("wal_recurring_legacy_unauthorized", unauthorized.id),
-    ]);
-    await seedCachedKey({
-      walletScope: "selected",
-      walletBindings: [
-        {
-          walletId: TEST_WALLET_ID,
-          custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          permissions: ["payments:read"],
-        },
-      ],
-    });
-    const selected = await app.request(
-      "/v1/payments/recurring-payments",
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    expect(selected.status).toBe(200);
-    const selectedBody = successResponseSchema(paymentRecurringPaymentListResponseSchema).parse(
-      await selected.json()
-    );
-    expect(selectedBody.data.total).toBe(2);
-    expect(selectedBody.data.recurringPayments.map((row) => row.id).sort()).toEqual(
-      [exact.id, legacy.id].sort()
-    );
-    const nextPage = await app.request(
-      "/v1/payments/recurring-payments?pageSize=1&page=2",
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    expect(nextPage.status).toBe(200);
-    expect(await nextPage.json()).toMatchObject({
-      data: { recurringPayments: [{ id: exact.id }], total: 2 },
-    });
-    const scopedDetail = await app.request(
-      `/v1/payments/recurring-payments/${legacy.id}`,
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    expect(scopedDetail.status).toBe(200);
-    const unauthorizedDetail = await app.request(
-      `/v1/payments/recurring-payments/${unauthorized.id}`,
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    expect(unauthorizedDetail.status).toBe(404);
-    await seedCachedKey({ walletScope: "all", walletBindings: [] });
-    const tenantDetail = await app.request(
-      `/v1/payments/recurring-payments/${legacy.id}`,
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    expect(tenantDetail.status).toBe(200);
-    const tenantList = await app.request(
-      "/v1/payments/recurring-payments",
-      { headers: RECURRING_HEADERS },
-      env
-    );
-    expect(tenantList.status).toBe(200);
-    expect(await tenantList.json()).toMatchObject({ data: { total: 3 } });
-  });
+  it.each([{ walletIds: [TEST_CUSTODY_WALLET_ID] }, { walletIds: [] }])(
+    "keeps pinned and null-pin recurring history project-scoped with signing wallets $walletIds",
+    async ({ walletIds }) => {
+      const exact = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const legacy = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const otherReference = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const foreign = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const foreignProjectId = `${TEST_PROJECT.id}_production`;
+      const foreignCounterpartyId = await seedCounterparty({ projectId: foreignProjectId });
+      const foreignAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId: foreignCounterpartyId,
+        address: TEST_SOLANA_ADDRESSES.wallet2,
+        projectId: foreignProjectId,
+      });
+      await getDb(env).batch([
+        getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET created_at = ? WHERE id = ?")
+          .bind("2026-10-12T00:00:00.000Z", exact.id),
+        getDb(env)
+          .prepare(
+            "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL, created_at = ? WHERE id = ?"
+          )
+          .bind("2026-10-12T00:00:01.000Z", legacy.id),
+        getDb(env)
+          .prepare(
+            "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL, source_wallet_id = ?, created_at = ? WHERE id = ?"
+          )
+          .bind("wal_recurring_legacy_other", "2026-10-12T00:00:02.000Z", otherReference.id),
+        getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payments
+                SET source_custody_wallet_id = NULL, project_id = ?,
+                    counterparty_id = ?, counterparty_account_id = ?
+              WHERE id = ?`
+          )
+          .bind(foreignProjectId, foreignCounterpartyId, foreignAccountId, foreign.id),
+      ]);
+      await seedCachedKey({ grants: ["recurring.read"], walletScope: "selected", walletIds });
+
+      const selected = await app.request(
+        "/v1/payments/recurring-payments",
+        { headers: RECURRING_HEADERS },
+        env
+      );
+
+      expect(selected.status).toBe(200);
+      const selectedBody = successResponseSchema(paymentRecurringPaymentListResponseSchema).parse(
+        await selected.json()
+      );
+      expect(selectedBody.data.total).toBe(3);
+      expect(
+        selectedBody.data.recurringPayments.map((row) => ({
+          id: row.id,
+          sourceCustodyWalletId: row.sourceCustodyWalletId,
+        }))
+      ).toEqual([
+        { id: otherReference.id, sourceCustodyWalletId: null },
+        { id: legacy.id, sourceCustodyWalletId: null },
+        { id: exact.id, sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID },
+      ]);
+      const nextPage = await app.request(
+        "/v1/payments/recurring-payments?pageSize=1&page=3",
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect(nextPage.status).toBe(200);
+      expect(await nextPage.json()).toMatchObject({
+        data: { recurringPayments: [{ id: exact.id }], total: 3 },
+      });
+      for (const row of selectedBody.data.recurringPayments) {
+        const detail = await app.request(
+          `/v1/payments/recurring-payments/${row.id}`,
+          { headers: RECURRING_HEADERS },
+          env
+        );
+        expect(detail.status).toBe(200);
+        expect((await parseRecurringResponse(detail)).data.recurringPayment).toMatchObject({
+          id: row.id,
+          sourceCustodyWalletId: row.sourceCustodyWalletId,
+        });
+      }
+      const foreignDetail = await app.request(
+        `/v1/payments/recurring-payments/${foreign.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect(foreignDetail.status).toBe(404);
+
+      await seedCachedKey({ grants: [], walletScope: "selected", walletIds });
+      const denied = await app.request(
+        "/v1/payments/recurring-payments",
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toMatchObject({
+        error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "recurring.read" } },
+      });
+    }
+  );
 
   it.each(["all", "selected"] as const)(
     "fails closed before signing a null-pin recurring payment with %s wallet scope",
@@ -772,19 +798,7 @@ describe("Payments routes — recurring", () => {
         )
         .bind(recurringPaymentId)
         .run();
-      await seedCachedKey({
-        walletScope,
-        walletBindings:
-          walletScope === "selected"
-            ? [
-                {
-                  walletId: TEST_WALLET_ID,
-                  custodyWalletId: TEST_CUSTODY_WALLET_ID,
-                  permissions: ["payments:write"],
-                },
-              ]
-            : [],
-      });
+      await seedCachedKey({ walletScope, walletIds: [TEST_CUSTODY_WALLET_ID] });
       const signerCalls = createOrgSignerForCustodyWalletMock.mock.calls.length;
 
       const response = await app.request(
@@ -1780,6 +1794,82 @@ describe("Payments routes — recurring", () => {
       .bind("prpu_stale_respelled_amount")
       .first<{ status: string }>();
     expect(attempt).toEqual({ status: "confirmed" });
+  });
+
+  // HOO-2099: start admission runs only before a fresh update's claim. A
+  // recovered update whose saved signature landed only confirms it, so a key
+  // that has since lost the wallet still finishes it rather than leaving the
+  // mandate paused in `updating`.
+  it("confirms a landed stale metadata update after the key loses the wallet", async () => {
+    const updatePlanSignature = signature(
+      "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
+    );
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const signaturesBefore = signAndSendMock.mock.calls.length;
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const metadataUri = "https://example.com/recurring/landed.json";
+    const before = {
+      sourceCustodyWalletId: activated.sourceCustodyWalletId,
+      counterpartyId: activated.counterpartyId,
+      counterpartyAccountId: activated.counterpartyAccountId,
+      token: activated.token,
+      amount: activated.amount,
+      periodHours: activated.periodHours,
+      firstCollectionAt: activated.firstCollectionAt,
+      nextCollectionDueAt: activated.nextCollectionDueAt,
+      metadataUri: activated.metadataUri,
+    };
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_update_attempts (
+           id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+           old_plan_id, old_subscription_id, plan_update_signature, changed_fields,
+           before_values, after_values, created_at, updated_at
+         ) VALUES (
+           'prpu_stale_landed_metadata', ?, ?, ?, 'metadata_schedule', 'processing',
+           'update_plan', ?, ?, ?, ARRAY['metadataUri']::text[], ?::jsonb, ?::jsonb, ?, ?
+         )`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        activated.planId,
+        activated.subscriptionId,
+        updatePlanSignature,
+        JSON.stringify(before),
+        JSON.stringify({ ...before, metadataUri }),
+        staleAt,
+        staleAt
+      )
+      .run();
+    // The saved plan update landed: the plan holds the new URI.
+    vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue(planAccount(metadataUri));
+    await seedUnboundWallet();
+    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ metadataUri }) },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    expect((await parseRecurringResponse(updateRes)).data.recurringPayment).toMatchObject({
+      status: "active",
+      metadataUri,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(signaturesBefore);
   });
 
   it("clamps stale metadata update retries after the subscription period advances", async () => {
@@ -3818,7 +3908,7 @@ describe("Payments routes — recurring", () => {
       expect(await collectionAttempts(recurringPayment.subscriptionId)).toEqual([]);
     });
 
-    it("fails a refused activation back to pending_activation without signing", async () => {
+    it("refuses an activation before claiming it, signing and recording nothing", async () => {
       const signAndSendMock = recurringExecution.signAndSendMock();
       const recurringPayment = await createRecurringPaymentFixture({
         ...DEFAULT_RECURRING_FIXTURE,
@@ -3841,10 +3931,10 @@ describe("Payments routes — recurring", () => {
         )
         .bind(recurringPayment.id)
         .first<{ status: string; error: string | null }>();
-      expect(attempt).toMatchObject({ status: "failed", error: "Organization is not active" });
+      expect(attempt).toBeNull();
     });
 
-    it("returns a refused resume to canceled without signing", async () => {
+    it("refuses a resume before claiming it, leaving it canceled", async () => {
       const signAndSendMock = recurringExecution.signAndSendMock();
       signAndSendMock.mockResolvedValue(
         signature(
@@ -3878,11 +3968,7 @@ describe("Payments routes — recurring", () => {
         )
         .bind(activated.id)
         .first<{ status: string; signature: string | null; error: string | null }>();
-      expect(attempt).toMatchObject({
-        status: "failed",
-        signature: null,
-        error: "Organization is not active",
-      });
+      expect(attempt).toBeNull();
     });
 
     it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(
@@ -4689,29 +4775,475 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
-  it.each(unboundWalletCases)(
-    "rejects a selected-wallet API key bound to another wallet on $route",
-    async ({ expectedStatus, expectedMessage, request }) => {
-      await seedUnboundWallet();
+  // A key's wallet scope applies when SDP signs (HOO-2099): writes that sign
+  // nothing succeed on any project wallet, and every start is refused before
+  // its attempt is claimed.
+  it("lets a selected-wallet key edit and cancel a pending mandate on a wallet it cannot sign with, signing nothing", async () => {
+    await seedUnboundWallet();
+    const payment = await seedPendingRecurringPayment();
+    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+    const executionCalls = recurringExecutionCallCounts();
+
+    const update = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "26.00" }) },
+      env
+    );
+    expect(update.status).toBe(200);
+    const cancel = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancel.status).toBe(200);
+    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  });
+
+  it("refuses activation by a selected-wallet key outside the source wallet, before claiming it", async () => {
+    await seedUnboundWallet();
+    const payment = await seedPendingRecurringPayment();
+    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+    const before = await recurringExecutionSnapshot(payment.id);
+    const executionCalls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    await expectWalletOutOfScope(response);
+    // Refused before the claim commits, so no activation exists for the job
+    // to recover as the mandate: the row is exactly as it was.
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    const attempts = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*)::int AS count FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
+      )
+      .bind(payment.id)
+      .first<{ count: number }>();
+    expect(attempts).toEqual({ count: 0 });
+    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  });
+
+  // The claim and a revocation are ordered on the key row (HOO-2099): an
+  // activation admitted just before its key is revoked must not leave a claim
+  // the job would later finish as the mandate.
+  it("refuses an activation whose key is revoked between admission and claim", async () => {
+    const payment = await seedPendingRecurringPayment();
+    const before = await recurringExecutionSnapshot(payment.id);
+
+    const response = await revokeKeyWhileClaiming(
+      `/v1/payments/recurring-payments/${payment.id}/activate`
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+  });
+
+  // A key edit writes the key row under the same lock revocation takes, so the
+  // claim decides the narrowed key exactly as the signing waist would.
+  it.each([
+    {
+      change: "loses recurring.execute",
+      narrowing: "UPDATE api_keys SET grants = '{recurring.read}' WHERE id = ?",
+      reason: "action_not_held",
+    },
+    {
+      change: "loses the source wallet",
+      narrowing: "UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?",
+      reason: "wallet_out_of_scope",
+    },
+  ])(
+    "refuses an activation whose key $change between admission and claim",
+    async ({ narrowing, reason }) => {
       const payment = await seedPendingRecurringPayment();
-      await bindApiKeyToWallet(UNBOUND_WALLET_ID, UNBOUND_CUSTODY_WALLET_ID);
       const before = await recurringExecutionSnapshot(payment.id);
+
+      const response = await revokeKeyWhileClaiming(
+        `/v1/payments/recurring-payments/${payment.id}/activate`,
+        { method: "POST", body: {} },
+        narrowing
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: { details: { reason } } });
+      expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    }
+  );
+
+  // A member is decided the same way: removal writes the membership row the
+  // claim share-locks.
+  it("refuses an activation whose member is removed between admission and claim", async () => {
+    const payment = await seedPendingRecurringPayment();
+    const before = await recurringExecutionSnapshot(payment.id);
+    const { headers } = await authenticateTestClerkUser(env, getDb(env), {
+      userId: TEST_USER.id,
+      email: TEST_USER.email,
+      clerkUserId: `clerk_${TEST_USER.id}`,
+      organizationId: TEST_ORG.id,
+      clerkOrgId: "clerk_org_recurring_member",
+      orgSlug: TEST_ORG.slug,
+      role: "admin",
+    });
+
+    const response = await narrowWhileClaiming({
+      path: `/v1/payments/recurring-payments/${payment.id}/activate`,
+      init: { method: "POST", body: {} },
+      headers: { ...headers(TEST_PROJECT.id), "Content-Type": "application/json" },
+      table: "organization_members",
+      rowId: TEST_USER.id,
+      narrowing: "UPDATE organization_members SET status = 'removed' WHERE user_id = ?",
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+  });
+
+  it("refuses a resume whose key is revoked between admission and claim", async () => {
+    recurringExecution
+      .signAndSendMock()
+      .mockResolvedValue(
+        signature(
+          "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+        )
+      );
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancelRes.status).toBe(200);
+    const before = await recurringExecutionSnapshot(activated.id);
+
+    const response = await revokeKeyWhileClaiming(
+      `/v1/payments/recurring-payments/${activated.id}/resume`
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(activated.id)).toEqual(before);
+  });
+
+  it("refuses an amount change whose key is revoked between admission and claim", async () => {
+    recurringExecution
+      .signAndSendMock()
+      .mockResolvedValue(
+        signature(
+          "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+        )
+      );
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const before = await recurringExecutionSnapshot(activated.id);
+
+    const response = await revokeKeyWhileClaiming(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", body: { amount: "30.00" } }
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(activated.id)).toEqual(before);
+  });
+
+  it.each([
+    {
+      route: "collect",
+      prepare: (activated: { id: string; subscriptionId: string }) =>
+        setRecurringCollectionDue({
+          recurringPaymentId: activated.id,
+          subscriptionId: activated.subscriptionId,
+          dueAt: new Date(Date.now() - 60_000).toISOString(),
+        }),
+      request: (id: string) => ({
+        path: `/v1/payments/recurring-payments/${id}/collect`,
+        method: "POST",
+        body: {},
+      }),
+    },
+    {
+      route: "an amount change",
+      prepare: async () => {},
+      request: (id: string) => ({
+        path: `/v1/payments/recurring-payments/${id}`,
+        method: "PATCH",
+        body: { amount: "99.00" },
+      }),
+    },
+  ])(
+    "refuses $route on an active mandate by a selected-wallet key outside its source wallet",
+    async ({ prepare, request }) => {
+      await seedUnboundWallet();
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      await prepare(activated);
+      await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+      const before = await recurringExecutionSnapshot(activated.id);
       const executionCalls = recurringExecutionCallCounts();
 
-      const { path, method = "POST", body } = request(payment);
+      const { path, method, body } = request(activated.id);
       const response = await app.request(
         path,
         { method, headers: RECURRING_HEADERS, body: JSON.stringify(body) },
         env
       );
 
-      expect(response.status).toBe(expectedStatus);
-      const responseBody = errorResponseSchema.parse(await response.json());
-      expect(responseBody.error.message).toBe(expectedMessage);
-      expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+      await expectWalletOutOfScope(response);
+      expect(await recurringExecutionSnapshot(activated.id)).toEqual(before);
       expect(recurringExecutionCallCounts()).toEqual(executionCalls);
     }
   );
+
+  // The compromised-key path (APE-343): revoke-and-cancel finds what the key
+  // activated under its own id or one it was rotated from.
+  describe("cancel what a revoked key activated", () => {
+    async function seedKeyRow(id: string, rotatedFrom: string | null) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+              grants, status, rotated_from)
+           VALUES (?, ?, ?, ?, ?, 'sk_test_x', ?, '{}', 'active', ?)`
+        )
+        .bind(id, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, id, `hash_${id}`, rotatedFrom)
+        .run();
+    }
+    // The revoke route runs inside the project's cluster scope (projectContextMiddleware).
+    const cancelFor = (apiKeyId: string) =>
+      runInClusterScope({ projectId: TEST_PROJECT.id, environment: "sandbox" }, () =>
+        cancelRecurringPaymentsActivatedByKey(env, {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          apiKeyId,
+        })
+      );
+    beforeEach(() => {
+      recurringExecution
+        .signAndSendMock()
+        .mockResolvedValue(
+          signature(
+            "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
+          )
+        );
+    });
+    const statusOf = async (id: string) =>
+      (
+        await getDb(env)
+          .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+          .bind(id)
+          .first<{ status: string }>()
+      )?.status;
+
+    it("cancels a payment the key activated", async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+
+      expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [activated.id], failed: [] });
+      expect(await statusOf(activated.id)).toBe("canceled");
+    });
+
+    it("cancels a payment a key's rotated-from predecessor activated", async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      await seedKeyRow("key_recurring_rotated_successor", TEST_API_KEY.id);
+
+      expect(await cancelFor("key_recurring_rotated_successor")).toEqual({
+        canceled: [activated.id],
+        failed: [],
+      });
+    });
+
+    it.each(["resuming", "canceling"] as const)(
+      "reports one %s as failed, and leaves it",
+      async (inFlight) => {
+        const activated = await activateRecurringPaymentFixture({
+          ...DEFAULT_RECURRING_FIXTURE,
+          headers: RECURRING_HEADERS,
+        });
+        // A resume that has signed but not recorded its result becomes active
+        // when it settles; a cancel in flight that fails goes back to active.
+        // Either way the revoke must surface it.
+        await getDb(env)
+          .prepare("UPDATE payment_recurring_payments SET status = ? WHERE id = ?")
+          .bind(inFlight, activated.id)
+          .run();
+
+        expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [], failed: [activated.id] });
+        expect(await statusOf(activated.id)).toBe(inFlight);
+      }
+    );
+
+    const activatorOf = async (id: string) =>
+      (
+        await getDb(env)
+          .prepare("SELECT activated_by_api_key_id FROM payment_recurring_payments WHERE id = ?")
+          .bind(id)
+          .first<{ activated_by_api_key_id: string | null }>()
+      )?.activated_by_api_key_id;
+    const activatedByAnotherKey = async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      await seedKeyRow("key_recurring_original_activator", null);
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET activated_by_api_key_id = ? WHERE id = ?")
+        .bind("key_recurring_original_activator", activated.id)
+        .run();
+      return activated;
+    };
+
+    // A change to where or how much money moves re-authorizes the mandate, so
+    // the key that made it is the one whose revocation cancels it.
+    it("hands the payment to the key that changes its amount", async () => {
+      const activated = await activatedByAnotherKey();
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.00" }) },
+        env
+      );
+
+      expect(update.status).toBe(200);
+      expect(await activatorOf(activated.id)).toBe(TEST_API_KEY.id);
+      expect(await cancelFor("key_recurring_original_activator")).toEqual({
+        canceled: [],
+        failed: [],
+      });
+      expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [activated.id], failed: [] });
+    });
+
+    it("gives the payment back to its activator when the change fails before taking effect", async () => {
+      const activated = await activatedByAnotherKey();
+      recurringExecution.signAndSendMock().mockRejectedValueOnce(new Error("signer unavailable"));
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.00" }) },
+        env
+      );
+
+      expect(update.status).toBeGreaterThanOrEqual(400);
+      expect(await statusOf(activated.id)).toBe("active");
+      expect(await activatorOf(activated.id)).toBe("key_recurring_original_activator");
+      expect(await cancelFor("key_recurring_original_activator")).toEqual({
+        canceled: [activated.id],
+        failed: [],
+      });
+    });
+
+    it("reports a payment whose update by another key is in flight to its previous activator", async () => {
+      const activated = await activatedByAnotherKey();
+      // Key B has claimed an update: the payment names B, and the attempt
+      // keeps the activator it would restore if the update failed.
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'updating', activated_by_api_key_id = ? WHERE id = ?"
+        )
+        .bind(TEST_API_KEY.id, activated.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_recurring_payment_update_attempts (
+             id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+             changed_fields, before_values, after_values, previous_activator, created_at, updated_at
+           ) VALUES (
+             'prpu_in_flight_handover', ?, ?, ?, 'replacement', 'processing', 'claim',
+             ARRAY['amount']::text[], '{}'::jsonb, '{}'::jsonb, ?::jsonb, ?, ?
+           )`
+        )
+        .bind(
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activated.id,
+          JSON.stringify({ apiKeyId: "key_recurring_original_activator", userId: null }),
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+
+      expect(await cancelFor("key_recurring_original_activator")).toEqual({
+        canceled: [],
+        failed: [activated.id],
+      });
+    });
+
+    it("leaves the activator in place on a metadata-only update", async () => {
+      const activated = await activatedByAnotherKey();
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ metadataUri: "https://example.com/recurring/renamed.json" }),
+        },
+        env
+      );
+
+      expect(update.status).toBe(200);
+      expect(await activatorOf(activated.id)).toBe("key_recurring_original_activator");
+    });
+
+    it("cancels nothing for an unrelated key", async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      await seedKeyRow("key_recurring_unrelated", null);
+
+      expect(await cancelFor("key_recurring_unrelated")).toEqual({ canceled: [], failed: [] });
+      expect(await statusOf(activated.id)).toBe("active");
+    });
+  });
+
+  it("refuses moving an active mandate to a wallet outside the key's scope, before claiming it", async () => {
+    await seedUnboundWallet();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    await bindApiKeyToWallet(TEST_CUSTODY_WALLET_ID);
+    const before = await recurringExecutionSnapshot(activated.id);
+    const executionCalls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID }),
+      },
+      env
+    );
+
+    await expectWalletOutOfScope(response);
+    expect(await recurringExecutionSnapshot(activated.id)).toEqual(before);
+    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  });
 
   it("rejects collection attempt metadata without a source discriminator at the database", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
@@ -4743,41 +5275,6 @@ describe("Payments routes — recurring", () => {
         .bind(attemptId)
         .run()
     ).rejects.toThrow(/payment_subscription_collection_attempts_metadata_source_check/);
-  });
-
-  it("rejects a source change to a wallet outside the API key bindings", async () => {
-    await seedUnboundWallet();
-    const payment = await seedPendingRecurringPayment();
-    await bindApiKeyToWallet(TEST_WALLET_ID, TEST_CUSTODY_WALLET_ID);
-
-    const allowedResponse = await app.request(
-      `/v1/payments/recurring-payments/${payment.id}`,
-      {
-        method: "PATCH",
-        headers: RECURRING_HEADERS,
-        body: JSON.stringify({ amount: "26.00" }),
-      },
-      env
-    );
-    expect(allowedResponse.status).toBe(200);
-    const before = await recurringExecutionSnapshot(payment.id);
-    const executionCalls = recurringExecutionCallCounts();
-
-    const response = await app.request(
-      `/v1/payments/recurring-payments/${payment.id}`,
-      {
-        method: "PATCH",
-        headers: RECURRING_HEADERS,
-        body: JSON.stringify({ sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(403);
-    const responseBody = errorResponseSchema.parse(await response.json());
-    expect(responseBody.error.message).toBe("API key is not authorized for the requested wallet");
-    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
-    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
   });
 
   describe("Idempotency-Key re-entrancy (HOO-1918)", () => {
