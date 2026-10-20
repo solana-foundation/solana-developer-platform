@@ -99,13 +99,12 @@ export function formatDecimalAmount(value: string, locale?: string): string {
  * pays, else the quote, and null while neither is known.
  */
 export function saleFiatLabel(transfer: PaymentTransferSummary, locale?: string): string | null {
-  if (transfer.fiatPayout) {
-    return `${formatDecimalAmount(transfer.fiatPayout.amount, locale)} ${transfer.fiatPayout.currency.toUpperCase()}`;
-  }
-  if (transfer.fiatAmount && transfer.fiatCurrency) {
-    return `${formatDecimalAmount(transfer.fiatAmount, locale)} ${transfer.fiatCurrency.toUpperCase()}`;
-  }
-  return null;
+  const quoted =
+    transfer.fiatAmount && transfer.fiatCurrency
+      ? { amount: transfer.fiatAmount, currency: transfer.fiatCurrency }
+      : null;
+  const sold = transfer.fiatPayout ?? quoted;
+  return sold ? `${formatDecimalAmount(sold.amount, locale)} ${sold.currency.toUpperCase()}` : null;
 }
 
 /**
