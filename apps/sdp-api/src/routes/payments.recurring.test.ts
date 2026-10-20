@@ -4742,16 +4742,16 @@ describe("Payments routes — recurring", () => {
     {
       change: "loses recurring.execute",
       narrowing: "UPDATE api_keys SET grants = '{recurring.read}' WHERE id = ?",
-      reason: "action_not_held",
+      error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "recurring.execute" } },
     },
     {
       change: "loses the source wallet",
       narrowing: "UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?",
-      reason: "wallet_out_of_scope",
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
     },
   ])(
     "refuses an activation whose key $change between admission and claim",
-    async ({ narrowing, reason }) => {
+    async ({ narrowing, error }) => {
       const payment = await seedPendingRecurringPayment();
       const before = await recurringExecutionSnapshot(payment.id);
 
@@ -4762,7 +4762,7 @@ describe("Payments routes — recurring", () => {
       );
 
       expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toMatchObject({ error: { details: { reason } } });
+      await expect(response.json()).resolves.toMatchObject({ error });
       expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
     }
   );

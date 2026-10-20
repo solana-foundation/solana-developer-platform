@@ -10,6 +10,7 @@ import {
   decideMovement,
   decidePrincipal,
   type MoneyAdmissionFacts,
+  type MoneyAdmissionRefused,
   MoneyMovementRefusedError,
   type MoneyPrincipalFacts,
   readMoneyAdmissionFacts,
@@ -418,7 +419,29 @@ describe("decidePrincipal", () => {
     expect(decide(liveKey({ grants: ["transfers.read", "recurring.execute"] }))).toEqual({
       admitted: false,
       reason: "action_not_held",
+      action: "transfers.execute",
     });
+  });
+
+  // One refusal shape for keys: a missing action reads like the route's own.
+  it.each<[MoneyAdmissionRefused, Record<string, unknown>]>([
+    [
+      { admitted: false, reason: "action_not_held", action: "transfers.execute" },
+      {
+        code: "INSUFFICIENT_PERMISSIONS",
+        statusCode: 403,
+        reason: "action_not_held",
+        details: { action: "transfers.execute" },
+      },
+    ],
+    [
+      { admitted: false, reason: "wallet_out_of_scope" },
+      { code: "FORBIDDEN", statusCode: 403, details: { reason: "wallet_out_of_scope" } },
+    ],
+  ])("turns %o into its error", (decision, error) => {
+    const refusal = MoneyMovementRefusedError.of(decision);
+    expect(refusal).toMatchObject(error);
+    expect(refusal.details).toEqual(error.details);
   });
 
   it("scopes a selected key to its listed wallets, and never widens an empty list", () => {
@@ -449,7 +472,7 @@ describe("decidePrincipal", () => {
         WALLET,
         "issuance.seize"
       )
-    ).toEqual({ admitted: false, reason: "action_not_held" });
+    ).toEqual({ admitted: false, reason: "action_not_held", action: "issuance.enforce" });
   });
 
   it("admits a mandate only for its own movement, status and source wallet", () => {

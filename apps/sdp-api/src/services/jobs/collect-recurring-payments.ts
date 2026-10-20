@@ -191,7 +191,7 @@ async function collectRow(
       // failure every retry window.
       const decision = await checkMoneyStart(env, scope, context, subject);
       if (!decision.admitted) {
-        return skipRefusedPeriod(env, row, new MoneyMovementRefusedError(decision.reason));
+        return skipRefusedPeriod(env, row, MoneyMovementRefusedError.of(decision));
       }
       await journalAutomatedCollectionFailure({
         env,

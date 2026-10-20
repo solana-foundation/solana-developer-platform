@@ -114,9 +114,15 @@ export type OrganizationAdmissionFacts = Pick<
   "organizationStatus" | "projectEnvironment" | "rawSettings"
 >;
 
-export type MoneyAdmissionDecision =
-  | { admitted: true }
-  | { admitted: false; reason: MoneyAdmissionRefusal };
+/**
+ * A refused decision. `action_not_held` names the movement's first action, so
+ * its error reads like the route's own refusal.
+ */
+export type MoneyAdmissionRefused =
+  | { admitted: false; reason: Exclude<MoneyAdmissionRefusal, "action_not_held"> }
+  | { admitted: false; reason: "action_not_held"; action: Action };
+
+export type MoneyAdmissionDecision = { admitted: true } | MoneyAdmissionRefused;
 
 /**
  * What a start signs with. The custody signer names its wallet; a sponsor and
@@ -135,24 +141,47 @@ export interface MoneyStartContext {
   subjectId: string;
 }
 
-const REFUSAL_MESSAGES: Record<MoneyAdmissionRefusal, string> = {
+const REFUSAL_MESSAGES: Record<Exclude<MoneyAdmissionRefusal, "action_not_held">, string> = {
   project_not_found: "Project not found",
   organization_inactive: "Organization is not active",
   // Matches `productionNotEnabled()`, the edge refusal for the same reason.
   production_not_enabled: "Production is not enabled for this organization",
   principal_missing: "No authenticated principal may move money here",
   principal_not_live: "The credential moving money is no longer active",
-  action_not_held: "The credential does not hold the action this movement needs",
   wallet_out_of_scope: "The credential may not sign with this wallet",
 };
 
+type RefusalArguments =
+  | [reason: Exclude<MoneyAdmissionRefusal, "action_not_held">]
+  | [reason: "action_not_held", action: Action];
+
+function refusalErrorArguments(refusal: RefusalArguments): ConstructorParameters<typeof AppError> {
+  if (refusal[0] === "action_not_held") {
+    const action = refusal[1];
+    return ["INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action }];
+  }
+  return ["FORBIDDEN", REFUSAL_MESSAGES[refusal[0]], { reason: refusal[0] }];
+}
+
+/**
+ * A waist's refusal (403). A missing action is `INSUFFICIENT_PERMISSIONS` with
+ * `details.action`, the refusal `requireAction` gives at the route; every
+ * other reason is `FORBIDDEN` with `details.reason`.
+ */
 export class MoneyMovementRefusedError extends AppError {
   readonly reason: MoneyAdmissionRefusal;
 
-  constructor(reason: MoneyAdmissionRefusal) {
-    super("FORBIDDEN", REFUSAL_MESSAGES[reason], { reason });
+  constructor(...refusal: RefusalArguments) {
+    super(...refusalErrorArguments(refusal));
     this.name = "MoneyMovementRefusedError";
-    this.reason = reason;
+    this.reason = refusal[0];
+  }
+
+  /** The error for a refused decision. */
+  static of(decision: MoneyAdmissionRefused): MoneyMovementRefusedError {
+    return decision.reason === "action_not_held"
+      ? new MoneyMovementRefusedError(decision.reason, decision.action)
+      : new MoneyMovementRefusedError(decision.reason);
   }
 }
 
@@ -195,8 +224,13 @@ export function decideMoneyStart(facts: OrganizationAdmissionFacts | null): Mone
 
 const ADMITTED: MoneyAdmissionDecision = { admitted: true };
 
-function refuse(reason: MoneyAdmissionRefusal): MoneyAdmissionDecision {
+function refuse(reason: Exclude<MoneyAdmissionRefusal, "action_not_held">): MoneyAdmissionDecision {
   return { admitted: false, reason };
+}
+
+/** A principal holding none of the movement's actions; names the first. */
+function refuseActionNotHeld(actions: readonly [Action, ...Action[]]): MoneyAdmissionDecision {
+  return { admitted: false, reason: "action_not_held", action: actions[0] };
 }
 
 function statusAdmits(
@@ -265,14 +299,14 @@ type ApiKeyPrincipalFacts = Extract<MoneyPrincipalFacts, { kind: "api_key" }>["k
 function decideApiKey(
   key: ApiKeyPrincipalFacts,
   readAt: number,
-  actions: readonly Action[] | null,
+  actions: readonly [Action, ...Action[]] | null,
   subject: MoneyAdmissionSubject
 ): MoneyAdmissionDecision {
   if (!key || apiKeyRowRefusal(key, readAt) !== null) {
     return refuse("principal_not_live");
   }
   if (actions !== null && !actions.some((action) => apiKeyMayPerform(key.grants, action))) {
-    return refuse("action_not_held");
+    return refuseActionNotHeld(actions);
   }
   // A selected key signs only with a listed wallet; with none listed it signs
   // nothing. A sponsor signs for no custody wallet, so has none to scope.
@@ -284,7 +318,7 @@ function decideApiKey(
 
 function decideMember(
   member: { status: string; role: string } | null,
-  actions: readonly Action[] | null
+  actions: readonly [Action, ...Action[]] | null
 ): MoneyAdmissionDecision {
   if (!member || !memberStatusMayMoveMoney(member.status)) {
     return refuse("principal_not_live");
@@ -295,7 +329,7 @@ function decideMember(
   const role = normalizeOrganizationRole(member.role);
   return actions.some((action) => organizationRoleMayPerform(role, action))
     ? ADMITTED
-    : refuse("action_not_held");
+    : refuseActionNotHeld(actions);
 }
 
 /** A start needs the row in a status that admits it; an exit only needs the row. */
@@ -354,7 +388,7 @@ export function assertMovementAdmitted(
     return;
   }
   logMoneyRefused(decision.reason, context);
-  throw new MoneyMovementRefusedError(decision.reason);
+  throw MoneyMovementRefusedError.of(decision);
 }
 
 /** The one `sdp_money_refused` event shape, whichever surface refused. */
@@ -585,6 +619,6 @@ export async function assertMoneyStartAdmitted(
 ): Promise<void> {
   const decision = await checkMoneyStart(env, scope, context, subject);
   if (!decision.admitted) {
-    throw new MoneyMovementRefusedError(decision.reason);
+    throw MoneyMovementRefusedError.of(decision);
   }
 }
