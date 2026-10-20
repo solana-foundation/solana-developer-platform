@@ -1315,4 +1315,110 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
       expect(rows.map((row) => row.id)).toEqual([recurringPaymentId(environment)]);
     });
   });
+
+  describe("updateCollectionAttempt's delegation pre-image", () => {
+    const ATTEMPT_ID = "psca_recurring_repo_pre_image";
+    const SIGNED_AT = "2026-06-30T12:01:00.000Z";
+    const PRE_IMAGE = {
+      periodStartTs: 1_770_000_000n,
+      amountPulled: 18_446_744_073_709_551_615n,
+    } as const;
+    const attemptKey = {
+      attemptId: ATTEMPT_ID,
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID_BY_ENVIRONMENT.sandbox,
+    } as const;
+
+    beforeEach(async () => {
+      await createPostgresPaymentSubscriptionsRepository(getDb(env)).createCollectionAttempt({
+        id: ATTEMPT_ID,
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID_BY_ENVIRONMENT.sandbox,
+        subscriptionId: subscriptionId("sandbox"),
+        transferId: null,
+        token: usdcMint("sandbox"),
+        amount: "10.00",
+        dueAt: DUE_AT,
+        attemptedAt: DUE_AT,
+        status: "processing",
+        signature: null,
+        error: null,
+        metadata: {
+          source: "automated",
+          recurringPaymentId: recurringPaymentId("sandbox"),
+          initiatedByKeyId: null,
+        },
+        createdAt: DUE_AT,
+        updatedAt: DUE_AT,
+      });
+    });
+
+    async function storedAttempt() {
+      return required(
+        await getDb(env).queryOne<{
+          signature: string | null;
+          status: string;
+          delegation_period_start_ts_before: number | null;
+          delegation_amount_pulled_before: string | null;
+          updated_at: string;
+        }>(
+          `SELECT signature, status, delegation_period_start_ts_before,
+                  delegation_amount_pulled_before, updated_at
+             FROM payment_subscription_collection_attempts
+            WHERE id = ?`,
+          [ATTEMPT_ID]
+        )
+      );
+    }
+
+    it("writes the pre-image while the attempt has none, and refuses a second one without a write", async () => {
+      const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(getDb(env));
+
+      const signed = await subscriptionsRepo.updateCollectionAttempt({
+        ...attemptKey,
+        signature: testSignature(3),
+        delegationPreImage: PRE_IMAGE,
+        updatedAt: SIGNED_AT,
+      });
+
+      expect(signed).toMatchObject({
+        signature: testSignature(3),
+        delegation_period_start_ts_before: 1_770_000_000,
+        delegation_amount_pulled_before: "18446744073709551615",
+      });
+      const afterFirst = await storedAttempt();
+      expect(
+        await subscriptionsRepo.updateCollectionAttempt({
+          ...attemptKey,
+          signature: testSignature(4),
+          delegationPreImage: { periodStartTs: 1_770_086_400n, amountPulled: 0n },
+          updatedAt: READ_AT,
+        })
+      ).toBeNull();
+      expect(await storedAttempt()).toEqual(afterFirst);
+    });
+
+    it("keeps updating an attempt that holds a pre-image when the update carries none", async () => {
+      const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(getDb(env));
+      await subscriptionsRepo.updateCollectionAttempt({
+        ...attemptKey,
+        signature: testSignature(3),
+        delegationPreImage: PRE_IMAGE,
+        updatedAt: SIGNED_AT,
+      });
+
+      const confirmed = await subscriptionsRepo.updateCollectionAttempt({
+        ...attemptKey,
+        status: "confirmed",
+        updatedAt: READ_AT,
+      });
+
+      expect(confirmed).toMatchObject({
+        status: "confirmed",
+        signature: testSignature(3),
+        delegation_period_start_ts_before: 1_770_000_000,
+        delegation_amount_pulled_before: "18446744073709551615",
+      });
+    });
+  });
 });
