@@ -3,18 +3,21 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { clearStoredApiKeySecrets, getStoredApiKeySecret } from "@/lib/playground-api-keys";
 import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import type { ApiKeyFlash } from "./api-key-flash";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 
-const clerk = vi.hoisted(() => ({
-  auth: {
-    isLoaded: true,
-    sessionId: "sess_a" as string | null,
-    userId: "user_a" as string | null,
-    orgId: "org_a" as string | null,
-  },
+interface ClerkAuthFixture {
+  isLoaded: boolean;
+  sessionId: string | null;
+  userId: string | null;
+  orgId: string | null;
+}
+
+const clerk = vi.hoisted((): { auth: ClerkAuthFixture } => ({
+  auth: { isLoaded: true, sessionId: "sess_a", userId: "user_a", orgId: "org_a" },
 }));
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => clerk.auth }));
@@ -42,6 +45,7 @@ const accountAKey: ApiKeyFlash = {
 };
 
 beforeEach(() => {
+  clearStoredApiKeySecrets();
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   resetDashboardNavigation();
@@ -98,6 +102,21 @@ describe("ApiKeyFlashSurface", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByDisplayValue(accountAKey.key ?? "")).toBeNull();
     expect(screen.queryByText("API key created")).toBeNull();
+    // Nor does A's key reach the Playground's secret store for B.
+    expect(getStoredApiKeySecret({ apiKeyId: accountAKey.apiKeyId })).toBeNull();
+  });
+
+  it("hands a new key to the Playground so it can run without pasting it", async () => {
+    fetchMock.mockResolvedValueOnce(flashResponse(accountAKey));
+
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiKeyFlashSurface />
+      </I18nProvider>
+    );
+
+    expect(await screen.findByText("API key created")).toBeTruthy();
+    expect(getStoredApiKeySecret({ apiKeyId: accountAKey.apiKeyId })).toBe(accountAKey.key);
   });
 
   it("drops a shown key the moment the auth scope changes", async () => {
