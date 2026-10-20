@@ -408,6 +408,25 @@ function useDraftSave({
 }
 
 /**
+ * The draft the flow opens on: the kept draft `resumeFrom` as it was left, else in demo mode a
+ * draft filled in end to end, else an empty one.
+ */
+function openingDraft(
+  wallets: readonly PaymentsDashboardWallet[],
+  resumeFrom: LocalDraft | null,
+  demo: boolean
+): DraftState {
+  if (resumeFrom) {
+    return restoreDraft(
+      initialDraft(wallets),
+      resumeFrom.draft,
+      new Set(wallets.map((wallet) => wallet.id))
+    );
+  }
+  return demo ? demoDraft(wallets) : initialDraft(wallets);
+}
+
+/**
  * The flow's state: the step, whether a classification was picked, the draft and its access
  * list, starting from the kept draft `resumeFrom` when there is one, and the id the browser
  * keeps it under.
@@ -423,18 +442,7 @@ function useDraftFlowState(
     resumeFrom ? Math.min(Math.max(resumeFrom.step, 0), STEPS.length - 1) : 0
   );
   const [classified, setClassified] = useState(resumeFrom !== null || demo);
-  const form = useZodForm(
-    draftSchema,
-    resumeFrom
-      ? restoreDraft(
-          initialDraft(wallets),
-          resumeFrom.draft,
-          new Set(wallets.map((wallet) => wallet.id))
-        )
-      : demo
-        ? demoDraft(wallets)
-        : initialDraft(wallets)
-  );
+  const form = useZodForm(draftSchema, openingDraft(wallets, resumeFrom, demo));
   const [access, setAccess] = useState<DraftAccess>(resumeFrom?.access ?? "blocklist");
   const { storageKey } = useLocalDrafts();
   const [localId] = useState(() => keptId ?? crypto.randomUUID());

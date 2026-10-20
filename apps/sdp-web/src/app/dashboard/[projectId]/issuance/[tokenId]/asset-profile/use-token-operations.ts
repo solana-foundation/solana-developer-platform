@@ -1018,27 +1018,35 @@ export function useTokenOperations({
     if (!demo) return;
     const holder = signerAddress(mintSignerSelection.defaultWalletId);
     const other = authorityWallets.find((wallet) => wallet.publicKey !== holder)?.publicKey ?? "";
-    if (action === "seize") {
-      setSeizeForm((previous) => ({
-        ...previous,
-        source: holder,
-        destination: other,
-        amount: DEMO_PREFILL_AMOUNTS.seize,
-        memo: DEMO_PREFILL_MEMOS.seize,
-      }));
-    } else if (action === "force-burn") {
-      setForceBurnForm((previous) => ({
-        ...previous,
-        source: holder,
-        amount: DEMO_PREFILL_AMOUNTS.forceBurn,
-        memo: DEMO_PREFILL_MEMOS.forceBurn,
-      }));
-    } else {
-      setFreezeForm((previous) => ({
-        ...previous,
-        accountAddress: other,
-        reason: DEMO_PREFILL_MEMOS.freeze,
-      }));
+    switch (action) {
+      case "seize":
+        setSeizeForm((previous) => ({
+          ...previous,
+          source: holder,
+          destination: other,
+          amount: DEMO_PREFILL_AMOUNTS.seize,
+          memo: DEMO_PREFILL_MEMOS.seize,
+        }));
+        return;
+      case "force-burn":
+        setForceBurnForm((previous) => ({
+          ...previous,
+          source: holder,
+          amount: DEMO_PREFILL_AMOUNTS.forceBurn,
+          memo: DEMO_PREFILL_MEMOS.forceBurn,
+        }));
+        return;
+      case "freeze":
+        setFreezeForm((previous) => ({
+          ...previous,
+          accountAddress: other,
+          reason: DEMO_PREFILL_MEMOS.freeze,
+        }));
+        return;
+      default: {
+        const exhaustive: never = action;
+        throw new Error(`Unknown demo operation: ${String(exhaustive)}`);
+      }
     }
   };
 

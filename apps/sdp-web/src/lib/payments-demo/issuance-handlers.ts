@@ -457,7 +457,22 @@ const burnSchema = z.strictObject({
   options: options.optional(),
 });
 
-/** `POST /tokens/:id/burn`: supply out of an address the signer holds. */
+/**
+ * Null when the burn's source is the signing wallet itself; otherwise the API's refusal. A
+ * standard burn takes only the signer's own tokens (another account's need a force-burn), and
+ * the demo holds tokens by wallet address, so the signer's address is the one valid source.
+ */
+function burnSourceRefusal(context: WriteContext, signingWalletId: string, source: string) {
+  const signer = findWallet(context.world, signingWalletId);
+  if (!signer || signer.publicKey === source) return null;
+  return fail(
+    400,
+    "INVALID_BURN_SOURCE",
+    "Standard burn only supports the selected signer wallet or its token account. Use force-burn for a different account."
+  );
+}
+
+/** `POST /tokens/:id/burn`: supply out of the signing wallet's own holding. */
 function burn(context: WriteContext): DemoWriteResult {
   const entry = tokenFor(context);
   if (isFailure(entry)) return entry;
@@ -468,6 +483,7 @@ function burn(context: WriteContext): DemoWriteResult {
     notDeployed(entry.token) ??
     walletRefusal(context, body.signingCustodyWalletId) ??
     precisionRefusal(entry.token, body.burn.amount) ??
+    burnSourceRefusal(context, body.signingCustodyWalletId, body.burn.source) ??
     holdingRefusal(entry, body.burn.source, body.burn.amount);
   if (refusal) return refusal;
   const tx = txId();

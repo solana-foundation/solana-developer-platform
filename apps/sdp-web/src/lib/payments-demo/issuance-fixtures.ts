@@ -74,6 +74,23 @@ type WalletKey = "treasury" | "payroll" | "settlement";
  */
 type DemoTokenState = "live" | "paused" | "draft" | "failed";
 
+/** The token status a seeded token starts in: a draft or a failed deploy is still pending. */
+function tokenStatusOf(state: DemoTokenState): "active" | "paused" | "pending" {
+  switch (state) {
+    case "live":
+      return "active";
+    case "paused":
+      return "paused";
+    case "draft":
+    case "failed":
+      return "pending";
+    default: {
+      const exhaustive: never = state;
+      throw new Error(`Unknown demo token state: ${String(exhaustive)}`);
+    }
+  }
+}
+
 interface DemoTokenSpec {
   key: string;
   name: string;
@@ -745,7 +762,7 @@ function buildToken(
     isMintable: true,
     isFreezable: spec.freezable,
     requiresAllowlist: spec.requiresAllowlist,
-    status: spec.state === "paused" ? "paused" : deployed ? "active" : "pending",
+    status: tokenStatusOf(spec.state),
     deployedAt,
     createdBy: CREATED_BY,
     createdAt,

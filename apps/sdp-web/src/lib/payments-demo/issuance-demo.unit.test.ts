@@ -284,6 +284,19 @@ describe("a live token's operations", () => {
     expect(Number(holding().uiAmount)).toBe(before + 3);
   });
 
+  it("burns only the signing wallet's own tokens, as a standard burn does", () => {
+    const supply = token("demo_tok_vusd").totalSupply;
+    expect(
+      refusal(
+        write("POST", `${VUSD}/burn`, {
+          signingCustodyWalletId: TREASURY,
+          burn: { source: holderAddress("vusd", 1), amount: "1" },
+        })
+      )
+    ).toEqual([400, "INVALID_BURN_SOURCE"]);
+    expect(token("demo_tok_vusd").totalSupply).toBe(supply);
+  });
+
   it("burns, seizes and force-burns only what the source holds", () => {
     // The issuer's treasury signs and holds the seeded supply; ADDRESS holds none of it.
     const treasury = token("demo_tok_vusd").mintAuthority ?? "";
