@@ -368,7 +368,7 @@ describe("Payments routes — on-chain transfers", () => {
     expect(row.provider_data.cryptoDeposit).toBeNull();
   });
 
-  it("fails a claimed off-ramp deposit when audit-ledger admission is refused", async () => {
+  it("returns a claimed off-ramp deposit to awaiting it when audit-ledger admission is refused", async () => {
     const transferId = generatePaymentTransferId();
     await seedSolOfframpDeposit(transferId);
     const beginSpy = vi
@@ -381,8 +381,8 @@ describe("Payments routes — on-chain transfers", () => {
       expect(sendTransactionMock).not.toHaveBeenCalled();
 
       const row = await readTransferRow(transferId);
-      expect(row.status).toBe("failed");
-      expect(row.error).toContain("Audit ledger admission failed");
+      expect(row.status).toBe("awaiting_payment");
+      expect(row.destination_address).toBeNull();
     } finally {
       beginSpy.mockRestore();
     }

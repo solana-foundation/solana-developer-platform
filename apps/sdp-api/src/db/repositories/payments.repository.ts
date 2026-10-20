@@ -274,6 +274,17 @@ export interface PaymentsRepository {
    */
   transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
   /**
+   * Returns a claimed off-ramp deposit to awaiting its deposit, undoing the
+   * claim, only while the row holds no signed bytes, signature or submission
+   * start: proof that nothing could have reached the chain. Null otherwise.
+   */
+  releaseOfframpDepositClaim(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
    * Fair, cluster-scoped page of provider-settled rows awaiting chain proof.
    * A row held for a delivery mismatch waits for a new provider settlement.
    */

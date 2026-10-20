@@ -683,6 +683,34 @@ export function createPostgresPaymentsRepository(
       );
     },
 
+    async releaseOfframpDepositClaim(input) {
+      return applyRampTransition(
+        {
+          transferId: input.transferId,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          transition: "offramp_deposit_released",
+          destinationAddress: null,
+          error: null,
+          updatedAt: input.updatedAt,
+        },
+        {
+          clauses: [
+            "signature IS NULL",
+            "serialized_tx IS NULL",
+            "signed_transaction IS NULL",
+            "last_valid_block_height IS NULL",
+            "submission_started_at IS NULL",
+            "slot IS NULL",
+          ],
+          clauseValues: [],
+          // The released claim's key is no longer this row's: a retry under it runs again.
+          assignments: ["idempotency_key = NULL", "idempotency_fingerprint = NULL"],
+          assignmentValues: [],
+        }
+      );
+    },
+
     async markTransferSubmissionStarted(input) {
       assertScope(input);
       const scope = buildTransferScopeWhere({

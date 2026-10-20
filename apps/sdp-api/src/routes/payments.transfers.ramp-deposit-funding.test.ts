@@ -184,6 +184,34 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     expect(sendTransactionMock).not.toHaveBeenCalled();
   });
 
+  it("returns the sale to awaiting its deposit when signing fails before any bytes exist", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedUsdcOfframpDeposit(transferId);
+    const quoted = await readTransferRow(transferId);
+    answerSourceUsdc("25000000", "initialized");
+    createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(
+      new Error("custody signer unavailable")
+    );
+
+    const failed = await postTransfer(usdcDepositRequest(transferId), {});
+
+    expect(failed.status).toBeGreaterThanOrEqual(400);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const released = await readTransferRow(transferId);
+    expect({ ...released, updated_at: quoted.updated_at }).toEqual(quoted);
+    expect(released.status).toBe("awaiting_payment");
+
+    // The released sale takes a new deposit request, which funds it.
+    const funded = await postTransfer(usdcDepositRequest(transferId), {});
+    const fundedText = await funded.text();
+    expect(funded.status, fundedText).toBe(200);
+    expect((await readTransferResponse(new Response(fundedText))).data.transfer).toMatchObject({
+      id: transferId,
+      status: "settling",
+    });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a request that does not match the deposit before reading the chain", async () => {
     const transferId = generatePaymentTransferId();
     await seedUsdcOfframpDeposit(transferId);

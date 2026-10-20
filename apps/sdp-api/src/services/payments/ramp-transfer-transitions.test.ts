@@ -167,6 +167,12 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
     }
   });
 
+  it("releases a claimed deposit only back to awaiting it, for off-ramps alone", () => {
+    expect(sortedSources("offramp_deposit_released")).toEqual(["processing"]);
+    expect(RAMP_TRANSFER_TRANSITIONS.offramp_deposit_released.to).toBe("awaiting_payment");
+    expect(RAMP_TRANSFER_TRANSITIONS.offramp_deposit_released.types).toEqual(["offramp"]);
+  });
+
   it("never expires a settling transfer, so a stale expiry cannot undo a revival", () => {
     expect(RAMP_TRANSFER_TRANSITIONS.provider_expired.from).not.toContain("settling");
   });
@@ -438,6 +444,14 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
     file: "apps/sdp-api/src/routes/payments/transfers/handlers.ts",
     evidence: "transition: OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS[patch.status]",
     guardedCalls: 1,
+  },
+  {
+    // Repository-internal like the claim: its no-signed-bytes preconditions
+    // ride the same compare-and-set.
+    writer: "unsent off-ramp deposit release",
+    file: "apps/sdp-api/src/db/repositories/payments.repository.postgres.ts",
+    evidence: 'transition: "offramp_deposit_released"',
+    guardedCalls: 0,
   },
 ];
 

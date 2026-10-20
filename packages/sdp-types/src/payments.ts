@@ -365,6 +365,13 @@ export const RAMP_TRANSFER_TRANSITIONS = {
     to: "failed",
     types: ["offramp"],
   },
+  // A deposit that failed before SDP recorded any signed bytes moved nothing,
+  // so the sale goes back to awaiting its deposit.
+  offramp_deposit_released: {
+    from: ["processing"],
+    to: "awaiting_payment",
+    types: ["offramp"],
+  },
 } as const satisfies Record<string, RampTransferTransition>;
 
 export type RampTransferTransitionId = keyof typeof RAMP_TRANSFER_TRANSITIONS;
