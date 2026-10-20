@@ -7,7 +7,7 @@ import {
   resolveFireblocksTransferAsset,
 } from "@sdp/custody/provisioning";
 import { getSolanaConfig } from "@sdp/rpc";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
 import { wellKnownMint } from "@sdp/types";
 import { assertIsSignature } from "@solana/kit";
 import { z } from "zod";
@@ -139,6 +139,23 @@ async function persistResult(
   }
   // A hash during approval/broadcast can still be replaced. Only COMPLETED is a chain verdict.
   const completed = detail && result.status === "COMPLETED" && signature !== undefined;
+  if (completed) {
+    // Fireblocks may omit destinationAddress before confirmation. A completed
+    // transfer must prove the exact destination and net payment, using decimal
+    // strings rather than the deprecated floating-point amount fields.
+    const amounts = result.amountInfo;
+    if (
+      result.destinationAddress !== row.destination_address ||
+      !row.amount ||
+      !amounts?.amount ||
+      !amounts.netAmount ||
+      compareDecimalAmounts(amounts.amount, row.amount) !== 0 ||
+      compareDecimalAmounts(amounts.netAmount, row.amount) !== 0 ||
+      (amounts.requestedAmount != null &&
+        compareDecimalAmounts(amounts.requestedAmount, row.amount) !== 0)
+    )
+      throw conflict("Fireblocks settlement does not match the payment destination and amount");
+  }
   let fee: number | undefined;
   if (
     completed &&

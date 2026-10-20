@@ -29,6 +29,8 @@ export interface FireblocksTransferResult {
   operation?: string;
   assetId?: string;
   source?: { type: string; id: string };
+  destinationAddress?: string;
+  amountInfo?: { amount?: string; requestedAmount?: string; netAmount?: string };
   feeCurrency?: string;
   feeInfo?: { networkFee?: string };
 }
@@ -62,9 +64,33 @@ function result(value: unknown): FireblocksTransferResult {
     !/^[A-Z_]{1,100}$/.test(item.status)
   )
     return invalid();
-  for (const key of ["subStatus", "txHash", "externalTxId", "operation", "assetId"] as const) {
+  for (const key of [
+    "subStatus",
+    "txHash",
+    "externalTxId",
+    "operation",
+    "assetId",
+    "destinationAddress",
+  ] as const) {
     if (item[key] != null && (typeof item[key] !== "string" || item[key].length > 256))
       return invalid();
+  }
+  if (item.source != null) {
+    if (typeof item.source !== "object" || Array.isArray(item.source)) return invalid();
+    for (const key of ["type", "id"] as const) {
+      if (typeof item.source[key] !== "string" || item.source[key].length > 256) return invalid();
+    }
+  }
+  if (item.amountInfo != null) {
+    if (typeof item.amountInfo !== "object" || Array.isArray(item.amountInfo)) return invalid();
+    for (const key of ["amount", "requestedAmount", "netAmount"] as const) {
+      const amount = item.amountInfo[key];
+      if (
+        amount != null &&
+        (typeof amount !== "string" || amount.length > 100 || !/^\d+(\.\d+)?$/.test(amount))
+      )
+        return invalid();
+    }
   }
   return item;
 }

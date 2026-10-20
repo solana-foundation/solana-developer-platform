@@ -18,6 +18,11 @@ vi.mock("@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () =
     },
   })),
   generateFireblocksCsrAction: vi.fn(),
+  loadFireblocksVaultsAction: vi.fn(async () => ({
+    status: "success",
+    vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
+    nextCursor: null,
+  })),
 }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -488,8 +493,12 @@ it("rotates Fireblocks credentials using a generated key reference and the pinne
     })
   );
   const user = userEvent.setup();
+  await waitFor(() =>
+    expect(screen.getByLabelText("API user ID")).toHaveProperty("disabled", false)
+  );
   await user.type(screen.getByLabelText("API user ID"), "next-api-user");
-  await user.type(screen.getByLabelText("Vault account ID"), "0");
+  await user.click(screen.getByRole("button", { name: "Load vaults" }));
+  await user.click(await screen.findByRole("radio", { name: /Treasury/ }));
   await user.click(screen.getByRole("button", { name: "Rotate for 1 connections" }));
   await waitFor(() => expect(onClose).toHaveBeenCalledWith(false));
   expect(JSON.parse(String(rotation.mock.calls[0]?.[1]?.body))).toEqual({

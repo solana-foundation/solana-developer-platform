@@ -95,6 +95,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 }
 
 beforeEach(async () => {
+  testEnv.SDP_RELEASE_CHANNEL = "beta";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -141,6 +142,46 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Fireblocks BYOK lifecycle", () => {
+  it("refuses stable CSR, discovery, installation and rotation before provider calls or writes", async () => {
+    const fetch = providerResponse();
+    const connected = await connect();
+    const registration = await newRegistration();
+    const pending = await request("/provider-credentials", {
+      ...body,
+      fields: { ...body.fields, ...registration },
+    });
+    expect(pending.status).toBe(201);
+    const pendingId = (await pending.json()).data.connectionId;
+    const before = await getDb(env).queryMany(
+      "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
+      [ORGANIZATION_ID]
+    );
+    testEnv.SDP_RELEASE_CHANNEL = "stable";
+    fetch.mockClear();
+    const discoveryFields = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
+    for (const [path, payload] of [
+      ["/fireblocks/csr", undefined],
+      ["/fireblocks/csr", {}],
+      ["/fireblocks/vaults", discoveryFields],
+      ["/provider-credentials", body],
+      [`/connections/${pendingId}/complete`, {}],
+      [`/provider-credentials/${connected.providerCredential.id}/rotate`, { fields: registration }],
+    ] as const) {
+      const response = await request(path, payload);
+      expect(response.status, await response.clone().text()).toBe(403);
+      expect(await response.text()).toContain("custody_provider_not_in_release_channel");
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).queryMany(
+        "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
+        [ORGANIZATION_ID]
+      )
+    ).toEqual(before);
+    // Channel changes must leave cancellation available for existing installations.
+    expect((await request(`/connections/${pendingId}/cancel`, {})).status).toBe(200);
+  });
+
   it("encrypts credentials, attaches the vault with one read and replays completion", async () => {
     const fetch = providerResponse();
     const connected = await connect();

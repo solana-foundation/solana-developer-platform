@@ -92,6 +92,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 }
 
 beforeEach(async () => {
+  testEnv.SDP_RELEASE_CHANNEL = "beta";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -149,6 +150,7 @@ let providerStatus: string;
 let lostResponse = false;
 let readMissing = false;
 let createStatus = 200;
+let settlementPatch: Record<string, unknown> = {};
 async function ready() {
   const mock = providerResponse();
   const connection = await connect();
@@ -162,6 +164,7 @@ async function ready() {
   lostResponse = false;
   readMissing = false;
   createStatus = 200;
+  settlementPatch = {};
   mock.mockImplementation(async (url, init) => {
     const path = String(url).replace(testEnv.FIREBLOCKS_API_BASE_URL ?? "", "");
     expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
@@ -197,9 +200,16 @@ async function ready() {
         operation: "TRANSFER",
         assetId: createBody.assetId,
         source: createBody.source,
+        destinationAddress: createBody.destination.oneTimeAddress.address,
+        amountInfo: {
+          amount: createBody.amount,
+          requestedAmount: createBody.amount,
+          netAmount: createBody.amount,
+        },
         status: providerStatus,
         subStatus: providerStatus === "BLOCKED" ? "BLOCKED_BY_POLICY" : undefined,
         txHash: providerStatus === "COMPLETED" ? SIG : undefined,
+        ...settlementPatch,
       });
     }
     throw new Error(`Unexpected provider request ${init?.method} ${path}`);
@@ -244,6 +254,45 @@ async function refresh(id: string) {
 }
 
 describe("native Fireblocks BYOK payment routes", () => {
+  it("blocks new payments in stable but still reconciles a payment submitted in beta", async () => {
+    const mock = await ready();
+    const response = await send();
+    expect(response.status).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    testEnv.SDP_RELEASE_CHANNEL = "stable";
+    mock.mockClear();
+    const refused = await send("stable-new");
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain("custody_provider_not_in_release_channel");
+    expect(mock).not.toHaveBeenCalled();
+    providerStatus = "COMPLETED";
+    expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
+    expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("does not confirm mismatched or incomplete settlement details or resubmit the payment", async () => {
+    const mock = await ready();
+    const response = await send();
+    const transfer = (await response.json()).data.transfer;
+    providerStatus = "COMPLETED";
+    for (const patch of [
+      { destinationAddress: ADDRESS },
+      { destinationAddress: "" },
+      { amountInfo: null },
+      { amountInfo: { amount: "0.02", netAmount: "0.02" } },
+      { amountInfo: { amount: "0.01", netAmount: "0.009" } },
+      { amountInfo: { amount: "0.01", netAmount: "0.01", requestedAmount: "1" } },
+      { source: { type: "VAULT_ACCOUNT", id: "99" } },
+      { externalTxId: "another-payment" },
+      { assetId: "SOL" },
+    ]) {
+      settlementPatch = patch;
+      expect(await refresh(transfer.id)).toMatchObject({ status: "processing", signature: null });
+    }
+    settlementPatch = { amountInfo: { amount: "0.010000000", netAmount: "0.010000000" } };
+    expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
   it("submits TRANSFER with tenant credentials, records pending approval and replays without another POST", async () => {
     const mock = await ready();
     const response = await send();

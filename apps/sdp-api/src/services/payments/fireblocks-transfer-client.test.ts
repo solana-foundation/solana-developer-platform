@@ -27,6 +27,20 @@ function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisionin
 }
 
 describe("native Fireblocks HTTP protocol", () => {
+  it.each([
+    { source: { type: "VAULT_ACCOUNT", id: 0 } },
+    { destinationAddress: {} },
+    { amountInfo: { amount: 0.01 } },
+    { amountInfo: { netAmount: "-0.01" } },
+    { amountInfo: { requestedAmount: "1e-2" } },
+  ])("rejects malformed provider settlement fields: %j", async (patch) => {
+    const fetch = vi.fn(async () =>
+      Response.json({ id: "proposal", status: "COMPLETED", ...patch })
+    );
+    await expect(readFireblocksTransfer(runtime(fetch), access(), "xfr_1")).rejects.toThrow(
+      "Invalid Fireblocks transfer response"
+    );
+  });
   it("signs the exact TRANSFER body and URI with the customer's RSA key and permanent idempotency ID", async () => {
     const credentials = access();
     const body: FireblocksTransferRequest = {
@@ -50,7 +64,9 @@ describe("native Fireblocks HTTP protocol", () => {
       const headers = new Headers(init.headers);
       expect(headers.get("X-API-Key")).toBe(credentials.apiKey);
       expect(headers.get("Idempotency-Key")).toBe(body.externalTxId);
-      const { payload } = await jwtVerify(headers.get("Authorization")!.slice(7), rsa.publicKey);
+      const authorization = headers.get("Authorization");
+      if (!authorization) throw new Error("Missing authorization header");
+      const { payload } = await jwtVerify(authorization.slice(7), rsa.publicKey);
       expect(payload).toMatchObject({
         sub: credentials.apiKey,
         uri: "/v1/transactions",

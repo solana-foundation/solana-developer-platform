@@ -1,5 +1,13 @@
 # Fireblocks BYOK
 
+Fireblocks **BYOK is beta**. Set `SDP_RELEASE_CHANNEL=beta` (or `experimental`) on the
+API deployment to offer it. The dashboard consumes the API's provider availability;
+stable refuses new registrations, installation, credential rotation, wallet creation,
+signing, and payment submission. Existing payments still reconcile through read-only
+provider requests, and cancellation/deactivation remain available. Managed Fireblocks
+custody retains its stable stage. Release channel and Solana network are independent:
+a beta deployment can connect to mainnet.
+
 Fireblocks connections use the same project-scoped encrypted credential lifecycle as Privy:
 installation, credential checks, replacement, rotation, rollback, deactivation, and secret
 retirement. Organization entitlement to Fireblocks is still required. Deploy migration
@@ -69,12 +77,14 @@ SOL for fees (also when sending USDC); SDP's local/Kora fee sponsor is not invol
 No RAW-signing permission or SDP Signer check is required for these payments.
 
 USDC is resolved by its exact Solana mint (`issuerAddress`) and `nativeAsset` in Fireblocks'
-asset catalogue, never by symbol alone. Other tokens, ramp-deposit reuse and managed Fireblocks
-wallets are rejected by this direct-payment path. Batch and custom-program signing still use
+asset catalogue, never by symbol alone. Other tokens and ramp-deposit reuse are rejected
+by this direct-payment path. Managed Fireblocks wallets retain their existing sponsored
+signing path. Batch and custom-program signing still use
 the existing solana-keychain adapter; they have not been converted to native transfers.
 
-SDP resolves an approved matching Fireblocks whitelist entry to its internal/external wallet ID.
-An unmatched destination uses `ONE_TIME_ADDRESS`, which must be allowed by the workspace.
+SDP sends the exact selected address using `ONE_TIME_ADDRESS`. Fireblocks resolves matching
+whitelisted destinations in its workspace; unmatched destinations require one-time transfers
+to be allowed by the workspace. The read-only SDP checks do not change the submitted address.
 An SDP contact alone does not whitelist an address. Manage whitelisting in Fireblocks. The SDP memo becomes a Fireblocks note, not a Solana memo instruction.
 
 Before submission, SDP durably stores the intent and atomically claims a single create attempt.
@@ -86,7 +96,9 @@ create a replacement until the original has been reconciled. A crash before the 
 may require manual reconciliation; automatic resubmission is deliberately not implemented.
 
 Fireblocks transaction ID, status and substatus are visible in SDP. COMPLETED with a valid
-Solana signature records confirmation; the existing chain-finality job checks finalization.
+Solana signature records confirmation only after the external ID, vault, asset, destination,
+and exact decimal payment/net amounts match the stored intent. Missing or mismatched details
+stay processing for reconciliation. The existing chain-finality job checks finalization.
 Terminal provider failures record their reason. The transaction details page refreshes every
 15 seconds while pending. The five-minute local signing timeout does not apply to these intents.
 Existing failed RAW attempts remain failed and are never retried by this implementation.
@@ -205,8 +217,8 @@ with existing databases; their proposal/import tables have no runtime readers or
 
 Selecting a destination checks its exact address, asset and network against internal and external
 Fireblocks wallets. Only a successful lookup confirming absence shows the whitelist warning.
-Pending and approved entries do not prompt. Sending still resolves approved whitelist IDs and
-otherwise uses a one-time address, subject to the customer's Fireblocks workspace settings.
+Pending and approved entries do not prompt. Sending uses the selected address, subject to
+Fireblocks' whitelist resolution and the customer's workspace settings.
 
 Pay also reads the active TRANSFER policy using the selected wallet's BYOK credential. It evaluates
 the first matching rule for the API user, source vault, exact asset, destination and amount.
@@ -236,3 +248,59 @@ POST and PUT requests are eliminated. No Solana RPC calls are added.
 Regression tests use recording HTTP fixtures and isolated PostgreSQL/Redis. Production handlers
 continue to call the real Fireblocks API. Live policy checks depend on the connected API user's
 permissions; HTTP 403 is reported as unavailable permission, never an empty policy.
+
+## Pre-push security review — 2026-10-20
+
+Scope: the complete Fireblocks change on `codex/fireblocks-byok-minimal`, relative to
+`a65235c5a548bdeec5833511b0832ac0a2d41399`, including the beta gate. This was a source
+review with regression testing, not an independent penetration test of a deployed service.
+
+Findings fixed:
+
+- **Managed-wallet regression:** the new native-transfer resolver rejected managed Fireblocks
+  wallets before the existing signing path could run. It now selects native transfers only
+  for BYOK connections. A database-backed regression asserts managed wallets require no BYOK
+  secret read or provider call from this resolver.
+- **Incomplete settlement binding:** a valid provider ID, source vault, asset and transaction
+  hash could confirm a row even when the returned recipient or amount disagreed. Completion
+  now requires the exact destination and decimal amount/net amount to match the durable intent.
+  Malformed, absent or mismatched settlement data stays processing and never authorizes a
+  second POST. Tests cover wrong recipients, amounts, assets, vaults and external IDs, and
+  equivalent decimal representations. Response handling follows Fireblocks'
+  [transaction response schema](https://github.com/fireblocks/fireblocks-openapi-spec/blob/main/open_api_spec.yml).
+
+Reviewed boundaries and evidence:
+
+- Admission: actual beta/stable/experimental availability, stable refusals before credential
+  writes/provider calls, adapter creation, payment submission, and retained read-only
+  reconciliation after changing channels. Cancellation remains available.
+- Credentials: generated RSA/CSR verification, encryption and tenant/project binding,
+  admin-only registration, rejection of client-supplied private keys/endpoints/networks,
+  CSR expiry/retirement, idempotent installation, rotation continuity, rollback and cleanup.
+- Money movement: existing payment authorization/policy middleware, exact wallet ownership,
+  mint/network matching, durable submission claims, concurrent retries, ambiguous outcomes,
+  terminal-state guards and bounded polling. Recovery does not submit transactions.
+- Provider boundaries: RSA-signed URI/body hashes, redirect refusal in the native HTTP client,
+  bounded discovery, conservative read-only policy matching and sanitized provider errors.
+  No whitelist/policy mutation routes or automatic contact imports remain.
+- Dashboard: CSR-only download, named vault selection, rotation recovery and warnings scoped
+  by user/organization/project. Suppressing a warning does not change backend authorization.
+
+Verification: 550 API tests, 118 dashboard tests, 11 provider tests and 7 live-runner safety
+tests passed (686 distinct tests). API/dashboard TypeScript checks, changed-file Biome,
+module boundaries, migration compatibility, secret-reference serialization and generated API
+playground drift checks passed. The obsolete manual-vault rotation test was updated to load
+and select a named vault, waiting for CSR loading before entering credentials.
+
+No unresolved critical/high-severity finding was identified in this review. Remaining limits:
+provider behavior, a real approval/settlement, and deployed GCP KMS/Secret Manager permissions
+were not tested against live services in this pass. Native payment settlement relies on
+Fireblocks' authenticated response; chain finalization checks the reported signature.
+An accepted or unknown submission is never automatically retried, so a crash before the
+POST or permanently unavailable credentials can require manual reconciliation. Fireblocks'
+own policies/signers remain authoritative. Batch/custom-program operations retain the
+existing RAW adapter and are outside native SOL/USDC transfer coverage.
+
+The audit fixes add **zero** Fireblocks or Solana RPC requests: they validate fields already
+returned by the existing status GET. Tests used isolated PostgreSQL/Redis, generated fixture
+keys and mocked provider HTTP; no customer credentials or mainnet funds were used.

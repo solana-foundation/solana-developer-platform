@@ -758,9 +758,9 @@ export class CustodyRuntimeTargets {
       params.custodyWalletId
     );
     if (!target) throw notFound("Custody wallet");
-    if (target.provider !== "fireblocks") return null;
-    if (target.kind !== "connection" || !target.wallet)
-      throw conflict("Native Fireblocks payments require a BYOK connection");
+    // Managed Fireblocks wallets keep the existing sponsored-signing path.
+    if (target.provider !== "fireblocks" || target.kind !== "connection") return null;
+    if (!target.wallet) throw conflict("Fireblocks wallet is unavailable");
     if (params.forSubmission) {
       this.assertRuntimeExecutionAllowed(target, params.custodyWalletId);
       await assertCustodyProviderEntitled(
