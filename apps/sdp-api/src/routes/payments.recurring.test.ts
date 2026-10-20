@@ -7009,6 +7009,8 @@ describe("Payments routes — recurring", () => {
 
       /** The expiry `seedSavedSendExpiry` gives an update attempt's saved send. */
       const SAVED_SEND_EXPIRY = 2_400;
+      /** A tip at the saved send's last valid block height: it can still land. */
+      const AT_SAVED_EXPIRY = { absoluteSlot: 2_900, blockHeight: SAVED_SEND_EXPIRY };
       /** A tip one block past the saved send's last valid block height: it can never land. */
       const PAST_SAVED_EXPIRY = { absoluteSlot: 2_900, blockHeight: SAVED_SEND_EXPIRY + 1 };
 
@@ -7217,6 +7219,52 @@ describe("Payments routes — recurring", () => {
             old_subscription_pda: oldSubscriptionPda,
           })
         );
+      });
+
+      it("keeps a stalled update's saved authorization in flight while it can still land", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(oldSubscriptionPda, null, DEFAULT_RECURRING_CHAIN);
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(activated.id),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await update()).status).toBe(409);
+        const authorizationSignature = poolSentSignatures()[3];
+        await leaveUpdateCrashedAt(activated.id, key);
+        await seedSavedSendExpiry(activated.id);
+        // The schedule's claim is stale, but its attempt saved the send a minute ago.
+        await getDb(env)
+          .prepare(
+            "UPDATE payment_recurring_payment_update_attempts SET updated_at = ? WHERE recurring_payment_id = ?"
+          )
+          .bind(new Date(Date.now() - 60 * 1000).toISOString(), activated.id)
+          .run();
+        delegationsBesideActiveOld(oldSubscriptionPda, null, AT_SAVED_EXPIRY);
+        const readsBefore = stepReads().length;
+        const sent = sends();
+
+        const retry = await update();
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(sent).not.toHaveBeenCalled();
+        // The retry claimed the attempt and read the plan and the authorization.
+        expect(
+          stepReads()
+            .slice(readsBefore)
+            .map(({ method }) => method)
+        ).toEqual(["getEpochInfo", "getMultipleAccounts", "getEpochInfo", "getMultipleAccounts"]);
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_signature: authorizationSignature,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
       });
 
       it("finishes a stale activation whose subscription landed without sending it again", async () => {
