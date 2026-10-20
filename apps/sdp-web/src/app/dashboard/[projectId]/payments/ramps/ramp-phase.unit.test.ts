@@ -1,8 +1,8 @@
 import type { PaymentTransferSummary } from "@sdp/types/payments";
-import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
 import { type TranslationValues, translate } from "@/i18n/translate";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { rampPhase, rampPhaseCopy, rampTransferPollInterval } from "./ramp-phase";
 
 const messages = getMessages("en");
@@ -97,7 +97,7 @@ describe("rampPhaseCopy", () => {
       transfer({
         status: "settling",
         signature: "sig",
-        token: wellKnownMint("USDC", "devnet") ?? "",
+        token: requiredWellKnownMint("USDC", "devnet"),
         deliveryMismatch: {
           reason: "amount_mismatch",
           checkedAt: "2026-10-20T01:14:00.000Z",

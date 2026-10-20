@@ -1,17 +1,17 @@
 import type { PaymentRampQuote, PaymentTransferSummary } from "@sdp/types/payments";
-import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { resolveTransferFlow } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 
-const DEVNET_USDC = wellKnownMint("USDC", "devnet") ?? "";
+const DEVNET_USDC = requiredWellKnownMint("USDC", "devnet");
 const DELIVERY =
   "5Zegs7mguCgwDJxUb5YeGeJG7tvTQ6mRfSwakahuySsScMDERzvqbXv8DfbJEnXMmwQF33LtLzRjm9vUncCZqMos";
 
