@@ -4871,6 +4871,29 @@ describe("Payments routes — recurring", () => {
       }),
     },
     {
+      route: "resume",
+      prepare: async (activated: { id: string }) => {
+        recurringExecution
+          .signAndSendMock()
+          .mockResolvedValue(
+            signature(
+              "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+            )
+          );
+        const canceled = await app.request(
+          `/v1/payments/recurring-payments/${activated.id}/cancel`,
+          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+          env
+        );
+        expect(canceled.status).toBe(200);
+      },
+      request: (id: string) => ({
+        path: `/v1/payments/recurring-payments/${id}/resume`,
+        method: "POST",
+        body: {},
+      }),
+    },
+    {
       route: "an amount change",
       prepare: async () => {},
       request: (id: string) => ({

@@ -166,4 +166,34 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
       expect(await countCounterpartyTransfers(counterpartyId)).toBe(0);
     }
   );
+
+  // HOO-2099: a quote signs nothing, so its admission is the only scope check:
+  // a selected key that does not list the quote's wallet is refused before
+  // any provider call or transfer write.
+  it.each(["onramp", "offramp"] as const)(
+    "refuses a %s quote on a wallet outside the key's scope with wallet_out_of_scope",
+    async (direction) => {
+      const counterpartyId = await seedCounterparty({
+        externalId: `admission_${direction}_out_of_scope`,
+      });
+      await getDb(env)
+        .prepare("UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?")
+        .bind(TEST_API_KEY.id)
+        .run();
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        throw new Error("A refused quote reached the provider");
+      });
+      onTestFinished(() => fetchSpy.mockRestore());
+
+      const response = await requestMoonPayQuote(direction, counterpartyId);
+
+      expect(response.status).toBe(403);
+      expect(errorResponseSchema.parse(await response.json()).error).toMatchObject({
+        code: "FORBIDDEN",
+        details: { reason: "wallet_out_of_scope" },
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await countCounterpartyTransfers(counterpartyId)).toBe(0);
+    }
+  );
 });
