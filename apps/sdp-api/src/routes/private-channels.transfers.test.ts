@@ -836,7 +836,12 @@ describe("Private Channels — transfer access and routes", () => {
     }
   );
 
+  // HOO-2099: refused before the transfer row, the SPC session or the
+  // gateway, so a retry after the scope is fixed runs as new.
   it("refuses a selected-scope API key naming an enrolled wallet it is not bound to", async () => {
+    const before = await getDb(env)
+      .prepare("SELECT * FROM private_channel_transfers ORDER BY id")
+      .all();
     const response = await postTransfer(
       {
         walletId: ACTOR_WALLET_ID,
@@ -847,9 +852,12 @@ describe("Private Channels — transfer access and routes", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(JSON.stringify(await response.json())).toContain(
-      "The credential may not sign with this wallet"
-    );
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(
+      await getDb(env).prepare("SELECT * FROM private_channel_transfers ORDER BY id").all()
+    ).toEqual(before);
     expect(createChannelTransferMock).not.toHaveBeenCalled();
   });
 

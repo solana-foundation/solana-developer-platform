@@ -820,6 +820,119 @@ describe("Helius Rings routes", () => {
     });
   });
 
+  // HOO-2099: the custody signer refuses a wallet outside a selected key's
+  // scope; every Rings write refuses it first, so nothing is prepared,
+  // recorded or sent to the gateway, and a retry after the scope is fixed
+  // runs as new.
+  describe("refusal outside the key's wallet scope", () => {
+    const RINGS_TABLES = [
+      "helius_rings_wallets",
+      "helius_rings_operations",
+      "helius_rings_events",
+      "helius_rings_zones",
+    ] as const;
+    let operationId: string;
+
+    async function ringsRows(): Promise<Record<string, unknown[]>> {
+      const db = getDb(env);
+      const entries = await Promise.all(
+        RINGS_TABLES.map(
+          async (table) =>
+            [table, (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results] as const
+        )
+      );
+      return Object.fromEntries(entries);
+    }
+
+    beforeEach(async () => {
+      await provisionRouteWallet();
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
+      gatewayOverride.current = gateway;
+      const failed = await post("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-scope-seed",
+      });
+      expect(failed.status).toBe(201);
+      operationId = ((await failed.json()) as { data: { operation: { id: string } } }).data
+        .operation.id;
+      await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+    });
+
+    it.each([
+      {
+        route: "POST /wallets",
+        path: () => "/v1/helius-rings/wallets",
+        body: () => ({ walletId: "wal_hr_route", name: "Ops" }),
+      },
+      {
+        route: "POST /wallets/:walletId/sync",
+        path: () => `/v1/helius-rings/wallets/${ringsWalletId}/sync`,
+        body: () => ({}),
+      },
+      {
+        route: "POST /wallets/:walletId/rekey",
+        path: () => `/v1/helius-rings/wallets/${ringsWalletId}/rekey`,
+        body: () => ({ confirmation: "Treasury" }),
+      },
+      {
+        route: "POST /wallets/:walletId/zones",
+        path: () => `/v1/helius-rings/wallets/${ringsWalletId}/zones`,
+        body: () => ({ name: "Payroll", kind: "treasury" }),
+      },
+      {
+        route: "POST /operations",
+        path: () => "/v1/helius-rings/operations",
+        body: () => ({
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-scope-new",
+        }),
+      },
+      {
+        route: "POST /operations/:operationId/execute",
+        path: () => `/v1/helius-rings/operations/${operationId}/execute`,
+        body: () => ({}),
+      },
+      {
+        route: "POST /operations/:operationId/retry",
+        path: () => `/v1/helius-rings/operations/${operationId}/retry`,
+        body: () => ({ clientNonce: "route-nonce-scope-retry" }),
+      },
+      {
+        route: "POST /operations/:operationId/recheck",
+        path: () => `/v1/helius-rings/operations/${operationId}/recheck`,
+        body: () => ({}),
+      },
+      {
+        route: "POST /operations/:operationId/void",
+        path: () => `/v1/helius-rings/operations/${operationId}/void`,
+        body: () => ({
+          signature:
+            "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
+        }),
+      },
+    ])("refuses $route with wallet_out_of_scope, writing nothing", async ({ path, body }) => {
+      const before = await ringsRows();
+
+      const res = await post(path(), body());
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({
+        error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
+      });
+      expect(await ringsRows()).toEqual(before);
+    });
+  });
+
   describe("POST /wallets/:walletId/sync", () => {
     const SHIELDED_ADDRESS = "rings1route_sync";
 
