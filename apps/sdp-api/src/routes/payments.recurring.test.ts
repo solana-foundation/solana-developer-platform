@@ -7,6 +7,7 @@ import {
   type PaymentRecurringPaymentAttemptStatus,
   type PaymentRecurringPaymentLifecycleAttemptStage,
   type PaymentRecurringPaymentLifecycleOperation,
+  type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
@@ -8135,7 +8136,7 @@ describe("Payments routes — recurring", () => {
             )
             .bind(created.id)
             .first<{
-              status: string;
+              status: PaymentRecurringPaymentStatus;
               plan_id: string | null;
               plan_pda: string | null;
               plan_created_at: string | null;
