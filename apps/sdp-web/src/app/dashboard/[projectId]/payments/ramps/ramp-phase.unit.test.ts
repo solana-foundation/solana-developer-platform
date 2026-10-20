@@ -1,4 +1,5 @@
 import type { PaymentTransferSummary } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
 import { type TranslationValues, translate } from "@/i18n/translate";
@@ -110,6 +111,26 @@ describe("rampPhaseCopy", () => {
     expect(copy.title).toBe("Delivery needs review");
     expect(copy.description).toContain("MoonPay reports 20.00 USDC delivered");
     expect(copy.description).toContain("the wallet received 0.50 USDC");
+  });
+
+  it("keeps every digit of amounts that differ past six places", () => {
+    const copy = rampPhaseCopy(
+      t,
+      transfer({
+        status: "settling",
+        signature: "sig",
+        token: SOL_MINT,
+        deliveryMismatch: {
+          reason: "amount_mismatch",
+          checkedAt: "2026-10-20T01:14:00.000Z",
+          reportedAmount: "1.000000002",
+          observedAmount: "1.000000001",
+        },
+      }),
+      { tokenLabel: "SOL", locale: "en" }
+    );
+    expect(copy.description).toContain("MoonPay reports 1.000000002 SOL delivered");
+    expect(copy.description).toContain("the wallet received 1.000000001 SOL");
   });
 
   it("says what the provider paid out once a sale completes", () => {

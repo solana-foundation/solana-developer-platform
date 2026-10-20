@@ -4,7 +4,7 @@ import type {
   RampDirection,
 } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { formatDisplayAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { getRampProviderLabel } from "@/lib/ramps";
@@ -258,8 +258,9 @@ export function rampPhaseCopy(
     options.tokenLabel ||
     (transfer.token ? WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token)?.symbol : undefined) ||
     t("DashboardPayments.transactionDetail.theTokens");
+  // Every digit: a review compares amounts that may differ past six places.
   const amountOf = (value: string | undefined, unit: string) =>
-    value === undefined ? null : formatDisplayAmount(value, unit, options.locale);
+    value === undefined ? null : `${formatDecimalAmount(value, options.locale)} ${unit}`;
   const values: TranslationValues = {
     provider,
     token,
