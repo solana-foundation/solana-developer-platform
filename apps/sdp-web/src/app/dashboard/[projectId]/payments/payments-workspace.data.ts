@@ -795,7 +795,14 @@ const MAX_COUNTERPARTY_PAGES = 50;
 export interface CounterpartiesResult {
   ok: boolean;
   data: Counterparty[];
+  /** The directory's full size, when the read knows it (a server's first page does). */
+  total?: number;
   error?: string;
+}
+
+/** Whether a contacts read holds the whole directory, so a reader can reuse it. */
+export function counterpartyListComplete(result: CounterpartiesResult): boolean {
+  return result.ok && (result.total === undefined || result.data.length >= result.total);
 }
 
 export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {

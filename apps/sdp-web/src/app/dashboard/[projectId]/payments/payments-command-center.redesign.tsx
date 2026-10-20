@@ -416,26 +416,21 @@ function transferRow(
   // Every row leads with what moved through the wallet, so buys, sales and sends read alike;
   // a ramp's fiat side rides in the detail, and leads only while a buy's tokens are unknown.
   const isRamp = transfer.type === "onramp" || transfer.type === "offramp";
-  const rampDirection = direction ?? (transfer.type === "onramp" ? "inbound" : "outbound");
-  const fiat =
+  const rampDirection: "inbound" | "outbound" =
+    direction ?? (transfer.type === "onramp" ? "inbound" : "outbound");
+  const rampFiat =
     isRamp && transfer.fiatAmount && transfer.fiatCurrency
-      ? `${formatDecimalAmount(transfer.fiatAmount, locale)} ${transfer.fiatCurrency.toUpperCase()}`
+      ? { amount: transfer.fiatAmount, unit: transfer.fiatCurrency.toUpperCase() }
       : null;
-  const amount = transfer.amount
-    ? formatSignedAmount(
-        transfer.amount,
-        isRamp ? rampDirection : direction,
-        resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
-        locale
-      )
-    : isRamp && transfer.fiatAmount && transfer.fiatCurrency
-      ? formatSignedAmount(
-          transfer.fiatAmount,
-          rampDirection,
-          transfer.fiatCurrency.toUpperCase(),
-          locale
-        )
-      : null;
+  const lead = transfer.amount
+    ? {
+        amount: transfer.amount,
+        unit: resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
+        direction: isRamp ? rampDirection : direction,
+      }
+    : rampFiat && { ...rampFiat, direction: rampDirection };
+  const amount = lead ? formatSignedAmount(lead.amount, lead.direction, lead.unit, locale) : null;
+  const fiat = rampFiat ? `${formatDecimalAmount(rampFiat.amount, locale)} ${rampFiat.unit}` : null;
   const wallet = walletName(walletsById, transfer.custodyWalletId);
   const kind = t(ACTIVITY_KIND_MESSAGE_KEYS[activityKind(transfer)]);
   const detail = [kind, wallet, transfer.amount ? fiat : null].filter(Boolean).join(" · ");

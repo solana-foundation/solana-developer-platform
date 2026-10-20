@@ -6,12 +6,19 @@ import type { TranslationValues } from "@/i18n/translate";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-/** An estimate figure: two places at least so money reads as money, up to six for dust. */
-export function formatEstimateFigure(value: string, locale: string): string {
+/**
+ * An estimate figure: two places at least so money reads as money (the legacy
+ * cards show none), up to six for dust.
+ */
+export function formatEstimateFigure(
+  value: string,
+  locale: string,
+  minimumFractionDigits = 2
+): string {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return value;
   return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 2,
+    minimumFractionDigits,
     maximumFractionDigits: 6,
   }).format(parsed);
 }

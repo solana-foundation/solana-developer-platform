@@ -15,6 +15,7 @@ import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments
 import {
   type CounterpartiesResult,
   cancelRampTransfer,
+  counterpartyListComplete,
   fetchAllCounterparties,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
@@ -163,7 +164,9 @@ export function useRampWizard<TId extends string>(
     fetchAllCounterparties,
     {
       fallbackData: counterpartiesResult,
-      revalidateIfStale: false,
+      // The server read the first page: reuse it when it holds every contact, and
+      // finish loading a larger directory here.
+      revalidateIfStale: !counterpartyListComplete(counterpartiesResult),
     }
   );
 

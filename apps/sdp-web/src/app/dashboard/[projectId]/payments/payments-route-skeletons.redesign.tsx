@@ -101,7 +101,7 @@ function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
       <Table
         className={cn(
           "rounded-none border-0",
-          columns.some((column) => column.fromMd) ? "md:min-w-[760px]" : "min-w-[760px]"
+          columns.some((column) => column.fromMd) ? "md:min-w-[47.5rem]" : "min-w-[760px]"
         )}
       >
         <TableHeader>

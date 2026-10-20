@@ -9,6 +9,7 @@ import Image from "next/image";
 import {
   estimateLimitCopy,
   estimateRateCopy,
+  formatEstimateFigure,
 } from "@/app/dashboard/[projectId]/payments/ramps/ramp-estimate-copy";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -21,18 +22,6 @@ interface ProviderCardProps {
   estimate?: RampProviderEstimateResult;
   estimateLoading?: boolean;
   onSelect: () => void;
-}
-
-function formatEstimateDecimal(value: string, locale: string): string {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return value;
-  }
-
-  return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 6,
-  }).format(parsed);
 }
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -57,9 +46,9 @@ function buildFeeLabel(t: Translate, fees: PaymentRampEstimateFees, locale: stri
     providerCurrency !== networkCurrency
   ) {
     return t("DashboardPayments.ramps.fees", {
-      providerFee: formatEstimateDecimal(providerFee, locale),
+      providerFee: formatEstimateFigure(providerFee, locale, 0),
       providerCurrency,
-      networkFee: formatEstimateDecimal(networkFee, locale),
+      networkFee: formatEstimateFigure(networkFee, locale, 0),
       networkCurrency,
     });
   }
@@ -69,7 +58,7 @@ function buildFeeLabel(t: Translate, fees: PaymentRampEstimateFees, locale: stri
   }
 
   return t("DashboardPayments.ramps.fee", {
-    amount: formatEstimateDecimal(fees.total, locale),
+    amount: formatEstimateFigure(fees.total, locale, 0),
     currency: fees.currency,
   });
 }
@@ -91,7 +80,7 @@ function ProviderCardEstimate({
     const { direction, fiatCurrency, assetRail, fiatAmount, cryptoAmount, fees } =
       estimate.estimate;
     const isFiatOut = direction === "offramp";
-    const amount = formatEstimateDecimal(isFiatOut ? fiatAmount : cryptoAmount, locale);
+    const amount = formatEstimateFigure(isFiatOut ? fiatAmount : cryptoAmount, locale, 0);
     const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
     const feeLabel = buildFeeLabel(t, fees, locale);
     // A payout is the crypto at the rate, less the fee; without the rate the numbers don't add up.

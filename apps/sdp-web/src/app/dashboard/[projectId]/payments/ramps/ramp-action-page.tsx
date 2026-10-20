@@ -9,6 +9,7 @@ import useSWR, { preload } from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import {
   type CounterpartiesResult,
+  counterpartyListComplete,
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
@@ -77,9 +78,9 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     fetchAllCounterparties,
     {
       fallbackData: props.counterpartiesResult,
-      // The server just read them; a new reader of the key reuses that, and a contact
-      // created here updates the cache itself.
-      revalidateIfStale: false,
+      // The server read the first page: reuse it when it holds every contact, and
+      // finish loading a larger directory here.
+      revalidateIfStale: !counterpartyListComplete(props.counterpartiesResult),
     }
   );
   const liveCounterparties = counterpartiesResult ?? props.counterpartiesResult;

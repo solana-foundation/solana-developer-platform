@@ -1,7 +1,9 @@
+import type { Counterparty } from "@sdp/types/counterparties";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {
+  counterpartyListComplete,
   createTransfer,
   createTransferBatch,
   estimateTransferBatch,
@@ -120,5 +122,28 @@ describe("Payments write requests", () => {
       });
       expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
     }
+  });
+});
+
+describe("counterpartyListComplete", () => {
+  const contact: Counterparty = {
+    id: "cpty_one",
+    organizationId: "org_test",
+    projectId: "proj_test",
+    externalId: null,
+    displayName: "One",
+    entityType: "business",
+    status: "active",
+    createdBy: null,
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+  };
+
+  it("reuses a read only when it holds the whole directory", () => {
+    expect(counterpartyListComplete({ ok: true, data: [contact], total: 1 })).toBe(true);
+    expect(counterpartyListComplete({ ok: true, data: [contact], total: 25 })).toBe(false);
+    expect(counterpartyListComplete({ ok: false, data: [], total: 0 })).toBe(false);
+    // A read that loaded every page names no total.
+    expect(counterpartyListComplete({ ok: true, data: [contact] })).toBe(true);
   });
 });
