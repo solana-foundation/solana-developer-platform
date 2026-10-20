@@ -17,20 +17,20 @@ import {
   createDvpTradeRepository,
 } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, forbidden, notFound, solanaRpcError } from "@/lib/errors";
+import { badRequest, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import {
-  assertApiKeyCustodyWalletAccess,
-  getAllowedApiKeyCustodyWalletIdsForPermissions,
-} from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
 import { custodyWalletForParty } from "@/services/dvp/custody-party";
 import { fundDvpTradeLeg } from "@/services/dvp/fund";
-import type { DvpCallerWallet } from "@/services/dvp/inbound";
-import { callerPartyAddresses, listInboundDvpTrades } from "@/services/dvp/inbound";
+import {
+  callerPartyAddresses,
+  type DvpCallerWallet,
+  listInboundDvpTrades,
+} from "@/services/dvp/inbound";
 import { inspectDvpMint } from "@/services/dvp/inspect-mint";
 import {
   type DvpLegActionResult,
@@ -68,14 +68,6 @@ import {
 } from "./trade-audit";
 
 type AppContext = Context<{ Bindings: Env }>;
-
-/**
- * The custody wallets this caller may see trades for, or null for unrestricted.
- * Empty means deny-all, never "no filter".
- */
-function readableSdpWalletIds(c: AppContext): string[] | null {
-  return getAllowedApiKeyCustodyWalletIdsForPermissions(getAuth(c), ["payments:read"]);
-}
 
 interface LegInput {
   mint: string;
@@ -479,31 +471,6 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
-  // A wallet-scoped key only SEES trades its bound wallets are party to, and
-  // visibility filters on the READ scope — a binding can hold payments:write
-  // without payments:read, so the guard checks read admission, not write. A
-  // `{walletId}` slot is the explicit ownership claim; a pasted address that
-  // happens to be a bound wallet's is not, and the remedy is naming it.
-  const readAdmittedWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
-    "payments:read",
-  ]);
-  if (
-    readAdmittedWalletIds !== null &&
-    !("walletId" in body.partyA && readAdmittedWalletIds.includes(body.partyA.walletId)) &&
-    !("walletId" in body.partyB && readAdmittedWalletIds.includes(body.partyB.walletId))
-  ) {
-    throw forbidden(
-      "A wallet-scoped key must name one of its wallets with payments:read as a party (a walletId slot) — the trade would otherwise be invisible to this key"
-    );
-  }
-  const assertedWalletIds = [
-    ...("walletId" in body.partyA ? [body.partyA.walletId] : []),
-    ...("walletId" in body.partyB ? [body.partyB.walletId] : []),
-  ];
-  for (const walletId of assertedWalletIds) {
-    assertApiKeyCustodyWalletAccess(auth, walletId, ["payments:write"]);
-  }
-
   const trade = await createDvpTrade(c.env, c, {
     organizationId: auth.organizationId,
     projectId,
@@ -748,7 +715,8 @@ export const listInboundTrades = async (c: AppContext) => {
     c.env,
     { organizationId: auth.organizationId, projectId, auth },
     inbound.trades.flatMap(({ trade }) => [trade.userA, trade.userB]),
-    inbound.callerAddresses
+    inbound.callerAddresses,
+    callerMayPerform(c, "dvp.execute")
   );
   return success(c, {
     trades: inbound.trades.map((entry) =>
@@ -798,7 +766,6 @@ export const listTrades = async (c: AppContext) => {
     {
       organizationId: auth.organizationId,
       projectId,
-      sdpWalletIds: readableSdpWalletIds(c),
     },
     {
       statuses: query.data.status === undefined ? null : query.data.status,
@@ -855,7 +822,6 @@ export const getTrade = async (c: AppContext) => {
     {
       organizationId: auth.organizationId,
       projectId,
-      sdpWalletIds: readableSdpWalletIds(c),
     },
     tradeId
   );
@@ -881,7 +847,8 @@ export const getTrade = async (c: AppContext) => {
     c.env,
     { organizationId: auth.organizationId, projectId, auth },
     [observed.userA, observed.userB],
-    callerAddresses
+    callerAddresses,
+    callerMayPerform(c, "dvp.execute")
   );
   return success(c, {
     trade: {
@@ -908,11 +875,12 @@ async function resolveYourSide(
   projectId: string
 ): Promise<{ side: "a" | "b"; custodyWalletId: string } | null> {
   const org = { organizationId: getAuth(c).organizationId, projectId };
-  const walletForA = await custodyWalletForParty(c.env, org, trade.userA, null);
+  const { walletAccess } = getAuth(c);
+  const walletForA = await custodyWalletForParty(c.env, org, trade.userA, walletAccess);
   if (walletForA !== null) {
     return { side: "a", custodyWalletId: walletForA };
   }
-  const walletForB = await custodyWalletForParty(c.env, org, trade.userB, null);
+  const walletForB = await custodyWalletForParty(c.env, org, trade.userB, walletAccess);
   if (walletForB !== null) {
     return { side: "b", custodyWalletId: walletForB };
   }
@@ -937,20 +905,13 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   // the scoped lookup refusing a wallet-scoped key, and answering here would
   // launder the trade past its scope. `getByIdAsParty` is deliberately
   // unfiltered and leans on RLS 0089, which enforces nothing in tests, so
-  // BOTH this guard and the key-scope check below are load-bearing.
+  // this guard is load-bearing.
   if (trade.organizationId === auth.organizationId) {
     throw notFound("DvP trade not found");
   }
 
   const fundable = await resolveYourSide(c, trade, projectId);
   if (!fundable) {
-    throw notFound("DvP trade not found");
-  }
-
-  // Key-scope filtering on the ORGANIZATION-level resolution, or the fallback
-  // would hand the trade to a key bound to a different wallet. Same 404.
-  const scopedWalletIds = readableSdpWalletIds(c);
-  if (scopedWalletIds !== null && !scopedWalletIds.includes(fundable.custodyWalletId)) {
     throw notFound("DvP trade not found");
   }
 
@@ -977,7 +938,8 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
     c.env,
     { organizationId: auth.organizationId, projectId, auth },
     [observed.userA, observed.userB],
-    callerAddresses
+    callerAddresses,
+    callerMayPerform(c, "dvp.execute")
   );
   return success(c, {
     trade: {

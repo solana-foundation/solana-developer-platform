@@ -184,7 +184,9 @@ stop_pid_file() {
   fi
   local pid
   pid="$(cat "${pid_file}")"
-  if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
+  # A pid file can outlive its process (reboot, hard-closed terminal), so only
+  # signal a pid that is still one of ours.
+  if [ -n "${pid}" ] && [[ "$(ps -o command= -p "${pid}" 2>/dev/null)" == *surfpool* ]]; then
     kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
   fi
   rm -f "${pid_file}"

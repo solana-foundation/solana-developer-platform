@@ -10,8 +10,7 @@ import type {
   PreparePaymentSubscriptionCollectionResponse,
   PreparePaymentSubscriptionLifecycleResponse,
 } from "@sdp/types/payments";
-import type { Address } from "@solana/kit";
-import { createNoopSigner } from "@solana/kit";
+import { type Address, createNoopSigner } from "@solana/kit";
 import {
   fetchMaybeSubscriptionDelegation,
   findSubscriptionAuthorityPda,
@@ -39,7 +38,6 @@ import {
   hasSubscriptionPlanPuller,
   resolveSubscriptionPlanRole,
 } from "@/routes/payments/subscription-plans/wallets";
-import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -442,7 +440,6 @@ export const prepareSubscriptionCollection = async (
     plan,
     hasSubscriptionPlanPuller(plan) ? "puller" : "owner"
   );
-  assertPaymentWalletExactAccess(c, callerWallet.id, ["payments:write"]);
 
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const { planPda } = await derivePlanAddresses(plan);

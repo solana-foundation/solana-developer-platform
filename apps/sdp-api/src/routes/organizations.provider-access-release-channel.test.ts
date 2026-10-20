@@ -4,7 +4,6 @@ import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
@@ -16,7 +15,6 @@ import {
 // the stages createApp was given, not the manifest (ADR 0005).
 
 const moonpayInBetaApp = createApp({
-  observability: noopObservability,
   rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
 });
 

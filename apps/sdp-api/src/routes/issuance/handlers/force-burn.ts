@@ -70,7 +70,6 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const { signer, custodyWalletId } = authority;
@@ -168,7 +167,6 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     type: "force_burn",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -206,7 +204,6 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
@@ -259,7 +256,6 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     auth,
     custodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const signer = authority.signer;

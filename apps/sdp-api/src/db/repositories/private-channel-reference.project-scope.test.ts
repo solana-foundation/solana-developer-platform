@@ -18,10 +18,7 @@ const OWNER_WALLET = {
   label: "Owner treasury",
 };
 
-const WALLET_SCOPES: PrivateChannelReferenceWalletScope[] = [
-  { scope: "all" },
-  { scope: "selected", walletIds: [OWNER_WALLET.walletId] },
-];
+const WALLET_SCOPES: PrivateChannelReferenceWalletScope[] = [{ scope: "all" }];
 
 function listWalletReferences(projectId: string, walletScope: PrivateChannelReferenceWalletScope) {
   return createPostgresPrivateChannelReferenceRepository(getDb(env)).listReferences({

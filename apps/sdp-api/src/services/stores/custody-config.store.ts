@@ -458,12 +458,20 @@ export class CustodyConfigStore implements SigningConfigStore {
 
   /**
    * Find a single active wallet by public key under one of the project's
-   * active configs.
+   * active configs. Several active records can hold one key (HOO-2099): the
+   * named record comes first, then the record the named Rings wallet links
+   * to, then any record a Rings wallet in the project links to, then the most
+   * recently updated config, so the record signed with is the one the
+   * caller's wallet scope was checked on.
    */
   async findActiveWalletByPublicKey(
     orgId: string,
     projectId: string,
-    publicKey: string
+    publicKey: string,
+    prefer: { custodyWalletId: string | null; ringsWalletId: string | null } = {
+      custodyWalletId: null,
+      ringsWalletId: null,
+    }
   ): Promise<CustodyWalletLookup | null> {
     const row = await this.db
       .prepare(
@@ -486,10 +494,24 @@ export class CustodyConfigStore implements SigningConfigStore {
            AND c.status = 'active'
            AND w.status = 'active'
            AND w.public_key = ?
-         ORDER BY c.updated_at DESC, c.id DESC
+         ORDER BY (w.id = ?::text) IS TRUE DESC,
+                  EXISTS (
+                    SELECT 1 FROM helius_rings_wallets r
+                     WHERE r.id = ?::text
+                       AND r.custody_wallet_id = w.id
+                       AND r.organization_id = c.organization_id
+                       AND r.project_id = c.project_id
+                  ) DESC,
+                  EXISTS (
+                    SELECT 1 FROM helius_rings_wallets r
+                     WHERE r.custody_wallet_id = w.id
+                       AND r.organization_id = c.organization_id
+                       AND r.project_id = c.project_id
+                  ) DESC,
+                  c.updated_at DESC, c.id DESC
          LIMIT 1`
       )
-      .bind(orgId, projectId, publicKey)
+      .bind(orgId, projectId, publicKey, prefer.custodyWalletId, prefer.ringsWalletId)
       .first<CustodyWalletLookupRow>();
 
     return row ? this.mapWalletLookupRow(row) : null;

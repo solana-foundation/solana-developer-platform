@@ -34,9 +34,7 @@ beforeEach(() => {
 describe("useWalletActions", () => {
   it("refreshes the cached wallet balances once the faucet has funded the wallet", async () => {
     mocks.faucet.mockResolvedValue({ status: "success", signature: "sig", amountSol: "1" });
-    const { result } = renderHook(() =>
-      useWalletActions({ walletId: "wallet_one", walletAddress: "addr_one" })
-    );
+    const { result } = renderHook(() => useWalletActions({ walletId: "wallet_one" }));
 
     await act(async () => {
       result.current.requestDevnetSol();
@@ -47,9 +45,7 @@ describe("useWalletActions", () => {
 
   it("leaves the cached balances alone when the faucet refuses", async () => {
     mocks.faucet.mockResolvedValue({ status: "error", message: "Rate limited" });
-    const { result } = renderHook(() =>
-      useWalletActions({ walletId: "wallet_one", walletAddress: "addr_one" })
-    );
+    const { result } = renderHook(() => useWalletActions({ walletId: "wallet_one" }));
 
     await act(async () => {
       result.current.requestDevnetSol();

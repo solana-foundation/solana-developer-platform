@@ -97,125 +97,6 @@
       ]
     },
     {
-      "name": "API Keys",
-      "item": [
-        {
-          "name": "List API keys",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/api-keys",
-            "description": "Lists API keys for the authenticated organization."
-          }
-        },
-        {
-          "name": "Create API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys",
-            "description": "Creates a new API key. The full key is returned once.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Treasury wallet\",\n  \"walletPurpose\": \"transfer\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Get API key",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}",
-            "description": "Gets API key details by id."
-          }
-        },
-        {
-          "name": "Update API key",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}",
-            "description": "Updates API key attributes. Use null to clear optional fields.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"allowedOperations\": [\n    \"issuance_mint_execute\"\n  ],\n  \"expiresAt\": \"2026-01-01T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Deactivate API key",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}",
-            "description": "Deactivates (soft deletes) an API key and invalidates it immediately.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"confirmation\": \"Primary Key\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Rotate API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/rotate",
-            "description": "Rotates an API key and returns the new key plus the old key grace period.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"gracePeriodHours\": 24\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
       "name": "Wallets",
       "item": [
         {
@@ -323,7 +204,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/public-key",
-            "description": "Returns the persisted public key for an exact active walletId. walletId may be omitted only by an API key whose own signing-wallet binding names the wallet; otherwise the request is rejected with 400. Resolution is DB-backed only."
+            "description": "Returns the persisted public key for an exact active walletId. walletId is required (400 without it); an API key with selected wallets gets 404 for a wallet it does not list. Resolution is DB-backed only."
           }
         },
         {
@@ -338,7 +219,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/signer-check",
-            "description": "Signs a server-authored memo message with the wallet selected by an authenticated API key or Clerk JWT, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
+            "description": "Signs a server-authored memo message with the named wallet, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"walletId\": \"privy_wallet_123\"\n}",
@@ -438,105 +319,6 @@
             "url": "{{baseUrl}}/v1/projects/{{projectId}}/provider-availability",
             "description": "Lists every provider the deployment knows across custody, compliance and ramps, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404."
           }
-        },
-        {
-          "name": "List project members",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members",
-            "description": "Lists members assigned to the project."
-          }
-        },
-        {
-          "name": "Add project member",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members",
-            "description": "Adds an organization member to the project.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"userId\": \"usr_example\",\n  \"role\": \"developer\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Update project member",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members/{{memberId}}",
-            "description": "Updates a project member role.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"role\": \"admin\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Remove project member",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/members/{{memberId}}",
-            "description": "Removes a member from the project."
-          }
-        },
-        {
-          "name": "List project API keys",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/api-keys",
-            "description": "Lists API keys scoped to the project."
-          }
-        },
-        {
-          "name": "Create project API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/api-keys",
-            "description": "Creates an API key scoped to the project. The full key is returned once.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Treasury wallet\",\n  \"walletPurpose\": \"transfer\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
         }
       ]
     },
@@ -609,7 +391,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/transactions",
-            "description": "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when no wallet selector is supplied. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined."
+            "description": "Lists issuance transactions across tokens for the current organization or project. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined."
           }
         },
         {
@@ -711,7 +493,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
-            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`, else the API key's preferred or sole wallet binding. The request is rejected with 400 when none resolves, or when the key has several bindings and no preferred one. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata."
+            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata."
           }
         },
         {
@@ -744,7 +526,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare-metadata",
-            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored), else the API key's preferred or sole wallet binding; the request is rejected with 400 when none resolves. Returns a null transaction when the on-chain URI already matches."
+            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches."
           }
         },
         {
@@ -1753,7 +1535,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/transactions",
-            "description": "Lists the project's transactions across SDP modules with stable cursor pagination. Results are limited to modules allowed by the caller's read permissions: payments:read for payments, private channels, and rings; wallets:read for DvP; and tokens:read for issuance. Requesting a module without its permission returns INSUFFICIENT_PERMISSIONS. `search` matches transaction id, module id, or signature as a prefix, not a substring. The endpoint is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable."
+            "description": "Lists the project's transactions across SDP modules with stable cursor pagination. Requires `transactions.read`. Every row also needs the `read` action of the module it comes from (which its `manage` or `execute` includes): a Payments row needs `transfers.read` for a transfer or deposit, `transfer_batches.read` for a batch item, `recurring.read` for a recurring collection, `payment_requests.read` for a payment request's fulfilment, and `onramp.read` or `offramp.read` for a ramp transfer; every other module's rows need that module's `read`. Rows the caller cannot read are left out. Requesting a module, or a Payments `kind`, without its action returns 403 INSUFFICIENT_PERMISSIONS naming it. `search` matches transaction id, module id, or signature as a prefix, not a substring. The endpoint is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable."
           }
         }
       ]

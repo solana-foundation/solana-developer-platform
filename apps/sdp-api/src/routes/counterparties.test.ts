@@ -7,10 +7,10 @@ import { getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { app } from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { noopObservability } from "@/runtime/observability";
 import {
+  ALL_API_KEY_GRANTS,
+  ALL_API_KEY_GRANTS_SQL,
   TEST_API_KEY,
-  TEST_CACHED_API_KEY,
   TEST_PRODUCTION_API_KEY,
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -94,15 +94,14 @@ describe("Counterparties Routes", () => {
       organizationId: TEST_ORG.id,
       projectId: `${TEST_PROJECT_ID}_production`,
       createdBy: TEST_USER.id,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
     });
 
     await db
       .prepare(
         `INSERT OR REPLACE INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Test Key', ?, ?, ${ALL_API_KEY_GRANTS_SQL}, 'active')`
       )
       .bind(
         TEST_API_KEY.id,
@@ -113,11 +112,6 @@ describe("Counterparties Routes", () => {
         apiKeyHash
       )
       .run();
-
-    await kv.apiKeys.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT_ID })
-    );
 
     const seededAt = new Date().toISOString();
     await seedTestCustodySetup(
@@ -604,7 +598,6 @@ describe("Counterparties Routes", () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
       // Today every provider is `experimental`; these stages put only MoonPay in `beta`.
       const betaApp = createApp({
-        observability: noopObservability,
         rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
       });
 

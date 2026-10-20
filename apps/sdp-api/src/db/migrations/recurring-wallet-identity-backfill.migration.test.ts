@@ -19,7 +19,7 @@ import {
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
-const migration = "0142_recurring_wallet_roles_and_sponsorship.sql";
+const migration = "0153_recurring_wallet_roles_and_sponsorship.sql";
 const databaseUrl = env.DATABASE_URL;
 if (!databaseUrl) throw new Error("Migration tests require DATABASE_URL");
 

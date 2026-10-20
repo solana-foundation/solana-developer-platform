@@ -6,10 +6,10 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
+import { DatabaseUnavailableError } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { rootLogger } from "@/runtime/logger";
-import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { env as baseEnv } from "@/test/helpers/env";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -29,37 +29,10 @@ const FEE_NETWORK_PATH = "/__fee_network_test_throw";
 const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 const IDEMPOTENCY_REUSED_PATH = "/__idempotency_reused_test_throw";
+const DATABASE_UNAVAILABLE_PATH = "/__database_unavailable_test_throw";
 
-beforeEach(async () => {
-  await clearKVStores(baseEnv);
-});
-
-function makeObservability(): {
-  obs: Observability;
-  captureException: ReturnType<typeof vi.fn>;
-  withScope: ReturnType<typeof vi.fn>;
-} {
-  const captureException = vi.fn();
-  const withScope = vi.fn((cb: (scope: ObservabilityScope) => void) => {
-    cb({ setTag: () => {}, setUser: () => {} });
-  });
-  // Plain async function rather than vi.fn so the generic survives type
-  // inference; these tests exercise the onError path, not scheduled, so we
-  // don't need to spy on withMonitor calls.
-  const withMonitor = async <T>(
-    _slug: string,
-    fn: () => Promise<T>,
-    _opts: MonitorOptions
-  ): Promise<T> => fn();
-  return {
-    obs: { captureException, withScope, withMonitor },
-    captureException,
-    withScope,
-  };
-}
-
-function buildApp(observability: Observability) {
-  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability });
+function buildApp() {
+  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
   // Mount a route that throws after createApp returns, so we exercise the
   // onError path without modifying the production createApp surface.
   app.all(THROW_PATH, () => {
@@ -119,6 +92,13 @@ function buildApp(observability: Observability) {
   app.all(IDEMPOTENCY_REUSED_PATH, () => {
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   });
+  app.all(DATABASE_UNAVAILABLE_PATH, () => {
+    throw new DatabaseUnavailableError(new Error("timeout exceeded when trying to connect"), {
+      totalCount: 10,
+      idleCount: 0,
+      waitingCount: 42,
+    });
+  });
   app.all(FEE_REJECTED_PATH, () => {
     throw new FeePaymentError(
       "Failed to sign transaction as fee payer: Kora Error -32001: Validation error: Mutable transfer-hook authority found on mint account CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",
@@ -145,8 +125,7 @@ function buildApp(observability: Observability) {
 
 describe("createApp onError HTTPException mapping", () => {
   it("maps malformed JSON on a validated route to the standard 400 envelope", async () => {
-    const { obs, captureException } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
     app.post(
       VALIDATED_BODY_PATH,
       validateBody(validatedBodySchema),
@@ -167,13 +146,11 @@ describe("createApp onError HTTPException mapping", () => {
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
     expect(body.error.message).toBe("Malformed JSON in request body");
-    expect(captureException).not.toHaveBeenCalled();
   });
 });
 
 describe("createApp plugin registration", () => {
   it("registers plugin routes under /v1", async () => {
-    const { obs } = makeObservability();
     const plugin: SdpPlugin = {
       name: "test-plugin",
       register(v1) {
@@ -182,7 +159,6 @@ describe("createApp plugin registration", () => {
     };
     const app = createApp({
       rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-      observability: obs,
       plugins: [plugin],
     });
 
@@ -194,7 +170,6 @@ describe("createApp plugin registration", () => {
   });
 
   it("rejects a /v1 body above the global backstop limit with 413", async () => {
-    const { obs } = makeObservability();
     const plugin: SdpPlugin = {
       name: "body-limit-test",
       register(v1) {
@@ -203,7 +178,6 @@ describe("createApp plugin registration", () => {
     };
     const app = createApp({
       rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-      observability: obs,
       plugins: [plugin],
     });
 
@@ -223,8 +197,7 @@ describe("createApp plugin registration", () => {
   });
 
   it("returns 404 for an unregistered route when no plugins are passed", async () => {
-    const { obs } = makeObservability();
-    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability: obs });
+    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
 
     const res = await app.request("/v1/test-plugin", {}, baseEnv);
 
@@ -232,40 +205,36 @@ describe("createApp plugin registration", () => {
   });
 
   it("throws when two plugins share the same name", () => {
-    const { obs } = makeObservability();
     const make = (name: string): SdpPlugin => ({ name, register: () => {} });
 
     expect(() =>
       createApp({
         rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-        observability: obs,
         plugins: [make("dup"), make("dup")],
       })
     ).toThrow(/dup/);
   });
 });
 
-describe("createApp onError capture", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+describe("createApp onError", () => {
+  beforeEach(async () => {
+    // These requests are anonymous, so they share the per-IP anonymous window
+    // with every suite this worker ran in the same minute; start it empty.
+    await clearKVStores(baseEnv);
   });
 
-  it("captures unexpected errors through the injected observability", async () => {
-    const { obs, captureException, withScope } = makeObservability();
-    const app = buildApp(obs);
+  it("answers an unexpected error with the 500 INTERNAL_ERROR envelope", async () => {
+    const app = buildApp();
 
     const res = await app.request(THROW_PATH, {}, baseEnv);
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INTERNAL_ERROR");
-    expect(withScope).toHaveBeenCalledTimes(1);
-    expect(captureException).toHaveBeenCalledTimes(1);
   });
 
   it("maps fee payment program errors to product-safe messages", async () => {
-    const { obs, captureException, withScope } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(FEE_ERROR_PATH, {}, baseEnv);
 
@@ -276,27 +245,35 @@ describe("createApp onError capture", () => {
       "The wallet used for this payment does not have enough funds. Add funds and try again."
     );
     expect(body.error.message).not.toContain("custom program error");
-    expect(withScope).not.toHaveBeenCalled();
-    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 with Retry-After when the database could not take the request", async () => {
+    const app = buildApp();
+
+    const res = await app.request(DATABASE_UNAVAILABLE_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("2");
+    const text = await res.text();
+    expect(JSON.parse(text)).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+    // The pool's own wording stays in the logs, not in the response.
+    expect(text).not.toContain("timeout exceeded");
   });
 
   // HOO-1918: the IETF draft's 422 for a reused Idempotency-Key must reach the
   // client as 422, not fall through the status whitelist to 500.
   it("answers an AppError's 422 as 422", async () => {
-    const { obs, captureException } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(IDEMPOTENCY_REUSED_PATH, {}, baseEnv);
 
     expect(res.status).toBe(422);
     const body = z.object({ error: z.object({ code: z.string() }) }).parse(await res.json());
     expect(body.error.code).toBe("IDEMPOTENCY_KEY_REUSED");
-    expect(captureException).not.toHaveBeenCalled();
   });
 
   it("maps deterministic signing rejections to a 422 that does not ask for a retry", async () => {
-    const { obs, captureException } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(FEE_REJECTED_PATH, {}, baseEnv);
 
@@ -306,7 +283,6 @@ describe("createApp onError capture", () => {
     expect(body.error.message).not.toContain("Try again");
     expect(body.error.message).not.toContain("temporarily unavailable");
     expect(body.error.message).not.toContain("CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM");
-    expect(captureException).not.toHaveBeenCalled();
   });
 
   // A sponsor outage is not a custody outage. The copy used to say "signing
@@ -315,8 +291,7 @@ describe("createApp onError capture", () => {
     [FEE_UNAVAILABLE_PATH, "unavailable"],
     [FEE_NETWORK_PATH, "unreachable"],
   ])("names the fee sponsor, not the signer, when the sponsor is %s", async (path) => {
-    const { obs } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(path, {}, baseEnv);
 
@@ -328,8 +303,7 @@ describe("createApp onError capture", () => {
   });
 
   it("names the fee sponsor when it rate limits or rejects", async () => {
-    const { obs } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const limited = await app.request(FEE_RATE_LIMITED_PATH, {}, baseEnv);
     expect(limited.status).toBe(429);
@@ -345,8 +319,7 @@ describe("createApp onError capture", () => {
   });
 
   it("keeps unclassified signing failures on the retryable 502 path", async () => {
-    const { obs } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(FEE_AMBIGUOUS_PATH, {}, baseEnv);
 
@@ -357,8 +330,7 @@ describe("createApp onError capture", () => {
   });
 
   it("redacts app error messages and details", async () => {
-    const { obs } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(SECRET_APP_ERROR_PATH, {}, baseEnv);
 
@@ -375,8 +347,7 @@ describe("createApp onError capture", () => {
   });
 
   it("redacts RPC error messages and details", async () => {
-    const { obs } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(SECRET_RPC_ERROR_PATH, {}, baseEnv);
 
@@ -394,8 +365,7 @@ describe("createApp onError capture", () => {
 
   it("redacts payments error messages and details, and logs diagnostics it never returns", async () => {
     const loggerError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
-    const { obs } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(SECRET_PAYMENTS_ERROR_PATH, {}, baseEnv);
 
@@ -427,8 +397,7 @@ describe("createApp onError capture", () => {
   });
 
   it("uses safe signing provider messages", async () => {
-    const { obs } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
     const res = await app.request(SECRET_SIGNING_ERROR_PATH, {}, baseEnv);
 
@@ -442,61 +411,33 @@ describe("createApp onError capture", () => {
 
   it("redacts unexpected error log context", async () => {
     const consoleError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
-    const { obs, captureException } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
-    const res = await app.request(SECRET_UNEXPECTED_ERROR_PATH, {}, baseEnv);
-    expect(res.status).toBe(500);
+    await app.request(SECRET_UNEXPECTED_ERROR_PATH, {}, baseEnv);
 
     const logged = JSON.stringify(consoleError.mock.calls);
-    const captured = JSON.stringify(captureException.mock.calls);
     expect(logged).not.toContain("raw-private-key");
     expect(logged).not.toContain("raw-token");
     expect(logged).not.toContain("pw");
-    expect(captured).not.toContain("raw-private-key");
-    expect(captured).not.toContain("raw-token");
-    expect(captured).not.toContain("pw");
     expect(logged).toContain("[REDACTED]");
-    expect(captured).toContain("[REDACTED]");
     consoleError.mockRestore();
   });
 
-  it("scrubs counterparty PII from the unexpected-error log and Sentry capture", async () => {
+  it("scrubs counterparty PII from the unexpected-error log", async () => {
     const loggerError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
-    const { obs, captureException } = makeObservability();
-    const app = buildApp(obs);
+    const app = buildApp();
 
-    const res = await app.request(
-      PII_UNEXPECTED_ERROR_PATH,
-      {},
-      { ...baseEnv, SENTRY_DSN: "https://x@y/1" }
-    );
-    expect(res.status).toBe(500);
+    const res = await app.request(PII_UNEXPECTED_ERROR_PATH, {}, baseEnv);
 
     const logged = JSON.stringify(loggerError.mock.calls);
-    const capturedError = captureException.mock.calls[0][0] as Error & {
-      context?: unknown;
-      cause?: unknown;
-    };
-    const captured = JSON.stringify([
-      capturedError.message,
-      capturedError.stack,
-      capturedError.context,
-      capturedError.cause,
-    ]);
+    expect(logged).not.toContain("jane.doe@example.com");
+    expect(logged).not.toContain("+15551234567");
+    expect(logged).not.toContain("Jane");
+    expect(logged).not.toContain("1988-04-02");
+    expect(logged).not.toContain("000123456789");
+    expect(logged).toContain("cp_1");
+    expect(logged).toContain("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 
-    for (const sink of [logged, captured]) {
-      expect(sink).not.toContain("jane.doe@example.com");
-      expect(sink).not.toContain("+15551234567");
-      expect(sink).not.toContain("Jane");
-      expect(sink).not.toContain("1988-04-02");
-      expect(sink).not.toContain("000123456789");
-      // Still diagnosable: the resource id and the on-chain address survive.
-      expect(sink).toContain("cp_1");
-      expect(sink).toContain("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
-    }
-
-    // The caller learns nothing about the failure beyond the trace id.
     expect(res.status).toBe(500);
     expect(JSON.stringify(await res.json())).not.toContain("jane.doe@example.com");
     loggerError.mockRestore();

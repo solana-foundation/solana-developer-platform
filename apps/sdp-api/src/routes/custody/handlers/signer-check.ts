@@ -4,9 +4,9 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
 import type { SignerCheckResponse } from "@sdp/types/custody";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
-import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
+  type Address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   createTransactionMessage,
@@ -14,6 +14,7 @@ import {
   getBase58Decoder,
   getTransactionEncoder,
   pipe,
+  type SignatureBytes,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   verifySignature,
@@ -26,10 +27,6 @@ import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { signerCheckSchema } from "@/routes/custody/schemas";
-import {
-  assertApiKeyCustodyWalletAccess,
-  resolveApiKeySigningWalletId,
-} from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -37,7 +34,7 @@ import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
-import { findAuthorizedOperationalWallet } from "./wallets";
+import { findProjectOperationalWallet } from "./wallets";
 
 /**
  * Whether `signature` is the custody wallet's own valid Ed25519 signature over
@@ -66,22 +63,14 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const resolvedWalletId = resolveApiKeySigningWalletId(auth, body.walletId, ["wallets:write"]);
-  if (resolvedWalletId === null) {
-    throw badRequest(
-      auth.authType === "api_key"
-        ? "API key is not bound to a signing wallet"
-        : "walletId is required for session or Clerk authentication"
-    );
-  }
+  const resolvedWalletId = body.walletId;
   const memo = `SDP signer check ${crypto.randomUUID()}`;
 
   try {
-    const wallet = await findAuthorizedOperationalWallet(c, resolvedWalletId, ["wallets:write"]);
+    const wallet = await findProjectOperationalWallet(c, resolvedWalletId);
     if (!wallet) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
-    assertApiKeyCustodyWalletAccess(auth, wallet.id, ["wallets:write"]);
     // Keep the legacy selector's retained-Connection checks; inventory hides inactive rows.
     const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
       kind: "wallet",

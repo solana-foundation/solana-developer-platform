@@ -60,9 +60,10 @@ export function jsonParsedTransactionMeta(params: {
 export function jsonParsedTransactionResponse(params: {
   meta: JsonParsedTransactionMeta | null;
   instructions: readonly JsonParsedInstruction[];
+  blockTime?: JsonParsedTransactionResponse["blockTime"];
 }): JsonParsedTransactionResponse {
   return {
-    blockTime: null,
+    blockTime: params.blockTime ?? null,
     meta: params.meta,
     slot: 100n,
     transaction: {

@@ -51,8 +51,7 @@ import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import type { AppContext } from "@/routes/earn/context";
-import { requireEarnStrategyForCaller } from "@/routes/earn/context";
+import { type AppContext, requireEarnStrategyForCaller } from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import {
   type earnExternalWalletDepositTransactionSchema,
@@ -110,9 +109,8 @@ import {
  * that takes the signed bytes back, records the movement, then broadcasts.
  *
  * WHY NO REQUEST GATE, stated here because its absence looks like the deposit
- * route's cautionary tale: the custody wallet binding governs the
- * organization's own custody and stands between a request and
- * `createOrgSignerForCustodyWallet`. This path never resolves a signer, never
+ * route's cautionary tale: a key's wallet scope governs the organization's
+ * own custody, at `createOrgSignerForCustodyWallet` (HOO-2099). This path never resolves a signer, never
  * touches custody, and moves the OWNER's money on the OWNER's signature, which
  * IS the authorization. There is no signing sink here for the
  * value-moving conformance inventory to find.
@@ -365,9 +363,8 @@ function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPosition
  * The read the cross-provider feed structurally cannot serve: its vault arm
  * requires a custody-wallet match and an owner-signed row has none. Like every
  * movement read this takes NO provider gate (ADR 0002 — it reports on money
- * that already moved) and, like the position reads, no `wallets:read`: these
- * are end-user wallets SDP does not custody, so wallet bindings have nothing
- * to say about them.
+ * that already moved) and, like the position reads, no wallet scope: these
+ * are end-user wallets SDP does not custody.
  *
  * The owner is a REQUIRED query filter, not a path segment, so the collection
  * keeps its `:movementId` detail route unambiguous. An owner with no recorded
@@ -805,7 +802,7 @@ export async function resolveExternalWalletExit(
  * "Gate asymmetry"): production slippage floor, environment capability,
  * surfacing, and catalogue admission apply to both tiers. Entitlement applies
  * only when a credential supplied an organization. Everything custody-shaped
- * stays absent: no wallet resolution, binding checks, or policy extraction.
+ * stays absent: no wallet resolution, wallet scope, or policy extraction.
  * The owner is an address, not a wallet SDP can reach.
  */
 export async function createEarnExternalWalletDepositTransaction(
@@ -1024,7 +1021,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 
 /**
  * POST /v1/earn/external-wallet/withdrawal-previews: quote one caller-owned
- * exit without applying custody-wallet bindings. The position's exact project
+ * exit without applying a custody wallet scope. The position's exact project
  * scope is the authorization boundary, matching the external build route.
  *
  * Like the build, this keeps every money-in gate out of the exit path. A

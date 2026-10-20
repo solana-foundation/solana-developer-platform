@@ -13,6 +13,7 @@ import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-aut
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
 import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
 import {
@@ -64,7 +65,7 @@ internalCustody.use("*", idempotencyKeyMiddleware());
 // each sits in its lifecycle, and the safe credential columns. This is what
 // lets the dashboard resume a pending or failed install without ever asking
 // for the secret again. Bounded, newest first; never secret material.
-internalCustody.get("/connections", async (c) => {
+internalCustody.get("/connections", requireAction("wallets.configure"), async (c) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const limit = Math.min(Math.max(Math.trunc(Number(c.req.query("limit") ?? 20) || 20), 1), 50);
@@ -127,7 +128,7 @@ internalCustody.get("/connections", async (c) => {
 // record that actually backs signing, and connection lifecycle counts. Internal
 // on purpose — it drives dashboard setup flows only, so it commits to no public
 // OpenAPI or API-key authorization contract while the setup model evolves.
-internalCustody.get("/providers", async (c) => {
+internalCustody.get("/providers", requireAction("wallets.configure"), async (c) => {
   const auth = getAuth(c);
   return success(
     c,
@@ -135,7 +136,7 @@ internalCustody.get("/providers", async (c) => {
   );
 });
 
-internalCustody.post("/provider-credentials", async (c) => {
+internalCustody.post("/provider-credentials", requireAction("wallets.configure"), async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = privySetup.validateSetupPayload(body);
   if (!parsed.success) {
@@ -157,37 +158,41 @@ internalCustody.post("/provider-credentials", async (c) => {
   return created(c, result);
 });
 
-internalCustody.post("/connections/:connectionId/provider-credentials", async (c) => {
-  const params = connectionParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/connections/:connectionId/provider-credentials",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = connectionParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = privySetup.validateSetupPayload(body);
+    if (!parsed.success) {
+      throw badRequest("Invalid request body", {
+        errors: z.flattenError(parsed.error).fieldErrors,
+      });
+    }
+
+    const idempotencyKey = c.req.header("Idempotency-Key");
+    if (!idempotencyKey) {
+      throw badRequest("Idempotency-Key is required");
+    }
+
+    return created(
+      c,
+      await privySetup.storeCredentials({
+        context: c,
+        connectionId: params.data.connectionId,
+        payload: parsed.data,
+        idempotencyKey,
+      })
+    );
   }
+);
 
-  const body = await c.req.json().catch(() => null);
-  const parsed = privySetup.validateSetupPayload(body);
-  if (!parsed.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(parsed.error).fieldErrors,
-    });
-  }
-
-  const idempotencyKey = c.req.header("Idempotency-Key");
-  if (!idempotencyKey) {
-    throw badRequest("Idempotency-Key is required");
-  }
-
-  return created(
-    c,
-    await privySetup.storeCredentials({
-      context: c,
-      connectionId: params.data.connectionId,
-      payload: parsed.data,
-      idempotencyKey,
-    })
-  );
-});
-
-internalCustody.get("/connections/:connectionId", async (c) => {
+internalCustody.get("/connections/:connectionId", requireAction("wallets.configure"), async (c) => {
   const params = connectionParamsSchema.safeParse(c.req.param());
   if (!params.success) {
     throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
@@ -195,88 +200,120 @@ internalCustody.get("/connections/:connectionId", async (c) => {
   return success(c, await getProviderCredentialInstallation(c, params.data.connectionId));
 });
 
-internalCustody.get("/connections/:connectionId/provider-credential", async (c) => {
-  const params = connectionParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.get(
+  "/connections/:connectionId/provider-credential",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = connectionParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    return success(c, await getProviderCredentialLifecycle(c, params.data.connectionId));
   }
-  return success(c, await getProviderCredentialLifecycle(c, params.data.connectionId));
-});
+);
 
-internalCustody.post("/connections/:connectionId/deactivate", async (c) => {
-  const params = connectionParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/connections/:connectionId/deactivate",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = connectionParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    await enforceMeteredQuota(c, recoveryQuota);
+    return success(c, await deactivateCustodyConnection(c, params.data.connectionId));
   }
-  await enforceMeteredQuota(c, recoveryQuota);
-  return success(c, await deactivateCustodyConnection(c, params.data.connectionId));
-});
+);
 
-internalCustody.post("/provider-credentials/:credentialId/rotate", async (c) => {
-  const params = credentialParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/provider-credentials/:credentialId/rotate",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = credentialParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    const body = rotationBodySchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) {
+      throw badRequest("Invalid request body", {
+        errors: z.flattenError(body.error).fieldErrors,
+      });
+    }
+    const idempotencyKey = c.req.header("Idempotency-Key");
+    if (!idempotencyKey) throw badRequest("Idempotency-Key is required");
+    await enforceMeteredQuota(c, rotationQuota);
+    return success(
+      c,
+      await rotateProviderCredential(c, params.data.credentialId, body.data.fields, idempotencyKey)
+    );
   }
-  const body = rotationBodySchema.safeParse(await c.req.json().catch(() => null));
-  if (!body.success) {
-    throw badRequest("Invalid request body", {
-      errors: z.flattenError(body.error).fieldErrors,
-    });
-  }
-  const idempotencyKey = c.req.header("Idempotency-Key");
-  if (!idempotencyKey) throw badRequest("Idempotency-Key is required");
-  await enforceMeteredQuota(c, rotationQuota);
-  return success(
-    c,
-    await rotateProviderCredential(c, params.data.credentialId, body.data.fields, idempotencyKey)
-  );
-});
+);
 
-internalCustody.post("/provider-credentials/:credentialId/complete-rotation", async (c) => {
-  const params = credentialParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/provider-credentials/:credentialId/complete-rotation",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = credentialParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    await enforceMeteredQuota(c, rotationQuota);
+    return success(c, await completeRotationCandidate(c, params.data.credentialId));
   }
-  await enforceMeteredQuota(c, rotationQuota);
-  return success(c, await completeRotationCandidate(c, params.data.credentialId));
-});
+);
 
-internalCustody.post("/provider-credentials/:credentialId/rollback", async (c) => {
-  const params = credentialParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/provider-credentials/:credentialId/rollback",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = credentialParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    await enforceMeteredQuota(c, recoveryQuota);
+    return success(c, await rollbackProviderCredential(c, params.data.credentialId));
   }
-  await enforceMeteredQuota(c, recoveryQuota);
-  return success(c, await rollbackProviderCredential(c, params.data.credentialId));
-});
+);
 
-internalCustody.post("/provider-credentials/:credentialId/deactivate", async (c) => {
-  const params = credentialParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/provider-credentials/:credentialId/deactivate",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = credentialParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    await enforceMeteredQuota(c, recoveryQuota);
+    return success(c, await deactivateProviderCredential(c, params.data.credentialId));
   }
-  await enforceMeteredQuota(c, recoveryQuota);
-  return success(c, await deactivateProviderCredential(c, params.data.credentialId));
-});
+);
 
-internalCustody.post("/connections/:connectionId/complete", async (c) => {
-  const params = connectionParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/connections/:connectionId/complete",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = connectionParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    return success(
+      c,
+      await privySetup.activate({ context: c, connectionId: params.data.connectionId })
+    );
   }
-  return success(
-    c,
-    await privySetup.activate({ context: c, connectionId: params.data.connectionId })
-  );
-});
+);
 
-internalCustody.post("/connections/:connectionId/cancel", async (c) => {
-  const params = connectionParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+internalCustody.post(
+  "/connections/:connectionId/cancel",
+  requireAction("wallets.configure"),
+  async (c) => {
+    const params = connectionParamsSchema.safeParse(c.req.param());
+    if (!params.success) {
+      throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
+    }
+    return success(
+      c,
+      await privySetup.deactivate({ context: c, connectionId: params.data.connectionId })
+    );
   }
-  return success(
-    c,
-    await privySetup.deactivate({ context: c, connectionId: params.data.connectionId })
-  );
-});
+);

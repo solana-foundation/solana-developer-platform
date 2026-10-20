@@ -4,22 +4,20 @@ Use this file as the quick reference for answering tokenization questions on top
 
 ## Public source of truth
 
-- Product overview: `apps/sdp-docs/content/docs/what-is-solana-developer-platform.mdx`
-- Getting started: `apps/sdp-docs/content/docs/getting-started.mdx`
+- Product overview: `apps/sdp-docs/content/docs/introduction.mdx`
+- Getting started: `apps/sdp-docs/content/docs/index.mdx`
 - Organization setup: `apps/sdp-docs/content/docs/guides/setup-organization.mdx`
 - Wallet setup: `apps/sdp-docs/content/docs/guides/setup-wallets.mdx`
-- API keys: `apps/sdp-docs/content/docs/guides/manage-api-keys.mdx`
-- Create token: `apps/sdp-docs/content/docs/guides/create-a-token.mdx`
-- Deploy token: `apps/sdp-docs/content/docs/guides/deploy-a-token.mdx`
-- Mint and burn: `apps/sdp-docs/content/docs/guides/mint-and-burn.mdx`
-- Allowlists: `apps/sdp-docs/content/docs/guides/manage-allowlists.mdx`
-- Freeze and compliance: `apps/sdp-docs/content/docs/guides/freeze-and-compliance.mdx`
-- Transfers: `apps/sdp-docs/content/docs/guides/transfer-tokens.mdx`
-- Prepare vs execute: `apps/sdp-docs/content/docs/guides/prepare-vs-execute.mdx`
+- API keys: `apps/sdp-docs/content/docs/developing-with-sdp/manage-api-keys.mdx`
+- Create token: `apps/sdp-docs/content/docs/tokens/create-a-token.mdx`
+- Deploy token: `apps/sdp-docs/content/docs/tokens/deploy-a-token.mdx`
+- Mint and burn: `apps/sdp-docs/content/docs/tokens/mint-and-burn.mdx`
+- Allowlists: `apps/sdp-docs/content/docs/tokens/allowlists.mdx`
+- Freeze and compliance: `apps/sdp-docs/content/docs/tokens/freeze-and-compliance.mdx`
+- Transfers: `apps/sdp-docs/content/docs/payments/send-basic-payment.mdx`
 - Issuance OpenAPI paths: `apps/sdp-api/src/openapi/paths/issuance.ts`
 - Payments OpenAPI paths: `apps/sdp-api/src/openapi/paths/payments.ts`
 - Wallets OpenAPI paths: `apps/sdp-api/src/openapi/paths/custody.ts`
-- API keys OpenAPI paths: `apps/sdp-api/src/openapi/paths/api-keys.ts`
 
 ## Business case to SDP mapping
 
@@ -81,21 +79,20 @@ Use this file as the quick reference for answering tokenization questions on top
 
 1. Organization: `apps/sdp-docs/content/docs/guides/setup-organization.mdx`
 2. Wallets: `apps/sdp-docs/content/docs/guides/setup-wallets.mdx`
-3. API keys: `apps/sdp-docs/content/docs/guides/manage-api-keys.mdx`
-4. Token creation: `apps/sdp-docs/content/docs/guides/create-a-token.mdx`
-5. Deployment: `apps/sdp-docs/content/docs/guides/deploy-a-token.mdx`
-6. Supply operations: `apps/sdp-docs/content/docs/guides/mint-and-burn.mdx`
-7. Distribution and movement: `apps/sdp-docs/content/docs/guides/transfer-tokens.mdx`
-8. Compliance controls: `apps/sdp-docs/content/docs/guides/manage-allowlists.mdx` and `apps/sdp-docs/content/docs/guides/freeze-and-compliance.mdx`
+3. API keys: `apps/sdp-docs/content/docs/developing-with-sdp/manage-api-keys.mdx`
+4. Token creation: `apps/sdp-docs/content/docs/tokens/create-a-token.mdx`
+5. Deployment: `apps/sdp-docs/content/docs/tokens/deploy-a-token.mdx`
+6. Supply operations: `apps/sdp-docs/content/docs/tokens/mint-and-burn.mdx`
+7. Distribution and movement: `apps/sdp-docs/content/docs/payments/send-basic-payment.mdx`
+8. Compliance controls: `apps/sdp-docs/content/docs/tokens/allowlists.mdx` and `apps/sdp-docs/content/docs/tokens/freeze-and-compliance.mdx`
 
 ## Endpoint families to cite
 
 - Wallets and custody:
   - `GET /v1/wallets`
   - `POST /v1/wallets`
-- API keys:
-  - `GET /v1/api-keys`
-  - `POST /v1/api-keys`
+- API keys: created, rotated and revoked in the dashboard by a signed-in member; an API key
+  cannot manage keys, so there is no key-management endpoint to cite.
 - Issuance:
   - `GET /v1/issuance/templates`
   - `POST /v1/issuance/tokens`

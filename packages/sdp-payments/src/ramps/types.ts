@@ -16,6 +16,7 @@ import type {
   PaymentRampQuote,
   RampCryptoDeposit,
   RampTransferSettlement,
+  RampTransferType,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
@@ -127,9 +128,13 @@ interface BaseRampSettlementEvent {
   provider: RampProviderId;
   /** Provider-issued quote/session reference the transfer row was created with — the reconciliation key. */
   reference: string;
+  /** Provider observation time when the provider gives a per-reference ordering field. */
+  providerObservedAt?: string;
   /** Provider-side customer identifier observed on the event, when the provider reports one. */
   providerCustomerId?: string;
-  /** Canonical on-chain movement reported by the provider for this ramp transfer. */
+  /** Provider refund destination, separate from the on-chain sending wallet. */
+  refundAddress?: string;
+  /** On-chain movement reported by the provider, to verify independently. */
   onchain?: RampOnchainTransfer;
 }
 
@@ -147,9 +152,8 @@ export type RampSettlementEvent =
   | (BaseRampSettlementEvent & {
       kind: "settling";
       /**
-       * On-ramp only: the fiat amount the observed pay-in settled for (writes
-       * `fiat_amount`). Off-ramp settling events leave it absent; when the
-       * type ever carries it, it writes `amount`.
+       * Provider-reported amount in the event's receiving currency, stored as
+       * an observation without replacing the quote.
        */
       receivedAmount?: string;
     })
@@ -167,11 +171,25 @@ export type RampSettlementEvent =
       deliveredAssetRail?: CryptoRailId | null;
     })
   | (BaseRampSettlementEvent & {
-      kind: "failed" | "expired";
+      kind: "failed";
       error?: string;
       settlement?: RampTransferSettlement;
     })
-  | { provider: RampProviderId; kind: "ignore"; reason: string };
+  | (BaseRampSettlementEvent & {
+      kind: "expired";
+      error?: string;
+      settlement?: RampTransferSettlement;
+    })
+  | {
+      provider: RampProviderId;
+      kind: "ignore";
+      reason: string;
+      /**
+       * A provider status SDP has no mapping for. Money may be moving, so a
+       * status pull holds the transfer for review instead of expiring it.
+       */
+      unmappedStatus?: string;
+    };
 
 /**
  * Runtime context for quote/execute calls. Providers read their own credentials
@@ -240,6 +258,15 @@ export type ValidateCounterpartyOptions =
       collectedData?: CollectedFieldData;
     };
 
+/** The stored transfer a status lookup asks its provider about. */
+export interface RampTransferLookup {
+  /** SDP's transfer id, which a provider that takes a caller reference stores with it. */
+  transferId: string;
+  rampType: RampTransferType;
+  /** The provider reference the transfer row holds; null until one is bound. */
+  providerReference: string | null;
+}
+
 /**
  * Full provider contract: rail discovery plus the runtime quote/execute flow.
  * All HTTP lives behind this; the route handler owns DB interaction and passes
@@ -251,6 +278,17 @@ export interface RampProvider {
   /** Optional webhook contract. Ingress verifies signed bytes before persisting;
    * parsing is pure and runs from the durable inbox after acknowledgement. */
   webhook?: RampProviderWebhook;
+  /**
+   * Optional status pull, for a sweep that recovers missed webhooks. Answers
+   * the events the provider's webhook would carry for each transaction it
+   * holds for the transfer, oldest update first, and none when it holds no
+   * transaction. Throws when SDP could not ask, so a failure never reads as
+   * absence.
+   */
+  fetchTransferStatus?: (
+    ctx: RampRuntimeContext,
+    lookup: RampTransferLookup
+  ) => Promise<readonly RampSettlementEvent[]>;
   /**
    * Support-matrix generation hook (ramp-support script only, never runtime):
    * fetches the provider's raw support dumps via `context.fetchJson` and

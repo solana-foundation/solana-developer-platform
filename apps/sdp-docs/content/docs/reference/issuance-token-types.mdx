@@ -14,7 +14,7 @@ The public issuance surface currently exposes three **Tokenization Templates**:
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
 
-Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is the token's own allowlist. It is separate from an API key's [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), which limit what a key may do.
+Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is the token's own allowlist. It is separate from an API key's [grants](/docs/developing-with-sdp/manage-api-keys#grants-by-module), which limit what a key may do.
 
 ## Selecting a template
 

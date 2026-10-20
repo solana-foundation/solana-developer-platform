@@ -90,6 +90,17 @@
     "comingSoon": "Coming soon",
     "description": "Allowlist management will be available in a future update."
   },
+  "organizationAccess": {
+    "title": "API key access",
+    "description": "Limit the addresses every API key in this organization can be used from. Each key's own allowlist applies on top. Signed-in members are never restricted.",
+    "allowedIpsLabel": "Allowed IP addresses",
+    "allowedIpsHelper": "One IPv4 or IPv6 address or CIDR range per line. Leave empty to allow any address.",
+    "save": "Save allowlist",
+    "saving": "Saving…",
+    "saved": "IP allowlist saved",
+    "saveFailed": "Could not save the IP allowlist: {error}",
+    "loadFailed": "Could not load the IP allowlist: {error}"
+  },
   "members": {
     "title": "Members",
     "description": "People with access to this organization.",

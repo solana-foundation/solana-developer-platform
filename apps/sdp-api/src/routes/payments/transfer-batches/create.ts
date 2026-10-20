@@ -7,6 +7,7 @@ import type {
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { AppError, badRequest, internalError } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -19,10 +20,7 @@ import {
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
-import {
-  admitPaymentWalletRuntimeExecution,
-  authorizeCustodyPaymentWallet,
-} from "@/routes/payments/wallets";
+import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -64,10 +62,13 @@ export async function authorizeTransferBatch(
 ): Promise<AuthorizedBatchRequest> {
   // SAFETY: mounted after validateBody(createTransferBatchSchema).
   const body = input.body as CreateTransferBatchInput;
-  // Read fresh, never from the cached snapshot, which drops a binding once its
-  // wallet is inactive and would refuse the replay of a batch that ran.
-  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
-  return authorizeBatchRequest(c, body, null, body.sourceCustodyWalletId);
+  const authorized = await authorizeBatchRequest(c, body, body.sourceCustodyWalletId);
+  // The custody signer refuses a wallet outside the key's scope (HOO-2099).
+  // Refusing here as well, before the key is claimed, keeps a refused batch
+  // from writing failed recipients and an Idempotency-Key that would replay
+  // them after the scope is fixed.
+  assertCallerWalletInScope(authorized.scope.auth.walletAccess, authorized.sourceWallet.id);
+  return authorized;
 }
 
 /** The custody runtime takes the source wallet: state, after the replay exits. */

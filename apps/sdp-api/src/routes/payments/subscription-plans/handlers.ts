@@ -6,8 +6,7 @@ import type {
   PaymentSubscriptionPlanResponse,
   PreparePaymentSubscriptionPlanResponse,
 } from "@sdp/types/payments";
-import type { Address } from "@solana/kit";
-import { createNoopSigner } from "@solana/kit";
+import { type Address, createNoopSigner } from "@solana/kit";
 import { getCreatePlanOverlayInstructionAsync } from "@solana/subscriptions";
 import { z } from "zod";
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
@@ -18,7 +17,6 @@ import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
-import { assertPaymentWalletExactAccess } from "@/routes/payments/wallets";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
   buildPreparedSubscriptionTransaction,
@@ -239,7 +237,6 @@ export const prepareCreateSubscriptionPlan = async (
   }
 
   const ownerWallet = await resolveSubscriptionPlanRole(c, plan, "owner");
-  assertPaymentWalletExactAccess(c, ownerWallet.id, ["payments:write"]);
 
   const { owner, planId, planPda } = await derivePlanAddresses(plan);
 
@@ -256,7 +253,6 @@ export const prepareCreateSubscriptionPlan = async (
   let defaultPuller = ownerWallet;
   if (body.pullers === undefined && hasSubscriptionPlanPuller(plan)) {
     defaultPuller = await resolveSubscriptionPlanRole(c, plan, "puller");
-    assertPaymentWalletExactAccess(c, defaultPuller.id, ["payments:write"]);
   }
   const pullers = (body.pullers ?? [defaultPuller.publicKey]).map((value) =>
     assertValidAddress(value, "pullers entry")

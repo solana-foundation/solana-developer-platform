@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
@@ -26,7 +27,8 @@ export async function findPaymentRequest(env: Env, token: string): Promise<Payme
 
 /**
  * Run the rest of a `/pay` chain under the cluster scope of the Project the payment request was
- * created in: the link carries no project, so the stored row decides the cluster.
+ * created in: the link carries no project, so the stored row decides the cluster. It moves money
+ * as that payment request (HOO-2099): the sponsor admits it only while the request is open.
  *
  * @param c - The request context, on a route with a `:token` parameter.
  * @param next - The rest of the route chain.
@@ -37,7 +39,10 @@ export async function paymentRequestScope(
   c: Context<{ Bindings: Env }, "/:token" | "/:token/tx">,
   next: Next
 ) {
-  const { project_id: projectId } = await findPaymentRequest(c.env, c.req.param("token"));
+  const { id: paymentRequestId, project_id: projectId } = await findPaymentRequest(
+    c.env,
+    c.req.param("token")
+  );
   if (projectId === null) {
     throw notFound("Payment request");
   }
@@ -45,5 +50,7 @@ export async function paymentRequestScope(
   if (!project) {
     throw notFound("Payment request");
   }
-  await runInClusterScope({ projectId: project.id, environment: project.environment }, next);
+  await runInClusterScope({ projectId: project.id, environment: project.environment }, () =>
+    runAsMoneyPrincipal({ kind: "payment_request", paymentRequestId }, next)
+  );
 }

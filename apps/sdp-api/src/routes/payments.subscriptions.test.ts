@@ -32,7 +32,6 @@ import {
   seedCounterparty,
   seedProductionPrivyWallet,
   sendTransactionMock,
-  TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
@@ -278,7 +277,7 @@ describe("Payments routes — subscriptions", () => {
     expect(response.status).toBe(404);
   });
 
-  it("revalidates stored owner grants before preparing an unsigned transaction", async () => {
+  it("prepares unsigned plans without signing scope and enforces live action grants", async () => {
     const response = await app.request(
       "/v1/payments/subscription-plans",
       {
@@ -298,13 +297,7 @@ describe("Payments routes — subscriptions", () => {
     const planId = (await response.json()).data.subscriptionPlan.id;
     await seedCachedKey({
       walletScope: "selected",
-      walletBindings: [
-        {
-          walletId: TEST_WALLET_ID,
-          custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          permissions: ["payments:write"],
-        },
-      ],
+      walletIds: [],
     });
     const prepare = () =>
       app.request(
@@ -317,12 +310,7 @@ describe("Payments routes — subscriptions", () => {
         env
       );
     expect((await prepare()).status).toBe(200);
-    await getDb(env)
-      .prepare(
-        "UPDATE api_key_wallet_permissions SET permissions = '[]' WHERE api_key_id = ? AND wallet_id = ?"
-      )
-      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
-      .run();
+    await seedCachedKey({ walletScope: "selected", walletIds: [], grants: ["recurring.read"] });
     getRecentBlockhashMock.mockClear();
     expect((await prepare()).status).toBe(403);
     expect(getRecentBlockhashMock).not.toHaveBeenCalled();
@@ -575,7 +563,9 @@ describe("Payments routes — subscriptions", () => {
     expect(await savedRoles()).toEqual({ owner_wallet_id: TEST_WALLET_ID, puller_wallet_id: null });
   });
 
-  it("requires owner wallet access when updating subscription plans", async () => {
+  // A plan is a record and an unsigned transaction the owner signs; SDP signs
+  // nothing, so a key's wallet scope does not limit it (HOO-2099).
+  it("lets a key that signs with no wallet archive a project plan", async () => {
     const planRes = await app.request(
       "/v1/payments/subscription-plans",
       {
@@ -595,9 +585,7 @@ describe("Payments routes — subscriptions", () => {
       await planRes.json()
     );
 
-    await seedCachedKey({
-      walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
-    });
+    await seedCachedKey({ walletScope: "selected", walletIds: [] });
 
     const detail = await app.request(
       `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}`,
@@ -623,10 +611,11 @@ describe("Payments routes — subscriptions", () => {
       env
     );
 
-    expect(updateRes.status).toBe(403);
-    const updateBody = errorResponseSchema.parse(await updateRes.json());
-    expect(updateBody.error.code).toBe("FORBIDDEN");
-    expect(updateBody.error.message).toContain("requested wallet");
+    expect(updateRes.status).toBe(200);
+    const updated = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await updateRes.json()
+    );
+    expect(updated.data.subscriptionPlan.status).toBe("archived");
   });
 
   it("rejects archived counterparties when creating subscriptions", async () => {
@@ -700,6 +689,7 @@ describe("Payments routes — subscriptions", () => {
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
+    await seedCachedKey({ walletScope: "selected", walletIds: [] });
     const subscriberTokenAccount = TEST_SOLANA_ADDRESSES.wallet3;
 
     const counterpartyRes = await app.request(

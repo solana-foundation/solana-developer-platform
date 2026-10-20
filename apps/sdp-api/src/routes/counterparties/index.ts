@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { authorize, authorizeNone } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { requireModule } from "@/middleware/require-module";
 import { validateBody, validateParams } from "@/middleware/validate";
 import { counterpartyAccounts } from "@/routes/counterparty-accounts";
@@ -40,40 +41,36 @@ counterparties.use("/:counterpartyId/provider-accounts/*", requireModule("ramps"
 counterparties.use("*", unifiedAuthMiddleware());
 counterparties.use("*", projectContextMiddleware());
 
-counterparties.get(
-  "/metadata",
-  requirePermissions("counterparties:read"),
-  getCounterpartyFieldOptions
-);
+counterparties.get("/metadata", requireAction("counterparties.read"), getCounterpartyFieldOptions);
 counterparties.get(
   "/accounts",
-  requirePermissions("counterparties:read"),
+  requireAction("counterparties.read"),
   listProjectCounterpartyAccounts
 );
-counterparties.get("/", requirePermissions("counterparties:read"), listCounterparties);
+counterparties.get("/", requireAction("counterparties.read"), listCounterparties);
 counterparties.post(
   "/",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateBody(createCounterpartySchema),
   authorizeNone(CREATES_IN_SCOPE),
   idempotent({ key: "accepted", serverErrors: "store" }),
   createCounterparty
 );
-counterparties.get("/:counterpartyId", requirePermissions("counterparties:read"), getCounterparty);
+counterparties.get("/:counterpartyId", requireAction("counterparties.read"), getCounterparty);
 counterparties.get(
   "/:counterpartyId/requirements",
-  requirePermissions("counterparties:read"),
+  requireAction("counterparties.read"),
   getCounterpartyRequirements
 );
 counterparties.post(
   "/:counterpartyId/requirements",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.execute"),
   validateBody(submitCounterpartyRequirementsSchema),
   submitCounterpartyRequirements
 );
 counterparties.patch(
   "/:counterpartyId",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateParams(counterpartyIdParamsSchema),
   validateBody(updateCounterpartySchema),
   authorize(authorizeCounterparty),
@@ -82,7 +79,7 @@ counterparties.patch(
 );
 counterparties.delete(
   "/:counterpartyId",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateParams(counterpartyIdParamsSchema),
   authorize(authorizeCounterparty),
   idempotent({ key: "accepted", serverErrors: "store" }),

@@ -5,13 +5,13 @@
  * Projects group API keys by team or environment.
  */
 
-import type { ProjectRole } from "@sdp/types/permissions";
 import type {
   Project,
   ProjectEnvironment,
   ProjectMember,
   ProjectSettings,
 } from "@sdp/types/projects";
+import type { ProjectRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { badRequest, internalError, notFound } from "@/lib/errors";

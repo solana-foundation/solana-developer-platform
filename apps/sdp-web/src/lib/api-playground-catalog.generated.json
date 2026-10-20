@@ -342,7 +342,7 @@
             "label": "walletId",
             "description": "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
             "defaultValue": "privy_wallet_123",
-            "required": false
+            "required": true
           }
         ],
         "bodyFields": [],
@@ -7827,7 +7827,7 @@
       "owner": "payments"
     },
     {
-      "pattern": "^\\/(v1\\/wallets|internal\\/dashboard\\/custody)(\\/|$)",
+      "pattern": "^\\/(v1\\/wallets|internal\\/dashboard\\/(custody|wallets))(\\/|$)",
       "owner": "custody"
     },
     {
@@ -7839,7 +7839,7 @@
       "owner": "core"
     },
     {
-      "pattern": "^\\/v1\\/(members|organizations|projects|onboarding|places|rpc|api-keys)(\\/|$)",
+      "pattern": "^\\/v1\\/(members|organizations|projects|onboarding|places|api-keys)(\\/|$)",
       "owner": "core"
     },
     {
@@ -7848,172 +7848,130 @@
     }
   ],
   "valueGates": {
-    "tokens:read": {
-      "module": "issuance"
-    },
-    "tokens:write": {
-      "module": "issuance"
-    },
-    "tokens:admin": {
-      "module": "issuance"
-    },
-    "payments:read": {
+    "transfers.read": {
       "module": "payments"
     },
-    "payments:write": {
+    "transfers.execute": {
       "module": "payments"
     },
-    "earn:read": {
-      "module": "earn"
-    },
-    "earn:write": {
-      "module": "earn"
-    },
-    "counterparties:read": {
+    "transfer_batches.read": {
       "module": "payments"
     },
-    "counterparties:write": {
+    "transfer_batches.execute": {
       "module": "payments"
     },
-    "wallets:read": {
+    "payment_requests.read": {
+      "module": "payments"
+    },
+    "payment_requests.manage": {
+      "module": "payments"
+    },
+    "counterparties.read": {
+      "module": "payments"
+    },
+    "counterparties.manage": {
+      "module": "payments"
+    },
+    "counterparties.execute": {
+      "module": "payments"
+    },
+    "transactions.read": {
+      "module": "payments"
+    },
+    "recurring.read": {
+      "module": "recurring_payments"
+    },
+    "recurring.manage": {
+      "module": "recurring_payments"
+    },
+    "recurring.execute": {
+      "module": "recurring_payments"
+    },
+    "wallets.read": {
       "module": "custody"
     },
-    "wallets:write": {
+    "wallets.manage": {
       "module": "custody"
     },
-    "compliance:read": {
+    "wallets.execute": {
+      "module": "custody"
+    },
+    "wallets.configure": {
+      "module": "custody"
+    },
+    "compliance.execute": {
       "module": "compliance"
     },
-    "compliance:write": {
-      "module": "compliance"
-    },
-    "custody:read": {
-      "module": "custody"
-    },
-    "custody:write": {
-      "module": "custody"
-    },
-    "custody:admin": {
-      "module": "custody"
-    },
-    "privacy": {
-      "module": "helius_rings"
-    },
-    "payment": {
-      "module": "payments"
-    },
-    "ramp": {
+    "onramp.read": {
       "module": "ramps"
     },
-    "issuance": {
-      "module": "issuance"
-    },
-    "program": {
-      "module": "markets"
-    },
-    "payment_transfer_execute": {
-      "module": "payments"
-    },
-    "payment_transfer_batch_execute": {
-      "module": "payments"
-    },
-    "recurring_payment_create": {
-      "module": "recurring_payments"
-    },
-    "recurring_payment_update": {
-      "module": "recurring_payments"
-    },
-    "recurring_payment_collection": {
-      "module": "recurring_payments"
-    },
-    "ramp_onramp_quote": {
+    "onramp.execute": {
       "module": "ramps"
     },
-    "ramp_offramp_quote": {
+    "offramp.read": {
       "module": "ramps"
     },
-    "issuance_allowlist_add_execute": {
+    "offramp.execute": {
+      "module": "ramps"
+    },
+    "ramp_transfers.manage": {
+      "module": "ramps"
+    },
+    "issuance.read": {
       "module": "issuance"
     },
-    "issuance_allowlist_remove_execute": {
+    "issuance.manage": {
       "module": "issuance"
     },
-    "issuance_burn_execute": {
+    "issuance.execute": {
       "module": "issuance"
     },
-    "issuance_deploy_execute": {
+    "issuance.enforce": {
       "module": "issuance"
     },
-    "issuance_force_burn_execute": {
+    "issuance.authority": {
       "module": "issuance"
     },
-    "issuance_freeze_execute": {
-      "module": "issuance"
-    },
-    "issuance_metadata_update_execute": {
-      "module": "issuance"
-    },
-    "issuance_mint_execute": {
-      "module": "issuance"
-    },
-    "issuance_pause_execute": {
-      "module": "issuance"
-    },
-    "issuance_seize_execute": {
-      "module": "issuance"
-    },
-    "issuance_unfreeze_execute": {
-      "module": "issuance"
-    },
-    "issuance_unpause_execute": {
-      "module": "issuance"
-    },
-    "issuance_update_authority_execute": {
-      "module": "issuance"
-    },
-    "dvp_fund": {
+    "dvp.read": {
       "module": "dvp"
     },
-    "dvp_settle": {
+    "dvp.manage": {
       "module": "dvp"
     },
-    "earn_vault_deposit": {
+    "dvp.execute": {
+      "module": "dvp"
+    },
+    "earn.read": {
       "module": "earn"
     },
-    "earn_vault_withdrawal": {
+    "earn.manage": {
       "module": "earn"
     },
-    "earn_program_withdrawal": {
+    "earn.execute": {
       "module": "earn"
     },
-    "rings_shield": {
+    "private_channels.read": {
+      "module": "private_channels"
+    },
+    "private_channels.manage": {
+      "module": "private_channels"
+    },
+    "private_channels.execute": {
+      "module": "private_channels"
+    },
+    "private_channels.configure": {
+      "module": "private_channels"
+    },
+    "helius_rings.read": {
       "module": "helius_rings"
     },
-    "rings_transfer_registered": {
+    "helius_rings.manage": {
       "module": "helius_rings"
     },
-    "rings_transfer_anonymous": {
+    "helius_rings.execute": {
       "module": "helius_rings"
     },
-    "rings_withdraw": {
-      "module": "helius_rings"
-    },
-    "rings_merge": {
-      "module": "helius_rings"
-    },
-    "rings_timelock_create": {
-      "module": "helius_rings"
-    },
-    "rings_timelock_settle": {
-      "module": "helius_rings"
-    },
-    "rings_zone_create": {
-      "module": "helius_rings"
-    },
-    "rings_ring_exit": {
-      "module": "helius_rings"
-    },
-    "rings_ring_entry": {
+    "helius_rings.configure": {
       "module": "helius_rings"
     },
     "mint_authority": {
@@ -8036,6 +7994,9 @@
     },
     "private_channels": {
       "module": "private_channels"
+    },
+    "issuance": {
+      "module": "issuance"
     },
     "rings": {
       "module": "helius_rings"
