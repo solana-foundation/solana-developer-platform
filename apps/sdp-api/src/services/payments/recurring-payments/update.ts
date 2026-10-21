@@ -168,6 +168,20 @@ type ResolvedRecurringPaymentUpdate = {
   afterValues: SavedUpdateValues;
 };
 
+/**
+ * An update's terms as a claimed run uses them. A replacement's destination is not among them: a
+ * request carries the one it resolved in `ClaimedUpdateStarts`, and the cron finalizes on the
+ * destination its landed plan holds on chain (`replacementFinalDestination`).
+ */
+type RecurringPaymentUpdateTerms = Omit<ResolvedRecurringPaymentUpdate, "destinationAddress">;
+
+/**
+ * Whether a claimed update may send new steps. A request may, and creates a replacement plan for
+ * the destination it resolved; the cron sends no new update step (its mandate admits no
+ * `recurring.update`), so it never creates a plan and needs no destination.
+ */
+type ClaimedUpdateStarts = { allowed: true; destinationAddress: string } | { allowed: false };
+
 const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>([
   "sourceCustodyWalletId",
   "counterpartyId",
@@ -840,7 +854,7 @@ async function finalizeMetadataScheduleUpdate(input: {
   claimed: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow | null;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   nextCollectionDueAt: string | null | undefined;
   createdBy: string | null;
   idempotency: RecurringPaymentUpdateIdempotency | null;
@@ -1201,11 +1215,11 @@ async function runMetadataScheduleUpdate(input: {
   claimed: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow | null;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   requestedNextCollectionDueAt: string | null | undefined;
   createdBy: string | null;
   idempotency: RecurringPaymentUpdateIdempotency | null;
-  startsAllowed: boolean;
+  starts: ClaimedUpdateStarts;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -1223,7 +1237,7 @@ async function runMetadataScheduleUpdate(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     sourceWallet: input.sourceWallet,
-    startsAllowed: input.startsAllowed,
+    startsAllowed: input.starts.allowed,
     logContext: { recurring_payment_id: input.claimed.id, attempt_id: attempt.id },
   });
 
@@ -1486,7 +1500,9 @@ async function getOrCreateReplacementPlan(input: {
   organizationId: string;
   projectId: string;
   sourceWallet: RecurringPaymentSourceWallet;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
+  /** The destination a plan this run creates pays; the cron's refuses, since it creates none. */
+  planCreationDestination: () => Address;
   createdBy: string | null;
 }): Promise<PaymentSubscriptionPlanRow> {
   if (input.attempt.new_plan_id) {
@@ -1512,7 +1528,7 @@ async function getOrCreateReplacementPlan(input: {
     periodHours: input.resolved.periodHours,
     programPlanId: generateProgramPlanId(),
     planPda: null,
-    destinationAddress: input.resolved.destinationAddress,
+    destinationAddress: input.planCreationDestination(),
     pullerWalletId: input.sourceWallet.walletId,
     pullerAddress: input.sourceWallet.publicKey,
     metadataUri: input.resolved.metadataUri,
@@ -1535,7 +1551,7 @@ async function getOrCreateReplacementSubscription(input: {
   organizationId: string;
   projectId: string;
   planId: string;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   createdBy: string | null;
 }): Promise<PaymentSubscriptionRow> {
   if (input.attempt.new_subscription_id) {
@@ -1585,9 +1601,11 @@ async function finalizeReplacementUpdate(input: {
   plan: PaymentSubscriptionPlanRow;
   subscription: PaymentSubscriptionRow;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   planPda: Address;
   planCreatedAt: string;
+  /** The destination the replacement finalizes on (`replacementFinalDestination`). */
+  destinationAddress: Address;
   /** Each signature is null when an earlier run's send landed before it was saved. */
   planCreationSignature: Signature | null;
   subscriptionPda: Address;
@@ -1660,7 +1678,7 @@ async function finalizeReplacementUpdate(input: {
       sourceAddress: input.resolved.sourceWallet.publicKey,
       counterpartyId: input.resolved.counterpartyId,
       counterpartyAccountId: input.resolved.counterpartyAccountId,
-      destinationAddress: input.resolved.destinationAddress,
+      destinationAddress: input.destinationAddress,
       destinationTokenAccount: null,
       token: input.resolved.token,
       amount: input.resolved.amount,
@@ -1832,7 +1850,7 @@ async function sendReplacementPlanCreation(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: TransactionSigner;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   owner: Address;
   destination: Address;
   mint: Address;
@@ -2021,6 +2039,60 @@ async function sendReplacementAuthorization(input: {
   return { attempt, signature: settled.signature };
 }
 
+/**
+ * The destination a replacement's new plan pays, when the run creates the plan: the one the
+ * request resolved. The cron creates no plan and sends no plan creation, so it is refused
+ * (`refuseCronUpdateStepSend`), which fails the update back to `active`.
+ *
+ * @param starts - Whether the run may send new steps.
+ * @param logContext - The schedule and attempt the refusal's log names.
+ * @returns The destination.
+ * @throws AppError CONFLICT for the cron.
+ */
+function replacementPlanCreationDestination(
+  starts: ClaimedUpdateStarts,
+  logContext: Pick<RecurringPaymentStepLogContext, "recurring_payment_id" | "attempt_id">
+): Address {
+  if (!starts.allowed) {
+    throw refuseCronUpdateStepSend(logContext);
+  }
+  return assertValidAddress(starts.destinationAddress, "destinationAddress");
+}
+
+/**
+ * The destination a replacement finalizes on. A request finalizes on the destination it resolved,
+ * which its own plan creation paid. The cron resumes an update a request started, and the plan
+ * row is editable (`PATCH /subscription-plans/:planId`) while the chain is not, so the cron reads
+ * the destination from the landed plan account and refuses a plan the chain shows owned by
+ * another wallet than the one the row names.
+ *
+ * @param starts - Whether the run may send new steps (a request) or not (the cron).
+ * @param plan - The landed plan account, decoded.
+ * @param owner - The wallet the replacement's plan was created for, as the row or the run names it.
+ * @returns The destination.
+ * @throws AppError CONFLICT under the cron when the plan's owner is not `owner`, or the plan does
+ *   not name exactly one destination.
+ */
+function replacementFinalDestination(
+  starts: ClaimedUpdateStarts,
+  plan: subscriptionsProgram.Plan,
+  owner: Address
+): Address {
+  if (starts.allowed) {
+    return assertValidAddress(starts.destinationAddress, "destinationAddress");
+  }
+  if (plan.owner !== owner) {
+    throw conflict("Recurring payment replacement plan on chain belongs to another wallet");
+  }
+  const [destinationAddress, ...otherDestinations] = plan.data.destinations.filter(
+    (destination) => destination !== subscriptionsProgram.ZERO_ADDRESS
+  );
+  if (destinationAddress === undefined || otherDestinations.length > 0) {
+    throw conflict("Recurring payment replacement plan on chain does not name one destination");
+  }
+  return destinationAddress;
+}
+
 /** What a replacement's steps leave for its old cancel and finalize. */
 interface SettledReplacementSteps {
   oldPlanPda: Address;
@@ -2030,6 +2102,8 @@ interface SettledReplacementSteps {
   plan: PaymentSubscriptionPlanRow;
   planPda: Address;
   planCreatedAt: string;
+  /** The destination the replacement finalizes on (`replacementFinalDestination`). */
+  destinationAddress: Address;
   /** Null when the plan's resend was refused as already done. */
   planCreationSignature: Signature | null;
   subscription: PaymentSubscriptionRow;
@@ -2056,6 +2130,8 @@ interface SettledReplacementSteps {
  * @param input.projectId - The schedule's project.
  * @param input.recurringPaymentId - The schedule.
  * @param input.attemptId - The run's attempt.
+ * @param input.starts - Whether the run may send new steps, which decides where the destination
+ *   it finalizes on comes from (`replacementFinalDestination`).
  * @returns The attempt as re-read, and the new mandate's settled steps.
  * @throws AppError CONFLICT when the schedule is no longer `updating` or the attempt is no longer
  *   this run's in-flight attempt.
@@ -2070,6 +2146,7 @@ async function readLandedReplacement(input: {
   projectId: string;
   recurringPaymentId: string;
   attemptId: string;
+  starts: ClaimedUpdateStarts;
 }): Promise<{
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   steps: Omit<
@@ -2129,6 +2206,11 @@ async function readLandedReplacement(input: {
       plan,
       planPda,
       planCreatedAt: onChainPlan.data.data.terms.createdAt.toString(),
+      destinationAddress: replacementFinalDestination(
+        input.starts,
+        onChainPlan.data,
+        assertValidAddress(plan.owner_address, "ownerAddress")
+      ),
       planCreationSignature: parseNullableStoredSignature(attempt.plan_creation_signature),
       subscription,
       subscriptionPda: assertValidAddress(subscription.subscription_pda, "subscriptionPda"),
@@ -2149,11 +2231,11 @@ async function runReplacementUpdate(input: {
   claimed: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow | null;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   requestedNextCollectionDueAt: string | null | undefined;
   createdBy: string | null;
   idempotency: RecurringPaymentUpdateIdempotency | null;
-  startsAllowed: boolean;
+  starts: ClaimedUpdateStarts;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -2170,7 +2252,7 @@ async function runReplacementUpdate(input: {
   const savedOldCancelSignature = parseNullableStoredSignature(attempt.old_cancel_signature);
   const replacementPeriodStartAt = attempt.created_at;
   const readsUnsentPlanFromChain =
-    !input.startsAllowed &&
+    !input.starts.allowed &&
     (attempt.authorization_setup_signature !== null ||
       savedAuthorizationSignature !== null ||
       savedOldCancelSignature !== null);
@@ -2183,7 +2265,7 @@ async function runReplacementUpdate(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     sourceWallet: input.resolved.sourceWallet,
-    startsAllowed: input.startsAllowed,
+    startsAllowed: input.starts.allowed,
     logContext: { recurring_payment_id: input.claimed.id, attempt_id: attempt.id },
   });
 
@@ -2230,7 +2312,6 @@ async function runReplacementUpdate(input: {
     }
 
     const owner = assertValidAddress(input.resolved.sourceWallet.publicKey, "sourceAddress");
-    const destination = assertValidAddress(input.resolved.destinationAddress, "destinationAddress");
     const mint = assertValidAddress(input.resolved.token, "token");
     const tokenProgram = await resolveMintTokenProgram(rpc, mint);
     const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
@@ -2246,6 +2327,11 @@ async function runReplacementUpdate(input: {
       projectId: input.projectId,
       sourceWallet: input.resolved.sourceWallet,
       resolved: input.resolved,
+      planCreationDestination: () =>
+        replacementPlanCreationDestination(input.starts, {
+          recurring_payment_id: input.claimed.id,
+          attempt_id: attempt.id,
+        }),
       createdBy: input.createdBy,
     });
     if (attempt.new_plan_id !== plan.id) {
@@ -2315,7 +2401,7 @@ async function runReplacementUpdate(input: {
         sourceSigner: await stepSigner(),
         resolved: input.resolved,
         owner,
-        destination,
+        destination: replacementPlanCreationDestination(input.starts, planLogContext),
         mint,
         tokenProgram,
         amountBaseUnits,
@@ -2333,6 +2419,7 @@ async function runReplacementUpdate(input: {
       throw transactionFailed("Subscription plan was not found on-chain");
     }
     const planCreatedAt = onChainPlan.data.data.terms.createdAt.toString();
+    const destinationAddress = replacementFinalDestination(input.starts, onChainPlan.data, owner);
     phase.step = { row: "update_attempt", column: "authorization_setup_signature" };
 
     let subscription = await getOrCreateReplacementSubscription({
@@ -2432,6 +2519,7 @@ async function runReplacementUpdate(input: {
       plan,
       planPda,
       planCreatedAt,
+      destinationAddress,
       planCreationSignature,
       subscription,
       subscriptionPda,
@@ -2458,6 +2546,7 @@ async function runReplacementUpdate(input: {
         projectId: input.projectId,
         recurringPaymentId: input.claimed.id,
         attemptId: attempt.id,
+        starts: input.starts,
       });
       attempt = landed.attempt;
       return { ...(await resolveOldMandate()), ...landed.steps };
@@ -2575,6 +2664,7 @@ async function runReplacementUpdate(input: {
     resolved: input.resolved,
     planPda: replacement.planPda,
     planCreatedAt: replacement.planCreatedAt,
+    destinationAddress: replacement.destinationAddress,
     planCreationSignature: replacement.planCreationSignature,
     subscriptionPda: replacement.subscriptionPda,
     subscriptionAuthorityAddress: replacement.subscriptionAuthorityAddress,
@@ -2974,7 +3064,7 @@ export async function updateRecurringPayment(input: {
     requestedNextCollectionDueAt: input.request.nextCollectionDueAt,
     createdBy: input.createdBy,
     idempotency: input.idempotency,
-    startsAllowed: true,
+    starts: { allowed: true, destinationAddress: resolved.destinationAddress },
   });
 }
 
@@ -2998,7 +3088,8 @@ export async function updateRecurringPayment(input: {
  *   next period, or undefined when it asks for none.
  * @param input.createdBy - Who the update's journal names.
  * @param input.idempotency - The request's key and fingerprint; null for the cron.
- * @param input.startsAllowed - False for the cron, which sends no new update step.
+ * @param input.starts - Whether the run may send new steps: a request may, toward the destination it
+ *   resolved; the cron sends none.
  * @returns The schedule after the update.
  * @throws RecurringPaymentStepFailedError, answering as its failure, once the update failed back
  *   to `active`.
@@ -3012,11 +3103,11 @@ async function runClaimedRecurringPaymentUpdate(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   subscription: PaymentSubscriptionRow | null;
   mode: PaymentRecurringPaymentUpdateAttemptMode;
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   requestedNextCollectionDueAt: string | null | undefined;
   createdBy: string | null;
   idempotency: RecurringPaymentUpdateIdempotency | null;
-  startsAllowed: boolean;
+  starts: ClaimedUpdateStarts;
 }): Promise<PaymentRecurringPaymentRow> {
   const { attempt, claimed } = input;
   try {
@@ -3034,7 +3125,7 @@ async function runClaimedRecurringPaymentUpdate(input: {
           requestedNextCollectionDueAt: input.requestedNextCollectionDueAt,
           createdBy: input.createdBy,
           idempotency: input.idempotency,
-          startsAllowed: input.startsAllowed,
+          starts: input.starts,
         });
       case "replacement":
         return await runReplacementUpdate({
@@ -3049,7 +3140,7 @@ async function runClaimedRecurringPaymentUpdate(input: {
           requestedNextCollectionDueAt: input.requestedNextCollectionDueAt,
           createdBy: input.createdBy,
           idempotency: input.idempotency,
-          startsAllowed: input.startsAllowed,
+          starts: input.starts,
         });
       default:
         return assertNever(input.mode);
@@ -3102,44 +3193,42 @@ const savedUpdateChangedFieldsSchema = z.array(z.enum(RECURRING_PAYMENT_UPDATE_F
 
 /**
  * A resumed update's terms, rebuilt from its attempt: the saved new terms, and for a replacement
- * the wallet and destination its plan row recorded. The plan row is written from the resolved
- * wallet and destination before the plan's send, so nothing is resolved again: an account
- * archived since cannot strand the update. With no plan row recorded, the replacement never
- * reached a send.
+ * that moves its source, the new wallet its plan row recorded (the row is written before the
+ * plan's send). No destination is resolved again or taken from the row: the cron sends no plan
+ * creation, and a landed plan's destination is read from the chain (`replacementFinalDestination`),
+ * so neither an account archived since nor an edited plan row can strand or redirect the update.
+ * With no plan row recorded, the replacement never reached a send.
  *
- * @param input - The schedule, its pin and the attempt.
+ * @param input - The schedule's pin and the attempt.
  * @param input.env - The environment.
  * @param input.organizationId - The schedule's organization.
  * @param input.projectId - The schedule's project.
- * @param input.recurringPayment - The `updating` schedule, still on its old terms.
  * @param input.sourceWallet - The schedule's source wallet pin.
  * @param input.attempt - The in-flight attempt.
  * @returns The terms and the next due date the update asks for, or null when a replacement never
  *   reached its plan.
  * @throws ZodError when the attempt's saved values are not a snapshot.
- * @throws AppError INTERNAL_ERROR when the attempt's new source is inconsistent, or its plan row
- *   or the plan's destination is missing.
+ * @throws AppError INTERNAL_ERROR when the attempt's new source is inconsistent or its plan row is
+ *   missing.
  */
 async function resumedUpdateTerms(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  recurringPayment: PaymentRecurringPaymentRow;
   sourceWallet: RecurringPaymentSourceWallet;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
 }): Promise<{
-  resolved: ResolvedRecurringPaymentUpdate;
+  resolved: RecurringPaymentUpdateTerms;
   requestedNextCollectionDueAt: string | null | undefined;
 } | null> {
   const before = recurringPaymentUpdateSnapshotSchema.parse(input.attempt.before_values);
   const after = recurringPaymentUpdateSnapshotSchema.parse(input.attempt.after_values);
   const changedFields = savedUpdateChangedFieldsSchema.parse(input.attempt.changed_fields);
-  const terms = (sourceWallet: RecurringPaymentSourceWallet, destinationAddress: string) => ({
+  const terms = (sourceWallet: RecurringPaymentSourceWallet) => ({
     resolved: {
       sourceWallet,
       counterpartyId: after.counterpartyId,
       counterpartyAccountId: after.counterpartyAccountId,
-      destinationAddress,
       token: after.token,
       amount: after.amount,
       periodHours: after.periodHours,
@@ -3156,10 +3245,20 @@ async function resumedUpdateTerms(input: {
   });
   switch (input.attempt.mode) {
     case "metadata_schedule":
-      return terms(input.sourceWallet, input.recurringPayment.destination_address);
+      return terms(input.sourceWallet);
     case "replacement": {
       if (input.attempt.new_plan_id === null) {
         return null;
+      }
+      const nextSourceCustodyWalletId = after.sourceCustodyWalletId;
+      if (nextSourceCustodyWalletId === input.sourceWallet.id) {
+        return terms(input.sourceWallet);
+      }
+      if (
+        nextSourceCustodyWalletId === null ||
+        input.attempt.new_source_custody_wallet_id !== nextSourceCustodyWalletId
+      ) {
+        throw internalError("Recurring payment update attempt names an inconsistent source wallet");
       }
       const plan = await createPaymentSubscriptionsRepository(
         input.env,
@@ -3172,27 +3271,13 @@ async function resumedUpdateTerms(input: {
       if (plan === null) {
         throw internalError("Recurring payment replacement plan was not found");
       }
-      if (plan.destination_address === null) {
-        throw internalError("Recurring payment replacement plan has no destination");
-      }
-      const nextSourceCustodyWalletId = after.sourceCustodyWalletId;
-      if (nextSourceCustodyWalletId === input.sourceWallet.id) {
-        return terms(input.sourceWallet, plan.destination_address);
-      }
-      if (
-        nextSourceCustodyWalletId === null ||
-        input.attempt.new_source_custody_wallet_id !== nextSourceCustodyWalletId
-      ) {
-        throw internalError("Recurring payment update attempt names an inconsistent source wallet");
-      }
-      return terms(
-        {
-          id: nextSourceCustodyWalletId,
-          walletId: plan.owner_wallet_id,
-          publicKey: plan.owner_address,
-        },
-        plan.destination_address
-      );
+      // The new wallet's ids come from the row; its address is checked against the plan's owner
+      // on chain wherever the plan is read landed (`replacementFinalDestination`).
+      return terms({
+        id: nextSourceCustodyWalletId,
+        walletId: plan.owner_wallet_id,
+        publicKey: plan.owner_address,
+      });
     }
     default:
       return assertNever(input.attempt.mode);
@@ -3250,7 +3335,6 @@ export async function resumeRecurringPaymentUpdate(input: {
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    recurringPayment: input.recurringPayment,
     sourceWallet: input.sourceWallet,
     attempt: inFlightAttempt,
   });
@@ -3324,6 +3408,6 @@ export async function resumeRecurringPaymentUpdate(input: {
     requestedNextCollectionDueAt: terms.requestedNextCollectionDueAt,
     createdBy: attempt.created_by,
     idempotency: null,
-    startsAllowed: false,
+    starts: { allowed: false },
   });
 }
