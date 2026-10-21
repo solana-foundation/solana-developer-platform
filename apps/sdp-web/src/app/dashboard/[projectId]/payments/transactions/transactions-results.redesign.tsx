@@ -29,6 +29,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useTransactionFilters } from "./transaction-filters-context.redesign";
 import { kindLabel, useTransactionStatus } from "./transaction-status";
 import type { TransactionsPageResult } from "./transactions-page.data.redesign";
+import { isUnverifiedMintName, UnverifiedMintWarning } from "./unverified-mint-warning";
 import { useCursorPagination } from "./use-cursor-pagination.redesign";
 
 export function TransactionsResults({
@@ -86,14 +87,18 @@ export function TransactionsResults({
           <TableBody>
             {result.transactions.map((transaction) => {
               const status = statusOf(transaction);
-              const token =
+              const resolvedToken =
                 transaction.token === null
                   ? null
                   : resolveTokenByMint(
                       transaction.token,
                       issuedTokensByMint,
                       transaction.tokenSymbol
-                    ).tokenName;
+                    );
+              const token = resolvedToken === null ? null : resolvedToken.tokenName;
+              const unverifiedToken =
+                resolvedToken !== null &&
+                isUnverifiedMintName(resolvedToken, transaction.tokenSymbol);
               const contact =
                 transaction.counterpartyId === null
                   ? null
@@ -149,6 +154,11 @@ export function TransactionsResults({
                           {formatDecimalAmount(transaction.amount, locale)}
                         </span>
                         {token === null ? null : <span className="text-secondary"> {token}</span>}
+                        {unverifiedToken ? (
+                          <span className="ml-1 inline-flex align-middle">
+                            <UnverifiedMintWarning />
+                          </span>
+                        ) : null}
                       </>
                     )}
                   </TableCell>
