@@ -355,13 +355,19 @@ async function recurringPaymentDueAt(recurringPaymentId: string) {
 function activationState(recurringPaymentId: string) {
   return getDb(env)
     .prepare(
-      `SELECT rp.status, a.status AS attempt_status, a.authorization_signature
+      `SELECT rp.status, a.status AS attempt_status, a.authorization_signature,
+              a.last_valid_block_height
          FROM payment_recurring_payments rp
          JOIN payment_recurring_payment_activation_attempts a ON a.recurring_payment_id = rp.id
         WHERE rp.id = ?`
     )
     .bind(recurringPaymentId)
-    .first<{ status: string; attempt_status: string; authorization_signature: string | null }>();
+    .first<{
+      status: string;
+      attempt_status: string;
+      authorization_signature: string | null;
+      last_valid_block_height: string | null;
+    }>();
 }
 
 function collectDueRecurringPaymentsIn(environment: SdpEnvironment, now: Date) {
@@ -2880,6 +2886,7 @@ describe("Payments routes — recurring", () => {
         }));
       // Recovered as the cron's unkeyed claim: another key never adopts it.
       await clearCollectionAttemptKeys(activated.subscriptionId);
+      recordSignatureStatus(poolSentSignatures()[2], null);
       let recoveryRes: Response;
       try {
         recoveryRes = await app.request(
@@ -4681,6 +4688,37 @@ describe("Payments routes — recurring", () => {
       status: "activating",
       attempt_status: "processing",
       authorization_signature: poolSentSignatures()[1],
+      last_valid_block_height: "1000",
+    });
+  });
+
+  it("keeps a recovered activation in flight when it fails before reading its saved subscription send", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    rejectPoolSendAfter(1, new Error("RPC response lost"));
+    expect(
+      (
+        await app.request(
+          `/v1/payments/recurring-payments/${created.id}/activate`,
+          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+          env
+        )
+      ).status
+    ).toBe(500);
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+      .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), created.id)
+      .run();
+    getAccountInfoMock.mockRejectedValueOnce(new Error("RPC unavailable"));
+
+    expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
+      recovered: 0,
+      failed: 1,
+    });
+    expect(await activationState(created.id)).toEqual({
+      status: "activating",
+      attempt_status: "processing",
+      authorization_signature: poolSentSignatures()[1],
+      last_valid_block_height: "1000",
     });
   });
 
@@ -4701,6 +4739,7 @@ describe("Payments routes — recurring", () => {
       status: "activating",
       attempt_status: "processing",
       authorization_signature: savedAuthorizationSignature,
+      last_valid_block_height: "1000",
     });
 
     await getDb(env)
@@ -4721,6 +4760,7 @@ describe("Payments routes — recurring", () => {
       status: "active",
       attempt_status: "confirmed",
       authorization_signature: resentAuthorizationSignature,
+      last_valid_block_height: "1000",
     });
   });
 
@@ -5504,7 +5544,8 @@ describe("Payments routes — recurring", () => {
       await getDb(env)
         .prepare(
           `UPDATE payment_recurring_payment_update_attempts
-              SET status = 'processing', stage = 'claim', plan_update_signature = NULL, updated_at = ?
+              SET status = 'processing', stage = 'claim', plan_update_signature = NULL,
+                  last_valid_block_height = NULL, updated_at = ?
             WHERE idempotency_key = ?`
         )
         .bind(staleAt, recordKey(key))
@@ -6166,7 +6207,8 @@ describe("Payments routes — recurring", () => {
       await getDb(env)
         .prepare(
           `UPDATE payment_recurring_payment_lifecycle_attempts
-              SET status = 'processing', stage = 'claim', signature = NULL, updated_at = ?
+              SET status = 'processing', stage = 'claim', signature = NULL,
+                  last_valid_block_height = NULL, updated_at = ?
             WHERE idempotency_key = ?`
         )
         .bind(staleAt, recordKey(firstKey))
@@ -6474,7 +6516,8 @@ describe("Payments routes — recurring", () => {
       await getDb(env)
         .prepare(
           `UPDATE payment_recurring_payment_lifecycle_attempts
-              SET status = 'processing', stage = 'claim', signature = NULL, updated_at = ?
+              SET status = 'processing', stage = 'claim', signature = NULL,
+                  last_valid_block_height = NULL, updated_at = ?
             WHERE idempotency_key = ?`
         )
         .bind(staleAt, recordKey(firstKey))
@@ -6587,7 +6630,7 @@ describe("Payments routes — recurring", () => {
           .prepare(
             `UPDATE payment_recurring_payment_lifecycle_attempts
                 SET status = 'processing', stage = 'submit', signature = NULL,
-                    idempotency_key = NULL, updated_at = ?
+                    last_valid_block_height = NULL, idempotency_key = NULL, updated_at = ?
               WHERE idempotency_key = ?`
           )
           .bind(staleAt, recordKey(input.key))

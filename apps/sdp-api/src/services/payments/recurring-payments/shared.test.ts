@@ -81,15 +81,14 @@ describe("readRecurringPaymentStep", () => {
         updatedAt: now,
       })
     );
-    required(
-      await repo.updateRecurringPaymentActivation({
-        recurringPaymentId: created.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        planCreationSignature: SAVED_SEND.signature,
-        updatedAt: now,
-      })
-    );
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_payments
+            SET status = 'activating', plan_creation_signature = ?, updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(SAVED_SEND.signature, now, created.id)
+      .run();
     recurringPaymentId = created.id;
     attemptId = attempt.id;
     step = {
