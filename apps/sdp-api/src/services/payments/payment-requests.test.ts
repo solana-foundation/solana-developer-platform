@@ -57,7 +57,7 @@ let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyT
 function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>> {
   return {
     ok: true,
-    status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
+    status: { slot: 1n, confirmations: null, confirmationStatus: "finalized", err: null },
     transaction: { slot: 1n, executionResultKnown: true, err: null, instructions: [] },
   };
 }
@@ -69,7 +69,7 @@ function foundSignature(): Awaited<ReturnType<typeof solanaPay.findReference>> {
     err: null,
     memo: null,
     blockTime: null,
-    confirmationStatus: "confirmed",
+    confirmationStatus: "finalized",
   };
 }
 
@@ -219,9 +219,36 @@ describe("reconcilePaymentRequest", () => {
     expect(transfers).toHaveLength(1);
     expect(transfers[0].id).toBe(settled.fulfilled_by_transfer_id);
     expect(transfers[0].direction).toBe("inbound");
-    expect(transfers[0].status).toBe("confirmed");
+    expect(transfers[0].status).toBe("finalized");
     expect(transfers[0].signature).toBe(SIGNATURE);
     expect(transfers[0].custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(findReferenceSpy.mock.calls[0][2]).toEqual({ commitment: "finalized" });
+    expect(validateTransferSpy.mock.calls[0][3]).toEqual({ commitment: "finalized" });
+  });
+
+  it("waits for finality without writing a transfer or marking the request paid", async () => {
+    mockSettlementSucceeds();
+    verifyTransactionLandedSpy.mockResolvedValue({
+      ok: true,
+      status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
+      transaction: { slot: 1n, executionResultKnown: true, err: null, instructions: [] },
+    });
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    const pending = await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(pending.status).toBe("awaiting_payment");
+    expect(pending.fulfilled_by_transfer_id).toBeNull();
+    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    const paid = await reconcileOnSandbox(pending, { bestEffort: false });
+
+    expect(paid.status).toBe("paid");
+    expect(await listInboundTransfers()).toMatchObject([
+      { id: paid.fulfilled_by_transfer_id, status: "finalized" },
+    ]);
   });
 
   it("settles an SPL request, exercising the splToken branch", async () => {

@@ -32,8 +32,8 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
 
 /**
  * Checks the chain for a transaction referencing this payment request and,
- * when a valid payment is found, records the inbound transfer and marks the
- * request paid.
+ * when a valid finalized payment is found, records the inbound transfer and
+ * marks the request paid.
  *
  * Reads the chain on the open cluster scope's cluster (the row's Project).
  *
@@ -90,8 +90,8 @@ export async function reconcilePaymentRequest(
 
 /**
  * Looks up the request's reference on chain, validates the referenced
- * transaction pays the right recipient/amount/mint, and settles the row to
- * `paid`.
+ * finalized transaction pays the right recipient/amount/mint, and settles the
+ * row to `paid`.
  *
  * @returns The settled row, or the row unchanged when no valid payment
  *   exists yet.
@@ -111,7 +111,7 @@ async function settlePaymentRequestIfPaid(
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(
-    findReference(rpc, reference, { commitment: "confirmed" }),
+    findReference(rpc, reference, { commitment: "finalized" }),
     FindReferenceError
   );
   if (found === null) {
@@ -119,17 +119,22 @@ async function settlePaymentRequestIfPaid(
   }
 
   const verified = await verifyTransactionLanded(rpc, found.signature as unknown as Signature);
-  if (!verified.ok) {
+  if (!verified.ok || verified.status.confirmationStatus !== "finalized") {
     return row;
   }
 
   const validated = await nullOnExpected(
-    validateTransfer(rpc, found.signature, {
-      recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-      amount: toNumberAmount(row.amount),
-      reference,
-      ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
-    }),
+    validateTransfer(
+      rpc,
+      found.signature,
+      {
+        recipient: assertValidAddress(row.destination_address, "destinationAddress"),
+        amount: toNumberAmount(row.amount),
+        reference,
+        ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
+      },
+      { commitment: "finalized" }
+    ),
     ValidateTransferError
   );
   if (validated === null) {
@@ -205,7 +210,7 @@ async function recordInboundTransfer(
       memo: null,
       type: "transfer",
       direction: "inbound",
-      status: "confirmed",
+      status: "finalized",
       provider: null,
       providerReference: null,
       deliveryMode: null,
