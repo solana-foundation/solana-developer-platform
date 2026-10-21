@@ -1,6 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
@@ -195,7 +194,8 @@ async function settlePaymentRequestIfPaid(
  * The oldest finalized transaction on the request's reference that landed, before the settlement
  * deadline when the request expires, and pays the request: the right recipient, amount and mint.
  * The reference is public, so anyone can name it in a transaction of their own; a failed,
- * late or non-paying one is skipped, never taken as the payment.
+ * late or non-paying one is skipped, never taken as the payment. `validateTransfer` reads the
+ * transaction from ledger history, so a payment checked long after it landed still validates.
  *
  * @param rpc - Solana RPC on the request's cluster.
  * @param row - The payment request.
@@ -224,10 +224,6 @@ async function findFirstValidPayment(
       deadline !== null &&
       (candidate.blockTime === null || Number(candidate.blockTime) * 1000 > deadline)
     ) {
-      continue;
-    }
-    const verified = await verifyTransactionLanded(rpc, candidate.signature);
-    if (!verified.ok) {
       continue;
     }
     const validated = await nullOnExpected(
