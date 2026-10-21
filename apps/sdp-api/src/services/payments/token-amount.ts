@@ -21,6 +21,10 @@ export interface PaymentMint {
   toBaseUnits: PaymentAmountConverter;
 }
 
+export interface PaymentMintFacts extends PaymentMint {
+  refusedExtension: string | null;
+}
+
 const UNSUPPORTED_PAYMENT_EXTENSIONS: ReadonlySet<string> = new Set([
   "InterestBearingConfig",
   // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
@@ -40,15 +44,16 @@ function parsePaymentAmount(amount: string, decimals: number): bigint {
 
 /**
  * Resolves the mint's actual decimals and owning token program in one read.
- * Refuses extensions that change the requested amount or prevent transfer.
+ * Records extensions the new-payment admission gate refuses.
  * Catalogue facts are verified by check:well-known-mints for the named cluster;
  * other mints are decoded live. The returned facts and converter are reused
  * through funding checks and builds, without another mint or clock read.
  */
-async function readPaymentMint(mint: Address): Promise<PaymentMint> {
+async function readPaymentMint(mint: Address): Promise<PaymentMintFacts> {
   const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   if (wellKnown?.clusters.includes(currentClusterScope().cluster)) {
     return {
+      refusedExtension: null,
       decimals: wellKnown.decimals,
       tokenProgram: address(SPL_TOKEN_PROGRAMS[wellKnown.tokenProgram]),
       toBaseUnits: (amount) => parsePaymentAmount(amount, wellKnown.decimals),
@@ -72,15 +77,14 @@ async function readPaymentMint(mint: Address): Promise<PaymentMint> {
   }
   if (!decoded.data.isInitialized) throw badRequest("Token mint is not initialized");
   const extensions = unwrapOption(decoded.data.extensions);
-  if (extensions !== null) {
-    for (const extension of extensions) {
-      if (UNSUPPORTED_PAYMENT_EXTENSIONS.has(extension.__kind)) {
-        throw badRequest(`Payments do not support the ${extension.__kind} mint extension`);
-      }
-    }
-  }
+  const refusedExtension =
+    extensions === null
+      ? null
+      : (extensions.find((extension) => UNSUPPORTED_PAYMENT_EXTENSIONS.has(extension.__kind))
+          ?.__kind ?? null);
   const decimals = decoded.data.decimals;
   return {
+    refusedExtension,
     decimals,
     tokenProgram: account.programAddress,
     toBaseUnits: (amount) => parsePaymentAmount(amount, decimals),
@@ -89,9 +93,10 @@ async function readPaymentMint(mint: Address): Promise<PaymentMint> {
 
 // Share immutable mint facts only within this request or cron scope. A failed
 // lookup is removed, and a later scope always reads custom mints afresh.
-const scopedMints = new WeakMap<ClusterScope, Map<Address, Promise<PaymentMint>>>();
+const scopedMints = new WeakMap<ClusterScope, Map<Address, Promise<PaymentMintFacts>>>();
 
-export function loadPaymentMint(mint: Address): Promise<PaymentMint> {
+/** Reads mint facts for proof/recovery without admitting a new payment. */
+export function loadPaymentMintFacts(mint: Address): Promise<PaymentMintFacts> {
   const scope = currentClusterScope();
   let mints = scopedMints.get(scope);
   if (mints === undefined) {
@@ -107,6 +112,14 @@ export function loadPaymentMint(mint: Address): Promise<PaymentMint> {
   });
   entries.set(mint, lookup);
   return lookup;
+}
+
+/** Admits new money movement after resolving the mint facts. */
+export async function loadPaymentMint(mint: Address): Promise<PaymentMint> {
+  const facts = await loadPaymentMintFacts(mint);
+  if (facts.refusedExtension !== null)
+    throw badRequest(`Payments do not support the ${facts.refusedExtension} mint extension`);
+  return facts;
 }
 
 /** Resolves a mint once for a batch of exact conversions. */

@@ -46,8 +46,10 @@ import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
+import { badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
+import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -58,6 +60,7 @@ import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import * as paymentRequestTransfer from "./payment-request-transfer";
 import { reconcilePaymentRequest } from "./payment-requests";
 
 const TEST_PROJECT_ID = "prj_preq_handler_test";
@@ -67,10 +70,10 @@ const TEST_WALLET_ID = "wal_preq_handler_test";
 const SIGNATURE = signature(getBase58Decoder().decode(new Uint8Array(64).fill(5)));
 const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
-const validateSolanaPayTransfer = solanaPay.validateTransfer;
+const validateExactTransfer = paymentRequestTransfer.validatePaymentRequestTransfer;
 
 let findReferenceSpy: MockInstance<typeof solanaPay.findReference>;
-let validateTransferSpy: MockInstance<typeof solanaPay.validateTransfer>;
+let validateTransferSpy: MockInstance<typeof paymentRequestTransfer.validatePaymentRequestTransfer>;
 let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyTransactionLanded>;
 
 function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>> {
@@ -228,7 +231,7 @@ describe("reconcilePaymentRequest", () => {
 
   beforeEach(async () => {
     findReferenceSpy = vi.spyOn(solanaPay, "findReference");
-    validateTransferSpy = vi.spyOn(solanaPay, "validateTransfer");
+    validateTransferSpy = vi.spyOn(paymentRequestTransfer, "validatePaymentRequestTransfer");
     verifyTransactionLandedSpy = vi.spyOn(verifiedConfirmation, "verifyTransactionLanded");
 
     const db = getDb(env);
@@ -348,26 +351,92 @@ describe("reconcilePaymentRequest", () => {
       received: 1_499_999_999n,
       status: "awaiting_payment",
     },
+  ])("checks $label with real transfer validation", async ({ token, amount, received, status }) => {
+    const request = await createRequest({ token, amount, expiresAt: null });
+    findReferenceSpy.mockResolvedValue(foundSignature());
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    validateTransferSpy.mockImplementation(validateExactTransfer);
+    const response = await validatedTransfer(token, received, address(request.reference));
+    // JSON-RPC token amounts are strings; all numeric fixture metadata is small.
+    rpc.answer(
+      "getTransaction",
+      JSON.parse(
+        JSON.stringify(response, (_, value) => (typeof value === "bigint" ? Number(value) : value))
+      )
+    );
+    const settled = await reconcileOnSandbox(request, { bestEffort: false });
+    expect(settled.status).toBe(status);
+    expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
+  });
+
+  it.each([
+    { received: 1_500_000n, status: "paid" },
+    { received: 1_499_999n, status: "awaiting_payment" },
   ])(
-    "checks $label with real Solana Pay validation",
-    async ({ token, amount, received, status }) => {
-      const request = await createRequest({ token, amount, expiresAt: null });
+    "settles only sufficient payments into a fresh ATA: $received",
+    async ({ received, status }) => {
+      const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
       findReferenceSpy.mockResolvedValue(foundSignature());
       verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-      validateTransferSpy.mockImplementation(validateSolanaPayTransfer);
-      const response = await validatedTransfer(token, received, address(request.reference));
-      // JSON-RPC token amounts are strings; all numeric fixture metadata is small.
+      validateTransferSpy.mockImplementation(validateExactTransfer);
+      const response = await validatedTransfer(
+        DEVNET_USDC_MINT,
+        received,
+        address(request.reference)
+      );
+      if (response.meta === null) throw new Error("Fixture requires metadata");
+      const fresh = { ...response, meta: { ...response.meta, preTokenBalances: [] } };
       rpc.answer(
         "getTransaction",
         JSON.parse(
-          JSON.stringify(response, (_, value) =>
-            typeof value === "bigint" ? Number(value) : value
-          )
+          JSON.stringify(fresh, (_, value) => (typeof value === "bigint" ? Number(value) : value))
         )
       );
-      const settled = await reconcileOnSandbox(request, { bestEffort: false });
-      expect(settled.status).toBe(status);
+      expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe(status);
       expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
+    }
+  );
+
+  it.each(["wrong program", "wrong mint", "wrong decimals", "failed transaction"])(
+    "rejects a fresh ATA payment with %s",
+    async (fault) => {
+      const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
+      findReferenceSpy.mockResolvedValue(foundSignature());
+      verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+      validateTransferSpy.mockImplementation(validateExactTransfer);
+      const response = await validatedTransfer(
+        fault === "wrong program" ? SOL_MINT : DEVNET_USDC_MINT,
+        1_500_000n,
+        address(request.reference)
+      );
+      if (response.meta === null) throw new Error("Fixture requires metadata");
+      const postTokenBalances = response.meta.postTokenBalances?.map((balance) => ({
+        ...balance,
+        mint: fault === "wrong mint" ? syntheticAddress(502) : balance.mint,
+        uiTokenAmount: {
+          ...balance.uiTokenAmount,
+          decimals: fault === "wrong decimals" ? 5 : balance.uiTokenAmount.decimals,
+        },
+      }));
+      const invalid = {
+        ...response,
+        meta: {
+          ...response.meta,
+          preTokenBalances: [],
+          postTokenBalances,
+          err: fault === "failed transaction" ? { InstructionError: [0, "InvalidArgument"] } : null,
+        },
+      };
+      rpc.answer(
+        "getTransaction",
+        JSON.parse(
+          JSON.stringify(invalid, (_, value) => (typeof value === "bigint" ? Number(value) : value))
+        )
+      );
+      expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe(
+        "awaiting_payment"
+      );
+      expect(await listInboundTransfers()).toHaveLength(0);
     }
   );
 
@@ -375,7 +444,7 @@ describe("reconcilePaymentRequest", () => {
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     findReferenceSpy.mockResolvedValue(foundSignature());
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockImplementation(validateSolanaPayTransfer);
+    validateTransferSpy.mockImplementation(validateExactTransfer);
     const response = await validatedTransfer(SOL_MINT, 1_500_000_000n, syntheticAddress(334));
     rpc.answer(
       "getTransaction",
@@ -517,6 +586,32 @@ describe("reconcilePaymentRequest", () => {
         bestEffort: false,
       })
     ).rejects.toThrow("rpc exploded");
+  });
+
+  it.each([
+    "Token mint account does not exist",
+    "Unsupported token program for mint",
+    "Payments do not support the InterestBearingConfig mint extension",
+  ])("isolates legacy mint rejection from other list rows: %s", async (message) => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => {});
+    const invalidMint = syntheticAddress(501);
+    const loadPaymentMint = paymentAmounts.loadPaymentMint;
+    vi.spyOn(paymentAmounts, "loadPaymentMint").mockImplementation((mint) =>
+      mint === invalidMint ? Promise.reject(badRequest(message)) : loadPaymentMint(mint)
+    );
+    const invalid = await createRequest({ token: invalidMint, expiresAt: null });
+    const healthy = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await mockSettlementSucceeds();
+    const [unchanged, settled] = await Promise.all(
+      [invalid, healthy].map((row) => reconcileOnSandbox(row, { bestEffort: true }))
+    );
+    expect(unchanged).toEqual(invalid);
+    expect(settled.status).toBe("paid");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_request_id: invalid.id, reason: "mint_not_admitted" }),
+      expect.any(String)
+    );
+    expect(await listInboundTransfers()).toHaveLength(1);
   });
 
   it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {

@@ -4,19 +4,8 @@ import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import {
-  getBase64Encoder,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
-  type Signature,
-} from "@solana/kit";
-import {
-  FindReferenceError,
-  findReference,
-  ValidateTransferError,
-  validateTransfer,
-} from "@solana/pay";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import type { Signature } from "@solana/kit";
+import { FindReferenceError, findReference, ValidateTransferError } from "@solana/pay";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import {
@@ -30,7 +19,8 @@ import {
 import { AppError, internalError, nullOnExpected } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import { loadPaymentMint } from "@/services/payments/token-amount";
+import { validatePaymentRequestTransfer } from "@/services/payments/payment-request-transfer";
+import { loadPaymentMint, type PaymentMint } from "@/services/payments/token-amount";
 import type { Env } from "@/types/env";
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
@@ -130,24 +120,40 @@ async function settlePaymentRequestIfPaid(
     return row;
   }
 
-  const mint = await loadPaymentMint(assertValidAddress(row.token, "token"));
+  let mint: PaymentMint;
+  try {
+    mint = await loadPaymentMint(assertValidAddress(row.token, "token"));
+  } catch (error) {
+    if (!(error instanceof AppError) || error.code !== "BAD_REQUEST") throw error;
+    getLogger().warn(
+      { payment_request_id: row.id, reason: "mint_not_admitted", error: error.message },
+      "Payment request settlement skipped"
+    );
+    return row;
+  }
   let expectedAmount: bigint;
   try {
     expectedAmount = parseTokenAmount(row.amount, mint.decimals);
   } catch (error) {
     // Legacy requests may predate create-time precision checks. They must
     // never settle against a rounded or out-of-range amount.
-    if (error instanceof AmountError) return row;
+    if (error instanceof AmountError) {
+      getLogger().warn(
+        { payment_request_id: row.id, reason: "invalid_amount", error: error.message },
+        "Payment request settlement skipped"
+      );
+      return row;
+    }
     throw error;
   }
   const recipient = assertValidAddress(row.destination_address, "destinationAddress");
 
   const validated = await nullOnExpected(
-    validateTransfer(rpc, found.signature, {
+    validatePaymentRequestTransfer(rpc, found.signature, {
       recipient,
-      // Solana Pay accepts only number amounts. Keep its structural checks,
-      // but enforce the amount below using exact raw balances from this same response.
-      amount: 0,
+      amount: expectedAmount,
+      decimals: mint.decimals,
+      tokenProgram: mint.tokenProgram,
       reference,
       ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
     }),
@@ -155,43 +161,6 @@ async function settlePaymentRequestIfPaid(
   );
   if (validated === null) {
     return row;
-  }
-
-  const recipientAccount =
-    row.token === SOL_MINT
-      ? recipient
-      : (
-          await findAssociatedTokenPda({
-            owner: recipient,
-            mint: assertValidAddress(row.token, "token"),
-            tokenProgram: mint.tokenProgram,
-          })
-        )[0];
-  const transaction = getTransactionDecoder().decode(
-    getBase64Encoder().encode(validated.transaction[0])
-  );
-  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-  const accountIndex = message.staticAccounts.indexOf(recipientAccount);
-  const meta = validated.meta;
-  if (accountIndex === -1 || meta === null) return row;
-
-  if (row.token === SOL_MINT) {
-    const pre = meta.preBalances[accountIndex];
-    const post = meta.postBalances[accountIndex];
-    if (pre === undefined || post === undefined || post - pre < expectedAmount) return row;
-  } else {
-    const pre = meta.preTokenBalances?.find((balance) => balance.accountIndex === accountIndex);
-    const post = meta.postTokenBalances?.find((balance) => balance.accountIndex === accountIndex);
-    if (
-      pre === undefined ||
-      post === undefined ||
-      pre.mint !== row.token ||
-      post.mint !== row.token ||
-      pre.uiTokenAmount.decimals !== mint.decimals ||
-      post.uiTokenAmount.decimals !== mint.decimals ||
-      BigInt(post.uiTokenAmount.amount) - BigInt(pre.uiTokenAmount.amount) < expectedAmount
-    )
-      return row;
   }
 
   const transfer = await recordInboundTransfer(env, row, projectId, custodyWalletId, found);

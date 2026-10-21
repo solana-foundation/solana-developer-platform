@@ -2,12 +2,12 @@ import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseTokenAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
   AccountRole,
   type Address,
+  address,
   appendTransactionMessageInstructions,
   type Blockhash,
   compileTransaction,
@@ -33,6 +33,7 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
+import { loadPaymentMint } from "@/services/payments/token-amount";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
@@ -248,7 +249,7 @@ async function buildPaymentTransaction(
 
   let instructions: Instruction[];
   if (request.token === SOL_MINT) {
-    const lamports = parseTokenAmount(request.amount, SOL_DECIMALS);
+    const lamports = (await loadPaymentMint(address(SOL_MINT))).toBaseUnits(request.amount);
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }

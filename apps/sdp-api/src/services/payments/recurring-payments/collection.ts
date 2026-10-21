@@ -76,7 +76,7 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { loadPaymentMint } from "@/services/payments/token-amount";
+import { loadPaymentMint, loadPaymentMintFacts } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -308,7 +308,7 @@ async function resolveDestinationTokenAccount(input: {
 }): Promise<Address> {
   const destinationOwner = assertValidAddress(input.destinationAddress, "destinationAddress");
   const mint = assertValidAddress(input.token, "token");
-  const { tokenProgram } = await loadPaymentMint(mint);
+  const { tokenProgram } = await loadPaymentMintFacts(mint);
   const [receiverAta] = await findAssociatedTokenPda({
     owner: destinationOwner,
     tokenProgram,
@@ -488,7 +488,7 @@ async function verifyRecurringPaymentCollection(input: {
 
   const rpc = createClusterRpc();
   const mint = assertValidAddress(input.recurringPayment.token, "token");
-  const { tokenProgram, toBaseUnits } = await loadPaymentMint(mint);
+  const { tokenProgram, toBaseUnits } = await loadPaymentMintFacts(mint);
   const amountBaseUnits = toBaseUnits(input.recurringPayment.amount);
   const confirmedTransaction = await getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {

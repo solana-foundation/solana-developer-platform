@@ -126,6 +126,21 @@ describe("Public payment request routes", () => {
     });
   }
 
+  it.each(["1.0000000001", "18446744073.709551616"])(
+    "returns 400 for a legacy invalid SOL pay-link amount %s",
+    async (amount) => {
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      if (request === null) throw new Error("Expected a payment request fixture");
+      await getDb(env)
+        .prepare("UPDATE payment_requests SET amount = ? WHERE id = ?")
+        .bind(amount, request.id)
+        .run();
+      const response = await postTransaction(request.public_token);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    }
+  );
+
   function calledClusters() {
     return new Set(rpc.calls.map((call) => call.cluster));
   }

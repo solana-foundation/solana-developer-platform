@@ -35,7 +35,7 @@ import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payme
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import { app as baseApp } from "@/index";
-import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
+import { AppError, badRequest, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import * as organizationAccess from "@/lib/organization-access";
 import { deriveIdempotencyRecordKey } from "@/middleware/idempotency";
@@ -3162,6 +3162,12 @@ describe("Payments routes — recurring", () => {
         "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
       );
       const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const mintAdmission = vi
+        .spyOn(paymentAmounts, "loadPaymentMint")
+        .mockRejectedValue(
+          badRequest("Payments do not support the InterestBearingConfig mint extension")
+        );
+      onTestFinished(() => mintAdmission.mockRestore());
       const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
       const now = new Date().toISOString();
       const staleAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
@@ -3279,6 +3285,7 @@ describe("Payments routes — recurring", () => {
         status: "confirmed",
         signature: submittedSignature,
       });
+      expect(mintAdmission).not.toHaveBeenCalled();
       expect(sendTransactionMock).toHaveBeenCalledTimes(2);
     }
   );

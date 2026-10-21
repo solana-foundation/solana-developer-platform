@@ -18,6 +18,7 @@ import {
   assertPaymentAmountFitsMint,
   loadPaymentAmountConverter,
   loadPaymentMint,
+  loadPaymentMintFacts,
   readStaticAmountMintDecimals,
 } from "./token-amount";
 
@@ -136,6 +137,18 @@ describe("loadPaymentAmountConverter", () => {
       await expect(inSandboxScope(() => loadPaymentAmountConverter(MINT))).rejects.toMatchObject({
         code: "BAD_REQUEST",
         statusCode: 400,
+      });
+      expect(accountInfoReads()).toEqual([MINT]);
+    }
+  );
+
+  it.each([SCALED_BY_TWO_UNTIL_LATER, INTEREST_BEARING_CONFIG])(
+    "reads facts for recovery without admitting a new payment ($__kind)",
+    async (extension) => {
+      serveMint({ decimals: 6, extensions: [extension] });
+      await inSandboxScope(async () => {
+        expect((await loadPaymentMintFacts(MINT)).toBaseUnits("1.5")).toBe(1500000n);
+        await expect(loadPaymentMint(MINT)).rejects.toMatchObject({ statusCode: 400 });
       });
       expect(accountInfoReads()).toEqual([MINT]);
     }
