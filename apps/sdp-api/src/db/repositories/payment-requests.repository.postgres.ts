@@ -160,7 +160,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row ? mapPaymentRequestRow(row) : null;
     },
 
-    async listPaymentRequestsToReconcile({ environment, createdAfter, expiredAfter, limit }) {
+    async listPaymentRequestsToReconcile({ environment, expiredAfter, limit }) {
       const rows = await db
         .prepare(
           `SELECT pr.*
@@ -169,14 +169,24 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
             WHERE p.environment = ?
               AND pr.status = 'awaiting_payment'
               AND pr.custody_wallet_id IS NOT NULL
-              AND pr.created_at::timestamptz > ?::timestamptz
               AND (pr.expires_at IS NULL OR pr.expires_at::timestamptz > ?::timestamptz)
-            ORDER BY pr.created_at DESC, pr.id DESC
+            ORDER BY pr.reconciled_at ASC NULLS FIRST, pr.id ASC
             LIMIT ?`
         )
-        .bind(environment, createdAfter, expiredAfter, limit)
+        .bind(environment, expiredAfter, limit)
         .all<Record<string, unknown>>();
       return rows.results.map(mapPaymentRequestRow);
+    },
+
+    async markPaymentRequestsReconciled(requestIds) {
+      await db
+        .prepare(
+          `UPDATE payment_requests
+              SET reconciled_at = sdp_iso_now()
+            WHERE id = ANY(?)`
+        )
+        .bind([...requestIds])
+        .run();
     },
 
     async getPaymentRequestByPublicToken(publicToken) {

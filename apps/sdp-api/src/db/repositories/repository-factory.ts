@@ -138,7 +138,11 @@ export function createPaymentRequestsRepository(
     createPostgresPaymentRequestsRepository(getDb(env)),
     scope,
     "PaymentRequestsRepository",
-    ["getPaymentRequestByPublicToken", "listPaymentRequestsToReconcile"]
+    [
+      "getPaymentRequestByPublicToken",
+      "listPaymentRequestsToReconcile",
+      "markPaymentRequestsReconciled",
+    ]
   );
 }
 

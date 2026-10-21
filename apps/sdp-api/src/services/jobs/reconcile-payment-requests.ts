@@ -7,12 +7,15 @@
  *
  * Runs inside one cluster scope per environment (a `cluster` Cron Definition): each run selects
  * only requests whose project is in the scope's environment and reads them through that cluster.
- * Settlement is idempotent (unique transfer signature, status compare-and-set), so overlapping
- * runs or a concurrent read converge on one settlement.
+ * Each run takes the least recently reconciled open requests and stamps every one it tried, so
+ * the sweep rotates through all of them. Settlement is idempotent (unique transfer signature,
+ * status compare-and-set), so overlapping runs or a concurrent read converge on one settlement.
  */
 
 import { currentClusterScope } from "@sdp/rpc/scope";
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import {
   PAYMENT_REQUEST_SETTLEMENT_GRACE_MS,
@@ -20,51 +23,55 @@ import {
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 
-/** How far back the sweep looks; an older request that never expires settles when it is read. */
-export const PAYMENT_REQUEST_RECONCILE_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
-
 /**
- * Requests reconciled per run, newest first; each costs one reference lookup on the cluster.
- * ponytail: past this many open requests in one environment the oldest wait for a read to
- * settle; a last-checked column with oldest-checked-first ordering lifts that.
+ * Requests reconciled per run. At one run a minute every open request in an environment is
+ * reconciled at least hourly while the environment has at most 60 times this many open.
  */
-const RECONCILE_BATCH_SIZE = 100;
+const RECONCILE_BATCH_SIZE = 200;
+
+/** Requests reconciled at once; each holds a few RPC calls on the billed cluster endpoint. */
+const RECONCILE_CONCURRENCY = 5;
 
 /**
- * Reconcile this environment's open payment requests, one at a time. A row that fails is logged
- * and left for the next run, so one bad row never stalls the rows behind it.
+ * Reconcile this environment's next batch of open payment requests. A row that fails is logged
+ * and still stamped, so it moves to the back of the rotation instead of blocking the front.
  *
  * @param env - API environment for database and RPC access.
- * @returns Resolves once every selected request has been tried.
+ * @returns Resolves once every selected request has been tried and stamped.
  */
 export async function reconcilePaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
-  const now = Date.now();
-  const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsToReconcile({
+  const repository = createSystemPaymentRequestsRepository(env);
+  const rows = await repository.listPaymentRequestsToReconcile({
     environment,
-    createdAfter: new Date(now - PAYMENT_REQUEST_RECONCILE_HORIZON_MS).toISOString(),
-    expiredAfter: new Date(now - PAYMENT_REQUEST_SETTLEMENT_GRACE_MS).toISOString(),
+    expiredAfter: new Date(Date.now() - PAYMENT_REQUEST_SETTLEMENT_GRACE_MS).toISOString(),
     limit: RECONCILE_BATCH_SIZE,
   });
+  const outcomes = await mapSettledWithConcurrency(rows, RECONCILE_CONCURRENCY, (row) =>
+    reconcilePaymentRequest(env, row, { bestEffort: true })
+  );
+  await repository.markPaymentRequestsReconciled(rows.map((row) => row.id));
+
   let paid = 0;
   let failed = 0;
-  for (const row of rows) {
-    try {
-      const reconciled = await reconcilePaymentRequest(env, row, { bestEffort: true });
-      if (reconciled.status === "paid") {
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome.status === "fulfilled") {
+      if (outcome.value.status === "paid") {
         paid += 1;
       }
-    } catch (error) {
-      failed += 1;
-      logEvent("warn", {
-        event: "sdp_api_payment_request_reconcile_failed",
-        flow: "payment-request-settlement",
-        payment_request_id: row.id,
-        environment,
-        error: error instanceof Error ? error.message : String(error),
-        error_diagnostics: paymentsErrorDiagnostics(error),
-      });
+      continue;
     }
+    failed += 1;
+    // SAFETY: mapSettledWithConcurrency returns one outcome per row, aligned by index.
+    const row = rows[index] as PaymentRequestRow;
+    logEvent("warn", {
+      event: "sdp_api_payment_request_reconcile_failed",
+      flow: "payment-request-settlement",
+      payment_request_id: row.id,
+      environment,
+      error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+      error_diagnostics: paymentsErrorDiagnostics(outcome.reason),
+    });
   }
   logEvent("info", {
     event: "sdp_api_payment_request_reconcile",
