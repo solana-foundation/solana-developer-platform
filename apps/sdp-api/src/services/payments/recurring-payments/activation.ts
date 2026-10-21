@@ -729,7 +729,6 @@ export async function activateRecurringPayment(input: {
   const { attempt, claimed } = claimResult;
 
   let currentStage: PaymentRecurringPaymentActivationAttemptStage = "create_plan";
-  let sendMayLand = false;
   let planCreationSignature = parseNullableStoredSignature(
     claimed.plan_creation_signature !== null
       ? claimed.plan_creation_signature
@@ -740,24 +739,40 @@ export async function activateRecurringPayment(input: {
       ? claimed.authorization_signature
       : attempt.authorization_signature
   );
-
-  try {
-    if (recoveringStaleActivation && (!planCreationSignature || !authorizationSignature)) {
+  // A send an earlier run saved may still land until the chain resolves its step, so a failure
+  // before then keeps the attempt in flight instead of resetting over it.
+  let sendMayLand = planCreationSignature !== null || authorizationSignature !== null;
+  let sourceSigner: TransactionSigner | null = null;
+  /**
+   * The source wallet's signer for a new send, admitted and resolved on first use. A recovered
+   * activation is admitted only here, after the chain has resolved every send an earlier run
+   * saved, so a refusal resets a schedule that has nothing still landing.
+   *
+   * @returns The source wallet's signer.
+   */
+  const signerForNewSend = async (): Promise<TransactionSigner> => {
+    if (sourceSigner !== null) return sourceSigner;
+    if (recoveringStaleActivation) {
       await input.admitStart();
     }
-    const owner = assertValidAddress(claimed.source_address, "sourceAddress");
-    const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
-    const mint = assertValidAddress(claimed.token, "token");
-    const sourceSigner = await createOrgSignerForCustodyWallet(
+    const signer = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
       input.projectId,
       input.sourceWallet.id,
       "recurring.activate"
     );
-    if (sourceSigner.address !== input.sourceWallet.publicKey) {
+    if (signer.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
     }
+    sourceSigner = signer;
+    return signer;
+  };
+
+  try {
+    const owner = assertValidAddress(claimed.source_address, "sourceAddress");
+    const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
+    const mint = assertValidAddress(claimed.token, "token");
     const tokenProgram = await resolveMintTokenProgram(rpc, mint);
     const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
     const amountBaseUnits = parseDecimalAmount(claimed.amount, sourceTokenAccount.decimals);
@@ -832,6 +847,8 @@ export async function activateRecurringPayment(input: {
       }
     );
     if (!onChainPlan) {
+      sendMayLand = false;
+      const planSigner = await signerForNewSend();
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
           amount: amountBaseUnits,
@@ -839,7 +856,7 @@ export async function activateRecurringPayment(input: {
           endTs: 0n,
           metadataUri: subscriptionProgramMetadataUri(claimed.metadata_uri),
           mint,
-          owner: sourceSigner,
+          owner: planSigner,
           periodHours: BigInt(claimed.period_hours),
           planId: programPlanId,
           pullers: [owner],
@@ -852,7 +869,7 @@ export async function activateRecurringPayment(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         sourceWallet: input.sourceWallet,
-        sourceSigner,
+        sourceSigner: planSigner,
         instructions: [createPlanInstruction],
         submissionStore: createSubscriptionStepStore({
           ...planStep,
@@ -891,7 +908,7 @@ export async function activateRecurringPayment(input: {
     if (!onChainPlan.exists) {
       throw new ResumedStepUnsettledError("Subscription plan is not visible on-chain yet; retry");
     }
-    sendMayLand = false;
+    sendMayLand = authorizationSignature !== null;
     const planCreatedAt = onChainPlan.data.data.terms.createdAt.toString();
 
     await subscriptionsRepo.updatePlan({
@@ -986,6 +1003,8 @@ export async function activateRecurringPayment(input: {
       }
     );
     if (!onChainSubscription) {
+      sendMayLand = false;
+      const authorizationSigner = await signerForNewSend();
       let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,
         subscriptionAuthorityAddress,
@@ -1011,7 +1030,7 @@ export async function activateRecurringPayment(input: {
         projectId: input.projectId,
         rpc,
         sourceWallet: input.sourceWallet,
-        sourceSigner,
+        sourceSigner: authorizationSigner,
         sourceTokenAccount,
         subscriptionAuthority,
         subscriptionAuthorityAddress,
@@ -1034,7 +1053,7 @@ export async function activateRecurringPayment(input: {
         merchant: owner,
         payer,
         planId: programPlanId,
-        subscriber: sourceSigner,
+        subscriber: authorizationSigner,
         tokenMint: mint,
       });
       authorizationSignature = await sendSubscriptionInstructions({
@@ -1043,7 +1062,7 @@ export async function activateRecurringPayment(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         sourceWallet: input.sourceWallet,
-        sourceSigner,
+        sourceSigner: authorizationSigner,
         instructions: [subscribeInstruction],
         feePayer,
         submissionStore: createSubscriptionStepStore({
