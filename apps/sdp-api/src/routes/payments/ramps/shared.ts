@@ -1,6 +1,12 @@
 import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { rampAmountLimitOf, SdpPaymentsError } from "@sdp/payments/errors";
-import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import {
+  type RampDirectionMembers,
+  type RampProvider,
+  type RampRuntimeContext,
+  supportsRampDirection,
+} from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction/credentials";
 import { isStagedProviderRefusalReason } from "@sdp/types/custody";
 import {
@@ -280,13 +286,16 @@ export async function persistRampQuoteTransfer(
 /** Ceiling on simultaneous live provider estimate calls per request. */
 export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
 
-export async function estimateAcrossProviders(
+export async function estimateAcrossProviders<Direction extends RampQuoteDirection>(
   c: AppContext,
+  direction: Direction,
   providers: readonly RampProviderId[],
-  runProvider: (provider: RampProviderId, ctx: RampRuntimeContext) => Promise<PaymentRampEstimate>
+  runProvider: (
+    client: RampProvider & RampDirectionMembers[Direction],
+    ctx: RampRuntimeContext
+  ) => Promise<PaymentRampEstimate>
 ): Promise<RampProviderEstimateResult[]> {
   const scope = await resolveScope(c);
-  const ctx = rampRuntime(c);
   const verdict = await loadProjectProviderVerdict(c);
 
   const settled = await mapSettledWithConcurrency(
@@ -312,7 +321,11 @@ export async function estimateAcrossProviders(
             reason: decision.reason,
           };
         }
-        const estimate = await runProvider(provider, ctx);
+        const client = RAMP_PROVIDER_CLIENTS[provider];
+        if (!supportsRampDirection(client, direction)) {
+          return { provider, status: "unsupported" };
+        }
+        const estimate = await runProvider(client, rampRuntime(c, provider));
         return { provider, status: "ok", estimate };
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {

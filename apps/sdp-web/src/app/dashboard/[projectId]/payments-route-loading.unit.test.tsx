@@ -119,6 +119,8 @@ describe("home and payments route loading states", () => {
         layout: "payments-transactions",
         markup: renderToStaticMarkup(<TransactionsLoading />),
         columns: ["status", "type", "amount", "contact", "wallet", "created"],
+        // Its table drops three columns on a phone, so it only scrolls from md up.
+        minWidth: "md:min-w-[47.5rem]",
       },
       {
         layout: "payment-requests",
@@ -137,7 +139,7 @@ describe("home and payments route loading states", () => {
       },
     ];
 
-    for (const { layout, markup, columns } of listCases) {
+    for (const { layout, markup, columns, minWidth = "min-w-[47.5rem]" } of listCases) {
       expect(markup).toContain(`data-loading-layout="${layout}"`);
       expect(markup).toContain(`data-loading-table-variant="${layout}"`);
       expect(markup.match(/data-loading-list-toolbar=/g)).toHaveLength(1);
@@ -147,7 +149,7 @@ describe("home and payments route loading states", () => {
       expect(markup.match(/data-loading-table-row=/g)).toHaveLength(5);
       // The settled lists scroll sideways on narrow screens rather than swapping to cards.
       expect(markup).toContain("overflow-x-auto");
-      expect(markup).toContain("min-w-[760px]");
+      expect(markup).toContain(minWidth);
       expect(markup).not.toContain("data-loading-mobile-rows");
     }
   });
@@ -224,7 +226,7 @@ describe("home and payments route loading states", () => {
     // The Schedules list scrolls sideways inside its column, like the other refresh lists.
     expect(markup).toContain('data-loading-layout="recurring-payments"');
     expect(markup).toContain("overflow-x-auto");
-    expect(markup).toContain("min-w-[760px]");
+    expect(markup).toContain("min-w-[47.5rem]");
   });
 
   it("uses theme-aware surfaces for every authenticated loading state", () => {

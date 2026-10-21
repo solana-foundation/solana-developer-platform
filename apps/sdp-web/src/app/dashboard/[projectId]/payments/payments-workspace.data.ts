@@ -1,33 +1,42 @@
 "use client";
 
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type {
   Counterparty,
   CounterpartyAccount,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
 } from "@sdp/types/counterparties";
-import type { CustodyWalletAggregate } from "@sdp/types/custody";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
-import type { CryptoRailId } from "@sdp/types/payment-rails";
-import type {
-  ListProjectCounterpartyAccountsEnvelope,
-  ListProjectCounterpartyAccountsResponse,
-  PaymentRampEstimateEnvelope,
-  PaymentsWalletAggregateEnvelope,
-  PaymentTransferBatch,
-  PaymentTransferBatchEnvelope,
-  PaymentTransferBatchEstimate,
-  PaymentTransferBatchEstimateEnvelope,
-  PaymentTransferBatchRequest,
-  PaymentTransferRecipient,
-  RampDirection,
-  RampProviderEstimateResult,
-  PaymentTransferEnvelope as TransferEnvelope,
-  PaymentTransferSummary as TransferRecord,
-  PaymentsDashboardWallet as WalletRecord,
-  PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
+import { type CustodyWalletAggregate, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types/custody";
+import { RAMP_FIAT_CURRENCIES, type RampFiatCurrency } from "@sdp/types/generated/ramp";
+import {
+  CRYPTO_RAIL_ASSET_LABELS,
+  type CryptoRailId,
+  SOLANA_CRYPTO_RAILS,
+} from "@sdp/types/payment-rails";
+import {
+  type ListProjectCounterpartyAccountsEnvelope,
+  type ListProjectCounterpartyAccountsResponse,
+  type PaymentsWalletAggregateEnvelope,
+  type PaymentTransferBatch,
+  type PaymentTransferBatchEnvelope,
+  type PaymentTransferBatchEstimate,
+  type PaymentTransferBatchEstimateEnvelope,
+  type PaymentTransferBatchRequest,
+  type PaymentTransferRecipient,
+  RAMP_AMOUNT_LIMIT_REASONS,
+  RAMP_DIRECTIONS,
+  type RampDirection,
+  type RampProviderEstimateResult,
+  type PaymentTransferEnvelope as TransferEnvelope,
+  type PaymentTransferSummary as TransferRecord,
+  type PaymentsDashboardWallet as WalletRecord,
+  type PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types/payments";
+// biome-ignore lint/style/noRestrictedImports: validates the provider ids an estimate response names; which providers to ask comes from getEnabledRampProviders()
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import type { Address } from "@solana/kit";
+import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import {
@@ -415,7 +424,7 @@ export async function fetchRampEstimates(
       }),
     }
   );
-  const body = (await response.json().catch(() => ({}))) as PaymentRampEstimateEnvelope;
+  const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(
       getApiError(
@@ -425,12 +434,76 @@ export async function fetchRampEstimates(
     );
   }
 
-  const estimates = body.data?.estimates;
-  if (!estimates) {
+  const parsed = rampEstimateEnvelopeSchema.safeParse(body);
+  if (!parsed.success) {
     throw new Error(t("DashboardPayments.workspace.rampEstimateMissing"));
   }
+  return parsed.data.data.estimates.map((result) => withUsableRate(result, t));
+}
 
-  return estimates;
+const rampEstimateCurrencySchema = z.union([
+  z.enum(RAMP_FIAT_CURRENCIES),
+  z.enum(CRYPTO_RAIL_ASSET_LABELS),
+]);
+
+/** Estimate figures are decimals; any other value refuses the response, as a missing one does. */
+const rampFigureSchema = z.string().refine((value) => isDecimalString(value));
+
+const rampEstimateSchema = z.object({
+  provider: z.enum(RAMP_PROVIDERS),
+  direction: z.enum(RAMP_DIRECTIONS),
+  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
+  assetRail: z.enum(SOLANA_CRYPTO_RAILS),
+  fiatAmount: rampFigureSchema,
+  cryptoAmount: rampFigureSchema,
+  exchangeRate: rampFigureSchema,
+  totalFiatAmount: rampFigureSchema.optional(),
+  fees: z.object({
+    currency: rampEstimateCurrencySchema,
+    total: rampFigureSchema,
+    network: rampFigureSchema.optional(),
+    networkCurrency: rampEstimateCurrencySchema.optional(),
+    provider: rampFigureSchema.optional(),
+    providerCurrency: rampEstimateCurrencySchema.optional(),
+  }),
+  minFiatAmount: rampFigureSchema.optional(),
+  maxFiatAmount: rampFigureSchema.optional(),
+  expiresAt: z.string().optional(),
+});
+
+const rampProvider = z.enum(RAMP_PROVIDERS);
+
+const rampProviderEstimateResultSchema = z.discriminatedUnion("status", [
+  z.object({ provider: rampProvider, status: z.literal("ok"), estimate: rampEstimateSchema }),
+  z.object({ provider: rampProvider, status: z.literal("unsupported") }),
+  // A refusal names its reason; an amount out of range also names the bound it crossed.
+  z.object({
+    provider: rampProvider,
+    status: z.literal("error"),
+    error: z.string(),
+    reason: z.enum([...RAMP_AMOUNT_LIMIT_REASONS, ...STAGED_PROVIDER_REFUSAL_REASONS]).optional(),
+    limit: z.object({ amount: rampFigureSchema, currency: z.string() }).optional(),
+  }),
+]);
+
+const rampEstimateEnvelopeSchema = z.object({
+  data: z.object({ estimates: z.array(rampProviderEstimateResultSchema) }),
+});
+
+/** An estimate without a positive rate is that provider's error, never a figure to hide. */
+function withUsableRate(
+  result: RampProviderEstimateResult,
+  t: Translate
+): RampProviderEstimateResult {
+  const rate = result.status === "ok" ? result.estimate.exchangeRate : null;
+  if (rate === null || compareDecimalAmounts(rate, "0") > 0) {
+    return result;
+  }
+  return {
+    provider: result.provider,
+    status: "error",
+    error: t("DashboardPayments.workspace.rampEstimateInvalidRate"),
+  };
 }
 
 export async function fetchWalletBalances(
@@ -795,7 +868,14 @@ const MAX_COUNTERPARTY_PAGES = 50;
 export interface CounterpartiesResult {
   ok: boolean;
   data: Counterparty[];
+  /** The directory's full size, when the read knows it (a server's first page does). */
+  total?: number;
   error?: string;
+}
+
+/** Whether a contacts read holds the whole directory, so a reader can reuse it. */
+export function counterpartyListComplete(result: CounterpartiesResult): boolean {
+  return result.ok && (result.total === undefined || result.data.length >= result.total);
 }
 
 export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {

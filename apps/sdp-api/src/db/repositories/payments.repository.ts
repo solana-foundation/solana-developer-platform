@@ -107,6 +107,8 @@ export interface UpdatePaymentTransferInput {
   transferId: string;
   organizationId?: string;
   projectId?: string;
+  /** Timeout CAS: only an unsigned row with no submission start may match. */
+  requireUnsigned?: true;
   expectedStatus?: PaymentTransferStatus;
   status?: PaymentTransferStatus;
   signature?: string | null;
@@ -121,6 +123,8 @@ export interface UpdatePaymentTransferInput {
   providerData?: Record<string, unknown>;
   error?: string | null;
   updatedAt: string;
+  /** Expiry CAS: a request that started submission wins over a stale failure. */
+  requireUnstarted?: true;
 }
 
 /** Row fields a guarded status change may write alongside the status. */

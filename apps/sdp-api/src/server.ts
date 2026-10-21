@@ -7,11 +7,10 @@
  * The shutdown sequence lives in `runtime/shutdown-node.ts`.
  */
 
-import "@sdp/env-config/tls-trust";
-
 import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 import { assertKoraConfigured } from "@sdp/fee-payment";
+import { assertManagedRpcConfigured } from "@sdp/rpc/factory";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 
 import { createApp } from "@/app";
@@ -19,7 +18,7 @@ import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
 import { parseDatabaseEnv } from "@/db/database-env";
 import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
-import { getProcessEnv } from "@/lib/runtime-env";
+import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
@@ -118,6 +117,9 @@ export function assertRequiredEnv(env: Env): void {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
   assertKoraConfigured(env);
+  if (!isSelfHostedDeployment(env)) {
+    assertManagedRpcConfigured();
+  }
 }
 
 async function main(): Promise<void> {

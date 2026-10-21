@@ -1,3 +1,4 @@
+import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { MoonpayRampSettlement, RampTransferType } from "@sdp/types/payments";
 import { z } from "zod";
 import { decimalStringFromNumber } from "#/decimal";
@@ -11,6 +12,55 @@ export type MoonpaySettlementEvent =
       providerObservedAt: string;
       rampType: RampTransferType;
     } & Exclude<RampSettlementEvent, { kind: "ignore" }>);
+
+export const MOONPAY_CRYPTO_CODES = [
+  "sol",
+  "usdc_sol",
+  "usdt_sol",
+  "usdg_sol",
+  "pyusd_sol",
+] as const;
+export type MoonpayCryptoCode = (typeof MOONPAY_CRYPTO_CODES)[number];
+
+export const MOONPAY_CRYPTO_CODE_TO_RAIL = {
+  sol: "sol.solana",
+  usdc_sol: "usdc.solana",
+  usdt_sol: "usdt.solana",
+  usdg_sol: "usdg.solana",
+  pyusd_sol: "pyusd.solana",
+} as const satisfies Record<MoonpayCryptoCode, CryptoRailId>;
+
+export function isMoonpayCryptoCode(value: string): value is MoonpayCryptoCode {
+  return (MOONPAY_CRYPTO_CODES as readonly string[]).includes(value);
+}
+
+/** The rail a MoonPay crypto code settles on, or null for an asset SDP has no rail for. */
+function moonpayCryptoRail(code: string): CryptoRailId | null {
+  return isMoonpayCryptoCode(code) ? MOONPAY_CRYPTO_CODE_TO_RAIL[code] : null;
+}
+
+/**
+ * `event` with the rail of the crypto a settled transaction moved, so
+ * settlement can refuse another asset. The webhook and the status pull both
+ * read it here. Null when a settled transaction names no crypto: each caller
+ * says how that fails.
+ *
+ * @param event - The transaction's settlement event.
+ * @param cryptoCode - The MoonPay code of the crypto the transaction moved.
+ * @returns The event, with `deliveredAssetRail` when it is settled.
+ */
+export function withMoonpaySettledAsset(
+  event: MoonpaySettlementEvent,
+  cryptoCode: string | undefined
+): MoonpaySettlementEvent | null {
+  if (event.kind !== "settled") {
+    return event;
+  }
+  if (cryptoCode === undefined) {
+    return null;
+  }
+  return { ...event, deliveredAssetRail: moonpayCryptoRail(cryptoCode) };
+}
 
 const MOONPAY_TRANSACTION_STATUS = {
   waitingPayment: "awaiting_payment",

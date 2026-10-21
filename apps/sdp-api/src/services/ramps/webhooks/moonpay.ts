@@ -1,13 +1,12 @@
 import { readRecord, readString } from "@sdp/payments/json";
-import { moonpayCryptoRail } from "@sdp/payments/ramps/providers/moonpay/client";
 import {
   type MoonpaySettlementEvent,
   moonpayBuyTransactionSchema,
   moonpaySellTransactionSchema,
   moonpaySellTransactionSettlementEvent,
   moonpayTransactionSettlementEvent,
+  withMoonpaySettledAsset,
 } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
-import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isRampTransferType,
@@ -30,7 +29,7 @@ import {
   withRampSettlementTransaction,
 } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
-import type { WebhookProcessor } from "./processor";
+import type { RampWebhookValidationContext, WebhookProcessor } from "./processor";
 
 /**
  * The key that signs `environment`'s MoonPay events. SDP holds the sandbox key
@@ -91,10 +90,8 @@ function withSettledAsset(
   event: MoonpaySettlementEvent,
   cryptoCode: string | undefined
 ): MoonpaySettlementEvent {
-  if (event.kind !== "settled") {
-    return event;
-  }
-  if (cryptoCode === undefined) {
+  const withAsset = withMoonpaySettledAsset(event, cryptoCode);
+  if (withAsset === null) {
     throw badRequest(
       `MoonPay "${type}" webhook carries a completed transaction without its crypto`,
       {
@@ -102,7 +99,7 @@ function withSettledAsset(
       }
     );
   }
-  return { ...event, deliveredAssetRail: moonpayCryptoRail(cryptoCode) };
+  return withAsset;
 }
 
 class RollBackMoonpayClaim extends Error {

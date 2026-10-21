@@ -13,14 +13,12 @@ import { cn } from "@sdp/ui/cn";
 import { InfoHint } from "@sdp/ui/info-hint";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
-import { StatusText } from "@sdp/ui/status-text";
 import { ArrowUpRightIcon, RotateCwIcon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useClientNow } from "@/lib/use-client-now";
 import {
   formatNetworkAge,
-  formatNetworkChange,
   formatNetworkDay,
   formatNetworkTicks,
   formatNetworkValue,
@@ -30,8 +28,6 @@ import {
   type NetworkMetricDisplay,
   type NetworkRange,
   networkAxisTicks,
-  networkChange,
-  networkChangeTone,
   networkFreshness,
   networkRangePoints,
 } from "./network-stats";
@@ -89,7 +85,7 @@ const HEALTH_BADGE = {
 const FIGURE_GRID = "mt-5 grid min-w-0 gap-x-12 gap-y-12.5 @[44rem]:grid-cols-2";
 const FIGURE_SLOTS = ["figure-1", "figure-2", "figure-3", "figure-4"] as const;
 /** The headline's one 30px line: a figure with no reading keeps it, so no state moves the page. */
-const HEADLINE_ROW = "mt-1 flex h-7.5 min-w-0 gap-x-2 whitespace-nowrap";
+const HEADLINE_ROW = "mt-1 flex h-7.5 min-w-0 whitespace-nowrap";
 /** The age reads in hours; a minute's tick keeps it current on a page left open. */
 const FRESHNESS_REFRESH_MS = 60_000;
 
@@ -146,8 +142,8 @@ function EmptyFigure({ id }: { id: NetworkMetricId }) {
 }
 
 /**
- * One metric: its latest figure, the change over the range, and the chart, or an empty figure
- * when the range holds no complete day.
+ * One metric: its latest figure and the chart, or an empty figure when the range holds no
+ * complete day.
  */
 const MetricFigure = memo(function MetricFigure({
   id,
@@ -174,7 +170,6 @@ const MetricFigure = memo(function MetricFigure({
       ticks,
       tickLabels: formatNetworkTicks(ticks, display.format, locale),
       latest: last.value,
-      change: networkChange(points),
       dateLabels: [
         formatNetworkDay(first.date, locale),
         formatNetworkDay(middle.date, locale),
@@ -196,18 +191,6 @@ const MetricFigure = memo(function MetricFigure({
         <span className="text-quote font-medium tracking-normal text-primary">
           {formatValue(view.latest)}
         </span>
-        {view.change === null ? null : (
-          <StatusText
-            tone={networkChangeTone(view.change, display.higherIsBetter)}
-            className="min-w-0 truncate text-body tabular-nums"
-          >
-            {formatNetworkChange(view.change, locale)}
-            <span className="sr-only">
-              {" "}
-              {t("Shared.homeWorkspace.network.changeOver", { range: t(RANGE_COPY[range]) })}
-            </span>
-          </StatusText>
-        )}
       </p>
       <OverviewAreaChart
         className="mt-5"

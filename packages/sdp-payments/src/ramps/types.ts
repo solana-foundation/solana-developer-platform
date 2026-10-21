@@ -15,13 +15,14 @@ import type {
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
+  RampDirection,
   RampTransferSettlement,
   RampTransferType,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export interface ProviderDirectionSupportSnapshot {
   currencies: Readonly<Record<string, RampCurrencyLimit>>;
@@ -99,22 +100,32 @@ export type RampFetchText = (
 export type RampDumpWriter = (name: string, payload: RampDiscoveryResponseDump) => Promise<void>;
 export type RampRawDumpReader = (relativePath: string) => Promise<unknown>;
 
+/**
+ * The keys of the provider account a call runs on: a public identifier and a
+ * secret, the pair every ramp account SDP integrates uses. A provider whose
+ * account has another shape adds an optional field here.
+ */
+export interface RampProviderCredentials {
+  /** Identifies the account: a publishable key, an API key or a client id. */
+  publicKey: string;
+  /** Authenticates the account's calls and signs its widget URLs. */
+  secretKey: string;
+}
+
+/** An account's keys for a mode, or why none can serve it. */
+export type RampCredentialsResolution =
+  | { ok: true; credentials: RampProviderCredentials }
+  | { ok: false; reason: string };
+
 export interface RampDiscoveryContext {
-  env: Record<string, string | undefined>;
+  /** SDP's sandbox keys for the provider, or why it has none. */
+  credentials: RampCredentialsResolution;
   fetchJson: RampFetchJson;
   fetchText: RampFetchText;
   writeDump: RampDumpWriter;
   readDump: RampRawDumpReader;
   /** Skip the network fetch and distill from the raw dumps already on disk. */
   offline: boolean;
-}
-
-export interface RampWebhookValidationContext {
-  env: Record<string, string | undefined>;
-  environment: SdpEnvironment;
-  headers: Headers;
-  rawBody: string;
-  requestUrl?: string;
 }
 
 export interface RampOnchainTransfer {
@@ -209,13 +220,14 @@ export function isAuditedRampSettlementKind(
 }
 
 /**
- * Runtime context for quote/execute calls. Providers read their own credentials
- * from `env` keyed by `mode`; the route handler resolves `mode` (it depends on
- * AppContext) and passes plain values so the provider stays AppContext-free.
+ * What one provider call runs under: the project's mode, the cluster that mode
+ * picks, and the provider account's keys for it. The API resolves all three,
+ * so an adapter never sees the process environment (ADR 0008).
  */
 export interface RampRuntimeContext {
-  env: Record<string, string | undefined>;
   mode: SdpEnvironment;
+  cluster: SolanaCluster;
+  credentials: RampProviderCredentials;
 }
 
 export interface RampEstimateOnrampInput {
@@ -230,6 +242,22 @@ export interface RampEstimateOfframpInput {
   cryptoAmount: string;
 }
 
+/** What the caller knows about the buyer, for a provider widget to pre-fill. */
+export interface RampCustomerDetails {
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  dob?: { year: number; month: number; day: number };
+  address?: {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
+}
+
 export interface RampOnrampQuoteInput {
   assetRail: CryptoRailId;
   fiatCurrency?: RampFiatCurrency;
@@ -241,8 +269,8 @@ export interface RampOnrampQuoteInput {
   paymentTransferId?: string;
   /** End-user IP forwarded for the provider's geo/fraud checks (Stripe). */
   customerIpAddress?: string;
-  /** Identity pre-fill for the embedded on-ramp widget (Stripe). */
-  stripeCustomerInfo?: StripeCustomerInfo;
+  /** Identity pre-fill for an embedded on-ramp widget (Stripe). */
+  customerDetails?: RampCustomerDetails;
 }
 
 export interface RampOfframpQuoteInput {
@@ -287,28 +315,81 @@ export interface RampTransferLookup {
   providerReference: string | null;
 }
 
+/** The members a provider needs to run an on-ramp. */
+export interface RampOnrampMembers {
+  estimateOnramp: (
+    ctx: RampRuntimeContext,
+    input: RampEstimateOnrampInput
+  ) => Promise<PaymentRampEstimate>;
+  createOnrampQuote: (
+    ctx: RampRuntimeContext,
+    input: RampOnrampQuoteInput
+  ) => Promise<PaymentRampQuote>;
+}
+
+/** The members a provider needs to run an off-ramp. */
+export interface RampOfframpMembers {
+  estimateOfframp: (
+    ctx: RampRuntimeContext,
+    input: RampEstimateOfframpInput
+  ) => Promise<PaymentRampEstimate>;
+  createOfframpQuote: (
+    ctx: RampRuntimeContext,
+    input: RampOfframpQuoteInput
+  ) => Promise<PaymentRampQuote>;
+}
+
+/** Each direction's members, by direction. */
+export interface RampDirectionMembers {
+  onramp: RampOnrampMembers;
+  offramp: RampOfframpMembers;
+}
+
+/** The member names each direction needs, so `supportsRampDirection` and the contract suite agree. */
+export const RAMP_DIRECTION_MEMBERS = {
+  onramp: ["estimateOnramp", "createOnrampQuote"],
+  offramp: ["estimateOfframp", "createOfframpQuote"],
+} as const satisfies {
+  readonly [Direction in RampDirection]: readonly (keyof RampDirectionMembers[Direction])[];
+};
+
 /**
  * Full provider contract: rail discovery plus the runtime quote/execute flow.
  * All HTTP lives behind this; the route handler owns DB interaction and passes
- * pre-resolved inputs.
+ * pre-resolved inputs. Members are function-typed, so an implementation is
+ * checked strictly. A provider that does not run a direction omits that
+ * direction's members.
+ *
+ * @typeParam Event - The settlement events its status pull answers, as its
+ * webhook processor reads them.
  */
-export interface RampProvider {
-  id: RampProviderId;
-  declaredRailSupport: ProviderDeclaredRailSupport;
+export interface RampProvider<Event extends RampSettlementEvent = RampSettlementEvent>
+  extends Partial<RampOnrampMembers>,
+    Partial<RampOfframpMembers> {
+  readonly id: RampProviderId;
+  /** The provider's name as people read it, in SDP's messages. */
+  readonly label: string;
+  readonly declaredRailSupport: ProviderDeclaredRailSupport;
+  /**
+   * Why `credentials` can't serve `mode`, or null when they can. A key's
+   * format names the mode it runs in, so a live key never reaches a sandbox
+   * call. Pure: makes no request.
+   */
+  checkCredentials: (credentials: RampProviderCredentials, mode: SdpEnvironment) => string | null;
   /** Optional webhook contract. Ingress verifies signed bytes before persisting;
    * parsing is pure and runs from the durable inbox after acknowledgement. */
   webhook?: RampProviderWebhook;
   /**
-   * Optional status pull, for a sweep that recovers missed webhooks. Answers
-   * the events the provider's webhook would carry for each transaction it
-   * holds for the transfer, oldest update first, and none when it holds no
+   * Status pull, for the sweep that recovers missed webhooks. Answers the
+   * events the provider's webhook would carry for each transaction it holds
+   * for the transfer, oldest update first, and none when it holds no
    * transaction. Throws when SDP could not ask, so a failure never reads as
    * absence.
    */
-  fetchTransferStatus?: (
+  fetchTransferStatus: (
     ctx: RampRuntimeContext,
     lookup: RampTransferLookup
-  ) => Promise<readonly RampSettlementEvent[]>;
+  ) => Promise<readonly Event[]>;
   /**
    * Optional: cancels the sale the provider holds under SDP's transfer id,
    * once SDP has canceled its own record. `not_found` when the customer never
@@ -325,27 +406,24 @@ export interface RampProvider {
    * persists them with `context.writeDump` (skipped when `context.offline`),
    * then re-reads the dumps and distills them into the currency/rail snapshot.
    */
-  discoverCurrencyAndRails(context: RampDiscoveryContext): Promise<ProviderRailSupportDistillation>;
-  estimateOnramp(
-    ctx: RampRuntimeContext,
-    input: RampEstimateOnrampInput
-  ): Promise<PaymentRampEstimate>;
-  estimateOfframp(
-    ctx: RampRuntimeContext,
-    input: RampEstimateOfframpInput
-  ): Promise<PaymentRampEstimate>;
-  createOnrampQuote?(
-    ctx: RampRuntimeContext,
-    input: RampOnrampQuoteInput
-  ): Promise<PaymentRampQuote>;
-  createOfframpQuote(
-    ctx: RampRuntimeContext,
-    input: RampOfframpQuoteInput
-  ): Promise<PaymentRampQuote>;
-  validateCounterparty(
+  discoverCurrencyAndRails: (
+    context: RampDiscoveryContext
+  ) => Promise<ProviderRailSupportDistillation>;
+  validateCounterparty: (
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions
-  ): CounterpartyRequirements;
+  ) => CounterpartyRequirements;
+}
+
+/**
+ * Whether `provider` runs `direction`: it has every member the direction
+ * needs. Narrows the provider to those members.
+ */
+export function supportsRampDirection<Direction extends RampDirection>(
+  provider: RampProvider,
+  direction: Direction
+): provider is RampProvider & RampDirectionMembers[Direction] {
+  return RAMP_DIRECTION_MEMBERS[direction].every((member) => provider[member] !== undefined);
 }
 
 export interface RampProviderWebhook<Event = unknown> {

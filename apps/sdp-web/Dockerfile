@@ -21,12 +21,7 @@
 # ── Base: pin Node + pnpm to the repo's packageManager ─────────────────────
 # Digest pinned so rebuilds don't silently float onto a new node:24-slim.
 # Refresh with: docker pull node:24-slim && docker inspect --format='{{index .RepoDigests 0}}' node:24-slim
-FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS tls-base
-# Temporary eMudhra containment before any package downloads or app startup.
-COPY packages/sdp-env-config/src/tls-trust.cjs /opt/sdp/tls-trust.cjs
-ENV NODE_OPTIONS="--require=/opt/sdp/tls-trust.cjs"
-
-FROM tls-base AS base
+FROM node:24-slim@sha256:8cabefbd444809cf0e319b5831c65da1ea202200ca552a5e75fd7938a6f86658 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -41,7 +36,6 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/sdp-web/package.json ./apps/sdp-web/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
-COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 # Tokens and Tailwind theme imported by globals.css.
 COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 # The UI primitives behind every components/ui import (re-export shims).
@@ -68,7 +62,6 @@ WORKDIR /repo
 COPY --from=deps /repo /repo
 COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
-COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-ui ./packages/sdp-ui
 COPY packages/sdp-rpc ./packages/sdp-rpc
@@ -139,7 +132,7 @@ RUN --mount=type=secret,id=sentry_auth_token \
     pnpm --filter sdp-web build
 
 # ── Runtime: slim image with only the standalone output ────────────────────
-FROM tls-base AS runner
+FROM node:24-slim@sha256:8cabefbd444809cf0e319b5831c65da1ea202200ca552a5e75fd7938a6f86658 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \

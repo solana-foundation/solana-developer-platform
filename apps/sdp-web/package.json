@@ -23,7 +23,6 @@
     "@clerk/nextjs": "7.9.7",
     "@flags-sdk/vercel": "1.4.9",
     "@sdp/design-tokens": "workspace:*",
-    "@sdp/env-config": "workspace:*",
     "@sdp/issuance": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/redaction": "workspace:*",

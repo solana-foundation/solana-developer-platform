@@ -47,6 +47,8 @@ interface RampWizardShellProps {
   cancelLabel?: string;
   /** Refresh surfaces only: confirm before running `onCancel`, as for a live transaction. */
   confirmCancel?: boolean;
+  /** Refresh surfaces only: holds the Cancel while the request it would start is in flight. */
+  cancelDisabled?: boolean;
   /** Refresh surfaces only: what the primary action is waiting for, on the footer's left. */
   footerHint?: ReactNode;
 }
@@ -70,7 +72,7 @@ function RefreshFooter({
   backLabel: string;
   backDisabled: boolean;
   onBack: () => void;
-  cancel: { label: string; onClick: () => void } | null;
+  cancel: { label: string; disabled: boolean; onClick: () => void } | null;
   hint: ReactNode;
   actions: ReactNode;
   primary: { label: string; disabled: boolean; onClick: () => void } | null;
@@ -87,7 +89,7 @@ function RefreshFooter({
       <div className="ml-auto flex items-center gap-4">
         {actions}
         {cancel ? (
-          <Button type="button" variant="ghost" onClick={cancel.onClick}>
+          <Button type="button" variant="ghost" disabled={cancel.disabled} onClick={cancel.onClick}>
             {cancel.label}
           </Button>
         ) : null}
@@ -167,7 +169,7 @@ function wizardFooter({
   secondaryDisabled: boolean | undefined;
   hideSecondary: boolean | undefined;
   onSecondaryClick: () => void;
-  cancel: { label: string; onClick: () => void } | null;
+  cancel: { label: string; disabled: boolean; onClick: () => void } | null;
   footerHint: ReactNode;
   footerActions: ReactNode;
   t: ReturnType<typeof useTranslations>;
@@ -178,6 +180,7 @@ function wizardFooter({
       (stepIndex === 0 && hideSecondary !== true
         ? {
             label: secondaryLabel ?? t("DashboardPayments.counterparty.cancel"),
+            disabled: false,
             onClick: onSecondaryClick,
           }
         : null);
@@ -220,6 +223,7 @@ function useLeaveConfirmation({
   hideSecondary,
   secondaryDisabled,
   confirmCancel,
+  cancelDisabled,
   onCancel,
   onSecondary,
 }: {
@@ -227,6 +231,7 @@ function useLeaveConfirmation({
   hideSecondary: boolean | undefined;
   secondaryDisabled: boolean | undefined;
   confirmCancel: boolean | undefined;
+  cancelDisabled: boolean | undefined;
   onCancel: (() => void) | undefined;
   onSecondary: () => void;
 }) {
@@ -235,7 +240,7 @@ function useLeaveConfirmation({
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>("secondary");
   const cancelConfirmationAvailable =
     confirmTarget === "cancel"
-      ? confirmCancel === true && onCancel !== undefined
+      ? confirmCancel === true && onCancel !== undefined && cancelDisabled !== true
       : confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
   const askToConfirm = (target: ConfirmTarget) => () => {
     setConfirmTarget(target);
@@ -282,6 +287,7 @@ function shellFooter({
   onCancel,
   cancelLabel,
   confirmCancel,
+  cancelDisabled,
   askToConfirm,
   footerHint,
   footerActions,
@@ -301,12 +307,18 @@ function shellFooter({
   onCancel: (() => void) | undefined;
   cancelLabel: string | undefined;
   confirmCancel: boolean | undefined;
+  cancelDisabled: boolean | undefined;
   askToConfirm: (target: ConfirmTarget) => () => void;
   footerHint: ReactNode;
   footerActions: ReactNode;
   t: ReturnType<typeof useTranslations>;
 }): ReactNode {
-  const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
+  // A refresh Cancel alone keeps the footer: an open sale waiting on its deposit address.
+  const showFooter =
+    hideSecondary !== true ||
+    hidePrimary !== true ||
+    footerActions != null ||
+    (refresh && onCancel !== undefined);
   if (!showFooter) {
     return undefined;
   }
@@ -323,6 +335,7 @@ function shellFooter({
     cancel: onCancel
       ? {
           label: cancelLabel ?? t("DashboardPayments.counterparty.cancel"),
+          disabled: cancelDisabled === true,
           onClick: confirmCancel ? askToConfirm("cancel") : onCancel,
         }
       : null,
@@ -355,6 +368,7 @@ export function RampWizardShell({
   onCancel,
   cancelLabel,
   confirmCancel,
+  cancelDisabled,
   footerHint,
 }: RampWizardShellProps) {
   const t = useTranslations();
@@ -364,6 +378,7 @@ export function RampWizardShell({
     hideSecondary,
     secondaryDisabled,
     confirmCancel,
+    cancelDisabled,
     onCancel,
     onSecondary,
   });
@@ -383,6 +398,7 @@ export function RampWizardShell({
     onCancel,
     cancelLabel,
     confirmCancel,
+    cancelDisabled,
     askToConfirm: confirmation.askToConfirm,
     footerHint,
     footerActions,

@@ -14,13 +14,21 @@ export function AmountBalanceReadout({
   exceeds,
   onMax,
 }: {
-  available: string;
+  /** Null when the wallet's balance could not be read. */
+  available: string | null;
   assetLabel: string;
   exceeds: boolean;
   onMax?: () => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  if (available === null) {
+    return (
+      <span className="whitespace-nowrap text-sm text-tertiary">
+        {t("DashboardPayments.ramps.balanceUnread")}
+      </span>
+    );
+  }
   const trimmedAssetLabel = assetLabel.trim();
   const displayAssetLabel =
     WELL_KNOWN_TOKEN_BY_MINT.get(trimmedAssetLabel)?.symbol ?? shortenAddress(trimmedAssetLabel);

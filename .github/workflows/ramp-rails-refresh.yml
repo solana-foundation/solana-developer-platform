@@ -14,9 +14,6 @@ concurrency:
   group: ramp-rails-refresh
   cancel-in-progress: false
 
-env:
-  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
-
 jobs:
   refresh:
     name: Discover live + open drift PR
@@ -39,7 +36,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install

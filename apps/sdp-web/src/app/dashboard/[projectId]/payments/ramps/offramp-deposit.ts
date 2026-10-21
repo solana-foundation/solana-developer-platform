@@ -30,7 +30,7 @@ export async function submitOfframpDeposit(
       position: "bottom-right",
     });
   } catch (error) {
-    toast.error(t("DashboardPayments.ramps.transferFailed"), {
+    toast.error(t("DashboardPayments.ramps.sendRefused"), {
       id: toastId,
       description:
         error instanceof Error ? error.message : t("DashboardPayments.ramps.transferFailed"),
