@@ -1,8 +1,4 @@
-import {
-  compareDecimalAmounts,
-  divideDecimalAmounts,
-  subtractDecimalAmounts,
-} from "@sdp/payments/decimal";
+import { compareDecimalAmounts, subtractDecimalAmounts } from "@sdp/payments/decimal";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   isRampTransferType,
@@ -72,8 +68,7 @@ function rampFiatPayout(row: TransferRow): RampFiatPayout | undefined {
 /**
  * What a transfer's saved signed transaction says about its Token-2022 amounts, in UI units at
  * the mint's decimals: the transfer fee it states and what the recipient receives after it, and,
- * when the mint scales its UI amount, the base units that moved and the multiplier `amount` was
- * scaled by at signing.
+ * when the mint scales its UI amount, the base units that moved.
  *
  * @param row - The transfer row.
  * @returns Each field, or undefined when it does not apply: no signed transaction, no
@@ -83,7 +78,6 @@ function signedTokenTransferFields(row: TransferRow): {
   transferFee: string | undefined;
   receivedAmount: string | undefined;
   unscaledAmount: string | undefined;
-  uiAmountMultiplier: string | undefined;
 } {
   const signed =
     row.signed_transaction === null ? null : readSignedTokenTransfer(row.signed_transaction);
@@ -92,7 +86,6 @@ function signedTokenTransferFields(row: TransferRow): {
       transferFee: undefined,
       receivedAmount: undefined,
       unscaledAmount: undefined,
-      uiAmountMultiplier: undefined,
     };
   }
   const transferFee =
@@ -104,7 +97,6 @@ function signedTokenTransferFields(row: TransferRow): {
     receivedAmount:
       transferFee === undefined ? undefined : subtractDecimalAmounts(row.amount, transferFee),
     unscaledAmount: scaled ? movedAmount : undefined,
-    uiAmountMultiplier: scaled ? divideDecimalAmounts(row.amount, movedAmount) : undefined,
   };
 }
 

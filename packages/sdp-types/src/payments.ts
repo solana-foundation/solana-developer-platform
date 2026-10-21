@@ -539,8 +539,6 @@ export interface PaymentTransferSummary {
   receivedAmount?: string;
   /** Base units moved at the mint's decimals, before a Token-2022 scaled UI amount multiplier; present only when `amount` was scaled. */
   unscaledAmount?: string;
-  /** `amount` divided by `unscaledAmount`; present with `unscaledAmount`. */
-  uiAmountMultiplier?: string;
   memo?: string;
   rampsMemo: Record<string, string>;
   /** A retired provider's transfers still read, as stored. */

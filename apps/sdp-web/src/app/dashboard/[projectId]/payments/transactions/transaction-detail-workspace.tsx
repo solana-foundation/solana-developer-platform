@@ -143,8 +143,8 @@ function transactionAmountLabel(
 
 /**
  * What a transfer's Token-2022 amounts add to its record, each with its token's name: the
- * transfer fee and what the recipient got after it, and the base units moved with the
- * multiplier a scaled UI amount applied.
+ * transfer fee and what the recipient got after it, and the underlying amount a scaled UI
+ * amount moved with what it shows as.
  *
  * @param transfer - The transfer record, when the page read one.
  * @param token - The token's name, or null when the row names none.
@@ -157,7 +157,7 @@ function tokenTransferLabels(
   locale: string
 ): {
   receivedAfterFee: { received: string; fee: string } | null;
-  scaled: { amount: string; multiplier: string } | null;
+  scaled: { amount: string; shown: string } | null;
 } {
   const tokenSuffix = token ? ` ${token}` : "";
   const receivedAfterFee =
@@ -168,13 +168,11 @@ function tokenTransferLabels(
           fee: `${formatDecimalAmount(transfer.transferFee, locale)}${tokenSuffix}`,
         };
   const scaled =
-    transfer === null ||
-    transfer.unscaledAmount === undefined ||
-    transfer.uiAmountMultiplier === undefined
+    transfer === null || transfer.unscaledAmount === undefined || transfer.amount === undefined
       ? null
       : {
           amount: `${formatDecimalAmount(transfer.unscaledAmount, locale)}${tokenSuffix}`,
-          multiplier: transfer.uiAmountMultiplier,
+          shown: `${formatDecimalAmount(transfer.amount, locale)}${tokenSuffix}`,
         };
   return { receivedAfterFee, scaled };
 }
@@ -342,7 +340,7 @@ function TransactionParties({
   direction: "inbound" | "outbound" | null;
   contact: string | null;
   receivedAfterFee: { received: string; fee: string } | null;
-  scaled: { amount: string; multiplier: string } | null;
+  scaled: { amount: string; shown: string } | null;
 }) {
   const t = useTranslations();
   const wallet = walletLabelOf(transaction);

@@ -394,9 +394,9 @@
       "transferFeeValue": "{amount} {asset}, paid by the recipient",
       "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
       "recipientReceives": "Recipient receives",
-      "scaledAmount": "Scaled amount",
-      "scaledAmountValue": "{amount} × {multiplier}",
-      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. {amount} of base units moved, shown multiplied by {multiplier}. SDP rounds the base units up so the recipient sees at least the amount sent.",
+      "scaledAmount": "Underlying amount",
+      "scaledAmountValue": "{amount}, shown as {shown}",
+      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. The transfer moved {amount} of underlying units, which the recipient sees as {shown}. SDP rounds up so they see at least the amount sent.",
       "counterparty": "counterparty",
       "toCounterparty": "to {counterparty}",
       "transferSubmitted": "Transfer submitted",
@@ -1531,9 +1531,9 @@
       "transferFee": "Transfer fee",
       "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
       "recipientReceived": "Recipient received",
-      "scaledAmount": "Scaled amount",
-      "scaledAmountValue": "{amount} × {multiplier}",
-      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. {amount} of base units moved, shown multiplied by {multiplier}. SDP rounds the base units up so the recipient sees at least the amount sent."
+      "scaledAmount": "Underlying amount",
+      "scaledAmountValue": "{amount}, shown as {shown}",
+      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. The transfer moved {amount} of underlying units, which the recipient sees as {shown}. SDP rounds up so they see at least the amount sent."
     },
     "requestDetail": {
       "paymentLink": "Payment link",

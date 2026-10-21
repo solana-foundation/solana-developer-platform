@@ -374,11 +374,11 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const scaled =
     transferResult === null ||
     transferResult.unscaledAmount === undefined ||
-    transferResult.uiAmountMultiplier === undefined
+    transferResult.amount === undefined
       ? null
       : {
           amount: `${formatTokenAmount(transferResult.unscaledAmount, locale)} ${assetLabel}`,
-          multiplier: transferResult.uiAmountMultiplier,
+          shown: `${formatTokenAmount(transferResult.amount, locale)} ${assetLabel}`,
         };
   return (
     <>
