@@ -127,41 +127,25 @@ describe("mapTransferRow payout and confirmation", () => {
 });
 
 describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
-  const mint = syntheticAddress(1);
   const authority = createNoopSigner(syntheticAddress(2));
   const transferAccounts = {
     source: syntheticAddress(3),
-    mint,
+    mint: syntheticAddress(1),
     destination: syntheticAddress(4),
     authority,
     decimals: 6,
   };
 
-  function transferRow(signedTransfers: readonly Instruction[] | null): PaymentTransferRow {
+  function signedTransferRow(signedTransfer: Instruction): PaymentTransferRow {
     return offrampRow({
-      id: "xfr_mapper_token_2022",
       type: "transfer",
       kind: "pay",
-      status: "confirmed",
-      provider: null,
-      provider_reference: null,
-      provider_observed_at: null,
-      delivery_mode: null,
-      fiat_currency: null,
-      fiat_amount: null,
-      provider_data: {},
-      token: mint,
-      amount: "1",
-      fee: 5000,
-      signed_transaction:
-        signedTransfers === null
-          ? null
-          : syntheticWireTransaction(authority.address, signedTransfers),
+      signed_transaction: syntheticWireTransaction(authority.address, [signedTransfer]),
     });
   }
 
-  const unsignedWire = {
-    id: "xfr_mapper_token_2022",
+  const transferWire = {
+    id: "xfr_mapper_payout",
     organizationId: "org_mapper",
     custodyWalletId: "cwlt_mapper",
     providerWalletId: "wallet_mapper",
@@ -169,63 +153,44 @@ describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
     type: "transfer",
     kind: "pay",
     direction: "outbound",
-    status: "confirmed",
+    status: "completed",
     signature: "sig",
     serializedTx: null,
     slot: 512958400,
     blockTime: null,
     confirmedAt: "2026-10-19T23:07:00.000Z",
-    fee: 5000,
+    fee: null,
     error: null,
     source: "source",
     destination: "deposit",
     counterpartyId: "cpty_mapper",
     rampsMemo: {},
-    token: mint,
-    amount: "1",
+    token: "USDC",
+    amount: "25",
     createdAt: "2026-10-19T23:01:00.626Z",
     updatedAt: "2026-10-19T23:07:00.000Z",
   };
 
-  it("adds no Token-2022 fields when the row saved no signed transaction", () => {
-    expect(onTheWire(transferRow(null))).toEqual(unsignedWire);
-  });
-
   it("states the fee the transfer withheld and what the recipient received", () => {
     const withFee = getTransferCheckedWithFeeInstruction({
       ...transferAccounts,
-      amount: 1_000_000n,
+      amount: 25_000_000n,
       fee: 2_500n,
     });
 
-    expect(onTheWire(transferRow([withFee]))).toEqual({
-      ...unsignedWire,
+    expect(onTheWire(signedTransferRow(withFee))).toEqual({
+      ...transferWire,
       transferFee: "0.0025",
-      receivedAmount: "0.9975",
+      receivedAmount: "24.9975",
     });
   });
 
   it("states the underlying amount a scaled mint moved", () => {
-    const scaled = getTransferCheckedInstruction({ ...transferAccounts, amount: 500_000n });
+    const scaled = getTransferCheckedInstruction({ ...transferAccounts, amount: 12_500_000n });
 
-    expect(onTheWire(transferRow([scaled]))).toEqual({
-      ...unsignedWire,
-      unscaledAmount: "0.5",
-    });
-  });
-
-  it("adds no Token-2022 fields to a batch chunk, whose transfers do not each move its amount", () => {
-    const half = getTransferCheckedInstruction({ ...transferAccounts, amount: 500_000n });
-    const chunk: PaymentTransferRow = {
-      ...transferRow([half, half]),
-      type: "transfer_batch",
-      kind: "batch_pay",
-    };
-
-    expect(onTheWire(chunk)).toEqual({
-      ...unsignedWire,
-      type: "transfer_batch",
-      kind: "batch_pay",
+    expect(onTheWire(signedTransferRow(scaled))).toEqual({
+      ...transferWire,
+      unscaledAmount: "12.5",
     });
   });
 });

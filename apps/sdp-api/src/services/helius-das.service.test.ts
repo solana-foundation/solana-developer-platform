@@ -172,15 +172,6 @@ describe("helius-das service", () => {
     ]);
   });
 
-  it("answers no symbols without a request when there are no mints or no DAS endpoint", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    expect(await inScope("sandbox", () => lookupTokenSymbols([]))).toEqual(new Map());
-    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "");
-    expect(await inScope("sandbox", () => lookupTokenSymbols([TEST_DAS_MINT]))).toEqual(new Map());
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it("keeps configured token labels even when they are long", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";

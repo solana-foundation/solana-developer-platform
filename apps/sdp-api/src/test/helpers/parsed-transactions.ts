@@ -43,14 +43,7 @@ export function syntheticSignature(index: number): Signature {
   return signature(getBase58Decoder().decode(syntheticBytes(64, index)));
 }
 
-/**
- * The base64 wire transaction of an unsigned v0 message carrying `instructions`, the form a
- * transfer row saves its signed transaction in.
- *
- * @param feePayer - The message's fee payer.
- * @param instructions - The message's instructions, in order.
- * @returns The base64 wire transaction, its signatures zeroed.
- */
+/** The base64 wire transaction of an unsigned v0 message carrying `instructions`. */
 export function syntheticWireTransaction(
   feePayer: Address,
   instructions: readonly Instruction[]

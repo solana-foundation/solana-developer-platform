@@ -438,14 +438,7 @@ export function systemAccountInfoResult(slot: number, lamports: number): JsonRpc
   };
 }
 
-/**
- * A base64 `getAccountInfo` result for an account `owner` holds with `data`, such as a sysvar.
- *
- * @param slot - The context slot the answer claims.
- * @param owner - The program that owns the account.
- * @param data - The account's data.
- * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
- */
+/** A base64 `getAccountInfo` result for an account `owner` holds with `data`. */
 export function ownedAccountInfoResult(
   slot: number,
   owner: string,
@@ -464,16 +457,7 @@ export function ownedAccountInfoResult(
   };
 }
 
-/**
- * A base64 `getAccountInfo` result for an initialized mint with no supply or authorities.
- *
- * @param slot - The context slot the answer claims.
- * @param tokenProgram - The token program that owns the mint.
- * @param mint - The mint's decimals and extensions.
- * @param mint.decimals - The mint's decimals.
- * @param mint.extensions - The mint's Token-2022 extensions, or null for none.
- * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
- */
+/** A base64 `getAccountInfo` result for an initialized mint with no supply or authorities. */
 export function mintAccountInfoResult(
   slot: number,
   tokenProgram: string,
