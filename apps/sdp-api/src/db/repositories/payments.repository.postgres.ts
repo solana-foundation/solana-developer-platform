@@ -703,6 +703,8 @@ export function createPostgresPaymentsRepository(
             "last_valid_block_height IS NULL",
             "submission_started_at IS NULL",
             "slot IS NULL",
+            // A sale the provider failed during the claim fails with the send instead.
+            "jsonb_typeof(provider_data->'providerFailure') IS DISTINCT FROM 'object'",
           ],
           clauseValues: [],
           // The released claim's key is no longer this row's: a retry under it runs again.

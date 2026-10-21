@@ -1,10 +1,12 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { forbidden } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   installClusterRpcStub,
@@ -213,6 +215,47 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
       status: "settling",
     });
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails a sale MoonPay failed during the claim, so a retry under its key sends nothing", {
+    timeout: 30_000,
+  }, async () => {
+    const transferId = generatePaymentTransferId();
+    await seedUsdcOfframpDeposit(transferId);
+    answerSourceUsdc("25000000", "initialized");
+    // MoonPay fails the sale while SDP holds the claim; then signing refuses.
+    // The webhook runs as its own request would, under the webhook identity.
+    createOrgSignerForCustodyWalletMock.mockImplementationOnce(async () => {
+      expect(
+        await runWithSystemDatabaseIdentity("http:webhooks", () =>
+          moonpayWebhook.process(env, "sandbox", {
+            provider: "moonpay",
+            kind: "failed",
+            rampType: "offramp",
+            reference: "moonpay-usdc-deposit",
+            transferId,
+            providerObservedAt: "2026-10-20T12:00:00.000Z",
+            error: "deposit_timeout",
+          })
+        )
+      ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
+      throw forbidden("Custody signing is paused for this wallet");
+    });
+    const idempotencyKey = crypto.randomUUID();
+
+    const failed = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
+    const retried = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
+
+    expect(failed.status).toBeGreaterThanOrEqual(400);
+    expect(retried.status).toBeGreaterThanOrEqual(400);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(1);
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const row = await readTransferRow(transferId);
+    expect(row.status).toBe("failed");
+    expect(row.provider_data).toMatchObject({
+      cryptoDeposit: null,
+      providerFailure: { reference: "moonpay-usdc-deposit", error: "deposit_timeout" },
+    });
   });
 
   it("refuses a request that does not match the deposit before reading the chain", async () => {

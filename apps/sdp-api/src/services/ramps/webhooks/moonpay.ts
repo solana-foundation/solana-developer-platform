@@ -23,8 +23,10 @@ import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import { rampAuditEntry } from "@/services/payments/ramp-audit";
 import {
   applyRampSettlementEventIn,
+  type RecordRampAudit,
   withRampSettlementTransaction,
 } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
@@ -164,7 +166,8 @@ async function moonpayObservationPreflight(
 async function applyFailedMoonpayBuyObservation(
   repo: PaymentsRepository,
   transfer: PaymentTransferRow,
-  event: Extract<MoonpaySettlementEvent, { kind: "failed" }>
+  event: Extract<MoonpaySettlementEvent, { kind: "failed" }>,
+  recordAudit: RecordRampAudit
 ): Promise<RampWebhookProcessResult> {
   // A buy card failure can retry before crypto delivery.
   if (
@@ -208,7 +211,71 @@ async function applyFailedMoonpayBuyObservation(
   if (event.error) failureInput.failureReason = event.error;
   if (event.settlement) failureInput.settlement = event.settlement;
   await repo.recordFailedMoonpayTransaction(failureInput);
+  recordAudit(
+    rampAuditEntry("update", updated, {
+      source: "provider",
+      transition: "moonpay_attempt_failed",
+      fromStatus: transfer.status,
+      providerObservedAt: event.providerObservedAt,
+      attemptReference: event.reference,
+    })
+  );
   return { outcome: "applied" };
+}
+
+/**
+ * Answers MoonPay's failure of a sale whose deposit SDP already claimed: the
+ * deposit may still land, so the row keeps its state for review. A claim still
+ * in flight holds the failure and loses its instruction, so a release after a
+ * failed send can't reopen the sale.
+ */
+async function holdClaimedSaleFailure(
+  repo: PaymentsRepository,
+  transfer: PaymentTransferRow,
+  event: Extract<MoonpaySettlementEvent, { kind: "failed" }>,
+  recordAudit: RecordRampAudit
+): Promise<RampWebhookProcessResult> {
+  if (transfer.status === "processing") {
+    await holdSaleFailureOnClaim(repo, transfer, event, recordAudit);
+  }
+  return { outcome: "refused", reason: "moonpay_sell_failed" };
+}
+
+async function holdSaleFailureOnClaim(
+  repo: PaymentsRepository,
+  transfer: PaymentTransferRow,
+  event: Extract<MoonpaySettlementEvent, { kind: "failed" }>,
+  recordAudit: RecordRampAudit
+): Promise<void> {
+  const providerFailure: Record<string, unknown> = {
+    reference: event.reference,
+    observedAt: event.providerObservedAt,
+  };
+  if (event.error) providerFailure.error = event.error;
+  const transitionInput: Parameters<PaymentsRepository["transitionRampTransfer"]>[0] = {
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    transition: "moonpay_sell_failed_while_claimed",
+    providerData: { providerFailure, cryptoDeposit: null },
+    updatedAt: new Date().toISOString(),
+  };
+  if (transfer.provider_reference === event.reference) {
+    transitionInput.providerObservation = {
+      reference: event.reference,
+      observedAt: event.providerObservedAt,
+    };
+  }
+  const updated = await repo.transitionRampTransfer(transitionInput);
+  if (updated === null) return;
+  recordAudit(
+    rampAuditEntry("update", updated, {
+      source: "provider",
+      transition: "moonpay_sell_failed_while_claimed",
+      fromStatus: transfer.status,
+      providerObservedAt: event.providerObservedAt,
+    })
+  );
 }
 
 /** Serializes claims, failures, and ordered status writes for one transfer. */
@@ -241,7 +308,7 @@ async function processMoonpayObservation(
       if (!locked) throw new Error("MoonPay preflight accepted a missing transfer");
       const { transfer } = locked;
       if (event.kind === "failed" && transfer.type === "onramp") {
-        return applyFailedMoonpayBuyObservation(repo, transfer, event);
+        return applyFailedMoonpayBuyObservation(repo, transfer, event, recordAudit);
       }
       if (transfer.type === "offramp" && transfer.status === "failed") {
         return { outcome: "refused", reason: "moonpay_terminal_conflict" };
@@ -252,8 +319,7 @@ async function processMoonpayObservation(
           (status) => status === transfer.status
         )
       ) {
-        // A deposit already claimed may still land. Keep its state for review.
-        return { outcome: "refused", reason: "moonpay_sell_failed" };
+        return holdClaimedSaleFailure(repo, transfer, event, recordAudit);
       }
 
       if (transfer.status !== "expired" && isTerminalRampTransferStatus(transfer.status)) {

@@ -276,7 +276,8 @@ export interface PaymentsRepository {
   /**
    * Returns a claimed off-ramp deposit to awaiting its deposit, undoing the
    * claim, only while the row holds no signed bytes, signature or submission
-   * start: proof that nothing could have reached the chain. Null otherwise.
+   * start (proof that nothing could have reached the chain) and the provider
+   * has not failed the sale. Null otherwise.
    */
   releaseOfframpDepositClaim(input: {
     transferId: string;

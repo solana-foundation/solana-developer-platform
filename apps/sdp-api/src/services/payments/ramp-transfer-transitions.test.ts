@@ -114,6 +114,7 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
       "expired",
       "pending",
     ]);
+    expect(sortedSources("moonpay_sell_failed_while_claimed")).toEqual(["processing"]);
   });
 
   it("lands each provider event on the status it names, for both ramp types", () => {
@@ -137,6 +138,8 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
     expect(RAMP_TRANSFER_TRANSITIONS.moonpay_attempt_failed.to).toBe("awaiting_payment");
     expect(RAMP_TRANSFER_TRANSITIONS.moonpay_sell_failed.types).toEqual(["offramp"]);
     expect(RAMP_TRANSFER_TRANSITIONS.moonpay_sell_failed.to).toBe("failed");
+    expect(RAMP_TRANSFER_TRANSITIONS.moonpay_sell_failed_while_claimed.types).toEqual(["offramp"]);
+    expect(RAMP_TRANSFER_TRANSITIONS.moonpay_sell_failed_while_claimed.to).toBe("processing");
   });
 
   it("keeps what SDP's own writers allowed before the table", () => {
@@ -266,6 +269,33 @@ describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
 
     expect(await transition("xfr_claimed_sale", "moonpay_sell_failed")).toBeNull();
     expect(await readStatus("xfr_claimed_sale")).toBe("processing");
+    expect(
+      (await transition("xfr_claimed_sale", "moonpay_sell_failed_while_claimed"))?.status
+    ).toBe("processing");
+  });
+
+  it("releases an unsent claim only while the provider has not failed its sale", async () => {
+    await seedTransfer({ id: "xfr_release_open", status: "processing", type: "offramp" });
+    await seedTransfer({ id: "xfr_release_failed", status: "processing", type: "offramp" });
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_transfers
+            SET provider_data = '{"providerFailure":{"reference":"moonpay-sale"}}'::jsonb
+          WHERE id = ?`
+      )
+      .bind("xfr_release_failed")
+      .run();
+    const release = (id: string) =>
+      createSystemPaymentsRepository(env).releaseOfframpDepositClaim({
+        transferId: id,
+        organizationId: ORG_ID,
+        projectId: PROJECT_ID,
+        updatedAt: "2026-10-13T00:01:00.000Z",
+      });
+
+    expect((await release("xfr_release_open"))?.status).toBe("awaiting_payment");
+    expect(await release("xfr_release_failed")).toBeNull();
+    expect(await readStatus("xfr_release_failed")).toBe("processing");
   });
 
   it("never moves a wallet transfer, even from a listed source status", async () => {
@@ -411,6 +441,12 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
     writer: "MoonPay failed buy attempt",
     file: "apps/sdp-api/src/services/ramps/webhooks/moonpay.ts",
     evidence: 'transition: "moonpay_attempt_failed"',
+    guardedCalls: 1,
+  },
+  {
+    writer: "MoonPay sale failure held on a claimed deposit",
+    file: "apps/sdp-api/src/services/ramps/webhooks/moonpay.ts",
+    evidence: 'transition: "moonpay_sell_failed_while_claimed"',
     guardedCalls: 1,
   },
   {

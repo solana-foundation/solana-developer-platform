@@ -315,6 +315,14 @@ export const RAMP_TRANSFER_TRANSITIONS = {
     to: "failed",
     types: ["offramp"],
   },
+  // A sale failed while its deposit is claimed: the claim stays open, since the
+  // deposit may still land, but holds the failure so releasing the claim after
+  // a failed send can't reopen the sale.
+  moonpay_sell_failed_while_claimed: {
+    from: ["processing"],
+    to: "processing",
+    types: ["offramp"],
+  },
   // Not from `settling`: a stale redelivered expiry must not undo a transfer
   // another event already revived.
   provider_expired: {

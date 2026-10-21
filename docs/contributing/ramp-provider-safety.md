@@ -57,7 +57,8 @@ contract; this document defines the money movement acceptance gate.
   signature, RPC timeout, provider timeout, or generic error as proof that no
   money moved. Never release a once-only claim unless the provider definitely
   rejected it, or SDP holds no signed bytes for it (an off-ramp deposit that
-  failed before signing returns to `awaiting_payment`).
+  failed before signing returns to `awaiting_payment`, unless the provider
+  failed the sale during the claim: then it fails).
 - Recover missed webhooks by pulling. `fetchTransferStatus` makes one request
   per transfer, maps the answer through the same package mapping as the
   webhook parser, and returns no events only when the provider holds no

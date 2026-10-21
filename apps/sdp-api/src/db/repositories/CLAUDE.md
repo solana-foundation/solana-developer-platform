@@ -203,7 +203,9 @@ for review; sandbox discards them.
 A failed MoonPay sale with no claimed deposit moves to `failed` and withdraws
 `cryptoDeposit` in the same guarded transition, but retains its reference and
 returns `refused` for review. A sale whose deposit was already claimed stays
-open for reconciliation and refuses the failure without regressing its state.
+`processing` for reconciliation, but holds the failure in
+`provider_data.providerFailure` and withdraws `cryptoDeposit` (audited), so a
+send that then fails before signing fails the sale instead of releasing it.
 If the failed event reports a deposit hash, the row moves to `settling`, holds
 the reported hash in `provider_data` and its reference, leaves any SDP-signed
 deposit signature untouched, and withdraws the instruction for review.
