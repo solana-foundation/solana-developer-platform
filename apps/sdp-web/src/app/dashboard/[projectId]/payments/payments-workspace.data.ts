@@ -470,24 +470,17 @@ const rampEstimateSchema = z.object({
 
 const rampProvider = z.enum(RAMP_PROVIDERS);
 
-// The most specific error first: an object drops the keys it doesn't name.
-const rampProviderEstimateResultSchema = z.union([
+const rampProviderEstimateResultSchema = z.discriminatedUnion("status", [
   z.object({ provider: rampProvider, status: z.literal("ok"), estimate: rampEstimateSchema }),
   z.object({ provider: rampProvider, status: z.literal("unsupported") }),
+  // A refusal names its reason; an amount out of range also names the bound it crossed.
   z.object({
     provider: rampProvider,
     status: z.literal("error"),
     error: z.string(),
-    reason: z.enum(RAMP_AMOUNT_LIMIT_REASONS),
-    limit: z.object({ amount: z.string(), currency: z.string() }),
+    reason: z.enum([...RAMP_AMOUNT_LIMIT_REASONS, ...STAGED_PROVIDER_REFUSAL_REASONS]).optional(),
+    limit: z.object({ amount: z.string(), currency: z.string() }).optional(),
   }),
-  z.object({
-    provider: rampProvider,
-    status: z.literal("error"),
-    error: z.string(),
-    reason: z.enum(STAGED_PROVIDER_REFUSAL_REASONS),
-  }),
-  z.object({ provider: rampProvider, status: z.literal("error"), error: z.string() }),
 ]);
 
 const rampEstimateEnvelopeSchema = z.object({

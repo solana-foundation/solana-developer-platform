@@ -173,6 +173,29 @@ describe("fetchRampEstimates", () => {
     ]);
   });
 
+  it("keeps an error's reason and the bound an amount crossed", async () => {
+    const outOfRange = {
+      provider: "moonpay",
+      status: "error",
+      error: "Amount is below the minimum",
+      reason: "amount_below_minimum",
+      limit: { amount: "20.00879", currency: "USDC" },
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: { estimates: [outOfRange, { provider: "stripe", status: "unsupported" }] },
+        })
+      )
+    );
+
+    expect(await fetchRampEstimates(request, t)).toEqual([
+      outOfRange,
+      { provider: "stripe", status: "unsupported" },
+    ]);
+  });
+
   it("refuses a response that is not an estimate list", async () => {
     vi.stubGlobal(
       "fetch",
