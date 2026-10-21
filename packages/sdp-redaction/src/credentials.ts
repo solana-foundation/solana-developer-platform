@@ -39,8 +39,8 @@ const PAY_LINK_TOKEN_PATTERN = /\/pay\/[^/\s?#"'<>\\]+/g;
 
 export function redactCredentialString(value: string): string {
   const withoutHeaders = value
-    .replace(PAY_LINK_TOKEN_PATTERN, `/pay/${REDACTED}`)
     .replace(PRIVATE_KEY_PATTERN, REDACTED)
+    .replace(PAY_LINK_TOKEN_PATTERN, `/pay/${REDACTED}`)
     .replace(AUTH_HEADER_PATTERN, (match, scheme: string, token: string) =>
       isLikelyAuthToken(scheme, token) ? `${scheme} ${REDACTED}` : match
     );
