@@ -101,6 +101,17 @@ describe("loadPaymentAmountConverter", () => {
     expect(rpc.requests).toEqual([]);
   });
 
+  it.each([WELL_KNOWN_TOKENS.USDG, WELL_KNOWN_TOKENS.PYUSD])(
+    "keeps $symbol supported while fee handling is deferred",
+    async (token) => {
+      const mint = token.mints.devnet;
+      if (mint === undefined) throw new Error("Fixture requires a devnet mint");
+      const convert = await inSandboxScope(() => loadPaymentAmountConverter(address(mint.address)));
+      expect(convert("1.5")).toBe(1500000n);
+      expect(rpc.requests).toEqual([]);
+    }
+  );
+
   it("reads a well-known mint the scope's cluster does not declare from the chain", async () => {
     const usdsMainnetMint = address(WELL_KNOWN_TOKENS.USDS.mints["mainnet-beta"].address);
     respondMintAccounts(rpc, {

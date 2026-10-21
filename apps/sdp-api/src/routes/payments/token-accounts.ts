@@ -179,21 +179,6 @@ export async function getSplTokenAccountAddresses(
   return addresses;
 }
 
-function assertSupportedTokenProgram(program: string): Address {
-  if (program === SPL_TOKEN_PROGRAM_ID || program === SPL_TOKEN_2022_PROGRAM_ID) {
-    return address(program);
-  }
-  throw badRequest("Unsupported token program for mint");
-}
-
-export async function resolveMintTokenProgram(rpc: SolanaRpc, mint: Address): Promise<Address> {
-  const mintAccountInfo = await getAccountInfo(rpc, mint);
-  if (!mintAccountInfo) {
-    throw badRequest("Token mint account does not exist");
-  }
-  return assertSupportedTokenProgram(mintAccountInfo.owner);
-}
-
 export async function resolveSourceTokenAccount(
   rpc: SolanaRpc,
   owner: Address,
