@@ -496,6 +496,7 @@ export async function readRecurringPaymentStep<T extends { exists: boolean }>(in
   }
 }
 
+/** {@link readRecurringPaymentStep} without its mapping of read failures to 409. */
 async function readStepOutcome<T extends { exists: boolean }>(
   input: Parameters<typeof readRecurringPaymentStep<T>>[0]
 ): Promise<ResumedStep<T>> {

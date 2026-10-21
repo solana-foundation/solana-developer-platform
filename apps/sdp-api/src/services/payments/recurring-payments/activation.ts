@@ -856,8 +856,8 @@ export async function activateRecurringPayment(input: {
         instructions: [createPlanInstruction],
         submissionStore: createSubscriptionStepStore({
           ...planStep,
-          save: (send) =>
-            getDb(input.env).transaction(async (tx) => {
+          save: async (send) => {
+            await getDb(input.env).transaction(async (tx) => {
               const signatureUpdatedAt = new Date().toISOString();
               const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
               const updatedRecurringPayment =
@@ -881,8 +881,9 @@ export async function activateRecurringPayment(input: {
                   updatedAt: signatureUpdatedAt,
                 })
               );
-              sendMayLand = true;
-            }),
+            });
+            sendMayLand = true;
+          },
         }),
       });
       onChainPlan = await confirmActivationPlan({ rpc, planPda, planCreationSignature });
@@ -1047,8 +1048,8 @@ export async function activateRecurringPayment(input: {
         feePayer,
         submissionStore: createSubscriptionStepStore({
           ...authorizationStep,
-          save: (send) =>
-            getDb(input.env).transaction(async (tx) => {
+          save: async (send) => {
+            await getDb(input.env).transaction(async (tx) => {
               const signatureUpdatedAt = new Date().toISOString();
               const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
               const updatedRecurringPayment =
@@ -1072,8 +1073,9 @@ export async function activateRecurringPayment(input: {
                   updatedAt: signatureUpdatedAt,
                 })
               );
-              sendMayLand = true;
-            }),
+            });
+            sendMayLand = true;
+          },
         }),
       });
       currentStage = "finalize";
