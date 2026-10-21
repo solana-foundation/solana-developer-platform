@@ -209,7 +209,7 @@ async function recordActivationFailure(input: {
   organizationId: string;
   projectId: string;
   stage: PaymentRecurringPaymentActivationAttemptStage;
-  /** This run saved a plan or authorization send that has not been seen landed. */
+  /** A saved send is unresolved, or a live delegation still needs DB finalization. */
   sendMayLand: boolean;
   error: Error;
   failedAt: string;
@@ -231,6 +231,7 @@ async function recordActivationFailure(input: {
         attemptId: input.attempt.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
+        stage: input.stage,
         error: recurringPaymentErrorMessage(input.error),
         updatedAt: input.failedAt,
       })
@@ -1110,7 +1111,9 @@ export async function activateRecurringPayment(input: {
         "Subscription authorization is not visible on-chain yet; retry"
       );
     }
-    sendMayLand = false;
+    // A live delegation stays in flight until DB finalization commits, so a
+    // rolled-back write is recovered instead of becoming a DB-only cancellation.
+    sendMayLand = true;
 
     const activatedAt = new Date().toISOString();
     const scheduleRequest =

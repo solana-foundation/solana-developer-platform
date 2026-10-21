@@ -1023,45 +1023,53 @@ describe("Payments routes — recurring", () => {
     });
   });
 
-  it("rolls back subscription and recurring activation finalization together", async () => {
-    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const createRepository =
-      paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
-    const repositorySpy = vi
-      .spyOn(
-        paymentRecurringPaymentsRepositoryPostgres,
-        "createPostgresPaymentRecurringPaymentsRepository"
-      )
-      .mockImplementation((db) => {
-        const repository = createRepository(db);
-        return {
-          ...repository,
-          updateActivationAttempt: vi.fn(async (input) => {
-            if (input.status === "confirmed") {
-              throw new Error("activation attempt finalization unavailable");
-            }
-            return repository.updateActivationAttempt(input);
-          }),
-        };
-      });
+  it.each(["database error", "fence miss"])(
+    "keeps a live delegation recoverable after finalization fails with %s",
+    async (failure) => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const createRepository =
+        paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+      const repositorySpy = vi
+        .spyOn(
+          paymentRecurringPaymentsRepositoryPostgres,
+          "createPostgresPaymentRecurringPaymentsRepository"
+        )
+        .mockImplementation((db) => {
+          const repository = createRepository(db);
+          return {
+            ...repository,
+            updateActivationAttempt: vi.fn(async (input) => {
+              if (input.status === "confirmed") {
+                if (failure === "fence miss") return null;
+                throw new Error("activation attempt finalization unavailable");
+              }
+              return repository.updateActivationAttempt(input);
+            }),
+          };
+        });
 
-    const response = await app.request(
-      `/v1/payments/recurring-payments/${created.id}/activate`,
-      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-      env
-    );
-    repositorySpy.mockRestore();
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      repositorySpy.mockRestore();
 
-    expect(response.status).toBe(500);
-    const rows = await getDb(env)
-      .prepare(
-        `SELECT rp.status AS recurring_status,
+      expect(response.status).toBe(failure === "fence miss" ? 409 : 500);
+      const [, authorizationSignature] = poolSentSignatures();
+      expect(authorizationSignature).toBeTruthy();
+      const rows = await getDb(env)
+        .prepare(
+          `SELECT rp.status AS recurring_status,
                 rp.plan_id,
                 rp.subscription_id,
                 ps.status AS subscription_status,
                 ps.authorization_signature,
                 a.status AS attempt_status,
-                a.stage AS attempt_stage
+                a.stage AS attempt_stage,
+                rp.authorization_signature AS recurring_authorization_signature,
+                a.authorization_signature AS attempt_authorization_signature,
+                a.last_valid_block_height
            FROM payment_recurring_payments rp
            LEFT JOIN payment_recurring_payment_activation_attempts a
              ON a.id = (SELECT id
@@ -1070,27 +1078,62 @@ describe("Payments routes — recurring", () => {
                          ORDER BY created_at DESC LIMIT 1)
            LEFT JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
           WHERE rp.id = ?`
-      )
-      .bind(created.id)
-      .first<{
-        recurring_status: string;
-        plan_id: string | null;
-        subscription_id: string | null;
-        subscription_status: string;
-        authorization_signature: string | null;
-        attempt_status: string;
-        attempt_stage: string;
-      }>();
-    expect(rows).toMatchObject({
-      recurring_status: "pending_activation",
-      plan_id: expect.any(String),
-      subscription_id: expect.any(String),
-      subscription_status: "pending_authorization",
-      authorization_signature: null,
-      attempt_status: "failed",
-      attempt_stage: "finalize",
-    });
-  });
+        )
+        .bind(created.id)
+        .first<{
+          recurring_status: string;
+          plan_id: string | null;
+          subscription_id: string | null;
+          subscription_status: string;
+          authorization_signature: string | null;
+          attempt_status: string;
+          attempt_stage: string;
+          recurring_authorization_signature: string | null;
+          attempt_authorization_signature: string | null;
+          last_valid_block_height: string | null;
+        }>();
+      expect(rows).toMatchObject({
+        recurring_status: "activating",
+        plan_id: expect.any(String),
+        subscription_id: expect.any(String),
+        subscription_status: "pending_authorization",
+        authorization_signature: null,
+        attempt_status: "processing",
+        attempt_stage: "finalize",
+        recurring_authorization_signature: authorizationSignature,
+        attempt_authorization_signature: authorizationSignature,
+        last_valid_block_height: "1000",
+      });
+      expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+        .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), created.id)
+        .run();
+      expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
+        recovered: 1,
+        refused: 0,
+      });
+      const recovered = await app.request(
+        `/v1/payments/recurring-payments/${created.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect((await parseRecurringResponse(recovered)).data.recurringPayment).toMatchObject({
+        status: "active",
+        authorizationSignature,
+      });
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT status, stage FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
+          )
+          .bind(created.id)
+          .first<{ status: string; stage: string }>()
+      ).toEqual({ status: "confirmed", stage: "finalize" });
+      expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("updates pending recurring payment terms directly and journals an audit event", async () => {
     const created = await createRecurringPaymentFixture({
