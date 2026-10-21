@@ -1,3 +1,4 @@
+import type { MovementId } from "@sdp/types/movements";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, notFound, walletNotFound } from "@/lib/errors";
@@ -157,9 +158,14 @@ async function authorizeExistingRecurringPayment(
 /** An action on an existing schedule: the schedule and its pinned source wallet. */
 export async function authorizeRecurringPayment(
   c: AppContext,
-  input: AuthorizeInput
+  input: AuthorizeInput,
+  movement: MovementId
 ): Promise<AuthorizedRecurringPayment> {
-  return authorizeExistingRecurringPayment(c, input, getAuth(c));
+  const authorized = await authorizeExistingRecurringPayment(c, input, getAuth(c));
+  if (authorized.sourceWallet !== null) {
+    assertWalletPurposeMaySign(authorized.sourceWallet.purpose, movement);
+  }
+  return authorized;
 }
 
 /**
@@ -186,6 +192,8 @@ export async function authorizeRecurringPaymentUpdate(
     }
     assertWalletPurposeMaySign(named.purpose, "recurring.update");
     nextSourceWallet = named;
+  } else if (authorized.sourceWallet !== null) {
+    assertWalletPurposeMaySign(authorized.sourceWallet.purpose, "recurring.update");
   }
   await assertNamedCounterpartyIdsInProject(c, body);
   return { ...authorized, nextSourceWallet };

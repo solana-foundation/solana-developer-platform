@@ -82,7 +82,7 @@ recurringPayments.post(
   requireAction("recurring.execute"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(activateRecurringPaymentSchema),
-  authorize(authorizeRecurringPayment),
+  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.activate")),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentActivateReplay),
   activateRecurringPayment
@@ -92,7 +92,7 @@ recurringPayments.post(
   requireAction("recurring.manage"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(cancelRecurringPaymentSchema),
-  authorize(authorizeRecurringPayment),
+  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.cancel")),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentCancelReplay),
   cancelRecurringPayment
@@ -102,7 +102,7 @@ recurringPayments.post(
   requireAction("recurring.execute"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(collectRecurringPaymentSchema),
-  authorize(authorizeRecurringPayment),
+  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.collect")),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentCollectReplay),
   collectRecurringPayment
@@ -112,7 +112,7 @@ recurringPayments.post(
   requireAction("recurring.execute"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(resumeRecurringPaymentSchema),
-  authorize(authorizeRecurringPayment),
+  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.resume")),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentResumeReplay),
   resumeRecurringPayment
