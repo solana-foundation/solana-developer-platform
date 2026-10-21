@@ -13,6 +13,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
+  unixTimestamp,
 } from "@solana/kit";
 import * as solanaPay from "@solana/pay";
 import { FindReferenceError, ValidateTransferError } from "@solana/pay";
@@ -75,7 +76,7 @@ function foundSignature(): Awaited<ReturnType<typeof solanaPay.findReference>> {
   };
 }
 
-function validatedTransfer(): Awaited<ReturnType<typeof solanaPay.validateTransfer>> {
+function validatedTransfer() {
   const transaction = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
@@ -105,7 +106,7 @@ function validatedTransfer(): Awaited<ReturnType<typeof solanaPay.validateTransf
       loadedAddresses: { readonly: [], writable: [] },
     },
     transaction: [getBase64EncodedWireTransaction(transaction), "base64"],
-  };
+  } satisfies Awaited<ReturnType<typeof solanaPay.validateTransfer>>;
 }
 
 function mockSettlementSucceeds() {
@@ -474,12 +475,85 @@ describe("reconcilePaymentRequest", () => {
     expect(findReferenceSpy).not.toHaveBeenCalled();
   });
 
-  it("short-circuits expired requests without touching the chain", async () => {
-    const expired = await createRequest({ token: SOL_MINT, expiresAt: "2000-01-01T00:00:00.000Z" });
+  it.each([SOL_MINT, DEVNET_USDC_MINT])(
+    "settles an on-time %s payment that finalizes after expiry",
+    async (token) => {
+      const expiresAt = "2026-10-21T12:00:00.000Z";
+      const deadline = Date.parse(expiresAt);
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(deadline - 1_000);
+      const request = await createRequest({ token, expiresAt });
+      mockSettlementSucceeds();
+      validateTransferSpy.mockResolvedValue({
+        ...validatedTransfer(),
+        blockTime: unixTimestamp(BigInt(deadline / 1_000 - 2)),
+      });
+      verifyTransactionLandedSpy.mockResolvedValue({
+        ok: true,
+        status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
+        transaction: { slot: 1n, executionResultKnown: true, err: null, instructions: [] },
+      });
 
-    const result = await reconcileOnSandbox(expired, { bestEffort: false });
+      const pending = await reconcileOnSandbox(request, { bestEffort: false });
+
+      expect(pending.status).toBe("awaiting_payment");
+      expect(await listInboundTransfers()).toHaveLength(0);
+
+      nowSpy.mockReturnValue(deadline + 15_000);
+      verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+      const paid = await reconcileOnSandbox(pending, { bestEffort: false });
+
+      expect(paid.status).toBe("paid");
+      expect(await listInboundTransfers()).toMatchObject([
+        { id: paid.fulfilled_by_transfer_id, status: "finalized" },
+      ]);
+    }
+  );
+
+  it.each([
+    { label: "at the deadline", secondsAfterDeadline: 0 },
+    { label: "after the deadline", secondsAfterDeadline: 1 },
+    { label: "without a known block time", secondsAfterDeadline: null },
+  ])("does not settle a payment $label", async ({ secondsAfterDeadline }) => {
+    const expiresAt = "2026-10-21T12:00:00.000Z";
+    const deadline = Date.parse(expiresAt);
+    vi.spyOn(Date, "now").mockReturnValue(deadline + 15_000);
+    mockSettlementSucceeds();
+    validateTransferSpy.mockResolvedValue({
+      ...validatedTransfer(),
+      blockTime:
+        secondsAfterDeadline === null
+          ? null
+          : unixTimestamp(BigInt(deadline / 1_000 + secondsAfterDeadline)),
+    });
+    const request = await createRequest({ token: SOL_MINT, expiresAt });
+
+    const result = await reconcileOnSandbox(request, { bestEffort: false });
 
     expect(result.status).toBe("awaiting_payment");
-    expect(findReferenceSpy).not.toHaveBeenCalled();
+    expect(result.fulfilled_by_transfer_id).toBeNull();
+    expect(findReferenceSpy).toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("retries an expired request when the finalized transaction's block time becomes available", async () => {
+    const expiresAt = "2026-10-21T12:00:00.000Z";
+    const deadline = Date.parse(expiresAt);
+    vi.spyOn(Date, "now").mockReturnValue(deadline + 15_000);
+    mockSettlementSucceeds();
+    const request = await createRequest({ token: SOL_MINT, expiresAt });
+
+    const pending = await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(pending.status).toBe("awaiting_payment");
+    expect(await listInboundTransfers()).toHaveLength(0);
+
+    validateTransferSpy.mockResolvedValue({
+      ...validatedTransfer(),
+      blockTime: unixTimestamp(BigInt(deadline / 1_000 - 2)),
+    });
+    const paid = await reconcileOnSandbox(pending, { bestEffort: false });
+
+    expect(paid.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
   });
 });

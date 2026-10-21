@@ -171,6 +171,30 @@ describe("Public payment request routes", () => {
     }
   );
 
+  it("keeps an unpaid expired request readable and refuses a new sponsored transaction", async () => {
+    const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+    await getDb(env)
+      .prepare("UPDATE payment_requests SET expires_at = ? WHERE id = ?")
+      .bind("2000-01-01T00:00:00.000Z", request.id)
+      .run();
+    const sponsorship = stubSponsorship();
+
+    const detailResponse = await app.request(`/pay/${request.public_token}`, {}, env);
+
+    expect(detailResponse.status).toBe(200);
+    await expect(detailResponse.json()).resolves.toMatchObject({
+      status: "expired",
+      solanaPayUrl: null,
+    });
+    const transactionResponse = await postTransaction(request.public_token);
+    expect(transactionResponse.status).toBe(400);
+    await expect(transactionResponse.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Payment request is no longer payable" },
+    });
+    expect(sponsorship).not.toHaveBeenCalled();
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+  });
+
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
     await getDb(env)

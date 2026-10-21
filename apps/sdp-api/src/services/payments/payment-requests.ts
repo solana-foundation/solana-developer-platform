@@ -60,9 +60,6 @@ export async function reconcilePaymentRequest(
   if (row.status !== "awaiting_payment") {
     return row;
   }
-  if (isPaymentRequestExpired(row.expires_at)) {
-    return row;
-  }
   if (row.custody_wallet_id === null) {
     if (options.bestEffort) {
       return row;
@@ -138,6 +135,15 @@ async function settlePaymentRequestIfPaid(
     ValidateTransferError
   );
   if (validated === null) {
+    return row;
+  }
+
+  // Finality may arrive after expiry; eligibility follows when the payment landed.
+  if (
+    row.expires_at !== null &&
+    (validated.blockTime === null ||
+      Number(validated.blockTime) * 1_000 >= Date.parse(row.expires_at))
+  ) {
     return row;
   }
 
