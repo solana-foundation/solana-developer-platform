@@ -97,11 +97,15 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
   installPaymentsRouteTestHooks();
   const rpc = installClusterRpcStub();
 
-  function answerSourceUsdc(baseUnits: string, state: StubTokenAccount["state"]) {
+  function answerUsdcMint() {
     rpc.answer(
       "getAccountInfo",
       mintAccountInfoResult(1, SPL_TOKEN_PROGRAMS["spl-token"], { decimals: 6, extensions: null })
     );
+  }
+
+  function answerSourceUsdc(baseUnits: string, state: StubTokenAccount["state"]) {
+    answerUsdcMint();
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
@@ -180,6 +184,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     const transferId = generatePaymentTransferId();
     await seedUsdcOfframpDeposit(transferId);
     const quoted = await readTransferRow(transferId);
+    answerUsdcMint();
     rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(1, []));
 
     const refused = await postTransfer(usdcDepositRequest(transferId), {});
