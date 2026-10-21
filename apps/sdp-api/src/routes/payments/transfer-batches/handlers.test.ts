@@ -450,6 +450,53 @@ describe("payment transfer batches", () => {
     await clearKVStores(env);
   });
 
+  it.each(
+    ["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"].flatMap(
+      (endpoint) => [
+        { endpoint, amount: "1.0000000001", message: "Amount has too many decimal places" },
+        { endpoint, amount: "18446744073.709551616", message: "Amount is out of range" },
+      ]
+    )
+  )(
+    "rejects invalid SOL batch amount $amount at $endpoint with 400",
+    async ({ endpoint, amount, message }) => {
+      const counterpartyId = await seedCounterparty("batch_invalid_sol_amount");
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const response = await app.request(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount }],
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST", message } });
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE organization_id = ? AND project_id = ?"
+          )
+          .bind(TEST_ORG.id, TEST_PROJECT.id)
+          .first<{ count: number }>()
+      ).toEqual({ count: 0 });
+    }
+  );
+
   it("estimates a SOL transfer batch", async () => {
     rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
 

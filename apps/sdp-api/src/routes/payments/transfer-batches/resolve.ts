@@ -3,7 +3,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseTokenAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
-import type { Address } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
@@ -62,11 +62,12 @@ async function resolveTokenContext(
   sourceAddress: Address
 ): Promise<TokenContext> {
   if (isNativePaymentToken(token)) {
+    const { toBaseUnits } = await loadPaymentMint(address(SOL_MINT));
     return {
       kind: "sol",
       token: SOL_MINT,
       decimals: SOL_DECIMALS,
-      toBaseUnits: (amount) => parseTokenAmount(amount, SOL_DECIMALS),
+      toBaseUnits,
     };
   }
 
