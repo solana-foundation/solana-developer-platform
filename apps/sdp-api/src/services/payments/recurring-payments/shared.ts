@@ -1,10 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import {
-  confirmTransaction,
-  getRecentBlockhash,
-  getSignatureStatuses,
-  type SolanaRpc,
-} from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -566,19 +561,25 @@ export async function readSavedSend(
   savedSend: SavedStepSend
 ): Promise<SavedSendOutcome> {
   // Read before the status: once the chain is past the expiry, nothing lands after the status read.
-  const blockHeight = await withTransientRpcRetry(() =>
-    rpc.getBlockHeight({ commitment: "confirmed" }).send()
+  const chainTip = await withTransientRpcRetry(() =>
+    rpc.getEpochInfo({ commitment: "confirmed" }).send()
   );
-  const [status] = await getSignatureStatuses(rpc, [savedSend.signature], {
-    searchTransactionHistory: true,
-  });
+  const statuses = await withTransientRpcRetry(() =>
+    rpc.getSignatureStatuses([savedSend.signature], { searchTransactionHistory: true }).send()
+  );
+  const [status] = statuses.value;
   if (status) {
     return status.err === null ? "succeeded" : "failed";
   }
   if (savedSend.lastValidBlockHeight === null) {
     throw internalError("A saved send with no record has no block height to prove its expiry");
   }
-  return blockHeight > savedSend.lastValidBlockHeight ? "expired" : "pending";
+  if (chainTip.blockHeight <= savedSend.lastValidBlockHeight) {
+    return "pending";
+  }
+  // The pool may answer the two reads from different nodes: only a node that has processed the
+  // slot the expiry was seen at has seen every block the send could have landed in.
+  return statuses.context.slot >= chainTip.absoluteSlot ? "expired" : "pending";
 }
 
 /**
