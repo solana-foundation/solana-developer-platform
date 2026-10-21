@@ -19,6 +19,8 @@ import {
   isSuccessfulPaymentTransferStatus,
   type PaymentSubscriptionCollectionAttemptInitialStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
+  type PaymentSubscriptionCollectionAttemptStatus,
+  type PaymentTransferStatus,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
 } from "@sdp/types/payments";
 import {
@@ -1085,7 +1087,7 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     event:
       | "sdp_api_recurring_payment_collection_transfer_moved"
       | "sdp_api_recurring_payment_collection_attempt_moved",
-    expectedStatus: string | null
+    expectedStatus: PaymentTransferStatus | PaymentSubscriptionCollectionAttemptStatus | null
   ): ResumedStepUnsettledError => {
     logEvent("error", {
       event,
