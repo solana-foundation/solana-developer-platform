@@ -149,17 +149,13 @@ export function TransactionsResults({
                     {transaction.amount === null ? (
                       <span className="text-tertiary">—</span>
                     ) : (
-                      <>
+                      <span className="inline-flex items-center gap-1">
                         <span className="font-medium text-primary">
                           {formatDecimalAmount(transaction.amount, locale)}
                         </span>
-                        {token === null ? null : <span className="text-secondary"> {token}</span>}
-                        {unverifiedToken ? (
-                          <span className="ml-1 inline-flex align-middle">
-                            <UnverifiedMintWarning />
-                          </span>
-                        ) : null}
-                      </>
+                        {token === null ? null : <span className="text-secondary">{token}</span>}
+                        {unverifiedToken ? <UnverifiedMintWarning /> : null}
+                      </span>
                     )}
                   </TableCell>
                   <TableCell
