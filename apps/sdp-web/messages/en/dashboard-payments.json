@@ -395,7 +395,7 @@
       "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
       "recipientReceives": "Recipient receives",
       "scaledAmount": "Underlying amount",
-      "scaledAmountHint": "Shown as {shown} due to the token's scaled UI amount multiplier, rounded up so the recipient sees at least the amount sent.",
+      "scaledAmountHint": "Shown as {shown} due to the token's scaled UI amount multiplier. The underlying amount is rounded up to the next base unit so it never shows less than you sent.",
       "counterparty": "counterparty",
       "toCounterparty": "to {counterparty}",
       "transferSubmitted": "Transfer submitted",
@@ -1531,7 +1531,7 @@
       "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
       "recipientReceived": "Recipient received",
       "scaledAmount": "Underlying amount",
-      "scaledAmountHint": "Shown as {shown} due to the token's scaled UI amount multiplier, rounded up so the recipient sees at least the amount sent."
+      "scaledAmountHint": "Shown as {shown} due to the token's scaled UI amount multiplier. The underlying amount is rounded up to the next base unit so it never shows less than you sent."
     },
     "requestDetail": {
       "paymentLink": "Payment link",
