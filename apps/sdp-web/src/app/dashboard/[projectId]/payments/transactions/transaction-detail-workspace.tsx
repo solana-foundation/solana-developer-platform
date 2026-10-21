@@ -382,7 +382,7 @@ function TransactionParties({
             label={t("DashboardPayments.transactionDetail.scaledAmount")}
             hint={t("DashboardPayments.transactionDetail.scaledAmountHint", scaled)}
           >
-            {t("DashboardPayments.transactionDetail.scaledAmountValue", scaled)}
+            {scaled.amount}
           </RecordRow>
         ) : null}
         {transfer?.source

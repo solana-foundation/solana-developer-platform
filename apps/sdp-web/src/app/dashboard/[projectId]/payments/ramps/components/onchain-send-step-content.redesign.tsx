@@ -454,7 +454,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
               </span>
             }
           >
-            {t("DashboardPayments.onchainSend.scaledAmountValue", scaled)}
+            {scaled.amount}
           </DetailRow>
         )}
         {memo === "" ? null : (
