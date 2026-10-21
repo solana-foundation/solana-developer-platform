@@ -51,8 +51,8 @@ async function get(path: string, key: typeof READ_KEY): Promise<Response> {
 }
 
 describe("payment request public tokens", () => {
-  // Reads reconcile an awaiting request on chain; nothing has paid it, so
-  // every read returns the stored row.
+  // The single read reconciles an awaiting request on chain and nothing has
+  // paid it, so it returns the stored row; the list reads stored rows only.
   const rpc = installClusterRpcStub();
   let requestId: string;
   let publicToken: string;
@@ -125,6 +125,17 @@ describe("payment request public tokens", () => {
     expect(body.data.paymentRequests).toHaveLength(1);
     expect(body.data.paymentRequests[0]).not.toHaveProperty("publicToken");
     expect(JSON.stringify(body)).not.toContain(publicToken);
+  });
+
+  it("lists an awaiting request from its stored row without reading the chain", async () => {
+    const res = await get("/v1/payments/requests", READ_KEY);
+
+    expect(res.status).toBe(200);
+    const body = z
+      .object({ data: z.object({ paymentRequests: z.array(z.object({ id: z.string() })) }) })
+      .parse(await res.json());
+    expect(body.data.paymentRequests.map((request) => request.id)).toEqual([requestId]);
+    expect(rpc.calls).toEqual([]);
   });
 
   it("never returns the token on a single read", async () => {
