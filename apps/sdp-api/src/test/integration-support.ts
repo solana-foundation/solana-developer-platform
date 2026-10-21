@@ -10,6 +10,7 @@ import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import { hashString } from "@sdp/payments/hash";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { KoraClient } from "@solana/kora";
+import { findSubscriptionAuthorityPda } from "@solana/subscriptions";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -35,6 +36,10 @@ import {
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import {
+  type RevokeIdleSubscriptionAuthoritiesResult,
+  revokeIdleSubscriptionAuthorities,
+} from "@/services/payments/recurring-payments/authority-revocation";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -69,6 +74,7 @@ export const apiTestSupport = {
   DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
+  findSubscriptionAuthorityPda,
   getCreateAssociatedTokenIdempotentInstruction,
   getDb,
   hashString,
@@ -90,6 +96,22 @@ export const apiTestSupport = {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_USER,
+  /** One run of the revoke-subscription-authorities cron, as the worker runs it, per cluster. */
+  revokeIdleSubscriptionAuthorities: async (env: Env, now: Date) => {
+    const results: RevokeIdleSubscriptionAuthoritiesResult[] = [];
+    await runInEachClusterScope(async () => {
+      results.push(await revokeIdleSubscriptionAuthorities(env, now));
+    });
+    return results.reduce(
+      (total, result) => ({
+        revoked: total.revoked + result.revoked,
+        recovered: total.recovered + result.recovered,
+        failed: total.failed + result.failed,
+        skipped: total.skipped + result.skipped,
+      }),
+      { revoked: 0, recovered: 0, failed: 0, skipped: 0 }
+    );
+  },
   trackPendingTransfers: (env: Env) => runInEachClusterScope(() => trackPendingTransfers(env)),
   withdrawFromVault,
 };

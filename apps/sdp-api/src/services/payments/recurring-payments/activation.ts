@@ -66,6 +66,7 @@ import {
   ResumedStepUnsettledError,
   readRecurringPaymentStepIfResumed,
   recurringPaymentErrorMessage,
+  refuseWhileSubscriptionAuthorityRevokes,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
   type SubscriptionStep,
@@ -693,6 +694,10 @@ export async function activateRecurringPayment(input: {
       projectId: input.projectId,
       movement: "recurring.activate",
       recurringPaymentId: input.recurringPayment.id,
+      custodyWalletIds: [input.sourceWallet.id],
+    });
+    await refuseWhileSubscriptionAuthorityRevokes(tx, {
+      projectId: input.projectId,
       custodyWalletIds: [input.sourceWallet.id],
     });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);

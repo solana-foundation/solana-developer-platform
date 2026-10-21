@@ -25,6 +25,7 @@ import { recurringPaymentsCron } from "@/cron/recurring-payments";
 import { ringsIndexingCron } from "@/cron/rings-indexing";
 import { secretRetirementsCron } from "@/cron/secret-retirements";
 import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
+import { subscriptionAuthoritiesCron } from "@/cron/subscription-authorities";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
@@ -46,6 +47,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   pendingTransfersCron,
   sponsorshipBudgetsCron,
   recurringPaymentsCron,
+  subscriptionAuthoritiesCron,
   rampTransfersCron,
   rampDeliveriesCron,
   rampTransferStatusesCron,
