@@ -1,6 +1,5 @@
 "use client";
 
-import type { Counterparty } from "@sdp/types/counterparties";
 import type { PaymentRequest, PaymentRequestLink, PaymentRequestStatus } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
@@ -64,7 +63,6 @@ interface PaymentRequestsWorkspaceProps {
   initialPaymentRequests: PaymentRequest[];
   initialError?: string;
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
-  counterparties: Counterparty[];
   /** How many requests the API counts for the status filter, across every page. */
   total: number;
   /** Whether `total` is exact; when it is not, the pager shows the page without a count. */
@@ -76,19 +74,17 @@ interface PaymentRequestsWorkspaceProps {
 
 const REQUEST_STATUSES = Object.keys(REQUEST_STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
 
-/** The list's rows: status, amount, who pays, where to, when, and a copy of the link. */
+/** The list's rows: status, amount, where to, when, and a copy of the link. */
 function PaymentRequestsTable({
   rows,
   locale,
   amountLabel,
-  fromLabel,
   onSelect,
   onCopyLink,
 }: {
   rows: readonly PaymentRequest[];
   locale: string;
   amountLabel: (request: PaymentRequest) => string;
-  fromLabel: (counterpartyId: string | null) => string;
   onSelect: (request: PaymentRequest) => void;
   onCopyLink: (request: PaymentRequest) => void;
 }) {
@@ -104,7 +100,6 @@ function PaymentRequestsTable({
               label: t("DashboardPayments.requests.amount"),
               className: "text-right",
             },
-            { id: "from", label: t("DashboardPayments.requests.from") },
             { id: "to", label: t("DashboardPayments.requests.to") },
             { id: "created", label: t("DashboardPayments.recurring.created") },
             {
@@ -139,15 +134,6 @@ function PaymentRequestsTable({
                 )}
               >
                 {amountLabel(request)}
-              </TableCell>
-              <TableCell
-                className={cn(
-                  PAYMENTS_TABLE_CELL,
-                  "max-w-56 truncate",
-                  request.counterpartyId ? "text-primary" : "text-tertiary"
-                )}
-              >
-                {fromLabel(request.counterpartyId)}
               </TableCell>
               <TableCell
                 className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
@@ -365,9 +351,8 @@ function PaymentRequestsPagination({
   );
 }
 
-/** A row's payer, by contact name, and its amount, by token symbol on the current cluster. */
-function usePaymentRequestLabels(counterparties: readonly Counterparty[]) {
-  const t = useTranslations();
+/** A row's amount, by token symbol on the current cluster. */
+function usePaymentRequestAmountLabel() {
   const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
   const tokenSymbolByMint = useMemo(
@@ -380,23 +365,10 @@ function usePaymentRequestLabels(counterparties: readonly Counterparty[]) {
       ),
     [sdpEnvironment]
   );
-  const counterpartyNameById = useMemo(
-    () =>
-      new Map(counterparties.map((counterparty) => [counterparty.id, counterparty.displayName])),
-    [counterparties]
-  );
-  const fromLabel = (counterpartyId: string | null): string => {
-    if (!counterpartyId) {
-      return t("DashboardPayments.requests.anyone");
-    }
-    const name = counterpartyNameById.get(counterpartyId);
-    return name ? name : counterpartyId;
-  };
-  const amountLabel = (request: PaymentRequest) => {
+  return (request: PaymentRequest) => {
     const symbol = tokenSymbolByMint.get(request.token);
     return `${formatDecimalAmount(request.amount, locale)} ${symbol ? symbol : shortenAddress(request.token)}`;
   };
-  return { fromLabel, amountLabel, counterpartyNameById };
 }
 
 /**
@@ -408,7 +380,6 @@ export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
   initialLocalErrorCode,
-  counterparties,
   total,
   totalIsExact,
   hasNextPage,
@@ -417,23 +388,21 @@ export function PaymentRequestsWorkspace({
   const t = useTranslations();
   const demo = usePaymentsDemo();
   const locale = useLocale();
-  const { fromLabel, amountLabel, counterpartyNameById } = usePaymentRequestLabels(counterparties);
+  const amountLabel = usePaymentRequestAmountLabel();
   const router = useRouter();
   const projectHref = useProjectHref();
   const [isPending, startTransition] = useTransition();
   // TODO(api): send the search to GET /v1/payments/requests once it can search. The API lists
   // requests only by page and stored status, so until then the search matches the page the list
-  // has read, by amount, token, payer, destination and reference, and the pager carries it to
+  // has read, by amount, token, destination and reference, and the pager carries it to
   // the other pages. Known limitation of the API, not of this list.
   const { search } = listState;
   const rows = useMemo(
     () =>
       search === null
         ? initialPaymentRequests
-        : initialPaymentRequests.filter((request) =>
-            paymentRequestMatchesSearch(request, search, counterpartyNameById)
-          ),
-    [initialPaymentRequests, search, counterpartyNameById]
+        : initialPaymentRequests.filter((request) => paymentRequestMatchesSearch(request, search)),
+    [initialPaymentRequests, search]
   );
 
   const applyListParams = (updates: ListParamsUpdate) => {
@@ -519,7 +488,6 @@ export function PaymentRequestsWorkspace({
               rows={rows}
               locale={locale}
               amountLabel={amountLabel}
-              fromLabel={fromLabel}
               onSelect={(request) => router.push(projectHref(paymentRequestHref(request.id)))}
               onCopyLink={copyLink}
             />

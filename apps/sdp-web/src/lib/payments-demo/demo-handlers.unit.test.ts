@@ -452,23 +452,16 @@ describe("requests", () => {
   it("refuses a request the API would", () => {
     expect(request({ amount: "" })?.status).toBe(400);
     expect(request({ walletId: "demo_cwlt_nobody" })?.status).toBe(404);
-    expect(request({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(404);
     expect(request({ expiresAt: "2026-09-01T00:00:00.000Z" })?.status).toBe(400);
     expect(request({ expiresAt: "not a date" })?.status).toBe(400);
     expect(ops).toEqual([]);
   });
 
-  it("creates one for a contact, with an expiry", () => {
-    const created = request({
-      counterpartyId: "demo_cpty_acme",
-      expiresAt: "2026-10-28T00:00:00.000Z",
-    });
+  it("creates one with an expiry", () => {
+    const created = request({ expiresAt: "2026-10-28T00:00:00.000Z" });
     expect(created?.status).toBe(201);
     expect(created?.body.data).toEqual(
-      expect.objectContaining({
-        counterpartyId: "demo_cpty_acme",
-        expiresAt: "2026-10-28T00:00:00.000Z",
-      })
+      expect.objectContaining({ expiresAt: "2026-10-28T00:00:00.000Z" })
     );
   });
 });
