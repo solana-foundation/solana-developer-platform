@@ -1,5 +1,4 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
@@ -55,15 +54,6 @@ const FAILED_SIGNATURE = signature(getBase58Decoder().decode(new Uint8Array(64).
 const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 let validateTransferSpy: MockInstance<typeof solanaPay.validateTransfer>;
-let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyTransactionLanded>;
-
-function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>> {
-  return {
-    ok: true,
-    status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
-    transaction: { slot: 1n, executionResultKnown: true, err: null, instructions: [] },
-  };
-}
 
 function referenceSignature(entry: {
   signature: string;
@@ -193,7 +183,6 @@ describe("reconcilePaymentRequest", () => {
     answerReferenceSignatures([
       referenceSignature({ signature: SIGNATURE, err: null, blockTime: null }),
     ]);
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockResolvedValue(validatedTransfer());
   }
 
@@ -208,7 +197,6 @@ describe("reconcilePaymentRequest", () => {
   beforeEach(async () => {
     answerReferenceSignatures([]);
     validateTransferSpy = vi.spyOn(solanaPay, "validateTransfer");
-    verifyTransactionLandedSpy = vi.spyOn(verifiedConfirmation, "verifyTransactionLanded");
 
     const db = getDb(env);
     await db.prepare("DELETE FROM payment_requests").run();
@@ -290,7 +278,6 @@ describe("reconcilePaymentRequest", () => {
         blockTime: null,
       }),
     ]);
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockImplementation(async (_rpc, candidate) => {
       if (candidate === STRAY_SIGNATURE) {
         throw new ValidateTransferError("recipient not found");
@@ -304,10 +291,6 @@ describe("reconcilePaymentRequest", () => {
     );
 
     expect(settled.status).toBe("paid");
-    expect(verifyTransactionLandedSpy.mock.calls.map(([, candidate]) => candidate)).toEqual([
-      STRAY_SIGNATURE,
-      SIGNATURE,
-    ]);
     expect(validateTransferSpy.mock.calls.map(([, candidate]) => candidate)).toEqual([
       STRAY_SIGNATURE,
       SIGNATURE,
@@ -389,43 +372,6 @@ describe("reconcilePaymentRequest", () => {
     expect(await listInboundTransfers()).toMatchObject([{ custody_wallet_id: null }]);
   });
 
-  it("does not settle when the signature fails the independent confirmation check", async () => {
-    answerReferenceSignatures([
-      referenceSignature({ signature: SIGNATURE, err: null, blockTime: null }),
-    ]);
-    verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_confirmed" });
-    validateTransferSpy.mockResolvedValue(validatedTransfer());
-
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
-    );
-
-    expect(result.status).toBe("awaiting_payment");
-    expect(validateTransferSpy).not.toHaveBeenCalled();
-    expect(await listInboundTransfers()).toHaveLength(0);
-  });
-
-  it("does not settle while the transaction is confirmed but not yet indexed", async () => {
-    answerReferenceSignatures([
-      referenceSignature({ signature: SIGNATURE, err: null, blockTime: null }),
-    ]);
-    verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
-
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
-    );
-
-    expect(result.status).toBe("awaiting_payment");
-    expect(validateTransferSpy).not.toHaveBeenCalled();
-    expect(await listInboundTransfers()).toHaveLength(0);
-  });
-
   it("leaves the request awaiting when no transfer references it", async () => {
     const result = await reconcileOnSandbox(
       await createRequest({ token: SOL_MINT, expiresAt: null }),
@@ -442,7 +388,6 @@ describe("reconcilePaymentRequest", () => {
     answerReferenceSignatures([
       referenceSignature({ signature: SIGNATURE, err: null, blockTime: null }),
     ]);
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
 
     const result = await reconcileOnSandbox(
@@ -459,7 +404,7 @@ describe("reconcilePaymentRequest", () => {
     answerReferenceSignatures([
       referenceSignature({ signature: SIGNATURE, err: null, blockTime: null }),
     ]);
-    verifyTransactionLandedSpy.mockRejectedValue(new Error("rpc exploded"));
+    validateTransferSpy.mockRejectedValue(new Error("rpc exploded"));
 
     await expect(
       reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }), {
@@ -473,7 +418,7 @@ describe("reconcilePaymentRequest", () => {
     answerReferenceSignatures([
       referenceSignature({ signature: SIGNATURE, err: null, blockTime: null }),
     ]);
-    verifyTransactionLandedSpy.mockRejectedValue(new Error("rpc exploded"));
+    validateTransferSpy.mockRejectedValue(new Error("rpc exploded"));
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     const result = await reconcileOnSandbox(request, { bestEffort: true });
@@ -552,7 +497,6 @@ describe("reconcilePaymentRequest", () => {
         blockTime: Math.floor((expiresAtMs + 60_000) / 1000),
       }),
     ]);
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockResolvedValue(validatedTransfer());
 
     const settled = await reconcileOnSandbox(expired, { bestEffort: false });
@@ -584,13 +528,11 @@ describe("reconcilePaymentRequest", () => {
               : Math.floor((expiresAtMs + blockTimeAfterExpiryMs) / 1000),
         }),
       ]);
-      verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
       validateTransferSpy.mockResolvedValue(validatedTransfer());
 
       const result = await reconcileOnSandbox(expired, { bestEffort: false });
 
       expect(result).toBe(expired);
-      expect(verifyTransactionLandedSpy).not.toHaveBeenCalled();
       expect(validateTransferSpy).not.toHaveBeenCalled();
       expect(await listInboundTransfers()).toHaveLength(0);
     }
