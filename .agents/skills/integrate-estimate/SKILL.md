@@ -12,11 +12,11 @@ Choose the closest implementation in `packages/sdp-payments/src/ramps/providers/
 
 ## Contract
 
-Both methods are required on `RampProvider` (`packages/sdp-payments/src/ramps/types.ts`), even when one direction is unsupported:
+Each direction the provider runs has its estimate member on `RampProvider` (`packages/sdp-payments/src/ramps/types.ts`); a direction it doesn't run has none:
 
 ```ts
-estimateOnramp(ctx: RampRuntimeContext, input: RampEstimateOnrampInput): Promise<PaymentRampEstimate>
-estimateOfframp(ctx: RampRuntimeContext, input: RampEstimateOfframpInput): Promise<PaymentRampEstimate>
+estimateOnramp: (ctx: RampRuntimeContext, input: RampEstimateOnrampInput) => Promise<PaymentRampEstimate>;
+estimateOfframp: (ctx: RampRuntimeContext, input: RampEstimateOfframpInput) => Promise<PaymentRampEstimate>;
 ```
 
 Inputs (`packages/sdp-payments/src/ramps/types.ts`):
@@ -37,7 +37,7 @@ Output `PaymentRampEstimate` (`@sdp/types`, `packages/sdp-types/src/payments.ts`
 
 ## How to build it
 
-`ctx` is `{ env, mode }` — read your config with the mode-keyed reader from `register-provider`, then HTTP only. Convert the asset rail with `getCryptoRailAssetLabel` from `@sdp/types/payment-rails`; convert minor units with `parseDecimalAmount` / `formatDecimalAmount` from `@sdp/solana/amount`.
+`ctx` is `{ mode, cluster, credentials }`: read the keys with `rampCredentials(this, ctx)`, then HTTP only. Convert the asset rail with `getCryptoRailAssetLabel` from `@sdp/types/payment-rails`; convert minor units with `parseDecimalAmount` / `formatDecimalAmount` from `@sdp/solana/amount`.
 
 A common shape: GET the corridor's exchange rate once to learn decimals, again with the amount to get the quote, then map into `PaymentRampEstimate`.
 

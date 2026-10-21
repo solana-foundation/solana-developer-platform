@@ -1,5 +1,5 @@
 import { rampAmountLimitOf } from "@sdp/payments/errors";
-import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { rampClientFor } from "@sdp/payments/ramps";
 import { OFFRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { PaymentRampQuote } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -65,8 +65,8 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
   );
   const providers = row ? filterProviders(c, row.providers) : [];
 
-  const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
-    RAMP_PROVIDER_CLIENTS[provider].estimateOfframp(ctx, {
+  const estimates = await estimateAcrossProviders(c, "offramp", providers, (client, ctx) =>
+    client.estimateOfframp(ctx, {
       assetRail: input.assetRail,
       fiatCurrency: input.fiatCurrency,
       cryptoAmount: input.cryptoAmount,
@@ -95,13 +95,15 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   let precreatedTransferId: string | undefined;
   switch (input.provider) {
     case "moonpay": {
+      const moonpay = rampClientFor("moonpay", "offramp");
+      const runtime = rampRuntime(c, "moonpay");
       const fiatCurrency = input.fiatCurrency ?? "USD";
       const token = rampTransferTokenMint(input.assetRail);
       // One provider estimate and one balance read, side by side, before any
       // row: the estimate is the payout SDP quotes and refuses an amount
       // MoonPay would not take; the read refuses a sale the wallet cannot fund.
       const [estimated, funded] = await Promise.allSettled([
-        RAMP_PROVIDER_CLIENTS.moonpay.estimateOfframp(rampRuntime(c), {
+        moonpay.estimateOfframp(runtime, {
           assetRail: input.assetRail,
           fiatCurrency,
           cryptoAmount: input.cryptoAmount,
@@ -146,7 +148,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       }
       precreatedTransferId = pendingMoonpayTransfer.id;
       try {
-        quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOfframpQuote(rampRuntime(c), {
+        quote = await moonpay.createOfframpQuote(runtime, {
           assetRail: input.assetRail,
           fiatCurrency,
           cryptoAmount: input.cryptoAmount,

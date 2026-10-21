@@ -157,10 +157,6 @@ let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
 
-let originalMoonPayOnrampUrl: string | undefined;
-
-let originalMoonPayOfframpUrl: string | undefined;
-
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
 
@@ -574,13 +570,9 @@ export function installPaymentsRouteTestHooks(): void {
 
     originalMoonPaySandboxApiKey = env.MOONPAY_SANDBOX_API_KEY;
     originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
-    originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
-    originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
-    env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
-    env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -589,8 +581,6 @@ export function installPaymentsRouteTestHooks(): void {
   afterEach(async () => {
     env.MOONPAY_SANDBOX_API_KEY = originalMoonPaySandboxApiKey;
     env.MOONPAY_SANDBOX_SECRET_KEY = originalMoonPaySandboxSecretKey;
-    env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
-    env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
 
     await clearKVStores(env);
   });

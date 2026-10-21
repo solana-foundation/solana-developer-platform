@@ -275,8 +275,6 @@ export interface Env extends ManagedRpcEnv {
 
   // MoonPay ramps configuration
   // MoonPay sandbox only: production projects bring their own MoonPay account.
-  MOONPAY_ONRAMP_URL?: string;
-  MOONPAY_OFFRAMP_URL?: string;
   MOONPAY_SANDBOX_API_KEY?: string;
   MOONPAY_SANDBOX_SECRET_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
