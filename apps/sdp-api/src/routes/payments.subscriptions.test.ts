@@ -122,6 +122,33 @@ describe("Payments routes — subscriptions", () => {
     });
   });
 
+  it("refuses a plan amount finer than USDC's decimals with 400 and stores no plan", async () => {
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "1.0000001",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+
+    expect(planRes.status).toBe(400);
+    expect(errorResponseSchema.parse(await planRes.json()).error.code).toBe("BAD_REQUEST");
+    const stored = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*)::integer AS count FROM payment_subscription_plans WHERE project_id = ?"
+      )
+      .bind(TEST_PROJECT.id)
+      .first<{ count: number }>();
+    expect(stored).toEqual({ count: 0 });
+  });
+
   // A plan is a record and an unsigned transaction the owner signs; SDP signs
   // nothing, so a key's wallet scope does not limit it (HOO-2099).
   it("lets a key that signs with no wallet archive a project plan", async () => {
