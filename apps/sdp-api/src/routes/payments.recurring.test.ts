@@ -2351,6 +2351,40 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
   });
 
+  it("collects a legacy mint's pull without reading the mint again, its token account or a transfer hook", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    const [sourceAta] = await findAssociatedTokenPda({
+      owner: recurringExecution.sourceSigner().address,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      mint: address(DEVNET_USDC_MINT),
+    });
+    const hookAccounts = vi.spyOn(subscriptionsProgram, "resolveTransferHookAccounts");
+    onTestFinished(() => hookAccounts.mockRestore());
+    const accountReadsBefore = getAccountInfoMock.mock.calls.length;
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(200);
+    expect((await parseCollectionResponse(collectRes)).data.collectionAttempt.status).toBe(
+      "confirmed"
+    );
+    expect(hookAccounts).not.toHaveBeenCalled();
+    const accountsRead = getAccountInfoMock.mock.calls
+      .slice(accountReadsBefore)
+      .map(([, accountAddress]) => accountAddress);
+    expect(accountsRead).not.toContain(DEVNET_USDC_MINT);
+    expect(accountsRead).not.toContain(sourceAta);
+  });
+
   it("collects with the exact custody wallet when a Provider wallet ID could select another signer", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const signAsFeePayerMock = recurringExecution.signAsFeePayerMock();
