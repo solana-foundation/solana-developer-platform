@@ -79,7 +79,7 @@ export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
   .extend({
     walletId: withOpenApi(walletIdParamsSchemaBase.shape.walletId, {
       description:
-        "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Legacy provider `walletId` remains supported during the compatible rollout; ambiguous selectors are rejected.",
+        "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Provider wallet references are not accepted.",
       example: "cwlt_example",
     }),
   })

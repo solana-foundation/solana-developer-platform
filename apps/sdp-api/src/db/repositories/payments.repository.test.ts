@@ -804,7 +804,7 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
   });
 });
 
-describe("PaymentsRepository.listTransfers exact wallet and project history (postgres)", () => {
+describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   const WALLET_A = "wallet_allowlist_a";
   const WALLET_B = "wallet_allowlist_b";
   const CUSTODY_WALLET_A = "cwlt_allowlist_a";
@@ -891,37 +891,6 @@ describe("PaymentsRepository.listTransfers exact wallet and project history (pos
 
     expect(selected.rows.map((row) => row.id)).toHaveLength(1);
     expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
-  });
-
-  it("retains exact and null-pin history only in its project before pagination", async () => {
-    const repo = await seedTwoWallets();
-    const all = await repo.listTransfers(listArgs);
-
-    expect(all.total).toBe(3);
-    expect(all.rows).toHaveLength(3);
-    expect(all.rows).toContainEqual(
-      expect.objectContaining({ id: "xfr_a-1", custody_wallet_id: CUSTODY_WALLET_A })
-    );
-    expect(all.rows).toContainEqual(
-      expect.objectContaining({ id: "xfr_a-2", custody_wallet_id: null })
-    );
-    expect(all.rows).toContainEqual(
-      expect.objectContaining({ id: "xfr_b-1", custody_wallet_id: CUSTODY_WALLET_B })
-    );
-    await expect(repo.listTransfers({ ...listArgs, limit: 1, offset: 1 })).resolves.toMatchObject({
-      rows: [expect.objectContaining({ project_id: TEST_PROJECT_ID })],
-      total: 3,
-    });
-    await expect(
-      repo.listTransfers({ ...listArgs, projectId: `${TEST_PROJECT_ID}_production` })
-    ).resolves.toEqual({ rows: [], total: 0 });
-    await expect(
-      repo.getTransferById({
-        transferId: "xfr_a-2",
-        organizationId: TEST_ORG.id,
-        projectId: `${TEST_PROJECT_ID}_production`,
-      })
-    ).resolves.toBeNull();
   });
 });
 

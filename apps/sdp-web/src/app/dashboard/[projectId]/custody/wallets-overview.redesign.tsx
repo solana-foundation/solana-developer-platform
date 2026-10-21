@@ -230,7 +230,7 @@ function WalletCard({
         </div>
       </div>
       <p className="px-4 pt-5 pb-6 text-quote">
-        <WalletCardBalanceValue walletId={wallet.id} initialBalances={wallet.balances} />
+        <WalletCardBalanceValue walletId={wallet.id} initialBalances={wallet.balances ?? []} />
       </p>
       <dl className="grid grid-cols-2 gap-x-6 border-t border-border-subtle px-4 pt-3 pb-3">
         <WalletIdentifier
@@ -293,7 +293,7 @@ function WalletsList({
             <TableCell className="text-right">
               <WalletCardBalanceValue
                 walletId={item.wallet.id}
-                initialBalances={item.wallet.balances}
+                initialBalances={item.wallet.balances ?? []}
               />
             </TableCell>
             <TableCell className="pl-6">
@@ -475,10 +475,7 @@ export function WalletsOverview({
   // A pin keeps the name the list shows now, and a wallet that has gone drops out of the sidebar.
   useEffect(() => {
     if (!storageKey || walletsError) return;
-    syncWalletFavorites(
-      storageKey,
-      items.map((item) => ({ ...toFavorite(item), providerWalletId: item.wallet.walletId }))
-    );
+    syncWalletFavorites(storageKey, items.map(toFavorite));
   }, [items, storageKey, walletsError]);
 
   useEffect(() => {

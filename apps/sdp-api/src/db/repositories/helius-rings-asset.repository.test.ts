@@ -45,14 +45,7 @@ describe("HeliusRingsAssetRepository (postgres)", () => {
       .bind(DISABLED_MINT)
       .run();
 
-    try {
-      await expect(repo.getActiveByMint(DISABLED_MINT)).resolves.toBeNull();
-      expect((await repo.listActive()).map((row) => row.mint)).not.toContain(DISABLED_MINT);
-    } finally {
-      await getDb(env)
-        .prepare("DELETE FROM helius_rings_asset_allowlist WHERE mint = ?")
-        .bind(DISABLED_MINT)
-        .run();
-    }
+    await expect(repo.getActiveByMint(DISABLED_MINT)).resolves.toBeNull();
+    expect((await repo.listActive()).map((row) => row.mint)).not.toContain(DISABLED_MINT);
   });
 });

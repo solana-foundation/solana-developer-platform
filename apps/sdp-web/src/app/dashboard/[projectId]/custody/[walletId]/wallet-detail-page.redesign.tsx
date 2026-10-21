@@ -11,17 +11,23 @@ import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
-import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
 import { resolveWalletConnectionRow } from "./wallet-connection-row";
 import type {
   IssuedTokensByMint,
   WalletBalancesResult,
   WalletPageView,
 } from "./wallet-detail.shared";
-import { walletDetailHref } from "./wallet-detail.shared";
 import { WalletDetailView } from "./wallet-detail-view";
+
+interface WalletBalancesResponse {
+  walletBalances?: {
+    walletId: string;
+    address: string;
+    balances: WalletBalancesResult["balances"];
+  };
+}
 
 interface OwnedTokenRoute {
   id: string;
@@ -59,7 +65,6 @@ async function getWalletTrackedBalances(
 ): Promise<WalletBalancesResult> {
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
-    // shortcut: preserve the legacy 404 display until balance-state UX is changed separately.
     if (response.status === 404) {
       return { balances: [], error: null };
     }
@@ -67,8 +72,8 @@ async function getWalletTrackedBalances(
       return { balances: [], error: unavailableMessage };
     }
 
-    const balances = parseWalletBalanceResponse(await response.json(), walletId).balances;
-    return { balances, error: null };
+    const json = (await response.json()) as { data?: WalletBalancesResponse };
+    return { balances: json.data?.walletBalances?.balances ?? [], error: null };
   } catch {
     return { balances: [], error: unavailableMessage };
   }
@@ -133,13 +138,7 @@ function toWalletPageView(
  * One wallet's page. The wallet itself is read before anything renders (its name heads the
  * page); balances and the issued-token names are handed to the view as promises, so each part streams in on its own instead of holding the page.
  */
-export async function WalletDetailPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ walletId: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export async function WalletDetailPage({ params }: { params: Promise<{ walletId: string }> }) {
   const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
@@ -156,9 +155,6 @@ export async function WalletDetailPage({
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
   const wallet = await getWalletDetail(apiClient.request, resolvedWalletId);
-  if (wallet.id !== resolvedWalletId) {
-    redirect(await requestProjectHref(walletDetailHref(wallet.id, await searchParams)));
-  }
   const balancesPromise = getWalletTrackedBalances(
     apiClient.request,
     wallet.id,

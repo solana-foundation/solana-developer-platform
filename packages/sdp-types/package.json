@@ -204,11 +204,6 @@
       "import": "./src/site.ts",
       "default": "./src/site.ts"
     },
-    "./sponsorship": {
-      "types": "./src/sponsorship.ts",
-      "import": "./src/sponsorship.ts",
-      "default": "./src/sponsorship.ts"
-    },
     "./tokens": {
       "types": "./src/tokens.ts",
       "import": "./src/tokens.ts",

@@ -513,7 +513,7 @@
           {
             "key": "walletId",
             "label": "{walletId}",
-            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Legacy provider `walletId` remains supported during the compatible rollout; ambiguous selectors are rejected.",
+            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Provider wallet references are not accepted.",
             "defaultValue": "cwlt_example",
             "required": true
           },
