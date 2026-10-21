@@ -85,8 +85,8 @@ export interface PaymentRequestsRepository {
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
   /**
-   * The open requests one environment's reconciler checks next, least recently reconciled first,
-   * a never-reconciled one queued by its creation time: awaiting payment with a custody wallet,
+   * The open requests one environment's reconciler checks next, least recently checked first,
+   * a never-checked one queued by its creation time: awaiting payment with a custody wallet,
    * and unexpired or expired after `expiredAfter`. System-only: it reads across tenants.
    */
   listPaymentRequestsToReconcile(params: {
@@ -95,9 +95,9 @@ export interface PaymentRequestsRepository {
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   /**
-   * Stamp `reconciled_at` on requests the reconciler has just tried, so the next run takes the
+   * Stamp `last_checked_at` on requests the reconciler has just tried, so the next run takes the
    * ones behind them. System-only.
    */
-  markPaymentRequestsReconciled(requestIds: readonly string[]): Promise<void>;
+  markPaymentRequestsChecked(requestIds: readonly string[]): Promise<void>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
 }

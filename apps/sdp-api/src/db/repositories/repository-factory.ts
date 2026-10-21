@@ -141,7 +141,7 @@ export function createPaymentRequestsRepository(
     [
       "getPaymentRequestByPublicToken",
       "listPaymentRequestsToReconcile",
-      "markPaymentRequestsReconciled",
+      "markPaymentRequestsChecked",
     ]
   );
 }

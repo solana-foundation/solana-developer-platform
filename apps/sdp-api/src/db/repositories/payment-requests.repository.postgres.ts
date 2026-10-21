@@ -170,7 +170,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.status = 'awaiting_payment'
               AND pr.custody_wallet_id IS NOT NULL
               AND (pr.expires_at IS NULL OR pr.expires_at::timestamptz > ?::timestamptz)
-            ORDER BY COALESCE(pr.reconciled_at, pr.created_at) ASC, pr.id ASC
+            ORDER BY COALESCE(pr.last_checked_at, pr.created_at) ASC, pr.id ASC
             LIMIT ?`
         )
         .bind(environment, expiredAfter, limit)
@@ -178,11 +178,11 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return rows.results.map(mapPaymentRequestRow);
     },
 
-    async markPaymentRequestsReconciled(requestIds) {
+    async markPaymentRequestsChecked(requestIds) {
       await db
         .prepare(
           `UPDATE payment_requests
-              SET reconciled_at = sdp_iso_now()
+              SET last_checked_at = sdp_iso_now()
             WHERE id = ANY(?)`
         )
         .bind([...requestIds])
