@@ -16,7 +16,7 @@ import {
   paymentRecurringPaymentResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcResponder, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
@@ -63,7 +63,6 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
     rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()

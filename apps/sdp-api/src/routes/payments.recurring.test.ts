@@ -893,6 +893,60 @@ describe("Payments routes — recurring", () => {
     expect(stableBody.data.recurringPayment.token).toBe(DEVNET_USDC_MINT);
   });
 
+  it("refuses a USDC amount finer than its decimals and stores no recurring payment", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "recurring_precision_gate" });
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: "USDC",
+          amount: "25.0000001",
+          periodHours: 24,
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect(errorResponseSchema.parse(await res.json()).error.code).toBe("BAD_REQUEST");
+    const stored = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM payment_recurring_payments")
+      .first<{ count: number }>();
+    expect(stored).toEqual({ count: 0 });
+  });
+
+  it("refuses an update to a USDC amount finer than its decimals and keeps the stored amount", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+    const res = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ amount: "35.0000001" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect(errorResponseSchema.parse(await res.json()).error.code).toBe("BAD_REQUEST");
+    const stored = await getDb(env)
+      .prepare("SELECT amount FROM payment_recurring_payments WHERE id = ?")
+      .bind(created.id)
+      .first<{ amount: string }>();
+    expect(stored).toEqual({ amount: DEFAULT_RECURRING_FIXTURE.amount });
+  });
+
   it("activates recurring payments through SDP API routes", async () => {
     const signAsFeePayerMock = recurringExecution.signAsFeePayerMock();
     const created = await createRecurringPaymentFixture({
@@ -3986,13 +4040,7 @@ describe("Payments routes — recurring", () => {
       const activated = await activateProductionUsdcSchedule();
 
       expect(activated.token).toBe(MAINNET_USDC_MINT);
-      expect(recurringExecution.rpc.calls).toContainEqual({
-        cluster: "mainnet-beta",
-        method: "getTokenSupply",
-      });
-      expect(new Set(recurringExecution.rpc.calls.map((call) => call.cluster))).toEqual(
-        new Set(["mainnet-beta"])
-      );
+      expect(recurringExecution.rpc.calls.filter((call) => call.cluster === "devnet")).toEqual([]);
       expect(
         new Set(
           [
@@ -4017,23 +4065,11 @@ describe("Payments routes — recurring", () => {
           dueAt: new Date(now.getTime() - 60 * 1000).toISOString(),
         });
       }
-      const requestsBefore = recurringExecution.rpc.requests.length;
 
       await runInEachClusterScope(async () => {
         await collectDueRecurringPayments(env, now);
       });
 
-      const tokenSupplyReads = recurringExecution.rpc.requests
-        .slice(requestsBefore)
-        .filter((request) => request.method === "getTokenSupply");
-      const clustersReadingMint = (mint: string) =>
-        new Set(
-          tokenSupplyReads
-            .filter((request) => request.params[0] === mint)
-            .map((request) => request.cluster)
-        );
-      expect(clustersReadingMint(DEVNET_USDC_MINT)).toEqual(new Set(["devnet"]));
-      expect(clustersReadingMint(MAINNET_USDC_MINT)).toEqual(new Set(["mainnet-beta"]));
       const clustersConfirming = (collectionSignature: string) =>
         new Set(
           confirmTransactionMock.mock.calls

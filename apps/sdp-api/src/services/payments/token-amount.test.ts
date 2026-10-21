@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
@@ -19,7 +19,11 @@ import {
   type StubMint,
   scaledUiAmountConfig,
 } from "@/test/helpers/token-mints";
-import { loadPaymentAmountConverter, readStaticAmountMintDecimals } from "./token-amount";
+import {
+  assertPaymentAmountFitsMint,
+  loadPaymentAmountConverter,
+  parseStaticPaymentAmount,
+} from "./token-amount";
 
 const MINT = syntheticAddress(1);
 const CLOCK_UNIX_TIMESTAMP = 1_750_000_000n;
@@ -161,20 +165,18 @@ describe("loadPaymentAmountConverter", () => {
   });
 
   it.each([
+    { label: "plain", extensions: null },
     { label: "scaled UI amount", extensions: [SCALED_BY_TWO_UNTIL_LATER] },
     { label: "interest-bearing", extensions: [INTEREST_BEARING_CONFIG] },
-  ])(
-    "refuses a $label amount finer than the mint's decimals as a plain mint does",
-    async ({ extensions }) => {
-      serveMint({ decimals: 6, extensions });
+  ])("answers an amount finer than a $label mint's decimals with 400", async ({ extensions }) => {
+    serveMint({ decimals: 6, extensions });
 
-      const toBaseUnits = await inSandboxScope(() => loadPaymentAmountConverter(MINT));
+    const toBaseUnits = await inSandboxScope(() => loadPaymentAmountConverter(MINT));
 
-      expect(() => toBaseUnits("1.0000001")).toThrow(
-        new AmountError("Amount has too many decimal places")
-      );
-    }
-  );
+    expect(() => toBaseUnits("1.0000001")).toThrow(
+      expect.objectContaining({ code: "BAD_REQUEST", statusCode: 400 })
+    );
+  });
 
   it("answers 400 for a mint with no account", async () => {
     respondMintAccounts(rpc, { mints: new Map(), clockUnixTimestamp: CLOCK_UNIX_TIMESTAMP });
@@ -187,7 +189,7 @@ describe("loadPaymentAmountConverter", () => {
   });
 });
 
-describe("readStaticAmountMintDecimals", () => {
+describe("parseStaticPaymentAmount", () => {
   const rpc = installClusterRpcResponder();
 
   function serveMint(mint: StubMint): void {
@@ -197,10 +199,12 @@ describe("readStaticAmountMintDecimals", () => {
     });
   }
 
-  it("returns a plain mint's decimals", async () => {
+  it("converts a plain mint's amount to base units by its decimals", async () => {
     serveMint({ decimals: 9, extensions: null });
 
-    await expect(inSandboxScope(() => readStaticAmountMintDecimals(MINT))).resolves.toBe(9);
+    await expect(inSandboxScope(() => parseStaticPaymentAmount("1.5", MINT))).resolves.toBe(
+      1_500_000_000n
+    );
   });
 
   it.each([
@@ -209,10 +213,28 @@ describe("readStaticAmountMintDecimals", () => {
   ])("refuses a $label mint with 400", async ({ extensions }) => {
     serveMint({ decimals: 6, extensions });
 
-    await expect(inSandboxScope(() => readStaticAmountMintDecimals(MINT))).rejects.toMatchObject({
+    await expect(inSandboxScope(() => parseStaticPaymentAmount("1", MINT))).rejects.toMatchObject({
       code: "BAD_REQUEST",
       statusCode: 400,
       message: "Recurring payments do not support interest-bearing or scaled UI amount tokens",
     });
+  });
+});
+
+describe("assertPaymentAmountFitsMint", () => {
+  const rpc = installClusterRpcResponder();
+  const usdcDevnetMint = address(WELL_KNOWN_TOKENS.USDC.mints.devnet.address);
+
+  it("refuses an amount finer than a well-known mint's catalogue decimals with 400, reading nothing", async () => {
+    await expect(
+      inSandboxScope(() => assertPaymentAmountFitsMint("1.0000001", usdcDevnetMint))
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", statusCode: 400 });
+    expect(rpc.requests).toEqual([]);
+  });
+
+  it("accepts an amount at the mint's decimals", async () => {
+    await expect(
+      inSandboxScope(() => assertPaymentAmountFitsMint("1.000001", usdcDevnetMint))
+    ).resolves.toBeUndefined();
   });
 });

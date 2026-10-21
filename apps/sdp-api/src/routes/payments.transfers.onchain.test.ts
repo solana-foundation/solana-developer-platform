@@ -158,6 +158,25 @@ describe("Payments routes — on-chain transfers", () => {
     expect(await countTransferRows()).toBe(0);
   });
 
+  it("refuses a USDC amount finer than its decimals before creating a transfer record", async () => {
+    const res = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: DEVNET_USDC_MINT,
+        amount: "1.0000001",
+      },
+      {}
+    );
+
+    expect(res.status).toBe(400);
+    const body = await readErrorResponse(res);
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(await countTransferRows()).toBe(0);
+  });
+
   it("executes a SOL transfer and returns a confirmed transfer record", async () => {
     const res = await postTransfer(
       {
