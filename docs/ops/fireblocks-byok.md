@@ -10,9 +10,23 @@ a beta deployment can connect to mainnet.
 
 Fireblocks connections use the same project-scoped encrypted credential lifecycle as Privy:
 installation, credential checks, replacement, rotation, rollback, deactivation, and secret
-retirement. Organization entitlement to Fireblocks is still required. Deploy the Fireblocks migrations `0152`, `0153`, `0156` and `0157` before the API. They extend
+retirement. Organization entitlement to Fireblocks is still required. Deploy the Fireblocks migrations `0153`, `0154`, `0156` and `0157` before the API. They extend
 the GCP reservation and cleanup constraints, enforce one unfinished Fireblocks installation,
 and add tenant-isolated, encrypted CSR registration storage.
+
+If a local development database already applied `0152_fireblocks_byok.sql` from an
+earlier PR revision, record its new filename before running migrations. Its SQL is
+unchanged; `main` now uses `0152` for recurring-payment expiry. This prevents replaying
+the Fireblocks constraint changes after their validation migration already ran:
+
+```sql
+UPDATE schema_migrations
+SET version = '0154_fireblocks_byok.sql'
+WHERE version = '0152_fireblocks_byok.sql'
+  AND NOT EXISTS (
+    SELECT 1 FROM schema_migrations WHERE version = '0154_fireblocks_byok.sql'
+  );
+```
 
 If a development database already applied an earlier PR version of `0153` without
 the status column, apply this compatibility update before starting the new API.
