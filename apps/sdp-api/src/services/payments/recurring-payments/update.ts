@@ -332,8 +332,8 @@ async function resolveRecurringPaymentUpdate(input: {
   const token = resolveRecurringPaymentTokenMint(
     input.request.token === undefined ? input.recurringPayment.token : input.request.token
   );
-  // A new token is start admission; a recovered stale update settles work already sent.
-  const admitsToken = input.request.token !== undefined && !input.recoveringStaleUpdate;
+  // Token admission gates a fresh update; a recovered stale update settles work its claim admitted.
+  const admitsToken = !input.recoveringStaleUpdate;
   const [destination] = await Promise.all([
     accountChanged
       ? resolveSolanaCounterpartyAccount({

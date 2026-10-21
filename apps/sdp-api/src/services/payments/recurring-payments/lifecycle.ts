@@ -584,20 +584,7 @@ async function runRecurringPaymentLifecycle(
     if (!plan) {
       throw notFound("Subscription plan");
     }
-    // Cancel is an exit and never asks the terms admission check; a fresh resume restarts
-    // collection, while a resume recovered at submit settles work already sent.
-    const tokenMint = assertValidAddress(
-      input.operation === "resume" && !resumedAtSubmit
-        ? await assertRecurringPaymentTerms({
-            token: plan.token,
-            amount: claimed.amount,
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            env: input.env,
-          })
-        : plan.token,
-      "tokenMint"
-    );
+    const tokenMint = assertValidAddress(plan.token, "tokenMint");
 
     const expectedSubscriptionStatus = input.operation === "cancel" ? "active" : "canceled";
     const finalSubscriptionStatus = input.operation === "cancel" ? "canceled" : "active";
@@ -654,8 +641,19 @@ async function runRecurringPaymentLifecycle(
     // chain shows landed has already returned, so a refusal never strands an
     // operation that is on chain. A refused resume goes back to `canceled`
     // through the failure reset, which matches the subscription on chain.
-    if (recoveringStaleLifecycle && input.operation === "resume") {
-      await input.admitStart();
+    // Token terms are asked at the same point for every resume; cancel is an
+    // exit and never asks them.
+    if (input.operation === "resume") {
+      await assertRecurringPaymentTerms({
+        token: plan.token,
+        amount: claimed.amount,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        env: input.env,
+      });
+      if (recoveringStaleLifecycle) {
+        await input.admitStart();
+      }
     }
     const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
