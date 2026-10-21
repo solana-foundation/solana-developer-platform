@@ -7238,6 +7238,7 @@ describe("Payments routes — recurring", () => {
       });
 
       it("sends a cancel again once its saved send expired without landing", async () => {
+        mockDistinctRecentBlockhashes();
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
         expect(
