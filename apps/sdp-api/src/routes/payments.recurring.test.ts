@@ -273,6 +273,27 @@ async function seedIssuedTokenMint(params: {
   return tokenId;
 }
 
+/** An active schedule on a token issued in the project, and a way to pause that token. */
+async function activateOnIssuedToken() {
+  const issuedMint = (await generateKeyPairSigner()).address;
+  const issuedTokenId = await seedIssuedTokenMint({
+    projectId: TEST_PROJECT.id,
+    mintAddress: issuedMint,
+    status: "active",
+  });
+  const activated = await activateRecurringPaymentFixture({
+    ...DEFAULT_RECURRING_FIXTURE,
+    token: issuedMint,
+  });
+  const pauseToken = async () => {
+    await getDb(env)
+      .prepare("UPDATE issued_tokens SET status = 'paused' WHERE id = ?")
+      .bind(issuedTokenId)
+      .run();
+  };
+  return { activated, issuedMint, pauseToken };
+}
+
 function _expectPreparedSubscriptionTransaction(
   preparedTransaction: {
     serialized: string;
@@ -960,6 +981,25 @@ describe("Payments routes — recurring", () => {
     const res = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
       { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ token: pausedMint }) },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect(errorResponseSchema.parse(await res.json()).error.message).toBe(
+      "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported"
+    );
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+  });
+
+  it("refuses a fresh update that keeps its issued token after the token pauses, sending nothing", async () => {
+    const { activated, pauseToken } = await activateOnIssuedToken();
+    await pauseToken();
+    const sendsBefore = sendTransactionMock.mock.calls.length;
+
+    const res = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.00" }) },
       env
     );
 
@@ -6668,27 +6708,6 @@ describe("Payments routes — recurring", () => {
             signature: string | null;
           }>();
 
-      /** An active schedule on a token issued in the project, and a way to pause that token. */
-      async function activateOnIssuedToken() {
-        const issuedMint = (await generateKeyPairSigner()).address;
-        const issuedTokenId = await seedIssuedTokenMint({
-          projectId: TEST_PROJECT.id,
-          mintAddress: issuedMint,
-          status: "active",
-        });
-        const activated = await activateRecurringPaymentFixture({
-          ...DEFAULT_RECURRING_FIXTURE,
-          token: issuedMint,
-        });
-        const pauseToken = async () => {
-          await getDb(env)
-            .prepare("UPDATE issued_tokens SET status = 'paused' WHERE id = ?")
-            .bind(issuedTokenId)
-            .run();
-        };
-        return { activated, issuedMint, pauseToken };
-      }
-
       it("finishes a cancel whose send landed without sending it again", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
@@ -6972,6 +6991,32 @@ describe("Payments routes — recurring", () => {
         expect((await lifecycleAttempts(activated.id, "resume")).results).toEqual([
           { status: "confirmed", stage: "finalize", signature: null },
         ]);
+      });
+
+      it("refuses a resume that did not land once its issued token pauses, back to canceled and sending nothing", async () => {
+        const { activated, pauseToken } = await activateOnIssuedToken();
+        const lifecycle = (action: "cancel" | "resume", key: string) =>
+          app.request(
+            actionPath(activated.id, action),
+            { method: "POST", headers: keyed(key), body: "{}" },
+            env
+          );
+        expect((await lifecycle("cancel", crypto.randomUUID())).status).toBe(200);
+        const key = crypto.randomUUID();
+        expect((await lifecycle("resume", key)).status).toBe(200);
+        await leaveUnsavedSend({ recurringPaymentId: activated.id, operation: "resume", key });
+        await pauseToken();
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+        const sent = sends();
+
+        const retry = await lifecycle("resume", crypto.randomUUID());
+
+        expect(retry.status).toBe(400);
+        expect(errorResponseSchema.parse(await retry.json()).error.message).toBe(
+          "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported"
+        );
+        expect(sent).not.toHaveBeenCalled();
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceled");
       });
 
       it("finishes an activation whose plan landed before its signature was saved, sending only the subscription", async () => {
