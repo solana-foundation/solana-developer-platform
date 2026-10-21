@@ -3,7 +3,6 @@ import { isAddress } from "@solana/addresses";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { conflict, walletNotFound } from "@/lib/errors";
-import { findProjectOperationalWallet } from "@/routes/custody/handlers/wallets";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -106,8 +105,8 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
 /**
- * Resolve an exact SDP wallet or an unambiguous legacy provider selector.
- * Balance detail reads enforce the key's scope on the resolved internal ID.
+ * Resolve the exact SDP wallet addressed by the balance route.
+ * A selected API key sees only the internal IDs in its wallet scope.
  */
 export async function resolveWalletFromParams(c: AppContext) {
   const auth = getAuth(c);
@@ -115,13 +114,16 @@ export async function resolveWalletFromParams(c: AppContext) {
   if (!walletId) {
     throw walletNotFound();
   }
-  const wallet = await findProjectOperationalWallet(c, walletId, true);
-  if (
-    !wallet ||
-    !walletAccessAllows(auth.walletAccess, wallet.id) ||
-    (wallet.id !== walletId &&
-      (walletId.startsWith("cwlt_") || (await findRetainedPaymentWallet(c, walletId))))
-  ) {
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(c.env),
+    c.env,
+    new Map()
+  ).findOperationalWalletById({
+    organizationId: auth.organizationId,
+    projectId: requireProjectId(c),
+    custodyWalletId: walletId,
+  });
+  if (!wallet || !walletAccessAllows(auth.walletAccess, wallet.id)) {
     throw walletNotFound();
   }
   return { auth, wallet };

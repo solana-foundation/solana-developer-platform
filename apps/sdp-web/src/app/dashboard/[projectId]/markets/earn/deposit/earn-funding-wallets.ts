@@ -5,10 +5,6 @@ import useSWR from "swr";
 import { z } from "zod";
 import { earnQueryKeys } from "@/app/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
-import {
-  walletBalanceResponseSchema,
-  walletTokenBalanceSchema,
-} from "@/lib/wallet-balance-response";
 
 /**
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
@@ -21,6 +17,16 @@ import {
  * deposit and holds the resulting shares. One live wallet inventory serves
  * both flows; their write contracts remain deliberately separate.
  */
+
+const walletTokenBalanceSchema = z.object({
+  token: z.string(),
+  mint: z.string(),
+  amount: z.string(),
+  uiAmount: z.string(),
+  decimals: z.number(),
+  usdPrice: z.number().optional(),
+  usdValue: z.number().optional(),
+});
 
 /**
  * The wallet fields this seam actually promises its callers, PARSED rather than
@@ -63,11 +69,14 @@ const fundingWalletsResponseSchema = z.object({
   }),
 });
 
-const fundingWalletBalanceResponseSchema = walletBalanceResponseSchema.extend({
-  data: walletBalanceResponseSchema.shape.data.extend({
+const fundingWalletBalanceResponseSchema = z.object({
+  data: z.object({
     balanceReadContext: z
       .object({ minimumSlot: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
       .optional(),
+    walletBalances: z.object({
+      balances: z.array(walletTokenBalanceSchema),
+    }),
   }),
 });
 
@@ -115,7 +124,7 @@ export async function fetchLiveFundingWalletBalance(
     throw new Error(`Request failed (${response.status})`);
   }
   const parsed = fundingWalletBalanceResponseSchema.safeParse(await response.json());
-  if (!parsed.success || parsed.data.data.walletBalances.custodyWalletId !== custodyWalletId) {
+  if (!parsed.success) {
     throw new Error("Invalid custody wallet balance response");
   }
   if (

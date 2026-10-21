@@ -7,12 +7,6 @@ import {
 } from "@sdp/fee-payment/port";
 import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
 import {
-  SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES,
-  SPONSORSHIP_RESERVATION_SIGNING_ACCOUNTED_STATUSES,
-  SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES,
-  type SponsorshipReservationStatus,
-} from "@sdp/types/sponsorship";
-import {
   type Address,
   assertIsFullySignedTransaction,
   getBase64Decoder,
@@ -31,6 +25,7 @@ import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
   type SponsorshipReservation,
+  type SponsorshipReservationStatus,
   sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -327,7 +322,12 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (
       result !== "persisted" &&
-      !(await this.durablyAdvanced(reservation, SPONSORSHIP_RESERVATION_SIGNING_ACCOUNTED_STATUSES))
+      !(await this.durablyAdvanced(reservation, [
+        "signed",
+        "submitted",
+        "committed",
+        "charged_unknown",
+      ]))
     ) {
       return this.accountingUnavailable(
         this.network,
@@ -429,10 +429,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (
       submittedResult !== "persisted" &&
-      !(await this.durablyAdvanced(
-        reservation,
-        SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES
-      ))
+      !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
     ) {
       return this.accountingUnavailable(
         this.network,
@@ -827,7 +824,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private async durablyAdvanced(
     reservation: AdmissionResult,
-    forwardStatuses: readonly SponsorshipReservationStatus[]
+    forwardStatuses: SponsorshipReservationStatus[]
   ): Promise<boolean> {
     let current: SponsorshipReservation | null;
     try {
@@ -971,8 +968,7 @@ function isStructuredProviderRejection(error: unknown): boolean {
 
 function reservationHasResponse(reservation: SponsorshipReservation): boolean {
   return (
-    SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
-      (status) => status === reservation.status
-    ) && Boolean(reservation.signedTransaction)
+    ["signed", "submitted", "committed"].includes(reservation.status) &&
+    Boolean(reservation.signedTransaction)
   );
 }

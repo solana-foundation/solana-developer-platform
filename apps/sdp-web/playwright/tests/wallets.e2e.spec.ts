@@ -1,16 +1,19 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token, TokenTransaction } from "@sdp/types/tokens";
+import { Client } from "pg";
+import { z } from "zod";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
-import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
+import { getE2EEnv } from "@/playwright/env";
+import { createLocalApiClient, type LocalApiClient } from "@/playwright/support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
   getBootstrapApiBaseUrl,
   gotoProjectPage,
   provisionLinkedOrgProjects,
   provisionWithAdminSession,
-} from "../support/local-dashboard-bootstrap";
+} from "@/playwright/support/local-dashboard-bootstrap";
 
 interface TokenResponse {
   token: Token;
@@ -163,6 +166,140 @@ async function bootstrapWalletRouteFixture(browser: Browser, input: { labelPrefi
 
 test.describe
   .serial("dashboard wallets e2e", () => {
+    test("preserves existing organization settings when enabling local custody", async ({
+      browser,
+    }) => {
+      const databaseUrl = new URL(z.url().parse(process.env.DATABASE_URL));
+      const apiUrl = new URL(getBootstrapApiBaseUrl());
+      if (
+        getE2EEnv().useExternalApi ||
+        !["postgres:", "postgresql:"].includes(databaseUrl.protocol) ||
+        !["127.0.0.1", "localhost"].includes(databaseUrl.hostname) ||
+        !["http:", "https:"].includes(apiUrl.protocol) ||
+        !["127.0.0.1", "localhost"].includes(apiUrl.hostname)
+      ) {
+        throw new Error("Organization settings fixture requires loopback API and Postgres");
+      }
+
+      await provisionWithAdminSession(browser, async (session) => {
+        const fixtures = await bootstrapLocalWalletFixtures({
+          identity: session.identity,
+          bearerToken: session.getBearerToken,
+          provider: "local",
+          walletCount: 1,
+          fundSourceWallet: false,
+          preserveExistingFixtures: true,
+        });
+        const db = new Client({ connectionString: databaseUrl.toString() });
+        await db.connect();
+        try {
+          const organizationSchema = z.object({
+            id: z.string(),
+            settings: z.string().nullable(),
+            updated_at: z.string(),
+          });
+          const original = organizationSchema.parse(
+            (
+              await db.query(
+                `SELECT org.id, org.settings, org.updated_at FROM organizations org
+                 JOIN projects project ON project.organization_id = org.id
+                 WHERE org.id = $1 AND project.id = $2`,
+                [fixtures.organization.localOrgId, fixtures.projectId]
+              )
+            ).rows[0]
+          );
+          const topLevel = {
+            enableProductionProject: true,
+            defaultEnvironment: "sandbox",
+            customRateLimits: { requestsPerMinute: 1000 },
+          };
+          const providerSiblings = { ramps: { moonpay: false } };
+          const custodySiblings = { privy: false };
+          const enabled = {
+            ...topLevel,
+            providerOverrides: {
+              ...providerSiblings,
+              custody: { ...custodySiblings, local: true },
+            },
+          };
+          const cases = [
+            [
+              "missing provider overrides",
+              topLevel,
+              { ...topLevel, providerOverrides: { custody: { local: true } } },
+            ],
+            [
+              "missing custody overrides",
+              { ...topLevel, providerOverrides: providerSiblings },
+              { ...topLevel, providerOverrides: { ...providerSiblings, custody: { local: true } } },
+            ],
+            [
+              "missing local override",
+              { ...topLevel, providerOverrides: { ...providerSiblings, custody: custodySiblings } },
+              enabled,
+            ],
+            [
+              "disabled local override",
+              {
+                ...topLevel,
+                providerOverrides: {
+                  ...providerSiblings,
+                  custody: { ...custodySiblings, local: false },
+                },
+              },
+              enabled,
+            ],
+            ["already enabled", enabled, enabled],
+          ] as const;
+          const unchangedTimestamp = "2001-01-01 00:00:00";
+          try {
+            for (const [name, settings, expected] of cases) {
+              await test.step(name, async () => {
+                const savedSettings = JSON.stringify(settings);
+                await db.query(
+                  "UPDATE organizations SET settings = $2, updated_at = $3 WHERE id = $1",
+                  [original.id, savedSettings, unchangedTimestamp]
+                );
+                const retained = await bootstrapLocalWalletFixtures({
+                  identity: session.identity,
+                  bearerToken: session.getBearerToken,
+                  provider: "local",
+                  walletCount: 1,
+                  fundSourceWallet: false,
+                  preserveExistingFixtures: true,
+                });
+                expect(retained.wallets.map((wallet) => wallet.id)).toEqual(
+                  fixtures.wallets.map((wallet) => wallet.id)
+                );
+                const current = organizationSchema.parse(
+                  (
+                    await db.query(
+                      "SELECT id, settings, updated_at FROM organizations WHERE id = $1",
+                      [original.id]
+                    )
+                  ).rows[0]
+                );
+                expect(z.json().parse(JSON.parse(z.string().parse(current.settings)))).toEqual(
+                  expected
+                );
+                if (name === "already enabled") {
+                  expect(current.settings).toBe(savedSettings);
+                  expect(current.updated_at).toBe(unchangedTimestamp);
+                }
+              });
+            }
+          } finally {
+            await db.query(
+              "UPDATE organizations SET settings = $2, updated_at = $3 WHERE id = $1",
+              [original.id, original.settings, original.updated_at]
+            );
+          }
+        } finally {
+          await db.end();
+        }
+      });
+    });
+
     test("bootstrapped Privy wallet appears in the wallets overview", async ({ browser, page }) => {
       const walletLabel = `Wallet Detail ${Date.now().toString(36).toUpperCase()}`;
       const fixtures = await provisionWithAdminSession(browser, (session) =>
@@ -199,14 +336,9 @@ test.describe
         labelPrefix: "Wallet Routes",
       });
 
-      const walletHref = projectHref(
-        projectId,
-        `/dashboard/wallets/${encodeURIComponent(wallet.id)}`
-      );
-      const legacyCustodyHref = projectHref(
-        projectId,
-        `/dashboard/custody/${encodeURIComponent(wallet.walletId)}`
-      );
+      const encodedWalletId = encodeURIComponent(wallet.id);
+      const walletHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}`);
+      const custodyHref = projectHref(projectId, `/dashboard/custody/${encodedWalletId}`);
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets");
       await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
@@ -265,8 +397,8 @@ test.describe
         timeout: E2E_POLL_TIMEOUT_MS,
       });
 
-      await page.goto(legacyCustodyHref, { waitUntil: "domcontentloaded" });
-      await expect(page).toHaveURL(walletHref);
+      await page.goto(custodyHref, { waitUntil: "domcontentloaded" });
+      await expect(page).toHaveURL(custodyHref);
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });

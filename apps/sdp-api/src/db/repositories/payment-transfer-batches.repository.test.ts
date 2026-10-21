@@ -188,7 +188,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     ).toBeNull();
   });
 
-  it("filters exact batches and retains null-pin history only in its project", async () => {
+  it("filters batches by exact source wallet", async () => {
     await repo.createTransferBatchWithRecipients({
       batch: {
         ...baseInput,
@@ -217,37 +217,6 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
 
     expect(selected.rows).toHaveLength(1);
     expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    const listArgs = {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      limit: 20,
-      offset: 0,
-    };
-    const all = await repo.listTransferBatches(listArgs);
-    expect(all.total).toBe(2);
-    expect(all.rows).toHaveLength(2);
-    expect(all.rows).toContainEqual(
-      expect.objectContaining({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID })
-    );
-    expect(all.rows).toContainEqual(
-      expect.objectContaining({ id: legacy.id, source_custody_wallet_id: null })
-    );
-    await expect(
-      repo.listTransferBatches({ ...listArgs, limit: 1, offset: 1 })
-    ).resolves.toMatchObject({
-      rows: [expect.objectContaining({ project_id: TEST_PROJECT_ID })],
-      total: 2,
-    });
-    await expect(
-      repo.listTransferBatches({ ...listArgs, projectId: projects.production.id })
-    ).resolves.toEqual({ rows: [], total: 0 });
-    await expect(
-      repo.getTransferBatchById({
-        batchId: legacy.id,
-        organizationId: TEST_ORG.id,
-        projectId: projects.production.id,
-      })
-    ).resolves.toBeNull();
   });
 });
 

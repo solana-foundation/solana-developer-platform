@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyWalletMetadataResponse } from "@sdp/types/custody";
+import type { CustodyWalletMetadataResponse, CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { Badge } from "@sdp/ui/badge";
 import { Callout } from "@sdp/ui/callout";
 import Link from "next/link";
@@ -29,18 +29,23 @@ import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
-import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
 import { resolveWalletConnectionRow } from "./wallet-connection-row";
-import { walletDetailHref } from "./wallet-detail.shared";
 import {
   WalletBalanceRows,
   type WalletBalanceTokenRoutes,
   WalletBalanceTotal,
   type WalletTrackedBalancesResult,
 } from "./wallet-detail-balances";
+
+interface WalletBalancesResponse {
+  walletBalances?: {
+    address: string;
+    balances: CustodyWalletTokenBalance[];
+  };
+}
 
 interface OwnedTokenRoute {
   id: string;
@@ -82,7 +87,6 @@ async function getWalletTrackedBalances(
   const readAt = Date.now();
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
-    // shortcut: preserve the legacy 404 display until balance-state UX is changed separately.
     if (response.status === 404) {
       return { balances: [], error: null, readAt };
     }
@@ -94,8 +98,8 @@ async function getWalletTrackedBalances(
       };
     }
 
-    const balances = parseWalletBalanceResponse(await response.json(), walletId).balances;
-    return { balances, error: null, readAt };
+    const json = (await response.json()) as { data?: WalletBalancesResponse };
+    return { balances: json.data?.walletBalances?.balances ?? [], error: null, readAt };
   } catch {
     return {
       balances: [],
@@ -144,13 +148,7 @@ async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Ow
   }
 }
 
-export async function WalletDetailPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ walletId: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export async function WalletDetailPage({ params }: { params: Promise<{ walletId: string }> }) {
   const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
@@ -167,9 +165,6 @@ export async function WalletDetailPage({
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
   const wallet = await getWalletDetail(apiClient.request, resolvedWalletId);
-  if (wallet.id !== resolvedWalletId) {
-    redirect(await requestProjectHref(walletDetailHref(wallet.id, await searchParams)));
-  }
   const trackedBalancesPromise = getWalletTrackedBalances(
     apiClient.request,
     wallet.id,
@@ -276,7 +271,7 @@ export async function WalletDetailPage({
 
         <Suspense fallback={<WalletBalanceSummarySkeleton />}>
           <WalletBalanceSummary
-            walletId={resolvedWalletId}
+            walletId={wallet.id}
             balancesPromise={trackedBalancesPromise}
             providerLabel={providerLabel}
             publicKey={wallet.publicKey}
@@ -288,7 +283,7 @@ export async function WalletDetailPage({
 
       <Suspense fallback={<WalletBalancesSkeleton />}>
         <WalletBalancesSection
-          walletId={resolvedWalletId}
+          walletId={wallet.id}
           balancesPromise={trackedBalancesPromise}
           ownedTokensByMintPromise={ownedTokensByMintPromise}
           issuanceEnabled={issuanceEnabled}
@@ -296,9 +291,9 @@ export async function WalletDetailPage({
         />
       </Suspense>
 
-      <Suspense fallback={<WalletActivityViewport walletId={resolvedWalletId} />}>
+      <Suspense fallback={<WalletActivityViewport walletId={wallet.id} />}>
         <WalletActivityWithBalanceSymbols
-          walletId={resolvedWalletId}
+          walletId={wallet.id}
           balancesPromise={trackedBalancesPromise}
           ownedTokensByMintPromise={ownedTokensByMintPromise}
         />

@@ -363,12 +363,15 @@ describe("Payments routes — ramps", () => {
     const tokenAccountsFilterSchema = z.object({ programId: z.string() });
 
     const BALANCE_WALLET_BY_ENVIRONMENT = {
-      sandbox: async () => TEST_WALLET_ID,
-      production: () =>
-        seedProductionPrivyWallet({
-          custodyWalletId: "cwlt_payments_production_balances",
+      sandbox: async () => TEST_CUSTODY_WALLET_ID,
+      production: async () => {
+        const custodyWalletId = "cwlt_payments_production_balances";
+        await seedProductionPrivyWallet({
+          custodyWalletId,
           publicKey: TEST_SOLANA_ADDRESSES.wallet3,
-        }),
+        });
+        return custodyWalletId;
+      },
     } as const satisfies Record<SdpEnvironment, () => Promise<string>>;
 
     beforeEach(() => {
@@ -401,13 +404,13 @@ describe("Payments routes — ramps", () => {
       });
       await seedCachedKey({ walletIds: [TEST_CONNECTION_CUSTODY_WALLET_ID] });
 
-      const res = await requestBalances(TEST_CONNECTION_WALLET_ID, "");
+      const res = await requestBalances(TEST_CONNECTION_CUSTODY_WALLET_ID, "");
 
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({
         data: {
           walletBalances: {
-            walletId: TEST_CONNECTION_WALLET_ID,
+            custodyWalletId: TEST_CONNECTION_CUSTODY_WALLET_ID,
             address: TEST_SOLANA_ADDRESSES.wallet2,
           },
         },
@@ -419,7 +422,7 @@ describe("Payments routes — ramps", () => {
       ]);
 
       await seedCachedKey({ walletIds: [TEST_CUSTODY_WALLET_ID] });
-      const forbiddenRes = await requestBalances(TEST_CONNECTION_WALLET_ID, "");
+      const forbiddenRes = await requestBalances(TEST_CONNECTION_CUSTODY_WALLET_ID, "");
 
       // A wallet outside the key's scope reads as absent (HOO-2099).
       expect(forbiddenRes.status).toBe(404);
@@ -495,7 +498,7 @@ describe("Payments routes — ramps", () => {
     );
 
     it("sends ?minimumSlot as minContextSlot on every balance read", async () => {
-      const res = await requestBalances(TEST_WALLET_ID, "?minimumSlot=101");
+      const res = await requestBalances(TEST_CUSTODY_WALLET_ID, "?minimumSlot=101");
 
       expect(res.status).toBe(200);
       expect(await res.json()).toHaveProperty("data.balanceReadContext", { minimumSlot: 101 });
@@ -531,7 +534,7 @@ describe("Payments routes — ramps", () => {
           }));
         }
 
-        const res = await requestBalances(TEST_WALLET_ID, "?minimumSlot=101");
+        const res = await requestBalances(TEST_CUSTODY_WALLET_ID, "?minimumSlot=101");
 
         expect(res.status).toBe(503);
         expect(await res.json()).not.toHaveProperty("data.walletBalances");
@@ -564,7 +567,7 @@ describe("Payments routes — ramps", () => {
         return { result: { context: { slot: 101 }, value: null } };
       });
 
-      const res = await requestBalances(TEST_WALLET_ID, "");
+      const res = await requestBalances(TEST_CUSTODY_WALLET_ID, "");
 
       expect(events).toEqual(["labels-resolved", "deadline-started"]);
       expect(timeout.mock.calls).toEqual([[3_000]]);
