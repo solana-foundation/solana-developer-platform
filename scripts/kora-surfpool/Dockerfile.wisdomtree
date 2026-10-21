@@ -2,11 +2,7 @@
 
 # Surfpool 1.5.0 publishes a Linux x64 native binding but no Linux arm64
 # binding. The wrapper builds and runs this image as linux/amd64 on every host.
-FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
-
-# Apply the same trust policy before corepack/pnpm or RPC traffic.
-COPY packages/sdp-env-config/src/tls-trust.cjs /opt/sdp/tls-trust.cjs
-ENV NODE_OPTIONS="--require=/opt/sdp/tls-trust.cjs"
+FROM node:24.22.1-slim@sha256:1681862882da07ee5476fee047bcf34138833f1df42633bb25bcb0f438d5bf3d
 
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \

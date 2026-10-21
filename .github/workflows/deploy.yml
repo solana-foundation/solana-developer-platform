@@ -20,9 +20,6 @@ concurrency:
   group: sdp-deploy-main
   cancel-in-progress: false
 
-env:
-  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
-
 jobs:
   changes:
     runs-on: ubuntu-latest

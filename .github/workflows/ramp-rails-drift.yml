@@ -30,9 +30,6 @@ concurrency:
   group: ramp-rails-drift-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
-
 jobs:
   drift:
     name: Matrix in sync with dumps
@@ -50,7 +47,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install

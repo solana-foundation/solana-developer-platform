@@ -2,7 +2,6 @@
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
   "globalDependencies": [".env", ".env.*"],
-  "globalPassThroughEnv": ["NODE_OPTIONS"],
   "globalEnv": [
     "API_KEY_PEPPER",
     "CREDENTIAL_FINGERPRINT_PEPPER",
