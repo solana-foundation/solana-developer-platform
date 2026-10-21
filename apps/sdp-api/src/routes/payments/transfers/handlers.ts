@@ -8,7 +8,7 @@ import {
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseTokenAmount } from "@sdp/solana/amount";
 import type { Action } from "@sdp/types/actions";
 import {
   isRampTransferType,
@@ -82,7 +82,6 @@ import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import {
   buildSplTransferInstructions,
-  resolveMintTokenProgram,
   resolveSourceTokenAccount,
   resolveTokenLabel,
   type SplTransferSource,
@@ -104,7 +103,7 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { loadPaymentAmountConverter } from "@/services/payments/token-amount";
+import { loadPaymentMint } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -259,11 +258,15 @@ async function assertRampDepositFunded(
   if (isNativePaymentToken(operation.token)) return undefined;
   const rpc = createClusterRpc();
   const mint = assertValidAddress(operation.token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-  const [source, toBaseUnits] = await Promise.all([
-    resolveSourceTokenAccount(rpc, address(operation.sourceWallet.publicKey), mint, tokenProgram),
-    loadPaymentAmountConverter(mint),
-  ]);
+  const paymentMint = await loadPaymentMint(mint);
+  const { tokenProgram, toBaseUnits } = paymentMint;
+  const account = await resolveSourceTokenAccount(
+    rpc,
+    address(operation.sourceWallet.publicKey),
+    mint,
+    tokenProgram
+  );
+  const source = { ...account, ...paymentMint };
   const needed = toBaseUnits(operation.amount);
   if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram, toBaseUnits };
 
@@ -730,7 +733,7 @@ async function executeSolTransfer(
   amount: string,
   submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const lamports = parseDecimalAmount(amount, 9);
+  const lamports = parseTokenAmount(amount, 9);
   if (lamports <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
   }

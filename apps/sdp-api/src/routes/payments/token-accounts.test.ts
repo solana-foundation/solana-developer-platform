@@ -79,55 +79,64 @@ describe("getSplTokenBalances", () => {
 describe("buildSplTransferInstructions", () => {
   const rpc = installClusterRpcResponder();
 
-  it("debits a scaled UI amount mint's requested amount, not its static base units", async () => {
-    const mint = syntheticAddress(11);
-    respondMintAccounts(rpc, {
-      mints: new Map([
-        [
-          mint,
+  it.each([false, true])(
+    "builds exact amounts or rejects scaled mints (scaled=%s)",
+    async (scaled) => {
+      const mint = syntheticAddress(11);
+      respondMintAccounts(rpc, {
+        mints: new Map([
+          [
+            mint,
+            {
+              decimals: 6,
+              extensions: scaled
+                ? [
+                    scaledUiAmountConfig({
+                      multiplier: 2,
+                      newMultiplier: 4,
+                      newMultiplierEffectiveTimestamp: 1_800_000_000n,
+                    }),
+                  ]
+                : null,
+            },
+          ],
+        ]),
+        clockUnixTimestamp: 1_750_000_000n,
+      });
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
           {
-            decimals: 6,
-            extensions: [
-              scaledUiAmountConfig({
-                multiplier: 2,
-                newMultiplier: 4,
-                newMultiplierEffectiveTimestamp: 1_800_000_000n,
-              }),
-            ],
+            pubkey: syntheticAddress(12),
+            mint,
+            amount: "20000000",
+            decimals: 9,
+            uiAmountString: "40",
+            state: "initialized",
           },
-        ],
-      ]),
-      clockUnixTimestamp: 1_750_000_000n,
-    });
-    rpc.answer(
-      "getTokenAccountsByOwner",
-      tokenAccountsByOwnerResult(1, [
-        {
-          pubkey: syntheticAddress(12),
-          mint,
-          amount: "20000000",
-          decimals: 6,
-          uiAmountString: "40",
-          state: "initialized",
-        },
-      ])
-    );
+        ])
+      );
 
-    const { transferInstruction } = await runInClusterScope(
-      { projectId: null, environment: "sandbox" },
-      () =>
+      const result = runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
         buildSplTransferInstructions(createClusterRpc(), {
           authority: createNoopSigner(syntheticAddress(13)),
           destination: syntheticAddress(14),
           mint,
-          amount: "10",
+          amount: "9007199254.740993",
           ataRentPayer: syntheticAddress(15),
         })
-    );
+      );
 
-    expect(transferInstruction.programAddress).toBe(TOKEN_2022_PROGRAM_ADDRESS);
-    expect(
-      getTransferCheckedInstructionDataDecoder().decode(transferInstruction.data)
-    ).toMatchObject({ amount: 5_000_000n, decimals: 6 });
-  });
+      if (scaled) {
+        await expect(result).rejects.toMatchObject({ code: "BAD_REQUEST", statusCode: 400 });
+        return;
+      }
+      const { transferInstruction } = await result;
+      expect(rpc.requests.filter((request) => request.method === "getAccountInfo")).toHaveLength(1);
+      expect(transferInstruction.programAddress).toBe(TOKEN_2022_PROGRAM_ADDRESS);
+      expect(
+        getTransferCheckedInstructionDataDecoder().decode(transferInstruction.data)
+      ).toMatchObject({ amount: 9007199254740993n, decimals: 6 });
+    }
+  );
 });

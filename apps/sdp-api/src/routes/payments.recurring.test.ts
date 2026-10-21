@@ -48,6 +48,7 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recurring-payments/cancel-activated-by-key";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
+import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";
@@ -879,7 +880,7 @@ describe("Payments routes — recurring", () => {
     const scaledRes = await createRecurring(scaledMint);
     expect(scaledRes.status).toBe(400);
     expect(errorResponseSchema.parse(await scaledRes.json()).error.message).toBe(
-      "Recurring payments do not support interest-bearing or scaled UI amount tokens"
+      "Payments do not support the ScaledUiAmountConfig mint extension"
     );
 
     const issuedRes = await createRecurring(issuedMint);
@@ -2979,17 +2980,14 @@ describe("Payments routes — recurring", () => {
     const mintLookupReleased = new Promise<void>((resolve) => {
       releaseMintLookup = resolve;
     });
-    const getAccountInfo = getAccountInfoMock.getMockImplementation();
-    if (!getAccountInfo) {
-      throw new Error("Account info mock is not installed");
-    }
-    getAccountInfoMock.mockImplementationOnce(async (...args) => {
-      if (signalMintLookupReached) {
-        signalMintLookupReached();
-      }
-      await mintLookupReleased;
-      return getAccountInfo(...args);
-    });
+    const loadPaymentMint = paymentAmounts.loadPaymentMint;
+    const mintLookup = vi
+      .spyOn(paymentAmounts, "loadPaymentMint")
+      .mockImplementationOnce(async (mint) => {
+        if (signalMintLookupReached) signalMintLookupReached();
+        await mintLookupReleased;
+        return loadPaymentMint(mint);
+      });
 
     const preparePromise = app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
@@ -3021,6 +3019,7 @@ describe("Payments routes — recurring", () => {
     }
 
     const prepareRes = await preparePromise;
+    mintLookup.mockRestore();
     expect(prepareRes.status).toBe(409);
     const persisted = await repo.getSubscriptionById({
       subscriptionId,
@@ -3986,13 +3985,9 @@ describe("Payments routes — recurring", () => {
       const activated = await activateProductionUsdcSchedule();
 
       expect(activated.token).toBe(MAINNET_USDC_MINT);
-      expect(recurringExecution.rpc.calls).toContainEqual({
-        cluster: "mainnet-beta",
-        method: "getTokenSupply",
-      });
-      expect(new Set(recurringExecution.rpc.calls.map((call) => call.cluster))).toEqual(
-        new Set(["mainnet-beta"])
-      );
+      expect(
+        recurringExecution.rpc.calls.filter((call) => call.method === "getTokenSupply")
+      ).toEqual([]);
       expect(
         new Set(
           [
@@ -4026,14 +4021,7 @@ describe("Payments routes — recurring", () => {
       const tokenSupplyReads = recurringExecution.rpc.requests
         .slice(requestsBefore)
         .filter((request) => request.method === "getTokenSupply");
-      const clustersReadingMint = (mint: string) =>
-        new Set(
-          tokenSupplyReads
-            .filter((request) => request.params[0] === mint)
-            .map((request) => request.cluster)
-        );
-      expect(clustersReadingMint(DEVNET_USDC_MINT)).toEqual(new Set(["devnet"]));
-      expect(clustersReadingMint(MAINNET_USDC_MINT)).toEqual(new Set(["mainnet-beta"]));
+      expect(tokenSupplyReads).toEqual([]);
       const clustersConfirming = (collectionSignature: string) =>
         new Set(
           confirmTransactionMock.mock.calls
