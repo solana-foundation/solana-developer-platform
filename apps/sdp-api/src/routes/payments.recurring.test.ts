@@ -7915,8 +7915,8 @@ describe("Payments routes — recurring", () => {
         oldSubscriptionPda: string,
         otherExpiresAtTs: bigint | null,
         tip: Pick<RecurringChainView, "absoluteSlot" | "blockHeight">
-      ) {
-        recurringExecution.showChain({
+      ): RecurringChainView {
+        const view: RecurringChainView = {
           ...DEFAULT_RECURRING_CHAIN,
           absoluteSlot: tip.absoluteSlot,
           blockHeight: tip.blockHeight,
@@ -7924,7 +7924,9 @@ describe("Payments routes — recurring", () => {
             if (subscriptionPda === oldSubscriptionPda) return unpulledDelegation(0n);
             return otherExpiresAtTs === null ? null : unpulledDelegation(otherExpiresAtTs);
           },
-        });
+        };
+        recurringExecution.showChain(view);
+        return view;
       }
 
       /** The expiry `seedSavedSendExpiry` gives an update attempt's saved send. */
@@ -8616,10 +8618,8 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
       });
 
-      it("finishes a resumed replacement through the old cancel when its unwind finds the new delegation on chain", async () => {
+      it("finishes a resumed replacement through the old cancel when its setup read fails and its unwind finds the new delegation on chain", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        // The subscribe is refused as already subscribed and the chain shows the new delegation,
-        // so its slot stays empty; the old subscription's cancel is then refused.
         rejectPoolSendAfter(
           1,
           sendTransactionPreflightError(
@@ -8627,7 +8627,7 @@ describe("Payments routes — recurring", () => {
           )
         );
         sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
-        delegationsBesideActiveOld(
+        const chain = delegationsBesideActiveOld(
           required(activated.subscriptionPda),
           0n,
           DEFAULT_RECURRING_CHAIN
@@ -8648,13 +8648,11 @@ describe("Payments routes — recurring", () => {
           authorization_signature: null,
         });
         await leaveUpdateCrashedAt(activated.id, key);
-        vi.spyOn(subscriptionsProgram, "fetchMaybeSubscriptionAuthority").mockRejectedValue(
-          new Error("subscription authority read failed")
-        );
         const [authority] = await subscriptionsProgram.findSubscriptionAuthorityPda({
           tokenMint: address(DEVNET_USDC_MINT),
           user: recurringExecution.sourceSigner().address,
         });
+        recurringExecution.showChainRefusingReadsOf(chain, authority);
         const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
         onTestFinished(() => warnLog.mockRestore());
         const sent = sends();
@@ -8663,22 +8661,34 @@ describe("Payments routes — recurring", () => {
         const retry = await update();
 
         expect(retry.status).toBe(200);
-        expect(
-          recurringExecution.rpc.requests
-            .slice(requestsBefore)
-            .filter(({ method }) => method === "getMultipleAccounts")
-            .flatMap((request) => multipleAccountsRead(request).addresses)
-        ).not.toContain(authority);
         const newSubscription = required(
           await getDb(env)
             .prepare(
-              `SELECT s.id, s.subscription_pda FROM payment_subscriptions s
+              `SELECT s.id, s.subscription_pda, s.subscriber_token_account FROM payment_subscriptions s
                  JOIN payment_recurring_payment_update_attempts a ON a.new_subscription_id = s.id
                 WHERE a.recurring_payment_id = ?`
             )
             .bind(activated.id)
-            .first<{ id: string; subscription_pda: string | null }>()
+            .first<{
+              id: string;
+              subscription_pda: string | null;
+              subscriber_token_account: string | null;
+            }>()
         );
+        expect(
+          recurringExecution.rpc.requests
+            .slice(requestsBefore)
+            .filter(({ method }) => method === "getMultipleAccounts")
+            .map(multipleAccountsRead)
+            .filter(({ addresses }) => addresses.includes(authority))
+        ).toEqual([
+          {
+            addresses: [authority, required(newSubscription.subscriber_token_account)],
+            commitment: "confirmed",
+            minContextSlot: null,
+            encoding: "base64",
+          },
+        ]);
         expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
           status: "active",
           amount: "35.00",

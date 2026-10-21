@@ -6,6 +6,7 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
   type Signature,
+  SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   signature,
 } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
@@ -22,6 +23,8 @@ import {
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
+  type ClusterRpcReply,
+  type ClusterRpcRequest,
   type ClusterRpcResponder,
   epochInfoResult,
   installClusterRpcResponder,
@@ -287,7 +290,21 @@ function answerRecurringChain(rpc: ClusterRpcResponder, view: RecurringChainView
   rpc.respond("getEpochInfo", () => ({
     result: epochInfoResult({ absoluteSlot: view.absoluteSlot, blockHeight: view.blockHeight }),
   }));
-  rpc.respond("getMultipleAccounts", async (request) => ({
+  rpc.respond("getMultipleAccounts", (request) => recurringChainAccountsReply(view, request));
+}
+
+/**
+ * The accounts `view` shows for a `getMultipleAccounts` request, at the tip's slot.
+ *
+ * @param view - The chain to read.
+ * @param request - The recorded `getMultipleAccounts` request.
+ * @returns The reply naming each requested address's account, in request order.
+ */
+async function recurringChainAccountsReply(
+  view: RecurringChainView,
+  request: ClusterRpcRequest
+): Promise<ClusterRpcReply> {
+  return {
     result: multipleAccountsResult(
       view.absoluteSlot,
       await Promise.all(
@@ -296,7 +313,31 @@ function answerRecurringChain(rpc: ClusterRpcResponder, view: RecurringChainView
         )
       )
     ),
-  }));
+  };
+}
+
+/**
+ * Answer the current test's reads from `view` as {@link answerRecurringChain} does, except that
+ * every `getMultipleAccounts` naming `refusedAddress` fails with a JSON-RPC internal error, which
+ * the pool does not retry.
+ *
+ * @param rpc - The suite's responder.
+ * @param view - The chain the other reads see.
+ * @param refusedAddress - The address whose reads fail.
+ */
+function answerRecurringChainRefusingReadsOf(
+  rpc: ClusterRpcResponder,
+  view: RecurringChainView,
+  refusedAddress: Address
+): void {
+  answerRecurringChain(rpc, view);
+  rpc.respond("getMultipleAccounts", (request) =>
+    multipleAccountsRead(request).addresses.includes(refusedAddress)
+      ? {
+          error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "Internal error" },
+        }
+      : recurringChainAccountsReply(view, request)
+  );
 }
 
 export function installRecurringExecutionHooks() {
@@ -326,6 +367,8 @@ export function installRecurringExecutionHooks() {
   return {
     rpc,
     showChain: (view: RecurringChainView) => answerRecurringChain(rpc, view),
+    showChainRefusingReadsOf: (view: RecurringChainView, refusedAddress: Address) =>
+      answerRecurringChainRefusingReadsOf(rpc, view, refusedAddress),
     sourceSigner: () => sourceSigner,
     signAsFeePayerMock: () => signAsFeePayerMock,
   };
