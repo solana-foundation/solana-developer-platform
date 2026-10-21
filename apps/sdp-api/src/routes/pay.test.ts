@@ -1,5 +1,4 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type { SponsorshipReservationStatus } from "@sdp/types/sponsorship";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +8,7 @@ import {
   createPaymentRequestsRepository,
   createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
+import type { SponsorshipReservationStatus } from "@/db/repositories/sponsorship-budget.repository";
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { base64Schema } from "@/openapi/schemas/base";

@@ -111,7 +111,7 @@ function WalletCard({
           </div>
         </div>
         <div className="shrink-0 text-xl tracking-tight">
-          <WalletCardBalanceValue walletId={wallet.id} initialBalances={wallet.balances} />
+          <WalletCardBalanceValue walletId={wallet.id} initialBalances={wallet.balances ?? []} />
         </div>
       </div>
 

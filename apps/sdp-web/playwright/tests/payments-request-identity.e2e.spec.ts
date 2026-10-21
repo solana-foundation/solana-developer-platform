@@ -18,7 +18,6 @@ import { createLocalApiClient, type LocalApiClient } from "../support/local-api-
 import {
   bootstrapLocalWalletFixtures,
   getBootstrapApiBaseUrl,
-  getPlaywrightDatabaseUrl,
   gotoProjectPage,
   resolvePlaywrightProjects,
 } from "../support/local-dashboard-bootstrap";
@@ -28,7 +27,8 @@ const REQUESTS_PATH = "/dashboard/payments/requests";
 type LabeledWallet = PaymentsDashboardWallet & { label: string };
 
 function isolatedDatabaseUrl(): string {
-  const value = getPlaywrightDatabaseUrl();
+  const value = process.env.DATABASE_URL?.trim();
+  if (!value) throw new Error("Request identity E2E requires an explicit DATABASE_URL");
   const database = new URL(value);
   const api = new URL(getBootstrapApiBaseUrl());
   if (

@@ -1319,13 +1319,12 @@ function walletsRoute(rest: string[], params: URLSearchParams, world: DemoWorld)
 }
 
 function walletBalancesBody(world: DemoWorld, walletId: string) {
-  const wallet = findWallet(world, walletId);
+  const wallet = walletList(world).find((wallet) => wallet.id === walletId);
   if (!wallet) return undefined;
   return {
     data: {
       walletBalances: {
         custodyWalletId: wallet.id,
-        walletId: wallet.walletId,
         address: wallet.publicKey,
         balances: wallet.balances,
       },

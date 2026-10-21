@@ -112,7 +112,6 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   );
   const firstWallet = wallets[0];
   const firstTransfer = transfers[0];
-  const exampleWalletId = firstWallet?.walletId ?? "wal_ops_123";
   const exampleCustodyWalletId = firstWallet?.id ?? "cwlt_ops_123";
   const exampleWalletAddress = firstWallet?.publicKey ?? exampleWalletAddressFallback;
   const exampleTransferId = firstTransfer?.id ?? "xfr_live_123";
@@ -129,7 +128,6 @@ export function buildPaymentsPlaygroundEndpointConfigs(
         data: {
           walletBalances: {
             custodyWalletId: exampleCustodyWalletId,
-            walletId: exampleWalletId,
             address: exampleWalletAddress,
             balances: [
               {

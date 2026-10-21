@@ -199,14 +199,9 @@ test.describe
         labelPrefix: "Wallet Routes",
       });
 
-      const walletHref = projectHref(
-        projectId,
-        `/dashboard/wallets/${encodeURIComponent(wallet.id)}`
-      );
-      const legacyCustodyHref = projectHref(
-        projectId,
-        `/dashboard/custody/${encodeURIComponent(wallet.walletId)}`
-      );
+      const encodedWalletId = encodeURIComponent(wallet.id);
+      const walletHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}`);
+      const custodyHref = projectHref(projectId, `/dashboard/custody/${encodedWalletId}`);
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets");
       await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
@@ -265,8 +260,8 @@ test.describe
         timeout: E2E_POLL_TIMEOUT_MS,
       });
 
-      await page.goto(legacyCustodyHref, { waitUntil: "domcontentloaded" });
-      await expect(page).toHaveURL(walletHref);
+      await page.goto(custodyHref, { waitUntil: "domcontentloaded" });
+      await expect(page).toHaveURL(custodyHref);
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
