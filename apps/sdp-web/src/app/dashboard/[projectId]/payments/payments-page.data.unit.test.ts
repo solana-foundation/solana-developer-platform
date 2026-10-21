@@ -570,6 +570,32 @@ describe("fetchPaymentTransfers", () => {
     });
   });
 
+  it("keeps a sale's reported payout for the activity list", async () => {
+    const fiatPayout = { amount: "20.82", currency: "USD", reportedAt: "2026-10-19T23:06:32.066Z" };
+    const request = vi.fn(async () =>
+      Response.json({
+        data: [
+          {
+            id: "transfer-sale",
+            custodyWalletId: "cwlt_1",
+            providerWalletId: "wallet-1",
+            status: "completed",
+            signature: "signature-1",
+            type: "offramp",
+            fiatCurrency: "USD",
+            fiatAmount: "20.69",
+            fiatPayout,
+            rampsMemo: {},
+          },
+        ],
+      })
+    );
+
+    const result = await fetchPaymentTransfers(request, 5, { includeObserved: false });
+
+    expect(result.data?.[0]).toMatchObject({ fiatAmount: "20.69", fiatPayout });
+  });
+
   it.each([undefined, "", "   ", " wallet-1 "])(
     "fails closed when providerWalletId is %j",
     async (providerWalletId) => {

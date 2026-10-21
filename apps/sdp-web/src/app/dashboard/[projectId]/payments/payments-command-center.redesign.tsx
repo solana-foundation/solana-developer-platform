@@ -62,6 +62,7 @@ import {
   formatElapsedShort,
   formatSignedAmount,
   PAYMENT_STATUS_TONE,
+  rampFiatSide,
   summarizeBatch,
 } from "./payments-presentation";
 import { fetchRecurringPayments } from "./recurring/recurring-payments.data.redesign";
@@ -418,10 +419,11 @@ function transferRow(
   const isRamp = transfer.type === "onramp" || transfer.type === "offramp";
   const rampDirection: "inbound" | "outbound" =
     direction ?? (transfer.type === "onramp" ? "inbound" : "outbound");
-  const rampFiat =
-    isRamp && transfer.fiatAmount && transfer.fiatCurrency
-      ? { amount: transfer.fiatAmount, unit: transfer.fiatCurrency.toUpperCase() }
-      : null;
+  // A completed sale shows what the provider reports it paid, as its receipt does.
+  const fiatSide = isRamp ? rampFiatSide(transfer) : null;
+  const rampFiat = fiatSide
+    ? { amount: fiatSide.amount, unit: fiatSide.currency.toUpperCase() }
+    : null;
   const lead = transfer.amount
     ? {
         amount: transfer.amount,
