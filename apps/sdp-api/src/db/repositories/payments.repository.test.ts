@@ -133,9 +133,14 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     repo = createPostgresPaymentsRepository(getDb(env));
   });
 
-  it.for(["transfer", "transfer_batch"] as const)(
-    "a stale unsigned timeout cannot fail a signed %s or prevent its submission",
-    async (type) => {
+  it.for([
+    { type: "transfer", guard: "unsigned" },
+    { type: "transfer_batch", guard: "unsigned" },
+    { type: "transfer", guard: "unstarted" },
+    { type: "transfer_batch", guard: "unstarted" },
+  ] as const)(
+    "a stale $guard failure cannot overwrite a $type submission",
+    async ({ type, guard }) => {
       const input = { ...transferInput({ suffix: `timeout_${type}` }), type };
       await repo.createTransfer(input);
       const batches = createPostgresPaymentTransferBatchesRepository(getDb(env));
@@ -174,17 +179,8 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         });
         batchId = created.batch.id;
       }
-      // The timeout observed an unsigned row before the request saved its submission.
-      const selected = await repo.listTransfersByStatus({
-        environment: "sandbox",
-        statuses: ["processing"],
-        types: WALLET_TRANSFER_TYPES,
-        hasSignature: false,
-        limit: 10,
-      });
-      expect(selected.map((row) => row.id)).toContain(input.id);
-      expect(
-        await repo.persistSignedTransfer({
+      const persistSigned = () =>
+        repo.persistSignedTransfer({
           transferId: input.id,
           organizationId: TEST_ORG.id,
           projectId: TEST_PROJECT_ID,
@@ -192,13 +188,37 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
           signedTransaction: "AQ==",
           lastValidBlockHeight: "1000",
           updatedAt: new Date().toISOString(),
-        })
-      ).not.toBeNull();
+        });
+      const startSubmission = () =>
+        repo.markTransferSubmissionStarted({
+          transferId: input.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          startedAt: new Date().toISOString(),
+        });
+      if (guard === "unstarted") {
+        expect(await persistSigned()).not.toBeNull();
+      }
+      // Observe before the request advances the state the failure depends on.
+      const selected = await repo.listTransfersByStatus({
+        environment: "sandbox",
+        statuses: ["processing"],
+        types: WALLET_TRANSFER_TYPES,
+        hasSignature: guard === "unstarted",
+        limit: 10,
+      });
+      expect(selected.map((row) => row.id)).toContain(input.id);
+      if (guard === "unstarted") {
+        expect(await startSubmission()).not.toBeNull();
+      } else {
+        expect(await persistSigned()).not.toBeNull();
+      }
       const timeout = {
         transferId: input.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        requireUnsigned: true as const,
+        requireUnsigned: guard === "unsigned" ? (true as const) : undefined,
+        requireUnstarted: guard === "unstarted" ? (true as const) : undefined,
         error: "Transfer processing timed out",
         updatedAt: new Date().toISOString(),
       };
@@ -233,14 +253,9 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
           })
         ).toMatchObject({ rows: [{ status: "processing" }] });
       }
-      expect(
-        await repo.markTransferSubmissionStarted({
-          transferId: input.id,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          startedAt: new Date().toISOString(),
-        })
-      ).not.toBeNull();
+      if (guard === "unsigned") {
+        expect(await startSubmission()).not.toBeNull();
+      }
     }
   );
 

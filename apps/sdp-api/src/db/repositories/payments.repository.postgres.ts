@@ -300,6 +300,9 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
     clauses.push("status = ?");
     values.push(input.expectedStatus);
   }
+  if (input.requireUnstarted) {
+    clauses.push("submission_started_at IS NULL");
+  }
   // Ramp statuses move only through RAMP_TRANSFER_TRANSITIONS.
   if (input.status !== undefined) {
     clauses.push("type <> ALL(?)");

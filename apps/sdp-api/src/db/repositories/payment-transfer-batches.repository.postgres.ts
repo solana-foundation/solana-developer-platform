@@ -750,6 +750,7 @@ export function createPostgresPaymentTransferBatchesRepository(
                   AND submission_started_at IS NULL
                 ))
                 AND status = 'processing'
+                AND (NOT ?::boolean OR submission_started_at IS NULL)
               RETURNING id`
           )
           .bind(
@@ -763,7 +764,8 @@ export function createPostgresPaymentTransferBatchesRepository(
             input.transferId,
             input.organizationId,
             input.projectId,
-            input.requireUnsigned === true
+            input.requireUnsigned === true,
+            input.requireUnstarted === true
           )
           .all<{ id: string }>();
 

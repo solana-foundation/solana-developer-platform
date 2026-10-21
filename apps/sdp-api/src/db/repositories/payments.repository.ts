@@ -123,6 +123,8 @@ export interface UpdatePaymentTransferInput {
   providerData?: Record<string, unknown>;
   error?: string | null;
   updatedAt: string;
+  /** Expiry CAS: a request that started submission wins over a stale failure. */
+  requireUnstarted?: true;
 }
 
 /** Row fields a guarded status change may write alongside the status. */

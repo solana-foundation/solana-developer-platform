@@ -234,6 +234,8 @@ export interface SettlePaymentTransferBatchInput {
   error: string | null;
   slot: number | null;
   updatedAt: string;
+  /** Expiry CAS: leave a started chunk and its recipients unchanged. */
+  requireUnstarted?: true;
 }
 
 export interface RecomputeTransferBatchStatusInput {
