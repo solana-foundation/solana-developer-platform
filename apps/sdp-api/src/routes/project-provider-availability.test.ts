@@ -1,13 +1,15 @@
 import type { Action } from "@sdp/types/actions";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type {
-  OrganizationProviderOverrides,
-  ProjectProviderAvailability,
-  ProjectProviderAvailabilityEntry,
+import {
+  type OrganizationProviderOverrides,
+  type ProjectProviderAvailability,
+  type ProjectProviderAvailabilityEntry,
+  RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { managedRampKeyName } from "@/services/ramps/runtime";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
 import { clerkHeadersWithoutProject } from "@/test/helpers/clerk";
@@ -638,19 +640,22 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     });
   });
 
-  it.each([
-    ["moonpay", "MOONPAY_SANDBOX_WEBHOOK_SECRET"],
-    ["stripe", "STRIPE_SANDBOX_WEBHOOK_SECRET"],
-  ] as const)("reports %s unavailable while %s is missing", async (provider, name) => {
-    const sandbox = await readAvailability("sandbox", deploymentEnv({ [name]: undefined }));
+  it.each(RAMP_PROVIDERS)(
+    "reports %s unavailable while its sandbox webhook secret is missing",
+    async (provider) => {
+      const withoutSecret = deploymentEnv({
+        [managedRampKeyName(provider, "sandbox", "webhookSecret")]: undefined,
+      });
+      const sandbox = await readAvailability("sandbox", withoutSecret);
 
-    expect(sandbox.providers).toContainEqual({
-      family: "ramps",
-      provider,
-      available: false,
-      reason: "provider_not_configured",
-    });
-  });
+      expect(sandbox.providers).toContainEqual({
+        family: "ramps",
+        provider,
+        available: false,
+        reason: "provider_not_configured",
+      });
+    }
+  );
 
   it("reports MoonPay unavailable when a live key sits under the sandbox names", async () => {
     const liveKey = deploymentEnv({ MOONPAY_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" });

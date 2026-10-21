@@ -2,6 +2,7 @@ import type { PaymentTransferStatus } from "@sdp/types/payments";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
@@ -18,11 +19,11 @@ const PROJECTS = { sandbox: "prj_ramp_status_sandbox", production: "prj_ramp_sta
 const MOONPAY_TEST_ENV = {
   MOONPAY_SANDBOX_API_KEY: "pk_test_status_sweep",
   MOONPAY_SANDBOX_SECRET_KEY: "sk_test_status_sweep",
-};
+} satisfies ManagedRampKeysEnv;
 const MOONPAY_PRODUCTION_ENV = {
   MOONPAY_PRODUCTION_API_KEY: "pk_live_status_sweep",
   MOONPAY_PRODUCTION_SECRET_KEY: "sk_live_status_sweep",
-};
+} satisfies ManagedRampKeysEnv;
 const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
@@ -161,7 +162,7 @@ function sweep() {
 describe("sweepRampTransferStatuses", () => {
   installStripeTestEnv();
 
-  let savedMoonpay: Record<string, string | undefined>;
+  let savedMoonpay: ManagedRampKeysEnv;
 
   beforeEach(async () => {
     savedMoonpay = {

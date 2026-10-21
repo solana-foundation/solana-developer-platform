@@ -1,10 +1,11 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { stripeWebhook } from "@/services/ramps/webhooks/stripe";
 
 const STRIPE_ENV = {
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_test",
-};
+} satisfies ManagedRampKeysEnv;
 
 function signStripeBody(rawBody: string, timestamp: string, secret: string): string {
   return createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
@@ -18,10 +19,7 @@ function parseStripeEvent(body: Record<string, unknown>) {
 async function verifySigned(
   body: Record<string, unknown>,
   environment: "sandbox" | "production",
-  {
-    env = STRIPE_ENV,
-    secret = "whsec_test",
-  }: { env?: Record<string, string>; secret?: string } = {}
+  { env = STRIPE_ENV, secret = "whsec_test" }: { env?: ManagedRampKeysEnv; secret?: string } = {}
 ) {
   const rawBody = JSON.stringify(body);
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -241,7 +239,10 @@ describe("stripeWebhook", () => {
   });
 
   it("verifies the production endpoint with the production secret, never the sandbox one", async () => {
-    const env = { ...STRIPE_ENV, STRIPE_PRODUCTION_WEBHOOK_SECRET: "whsec_live_test" };
+    const env = {
+      ...STRIPE_ENV,
+      STRIPE_PRODUCTION_WEBHOOK_SECRET: "whsec_live_test",
+    } satisfies ManagedRampKeysEnv;
     const liveEvent = { type: "crypto.onramp_session.created", livemode: true, data: {} };
     await expect(verifySigned(liveEvent, "production", { env })).rejects.toMatchObject({
       code: "UNAUTHORIZED",

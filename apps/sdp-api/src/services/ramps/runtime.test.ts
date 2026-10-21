@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   isManagedRampConfigured,
   MANAGED_RAMP_KEY_NAMES,
+  type ManagedRampKeyName,
   type ManagedRampKeysEnv,
   managedRampWebhookSecret,
   rampRuntimeFor,
@@ -14,7 +15,7 @@ import {
 } from "./runtime";
 
 /** One key as mounted: its env var and a value that fits its mode. */
-type MountedKey = readonly [name: string, value: string];
+type MountedKey = readonly [name: ManagedRampKeyName, value: string];
 
 interface ManagedRampModeCase {
   publicKey: MountedKey;
@@ -29,7 +30,10 @@ const LABELS = { moonpay: "MoonPay", stripe: "Stripe" } as const satisfies Recor
   string
 >;
 
-const KEY_MODE_NAMES = { sandbox: "test-mode", production: "live-mode" } as const;
+const KEY_MODE_NAMES = {
+  sandbox: "test-mode",
+  production: "live-mode",
+} as const satisfies Record<SdpEnvironment, string>;
 
 /** The convention pinned by hand: `<PROVIDER>_<MODE>_<ROLE>`, public key in the provider's term. */
 const CASES = {

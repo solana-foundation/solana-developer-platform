@@ -20,7 +20,10 @@ const PUBLIC_KEY_TERMS = {
   stripe: "PUBLISHABLE_KEY",
 } as const satisfies Record<RampProviderId, string>;
 
-const ROLE_TERMS = { secretKey: "SECRET_KEY", webhookSecret: "WEBHOOK_SECRET" } as const;
+const ROLE_TERMS = {
+  secretKey: "SECRET_KEY",
+  webhookSecret: "WEBHOOK_SECRET",
+} as const satisfies Record<Exclude<ManagedRampKeyRole, "publicKey">, string>;
 
 /** A key of a provider's account, as its key formats declare it. */
 export type ManagedRampKeyRole = keyof RampKeyFormat;
