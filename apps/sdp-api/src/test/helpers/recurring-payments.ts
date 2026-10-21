@@ -12,6 +12,7 @@ import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
 import type { CollectionAttemptDelegationPreImage } from "@/db/repositories/payment-subscriptions.repository";
+import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -584,6 +585,83 @@ export async function seedRecurringDatabaseTenant(options: {
         options.publicKey
       ),
   ]);
+}
+
+/**
+ * Seeds an active subscription plan and an active subscription on it, the rows an `active`
+ * recurring payment's `plan_id` and `subscription_id` point at.
+ * @param options - The subscription's tenant, parties and schedule.
+ * @param options.organizationId - Organization owning both rows.
+ * @param options.projectId - Project owning both rows.
+ * @param options.planId - Id of the plan to create.
+ * @param options.subscriptionId - Id of the subscription to create.
+ * @param options.counterpartyId - Counterparty the subscription collects for.
+ * @param options.ownerWalletId - Provider wallet id owning the plan.
+ * @param options.ownerAddress - Address owning the plan and subscribing to it.
+ * @param options.destinationAddress - Address the plan pays out to.
+ * @param options.token - Token the plan collects.
+ * @param options.createdBy - User recorded as creator of both rows.
+ * @param options.createdAt - Creation, update and current-period start timestamp.
+ * @param options.nextCollectionDueAt - When the subscription's next collection falls due.
+ * @returns Resolves once both rows exist.
+ */
+export async function seedActiveRecurringSubscription(options: {
+  organizationId: string;
+  projectId: string;
+  planId: string;
+  subscriptionId: string;
+  counterpartyId: string;
+  ownerWalletId: string;
+  ownerAddress: string;
+  destinationAddress: string;
+  token: string;
+  createdBy: string;
+  createdAt: string;
+  nextCollectionDueAt: string;
+}): Promise<void> {
+  const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(getDb(env));
+  required(
+    await subscriptionsRepo.createPlan({
+      id: options.planId,
+      organizationId: options.organizationId,
+      projectId: options.projectId,
+      ownerWalletId: options.ownerWalletId,
+      ownerAddress: options.ownerAddress,
+      token: options.token,
+      amount: "10.00",
+      periodHours: 24,
+      programPlanId: "1",
+      planPda: null,
+      destinationAddress: options.destinationAddress,
+      pullerWalletId: null,
+      pullerAddress: null,
+      metadataUri: null,
+      status: "active",
+      createdBy: options.createdBy,
+      createdAt: options.createdAt,
+      updatedAt: options.createdAt,
+    })
+  );
+  required(
+    await subscriptionsRepo.createSubscription({
+      id: options.subscriptionId,
+      organizationId: options.organizationId,
+      projectId: options.projectId,
+      planId: options.planId,
+      counterpartyId: options.counterpartyId,
+      subscriberAddress: options.ownerAddress,
+      subscriberTokenAccount: null,
+      subscriptionPda: null,
+      subscriptionAuthorityAddress: null,
+      authorizationSignature: null,
+      status: "active",
+      currentPeriodStartAt: options.createdAt,
+      nextCollectionDueAt: options.nextCollectionDueAt,
+      createdBy: options.createdBy,
+      createdAt: options.createdAt,
+      updatedAt: options.createdAt,
+    })
+  );
 }
 
 export const DEFAULT_RECURRING_FIXTURE = {
