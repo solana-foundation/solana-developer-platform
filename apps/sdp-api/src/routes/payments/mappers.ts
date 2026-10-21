@@ -1,4 +1,8 @@
-import { subtractDecimalAmounts } from "@sdp/payments/decimal";
+import {
+  compareDecimalAmounts,
+  divideDecimalAmounts,
+  subtractDecimalAmounts,
+} from "@sdp/payments/decimal";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   isRampTransferType,
@@ -11,7 +15,7 @@ import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/type
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
-import { readStatedTransferFee } from "@/routes/payments/token-accounts";
+import { readSignedTokenTransfer } from "@/routes/payments/token-accounts";
 import {
   currentProviderSettlement,
   readDeliveryMismatch,
@@ -66,24 +70,42 @@ function rampFiatPayout(row: TransferRow): RampFiatPayout | undefined {
 }
 
 /**
- * The Token-2022 transfer fee a transfer's saved signed transaction states, in
- * UI units at the mint's decimals, and what the recipient receives after it.
+ * What a transfer's saved signed transaction says about its Token-2022 amounts, in UI units at
+ * the mint's decimals: the transfer fee it states and what the recipient receives after it, and,
+ * when the mint scales its UI amount, the base units that moved and the multiplier `amount` was
+ * scaled by at signing.
  *
  * @param row - The transfer row.
- * @returns The stated fee and the amount less that fee; both undefined when the
- *   row saved no signed transaction, it states no fee, or the row has no amount.
+ * @returns Each field, or undefined when it does not apply: no signed transaction, no
+ *   Token-2022 transfer in it, no amount on the row, no stated fee, or an unscaled amount.
  */
-function statedTransferFeeFields(row: TransferRow): {
+function signedTokenTransferFields(row: TransferRow): {
   transferFee: string | undefined;
   receivedAmount: string | undefined;
+  unscaledAmount: string | undefined;
+  uiAmountMultiplier: string | undefined;
 } {
-  const stated =
-    row.signed_transaction === null ? null : readStatedTransferFee(row.signed_transaction);
-  if (stated === null || row.amount === null) {
-    return { transferFee: undefined, receivedAmount: undefined };
+  const signed =
+    row.signed_transaction === null ? null : readSignedTokenTransfer(row.signed_transaction);
+  if (signed === null || row.amount === null) {
+    return {
+      transferFee: undefined,
+      receivedAmount: undefined,
+      unscaledAmount: undefined,
+      uiAmountMultiplier: undefined,
+    };
   }
-  const transferFee = formatDecimalAmount(stated.fee, stated.decimals);
-  return { transferFee, receivedAmount: subtractDecimalAmounts(row.amount, transferFee) };
+  const transferFee =
+    signed.fee === null ? undefined : formatDecimalAmount(signed.fee, signed.decimals);
+  const movedAmount = formatDecimalAmount(signed.amount, signed.decimals);
+  const scaled = compareDecimalAmounts(movedAmount, row.amount) !== 0;
+  return {
+    transferFee,
+    receivedAmount:
+      transferFee === undefined ? undefined : subtractDecimalAmounts(row.amount, transferFee),
+    unscaledAmount: scaled ? movedAmount : undefined,
+    uiAmountMultiplier: scaled ? divideDecimalAmounts(row.amount, movedAmount) : undefined,
+  };
 }
 
 export function mapTransferRow(row: TransferRow) {
@@ -122,7 +144,7 @@ export function mapTransferRow(row: TransferRow) {
     rampsMemo: row.ramps_memo,
     token: row.token,
     ...(row.amount ? { amount: row.amount } : {}),
-    ...statedTransferFeeFields(row),
+    ...signedTokenTransferFields(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

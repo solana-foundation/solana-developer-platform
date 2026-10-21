@@ -25,6 +25,7 @@ import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
+  getTransferCheckedInstructionDataDecoder,
   getTransferCheckedWithFeeInstruction,
   getTransferCheckedWithFeeInstructionDataDecoder,
   identifyToken2022Instruction,
@@ -379,34 +380,45 @@ export async function resolveTransferTerms(
 }
 
 /**
- * The transfer fee a signed transaction states: the fee and decimals on its
- * Token-2022 `TransferCheckedWithFee` instruction. The program refuses that
- * instruction unless the stated fee is the one it withholds, so on a landed
- * transaction this is the fee the recipient paid.
+ * The Token-2022 transfer a signed transaction carries: the base units and decimals on its
+ * `TransferChecked` or `TransferCheckedWithFee` instruction, and the fee the latter states. The
+ * program refuses a stated fee that is not the one it withholds, so on a landed transaction
+ * that is the fee the recipient paid.
  *
  * @param signedTransaction - The base64 wire transaction a transfer row saved before its send.
- * @returns The stated fee in base units with the mint's decimals, or null when no
- *   instruction states a fee.
+ * @returns The transfer's base units, decimals and stated fee (null on `TransferChecked`), or
+ *   null when no Token-2022 transfer instruction is present.
  */
-export function readStatedTransferFee(
+export function readSignedTokenTransfer(
   signedTransaction: string
-): { fee: bigint; decimals: number } | null {
+): { amount: bigint; decimals: number; fee: bigint | null } | null {
   const transaction = getTransactionDecoder().decode(getBase64Encoder().encode(signedTransaction));
   const message = decompileTransactionMessage(
     getCompiledTransactionMessageDecoder().decode(transaction.messageBytes)
   );
   for (const instruction of message.instructions) {
-    if (instruction.programAddress !== SPL_TOKEN_2022_PROGRAM_ID) continue;
     if (
-      instruction.data === undefined ||
-      identifyToken2022Instruction(instruction.data) !== Token2022Instruction.TransferCheckedWithFee
+      instruction.programAddress !== SPL_TOKEN_2022_PROGRAM_ID ||
+      instruction.data === undefined
     ) {
       continue;
     }
-    const { fee, decimals } = getTransferCheckedWithFeeInstructionDataDecoder().decode(
-      instruction.data
-    );
-    return { fee, decimals };
+    switch (identifyToken2022Instruction(instruction.data)) {
+      case Token2022Instruction.TransferChecked: {
+        const { amount, decimals } = getTransferCheckedInstructionDataDecoder().decode(
+          instruction.data
+        );
+        return { amount, decimals, fee: null };
+      }
+      case Token2022Instruction.TransferCheckedWithFee: {
+        const { amount, decimals, fee } = getTransferCheckedWithFeeInstructionDataDecoder().decode(
+          instruction.data
+        );
+        return { amount, decimals, fee };
+      }
+      default:
+        continue;
+    }
   }
   return null;
 }

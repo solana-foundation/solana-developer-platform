@@ -142,31 +142,41 @@ function transactionAmountLabel(
 }
 
 /**
- * What the recipient got after a Token-2022 transfer fee, with the fee, each with its token's
- * name.
+ * What a transfer's Token-2022 amounts add to its record, each with its token's name: the
+ * transfer fee and what the recipient got after it, and the base units moved with the
+ * multiplier a scaled UI amount applied.
  *
  * @param transfer - The transfer record, when the page read one.
  * @param token - The token's name, or null when the row names none.
  * @param locale - The locale to format the amounts in.
- * @returns The received amount and fee labels, or null when the transfer states no fee.
+ * @returns The fee and scaling labels, each null when the transfer has none.
  */
-function receivedAfterFeeLabel(
+function tokenTransferLabels(
   transfer: PaymentTransferDetail | null,
   token: string | null,
   locale: string
-): { received: string; fee: string } | null {
-  if (
-    transfer === null ||
-    transfer.receivedAmount === undefined ||
-    transfer.transferFee === undefined
-  ) {
-    return null;
-  }
+): {
+  receivedAfterFee: { received: string; fee: string } | null;
+  scaled: { amount: string; multiplier: string } | null;
+} {
   const tokenSuffix = token ? ` ${token}` : "";
-  return {
-    received: `${formatDecimalAmount(transfer.receivedAmount, locale)}${tokenSuffix}`,
-    fee: `${formatDecimalAmount(transfer.transferFee, locale)}${tokenSuffix}`,
-  };
+  const receivedAfterFee =
+    transfer === null || transfer.receivedAmount === undefined || transfer.transferFee === undefined
+      ? null
+      : {
+          received: `${formatDecimalAmount(transfer.receivedAmount, locale)}${tokenSuffix}`,
+          fee: `${formatDecimalAmount(transfer.transferFee, locale)}${tokenSuffix}`,
+        };
+  const scaled =
+    transfer === null ||
+    transfer.unscaledAmount === undefined ||
+    transfer.uiAmountMultiplier === undefined
+      ? null
+      : {
+          amount: `${formatDecimalAmount(transfer.unscaledAmount, locale)}${tokenSuffix}`,
+          multiplier: transfer.uiAmountMultiplier,
+        };
+  return { receivedAfterFee, scaled };
 }
 
 /**
@@ -231,8 +241,8 @@ function useTransactionSummary(
     ramp?.description ??
     (paymentStatus === null ? undefined : paymentWhy(paymentStatus, transfer, t));
   const soldCrypto = saleFiat ? cryptoAmount : null;
-  const receivedAfterFee = receivedAfterFeeLabel(transfer, token, locale);
-  return { status, amount, soldCrypto, receivedAfterFee, direction, contact, title, why };
+  const { receivedAfterFee, scaled } = tokenTransferLabels(transfer, token, locale);
+  return { status, amount, soldCrypto, receivedAfterFee, scaled, direction, contact, title, why };
 }
 
 /** A payment request's deposit waits on its payer; a ramp waits on its provider instead. */
@@ -325,12 +335,14 @@ function TransactionParties({
   direction,
   contact,
   receivedAfterFee,
+  scaled,
 }: {
   transaction: UnifiedTransaction;
   transfer: PaymentTransferDetail | null;
   direction: "inbound" | "outbound" | null;
   contact: string | null;
   receivedAfterFee: { received: string; fee: string } | null;
+  scaled: { amount: string; multiplier: string } | null;
 }) {
   const t = useTranslations();
   const wallet = walletLabelOf(transaction);
@@ -366,6 +378,14 @@ function TransactionParties({
               {receivedAfterFee.received}
             </RecordRow>
           </>
+        ) : null}
+        {scaled ? (
+          <RecordRow
+            label={t("DashboardPayments.transactionDetail.scaledAmount")}
+            hint={t("DashboardPayments.transactionDetail.scaledAmountHint", scaled)}
+          >
+            {t("DashboardPayments.transactionDetail.scaledAmountValue", scaled)}
+          </RecordRow>
         ) : null}
         {transfer?.source
           ? chainRow(t("DashboardPayments.transactionDetail.source"), transfer.source)
@@ -586,6 +606,7 @@ function TransactionRecord({
           direction={summary.direction}
           contact={summary.contact}
           receivedAfterFee={summary.receivedAfterFee}
+          scaled={summary.scaled}
         />
         {transfer?.provider ? (
           <ProviderSection provider={transfer.provider} reference={transfer.providerReference} />

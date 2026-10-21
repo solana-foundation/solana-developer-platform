@@ -389,6 +389,16 @@ export const transferSchema = z
         "What the recipient receives: `amount` minus `transferFee`, in UI units. Present with `transferFee`.",
       example: "99.75",
     }),
+    unscaledAmount: z.string().optional().openapi({
+      description:
+        "The base units the transfer moved, at the mint's decimals, before its Token-2022 scaled UI amount multiplier. Present only when the mint scaled `amount`.",
+      example: "5",
+    }),
+    uiAmountMultiplier: z.string().optional().openapi({
+      description:
+        "The scaled UI amount multiplier `amount` reflects: `amount` divided by `unscaledAmount`, as signed. Present with `unscaledAmount`.",
+      example: "2",
+    }),
     provider: z.enum(PERSISTED_RAMP_PROVIDERS).optional().openapi({
       description:
         "Ramp provider for on-ramp and off-ramp transfer records. A retired provider's records keep its id.",

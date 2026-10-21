@@ -17,6 +17,7 @@ import {
   LandmarkIcon,
   PlusIcon,
   ReceiptIcon,
+  ScalingIcon,
   StickyNoteIcon,
   UserRoundIcon,
   WalletIcon,
@@ -370,6 +371,15 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
   const transferFee = transferResult === null ? undefined : transferResult.transferFee;
   const receivedAmount = transferResult === null ? undefined : transferResult.receivedAmount;
+  const scaled =
+    transferResult === null ||
+    transferResult.unscaledAmount === undefined ||
+    transferResult.uiAmountMultiplier === undefined
+      ? null
+      : {
+          amount: `${formatTokenAmount(transferResult.unscaledAmount, locale)} ${assetLabel}`,
+          multiplier: transferResult.uiAmountMultiplier,
+        };
   return (
     <>
       <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4 refresh:items-start refresh:pb-6">
@@ -429,6 +439,22 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
             label={t("DashboardPayments.onchainSend.recipientReceives")}
           >
             {formatTokenAmount(receivedAmount, locale)} {assetLabel}
+          </DetailRow>
+        )}
+        {scaled === null ? null : (
+          <DetailRow
+            icon={<ScalingIcon className="size-3.5" />}
+            label={
+              <span className="flex items-center gap-1.5">
+                {t("DashboardPayments.onchainSend.scaledAmount")}
+                <InfoHint
+                  text={t("DashboardPayments.onchainSend.scaledAmountHint", scaled)}
+                  className="[&_svg]:size-3.5"
+                />
+              </span>
+            }
+          >
+            {t("DashboardPayments.onchainSend.scaledAmountValue", scaled)}
           </DetailRow>
         )}
         {memo === "" ? null : (
