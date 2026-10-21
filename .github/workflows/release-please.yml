@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
+
 jobs:
   plan:
     if: "${{ !startsWith(github.event.head_commit.message, 'chore(main): release ') }}"

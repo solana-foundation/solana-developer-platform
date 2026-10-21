@@ -14,6 +14,9 @@ concurrency:
   group: ramp-rails-refresh
   cancel-in-progress: false
 
+env:
+  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
+
 jobs:
   refresh:
     name: Discover live + open drift PR

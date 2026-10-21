@@ -25,6 +25,9 @@ concurrency:
   group: unified-transactions-drift-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
+
 jobs:
   drift:
     runs-on: ubuntu-latest

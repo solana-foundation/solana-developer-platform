@@ -12,6 +12,9 @@ concurrency:
   group: sdp-smoke-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
+
 jobs:
   smoke:
     name: GCP stage dashboard smoke

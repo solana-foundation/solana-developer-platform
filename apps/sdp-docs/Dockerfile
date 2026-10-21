@@ -4,7 +4,12 @@
 #   docker build -f apps/sdp-docs/Dockerfile -t sdp-docs .
 
 # Bump with: docker pull node:24-slim && docker inspect --format='{{index .RepoDigests 0}}' node:24-slim
-FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS base
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS tls-base
+# Temporary eMudhra containment before any package downloads or app startup.
+COPY packages/sdp-env-config/src/tls-trust.cjs /opt/sdp/tls-trust.cjs
+ENV NODE_OPTIONS="--require=/opt/sdp/tls-trust.cjs"
+
+FROM tls-base AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -64,7 +69,7 @@ ENV SDP_RELEASE_CHANNEL=$SDP_RELEASE_CHANNEL
 
 RUN pnpm --filter sdp-docs build
 
-FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runner
+FROM tls-base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \

@@ -7,6 +7,8 @@
  * The shutdown sequence lives in `runtime/shutdown-node.ts`.
  */
 
+import "@sdp/env-config/tls-trust";
+
 import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 import { assertKoraConfigured } from "@sdp/fee-payment";

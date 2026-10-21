@@ -356,6 +356,9 @@ importers:
       '@sdp/design-tokens':
         specifier: workspace:*
         version: link:../../packages/sdp-design-tokens
+      '@sdp/env-config':
+        specifier: workspace:*
+        version: link:../../packages/sdp-env-config
       '@sdp/issuance':
         specifier: workspace:*
         version: link:../../packages/sdp-issuance

@@ -58,6 +58,7 @@ const MODULE_METADATA = [
     // subpath (the advanced-settings catalog + lookups the editor renders).
     allowedDependencies: [
       "@sdp/design-tokens",
+      "@sdp/env-config",
       "@sdp/issuance",
       "@sdp/private-channels",
       "@sdp/redaction",

@@ -8,6 +8,9 @@ permissions:
   contents: read
   pull-requests: write
 
+env:
+  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
+
 jobs:
   dependency-review:
     name: Dependency Review

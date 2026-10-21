@@ -30,6 +30,9 @@ concurrency:
   group: ramp-rails-drift-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
+
 jobs:
   drift:
     name: Matrix in sync with dumps

@@ -2,6 +2,7 @@ import * as Sentry from "@sentry/nextjs";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    await import("@sdp/env-config/tls-trust");
     await import("@/sentry.server.config");
     const { resolveSdpReleaseChannel } = await import("@sdp/types/release-channels");
     const { checkSdpReleaseChannelAgainstApi } = await import("./flags/release-channel-check");

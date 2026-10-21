@@ -1,3 +1,4 @@
+import "@sdp/env-config/tls-trust";
 import path from "node:path";
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";

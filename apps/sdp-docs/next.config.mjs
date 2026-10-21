@@ -1,3 +1,4 @@
+import "@sdp/env-config/tls-trust";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMDX } from "fumadocs-mdx/next";
