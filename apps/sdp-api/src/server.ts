@@ -20,7 +20,7 @@ import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
 import { parseDatabaseEnv } from "@/db/database-env";
 import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
-import { getProcessEnv } from "@/lib/runtime-env";
+import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
@@ -119,7 +119,9 @@ export function assertRequiredEnv(env: Env): void {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
   assertKoraConfigured(env);
-  assertManagedRpcConfigured();
+  if (!isSelfHostedDeployment(env)) {
+    assertManagedRpcConfigured();
+  }
 }
 
 async function main(): Promise<void> {
