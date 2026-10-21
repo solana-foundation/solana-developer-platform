@@ -48,9 +48,11 @@ import {
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
+  readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  type SubscriptionStep,
+  savedStepSend,
   sendSubscriptionInstructions,
-  settleResumedStep,
 } from "./shared";
 
 /** The movement each lifecycle operation signs for: cancel is an exit, resume a start. */
@@ -610,17 +612,23 @@ async function runRecurringPaymentLifecycle(
     const rpc = createClusterRpc();
     const readDelegation = (commitment: "finalized" | "confirmed") =>
       subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment });
+    const lifecycleStep = {
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
+    } as const satisfies SubscriptionStep;
     let onChainSubscription: MaybeAccount<SubscriptionDelegation> | null = null;
     if (resumedAtSubmit) {
-      const step = await settleResumedStep({
+      const step = await readRecurringPaymentStep({
         rpc,
         read: readDelegation,
         // Resume clears the expiry, so only an existing delegation shows it landed.
         landed: (delegation) =>
           delegation.exists &&
           isSubscriptionDelegationCanceled(delegation) === (input.operation === "cancel"),
-        savedSignature: signature,
-        stale: true,
+        savedSend: savedStepSend(signature, attempt.last_valid_block_height),
+        step: lifecycleStep,
         failureMessage: lifecycleConfirmationMessage(input.operation),
         logContext: {
           recurring_payment_id: claimed.id,
@@ -642,6 +650,7 @@ async function runRecurringPaymentLifecycle(
         });
       }
       onChainSubscription = step.account;
+      signature = null;
     }
 
     // A fresh resume was admitted before its claim. A recovered one is
@@ -699,16 +708,15 @@ async function runRecurringPaymentLifecycle(
       sourceSigner,
       instructions: [instruction],
       submissionStore: createSubscriptionStepStore({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        save: async (savedSignature) => {
+        ...lifecycleStep,
+        save: async (send) => {
           const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
             attemptId: attempt.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
             stage: currentStage,
-            signature: savedSignature,
+            signature: send.signature,
+            lastValidBlockHeight: send.lastValidBlockHeight,
             error: null,
             updatedAt: new Date().toISOString(),
           });
@@ -716,9 +724,8 @@ async function runRecurringPaymentLifecycle(
             throw conflict("Recurring payment lifecycle attempt changed concurrently");
           }
           attempt = updatedAttempt;
-          signature = savedSignature;
+          signature = send.signature;
         },
-        rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
       }),
     });
 
