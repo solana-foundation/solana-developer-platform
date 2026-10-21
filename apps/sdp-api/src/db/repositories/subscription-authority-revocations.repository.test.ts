@@ -158,6 +158,21 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
   });
 
+  it("keeps an authority a standalone subscription awaiting authorization may be using", async () => {
+    await canceledSchedule();
+    // From the subscriptions API: no recurring payment or update names it, and its row stays
+    // pending after the caller's authorization lands.
+    await seedAuthoritySubscription(tenant, {
+      authority: AUTHORITY,
+      tokenMint: MINT,
+      status: "pending_authorization",
+      changedAt: LONG_AGO,
+      recurring: null,
+    });
+
+    expect(await list()).toEqual([]);
+  });
+
   it("keeps an authority while a canceled schedule on it is still inside its billing period", async () => {
     await canceledSchedule(RECENTLY);
 

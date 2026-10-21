@@ -80,9 +80,11 @@ const STATUS_COLUMNS = `?::text[] AS subscription_released, ?::text[] AS payment
  * - Every subscription SDP recorded on it, in any project of the environment, is released (a
  *   recurring payment's earlier subscriptions included: an update that moves its wallet or token
  *   leaves the old one here), and its last change is more than its plan's period plus the margin
- *   ago, so none can still be resumed. One still awaiting authorization counts as released once
- *   nothing can authorize it: no unreleased recurring payment names it as its subscription and no
- *   update in flight is creating it. A failed activation or update leaves it so.
+ *   ago, so none can still be resumed. A recurring payment's subscription still awaiting
+ *   authorization counts as released once nothing can authorize it: no unreleased recurring
+ *   payment names it and no update in flight is creating it. A failed activation or update leaves
+ *   it so. A standalone subscription awaiting authorization always holds: its row stays pending
+ *   after the caller's own authorization lands.
  * - Every recurring payment still on it is released and as long past its period.
  * - Nothing may be about to use one of the wallet's authorities before recording it: no recurring
  *   payment from the wallet is activating, updating or resuming, and no update in flight is moving
@@ -99,6 +101,12 @@ const AUTHORITY_IDLE_PREDICATE = `
        AND other_project.environment = authority_ref.environment
        AND ((other.status <> ALL(authority_ref.subscription_released)
              AND NOT (other.status = ANY(authority_ref.subscription_awaiting)
+                      -- Only a recurring payment's own subscription: a standalone one stays
+                      -- pending after its caller's authorization lands.
+                      AND (EXISTS (SELECT 1 FROM payment_recurring_payments created_for
+                                    WHERE created_for.subscription_id = other.id)
+                           OR EXISTS (SELECT 1 FROM payment_recurring_payment_update_attempts created_by
+                                       WHERE created_by.new_subscription_id = other.id))
                       AND NOT EXISTS (
                         SELECT 1 FROM payment_recurring_payments owner
                          WHERE owner.subscription_id = other.id
