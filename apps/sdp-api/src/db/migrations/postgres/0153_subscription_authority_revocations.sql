@@ -23,10 +23,12 @@
 -- caller's, so a slow run that wakes after a takeover can change nothing.
 CREATE TABLE payment_subscription_authority_revocations (
     id TEXT PRIMARY KEY,
-    organization_id TEXT NOT NULL REFERENCES organizations(id),
-    project_id TEXT NOT NULL REFERENCES projects(id),
+    organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
-    custody_wallet_id TEXT NOT NULL REFERENCES custody_wallets(id),
+    -- Cascades like custody_wallets itself does from its config, so retiring a config is never
+    -- blocked by a revoke's history.
+    custody_wallet_id TEXT NOT NULL REFERENCES custody_wallets(id) ON DELETE CASCADE,
     wallet_address TEXT NOT NULL,
     token_mint TEXT NOT NULL,
     subscription_authority_address TEXT NOT NULL,
