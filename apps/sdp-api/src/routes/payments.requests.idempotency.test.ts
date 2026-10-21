@@ -9,6 +9,7 @@ import {
   seedProductionPrivyWallet,
   TEST_API_KEY,
   TEST_PRODUCTION_PROJECT_ID,
+  TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
@@ -51,19 +52,25 @@ describe("Payments routes — payment request access before the key", () => {
     expect(await storedKeyCount("payreq-foreign-wallet")).toBe(0);
   });
 
-  it("refuses a counterparty outside the caller's project with 404 and stores nothing under the key", async () => {
+  it("refuses a create body naming a counterparty with 400 and writes no request", async () => {
     const response = await postPaymentRequest(
       {
         walletId: TEST_WALLET_ID,
         token: DEVNET_USDC_MINT,
         amount: "1",
-        counterpartyId: "cp_payment_request_missing",
+        counterpartyId: "cp_payment_request_open",
       },
-      "payreq-foreign-counterparty"
+      "payreq-counterparty-field"
     );
 
-    expect(response.status).toBe(404);
-    expect(await storedKeyCount("payreq-foreign-counterparty")).toBe(0);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+    expect(await storedKeyCount("payreq-counterparty-field")).toBe(0);
+    const stored = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE project_id = ?")
+      .bind(TEST_PROJECT.id)
+      .first<{ count: number }>();
+    expect(stored).toEqual({ count: 0 });
   });
 
   it("still creates a request for the project's own wallet", async () => {

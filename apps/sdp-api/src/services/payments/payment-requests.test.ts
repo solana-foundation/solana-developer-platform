@@ -119,7 +119,6 @@ async function createRequest(params: { token: string; expiresAt: string | null }
   ).createPaymentRequest({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
-    counterpartyId: null,
     custodyWalletId: TEST_CUSTODY_WALLET_ID,
     walletId: TEST_WALLET_ID,
     destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
@@ -222,6 +221,7 @@ describe("reconcilePaymentRequest", () => {
     expect(transfers[0].status).toBe("confirmed");
     expect(transfers[0].signature).toBe(SIGNATURE);
     expect(transfers[0].custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(transfers[0].counterparty_id).toBeNull();
   });
 
   it("settles an SPL request, exercising the splToken branch", async () => {

@@ -9,7 +9,6 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 
@@ -82,23 +81,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
     repo = createPostgresPaymentRequestsRepository(db);
   });
 
-  async function seedCounterparty(externalId: string | null = null) {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
-    const row = await counterpartiesRepo.createCounterparty({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      externalId,
-      entityType: "individual",
-      displayName: "Acme Payer",
-      providerData: {},
-      createdBy: TEST_USER.id,
-    });
-    if (!row) {
-      throw new Error("failed to seed counterparty");
-    }
-    return row;
-  }
-
   async function seedTransfer(id: string) {
     await getDb(env)
       .prepare(
@@ -118,7 +100,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
     return {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      counterpartyId: null,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: "wlt_receiving",
       destinationAddress: "OurWallet",
@@ -132,13 +113,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
   describe("createPaymentRequest", () => {
     it("inserts and returns the row with a generated id and awaiting_payment status", async () => {
-      const counterparty = await seedCounterparty();
-
-      const row = await repo.createPaymentRequest(createInput({ counterpartyId: counterparty.id }));
+      const row = await repo.createPaymentRequest(createInput());
 
       expect(row).not.toBeNull();
       expect(row?.id).toMatch(/^preq_/);
-      expect(row?.counterparty_id).toBe(counterparty.id);
       expect(row?.amount).toBe("25.00");
       expect(row?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
       expect(row?.status).toBe("awaiting_payment");
@@ -160,11 +138,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(row?.lifecycle).toHaveLength(1);
       expect(row?.lifecycle[0]).toMatchObject({ status: "awaiting_payment" });
       expect(row?.lifecycle[0].at).toEqual(expect.any(String));
-    });
-
-    it("supports an open link (null counterparty)", async () => {
-      const row = await repo.createPaymentRequest(createInput({ counterpartyId: null }));
-      expect(row?.counterparty_id).toBeNull();
     });
 
     it("generates a public_token distinct from the id", async () => {
@@ -424,161 +397,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
       });
       expect(current?.status).toBe("canceled");
-    });
-  });
-
-  describe("sponsored transaction window", () => {
-    const ACCOUNT_A = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
-    const ACCOUNT_B = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJfhRhPkV";
-
-    it("admits exactly one of two concurrent claims", async () => {
-      const request = await repo.createPaymentRequest(createInput());
-      const results = await Promise.all([
-        repo.claimSponsoredTransactionWindow({
-          requestId: request.id,
-          account: ACCOUNT_A,
-          unsignedTransaction: "dHhB",
-          lastValidBlockHeight: 1_000n,
-          currentBlockHeight: 900n,
-        }),
-        repo.claimSponsoredTransactionWindow({
-          requestId: request.id,
-          account: ACCOUNT_B,
-          unsignedTransaction: "dHhC",
-          lastValidBlockHeight: 1_000n,
-          currentBlockHeight: 900n,
-        }),
-      ]);
-      expect(results.filter(Boolean)).toHaveLength(1);
-
-      const claim = await repo.getSponsoredTransactionClaim(request.id);
-      expect(claim).not.toBeNull();
-      expect([ACCOUNT_A, ACCOUNT_B]).toContain(claim?.account);
-      expect(claim?.signedTransaction).toBeNull();
-      expect(claim?.lastValidBlockHeight).toBe(1_000n);
-    });
-
-    it("refuses a reclaim while the window is live and admits one after expiry", async () => {
-      const request = await repo.createPaymentRequest(createInput());
-      expect(
-        await repo.claimSponsoredTransactionWindow({
-          requestId: request.id,
-          account: ACCOUNT_A,
-          unsignedTransaction: "dHhB",
-          lastValidBlockHeight: 1_000n,
-          currentBlockHeight: 900n,
-        })
-      ).toBe(true);
-      expect(
-        await repo.claimSponsoredTransactionWindow({
-          requestId: request.id,
-          account: ACCOUNT_B,
-          unsignedTransaction: "dHhC",
-          lastValidBlockHeight: 1_100n,
-          currentBlockHeight: 950n,
-        })
-      ).toBe(false);
-      expect(
-        await repo.claimSponsoredTransactionWindow({
-          requestId: request.id,
-          account: ACCOUNT_B,
-          unsignedTransaction: "dHhC",
-          lastValidBlockHeight: 1_200n,
-          currentBlockHeight: 1_001n,
-        })
-      ).toBe(true);
-      const claim = await repo.getSponsoredTransactionClaim(request.id);
-      expect(claim?.account).toBe(ACCOUNT_B);
-      expect(claim?.signedTransaction).toBeNull();
-    });
-
-    it("stores the signature for the claiming account only", async () => {
-      const request = await repo.createPaymentRequest(createInput());
-      await repo.claimSponsoredTransactionWindow({
-        requestId: request.id,
-        account: ACCOUNT_A,
-        unsignedTransaction: "dHhB",
-        lastValidBlockHeight: 1_000n,
-        currentBlockHeight: 900n,
-      });
-      await repo.storeSponsoredTransactionSignature({
-        requestId: request.id,
-        account: ACCOUNT_B,
-        unsignedTransaction: "dHhB",
-        signedTransaction: "c2lnQg==",
-      });
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
-
-      await repo.storeSponsoredTransactionSignature({
-        requestId: request.id,
-        account: ACCOUNT_A,
-        unsignedTransaction: "dHhB",
-        signedTransaction: "c2lnQQ==",
-      });
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
-        "c2lnQQ=="
-      );
-    });
-
-    it("refuses a stale signature written against superseded unsigned bytes", async () => {
-      const request = await repo.createPaymentRequest(createInput());
-      await repo.claimSponsoredTransactionWindow({
-        requestId: request.id,
-        account: ACCOUNT_A,
-        unsignedTransaction: "dHhPbGQ=",
-        lastValidBlockHeight: 1_000n,
-        currentBlockHeight: 900n,
-      });
-      await repo.claimSponsoredTransactionWindow({
-        requestId: request.id,
-        account: ACCOUNT_A,
-        unsignedTransaction: "dHhOZXc=",
-        lastValidBlockHeight: 1_200n,
-        currentBlockHeight: 1_001n,
-      });
-
-      expect(
-        await repo.storeSponsoredTransactionSignature({
-          requestId: request.id,
-          account: ACCOUNT_A,
-          unsignedTransaction: "dHhPbGQ=",
-          signedTransaction: "c2lnT2xk",
-        })
-      ).toBe(false);
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
-
-      expect(
-        await repo.storeSponsoredTransactionSignature({
-          requestId: request.id,
-          account: ACCOUNT_A,
-          unsignedTransaction: "dHhOZXc=",
-          signedTransaction: "c2lnTmV3",
-        })
-      ).toBe(true);
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
-        "c2lnTmV3"
-      );
-    });
-
-    it("refuses a claim on a request that is not awaiting payment", async () => {
-      const request = await repo.createPaymentRequest(createInput());
-      await repo.markPaymentRequest({
-        requestId: request.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "canceled",
-        fulfilledByTransferId: null,
-        canceledBy: TEST_USER.id,
-      });
-      expect(
-        await repo.claimSponsoredTransactionWindow({
-          requestId: request.id,
-          account: ACCOUNT_A,
-          unsignedTransaction: "dHhB",
-          lastValidBlockHeight: 1_000n,
-          currentBlockHeight: 900n,
-        })
-      ).toBe(false);
     });
   });
 });
