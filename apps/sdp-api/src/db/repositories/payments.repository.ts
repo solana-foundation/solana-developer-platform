@@ -107,6 +107,8 @@ export interface UpdatePaymentTransferInput {
   transferId: string;
   organizationId?: string;
   projectId?: string;
+  /** Timeout CAS: only an unsigned row with no submission start may match. */
+  requireUnsigned?: true;
   expectedStatus?: PaymentTransferStatus;
   status?: PaymentTransferStatus;
   signature?: string | null;

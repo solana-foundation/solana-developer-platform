@@ -226,6 +226,8 @@ export interface UpdatePaymentTransferRecipientsStatusInput {
 
 export interface SettlePaymentTransferBatchInput {
   transferId: string;
+  /** Timeout CAS: leave a signed or started chunk and its recipients unchanged. */
+  requireUnsigned?: true;
   organizationId: string;
   projectId: string;
   transferStatus: TransferChainVerdictStatus;

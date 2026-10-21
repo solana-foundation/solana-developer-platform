@@ -280,6 +280,14 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   const clauses = ["id = ?"];
   const values: unknown[] = [input.transferId];
 
+  if (input.requireUnsigned) {
+    clauses.push(
+      "signature IS NULL",
+      "signed_transaction IS NULL",
+      "submission_started_at IS NULL"
+    );
+  }
+
   if (input.organizationId) {
     clauses.push("organization_id = ?");
     values.push(input.organizationId);

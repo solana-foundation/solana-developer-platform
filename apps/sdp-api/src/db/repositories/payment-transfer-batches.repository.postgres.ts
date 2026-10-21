@@ -744,6 +744,11 @@ export function createPostgresPaymentTransferBatchesRepository(
               WHERE id = ?
                 AND organization_id = ?
                 AND project_id IS NOT DISTINCT FROM ?
+                AND (NOT ?::boolean OR (
+                  signature IS NULL
+                  AND signed_transaction IS NULL
+                  AND submission_started_at IS NULL
+                ))
                 AND status = 'processing'
               RETURNING id`
           )
@@ -757,7 +762,8 @@ export function createPostgresPaymentTransferBatchesRepository(
             input.updatedAt,
             input.transferId,
             input.organizationId,
-            input.projectId
+            input.projectId,
+            input.requireUnsigned === true
           )
           .all<{ id: string }>();
 

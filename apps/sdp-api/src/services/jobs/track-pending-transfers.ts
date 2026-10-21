@@ -117,6 +117,7 @@ async function updateTerminalTransfer(
     }
     await createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
       transferId: transfer.id,
+      requireUnsigned: input.requireUnsigned,
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
       transferStatus: input.status,
@@ -409,6 +410,7 @@ async function recoverStuckProcessingTransfers(
         transferId: transfer.id,
         status: "failed",
         error: "Transfer processing timed out",
+        requireUnsigned: true,
         updatedAt: nowIso,
       });
     } catch (err) {

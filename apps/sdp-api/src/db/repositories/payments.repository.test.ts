@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
@@ -13,6 +14,7 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 
@@ -22,6 +24,7 @@ const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
 
 async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
   const db = getDb(env);
+  await db.prepare("DELETE FROM payment_transfer_batches").run();
   await db.prepare("DELETE FROM payment_transfers").run();
   await db.prepare("DELETE FROM custody_wallets").run();
   await db.prepare("DELETE FROM custody_configs").run();
@@ -129,6 +132,117 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     projects = await resetPaymentFixtures();
     repo = createPostgresPaymentsRepository(getDb(env));
   });
+
+  it.for(["transfer", "transfer_batch"] as const)(
+    "a stale unsigned timeout cannot fail a signed %s or prevent its submission",
+    async (type) => {
+      const input = { ...transferInput({ suffix: `timeout_${type}` }), type };
+      await repo.createTransfer(input);
+      const batches = createPostgresPaymentTransferBatchesRepository(getDb(env));
+      let batchId: string | null = null;
+      if (type === "transfer_batch") {
+        await seedProjectCryptoWalletCounterparty(getDb(env), {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          createdBy: TEST_USER.id,
+          counterpartyId: "cpty_timeout",
+          counterpartyAccountId: "cpacct_timeout",
+          walletAddress: input.destinationAddress,
+        });
+        const created = await batches.createTransferBatchWithRecipients({
+          batch: {
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            sourceWalletId: TEST_WALLET_ID,
+            sourceAddress: input.sourceAddress,
+            token: input.token,
+            status: "processing",
+          },
+          recipients: [
+            {
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT_ID,
+              transferId: input.id,
+              counterpartyId: "cpty_timeout",
+              counterpartyAccountId: "cpacct_timeout",
+              destinationAddress: input.destinationAddress,
+              amount: "1",
+              status: "processing",
+            },
+          ],
+        });
+        batchId = created.batch.id;
+      }
+      // The timeout observed an unsigned row before the request saved its submission.
+      const selected = await repo.listTransfersByStatus({
+        environment: "sandbox",
+        statuses: ["processing"],
+        types: WALLET_TRANSFER_TYPES,
+        hasSignature: false,
+        limit: 10,
+      });
+      expect(selected.map((row) => row.id)).toContain(input.id);
+      expect(
+        await repo.persistSignedTransfer({
+          transferId: input.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          signature: `signature-${type}`,
+          signedTransaction: "AQ==",
+          lastValidBlockHeight: "1000",
+          updatedAt: new Date().toISOString(),
+        })
+      ).not.toBeNull();
+      const timeout = {
+        transferId: input.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        requireUnsigned: true as const,
+        error: "Transfer processing timed out",
+        updatedAt: new Date().toISOString(),
+      };
+      if (type === "transfer_batch") {
+        await batches.settleTransferBatch({
+          ...timeout,
+          transferStatus: "failed",
+          slot: null,
+        });
+      } else {
+        expect(
+          await repo.updateTransfer({ ...timeout, expectedStatus: "processing", status: "failed" })
+        ).toBeNull();
+      }
+
+      expect(await readStatus(input.id)).toBe("processing");
+      if (batchId !== null) {
+        expect(
+          await batches.getTransferBatchById({
+            batchId,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+          })
+        ).toMatchObject({ status: "processing" });
+        expect(
+          await batches.listTransferRecipientsByBatch({
+            batchId,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            limit: 10,
+            offset: 0,
+          })
+        ).toMatchObject({ rows: [{ status: "processing" }] });
+      }
+      expect(
+        await repo.markTransferSubmissionStarted({
+          transferId: input.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          startedAt: new Date().toISOString(),
+        })
+      ).not.toBeNull();
+    }
+  );
 
   it("installs the indexed payment-ledger search plan", async () => {
     const extension = await getDb(env)
