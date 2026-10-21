@@ -96,6 +96,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
+import { assertWalletPurposeMaySign } from "@/services/domain/signing/custody-runtime-target";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -388,6 +389,7 @@ export async function authorizeTransfer(
   // from writing a failed transfer row and an Idempotency-Key that would
   // replay that failure after the scope is fixed.
   assertCallerWalletInScope(scope.auth, operation.sourceWallet.id);
+  assertWalletPurposeMaySign(operation.sourceWallet.purpose, "payments.transfer");
   // A ramp deposit the request funds is named by id: it must be in the
   // project before the key is claimed, so a wrong id is never stored as a 404.
   let rampTransfer: TransferRow | null = null;

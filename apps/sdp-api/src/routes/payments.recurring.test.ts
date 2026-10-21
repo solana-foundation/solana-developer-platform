@@ -477,8 +477,8 @@ async function seedUnboundWallet(): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO custody_wallets
-         (id, custody_config_id, wallet_id, public_key, status)
-       VALUES (?, ?, ?, ?, 'active')`
+         (id, custody_config_id, wallet_id, public_key, purpose, status)
+       VALUES (?, ?, ?, ?, 'transfer', 'active')`
     )
     .bind(UNBOUND_CUSTODY_WALLET_ID, TEST_CONFIG_ID, UNBOUND_WALLET_ID, unboundWallet.address)
     .run();
@@ -516,7 +516,7 @@ async function seedReplacementCustodyWallet(params: {
         walletId: TEST_WALLET_ID,
         publicKey: params.publicKey,
         label: null,
-        purpose: null,
+        purpose: "transfer",
         status: "active",
       },
     ],

@@ -191,13 +191,13 @@ describe("details step", () => {
     const formData = mocks.createWallet.mock.calls[0]?.[0] as FormData;
     expect(formData.get("provider")).toBe("turnkey");
     expect(formData.get("label")).toBe("Settlement wallet");
-    expect(formData.get("purpose")).toBe("root");
+    expect(formData.get("purpose")).toBe("transfer");
     expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
   });
 
-  it("fixes the first wallet on a provider as its root wallet", async () => {
+  it("fixes the first wallet on a provider as a transfer wallet", async () => {
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-    expect(screen.getByRole("button", { name: /first wallet is its root wallet/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /first wallet is a transfer wallet/ })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Treasury" } });
     await act(async () => {

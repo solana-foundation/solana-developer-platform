@@ -14,6 +14,7 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
+import { assertWalletPurposeMaySign } from "@/services/domain/signing/custody-runtime-target";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
 /**
@@ -118,6 +119,7 @@ export async function authorizeRecurringPaymentCreate(
   };
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
+  assertWalletPurposeMaySign(sourceWallet.purpose, "recurring.activate");
   // Every id the caller names is checked before the key is claimed: a
   // counterparty account from another tenant never reaches the service.
   await assertCounterpartyAccountInProject(c, {
@@ -182,6 +184,7 @@ export async function authorizeRecurringPaymentUpdate(
     if (!named) {
       throw walletNotFound();
     }
+    assertWalletPurposeMaySign(named.purpose, "recurring.update");
     nextSourceWallet = named;
   }
   await assertNamedCounterpartyIdsInProject(c, body);

@@ -17,6 +17,7 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
+import { assertWalletPurposeMaySign } from "@/services/domain/signing/custody-runtime-target";
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
@@ -176,6 +177,7 @@ export async function authorizeBatchRequest(
   assertPaymentProjectScope(input.projectId, projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
+  assertWalletPurposeMaySign(sourceWallet.purpose, "payments.transfer_batch");
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
 

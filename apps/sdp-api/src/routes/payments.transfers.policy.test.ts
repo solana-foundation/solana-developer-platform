@@ -4,17 +4,20 @@ import { AppError } from "@/lib/errors";
 import { SigningService } from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
   TEST_API_KEY,
+  TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import {
+  countTransferRows,
   postTransfer,
   readErrorResponse,
   readTransferResponse,
@@ -41,6 +44,44 @@ describe("Payments routes — transfer wallet access", () => {
       code: "NOT_FOUND",
       message: "Wallet not found. Verify the wallet identifier supplied to this endpoint.",
     });
+  });
+  it("refuses a DvP settlement authority wallet as a transfer source before claiming the key", async () => {
+    await seedTestCustodyRows(env, {
+      configs: [],
+      wallets: [
+        {
+          id: "cwlt_transfer_settlement_authority",
+          owner: { kind: "config", custodyConfigId: TEST_CONFIG_ID },
+          walletId: "wal_transfer_settlement_authority",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+          label: "Settlement authority",
+          purpose: "dvp_settlement_authority",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await postTransfer(
+      {
+        sourceCustodyWalletId: "cwlt_transfer_settlement_authority",
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "0.1",
+      },
+      {}
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "A dvp_settlement_authority wallet cannot sign payments.transfer",
+        details: { reason: "wallet_purpose", purpose: "dvp_settlement_authority" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(await countTransferRows()).toBe(0);
   });
   it("admits runtime execution only for new transfers", async () => {
     const headers = {

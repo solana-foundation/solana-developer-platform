@@ -11,14 +11,21 @@ import {
   type CustodyWalletStatus,
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
-import type { MovementId } from "@sdp/types/movements";
+import { type MovementId, movementAllowsWalletPurpose } from "@sdp/types/movements";
 import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
-import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
+import {
+  AppError,
+  conflict,
+  forbidden,
+  internalError,
+  notFound,
+  providerUnavailable,
+} from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { decideMovement, readMovementFactsWith } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
@@ -54,6 +61,7 @@ type ConfigAdapterResolver = (
 interface RuntimeWallet {
   walletId: string;
   publicKey: Address;
+  purpose: CustodyWalletPurpose | null;
 }
 
 interface ConfigRuntimeTarget {
@@ -147,6 +155,7 @@ interface ConfigRow {
 interface ConfigWalletRow extends ConfigRow {
   wallet_id: string;
   wallet_public_key: string;
+  wallet_purpose: string | null;
   wallet_status: string;
 }
 
@@ -167,6 +176,7 @@ interface ConnectionOwnerRow extends CustodyConnectionRuntimeAvailabilityFacts {
 interface ConnectionWalletRow extends ConnectionOwnerRow {
   wallet_id: string;
   wallet_public_key: string;
+  wallet_purpose: string | null;
   wallet_status: CustodyWalletStatus;
 }
 
@@ -521,7 +531,7 @@ export class CustodyRuntimeTargets {
     projectId: string;
     connectionId: string;
     label?: string;
-    purpose?: CustodyWalletPurpose;
+    purpose: CustodyWalletPurpose;
     /** A keyed request's recovery point: sent to Privy and recorded on the row. */
     idempotency?: CustodyWalletIdempotency | null;
   }): Promise<CreatedCustodyConnectionWallet> {
@@ -673,6 +683,7 @@ export class CustodyRuntimeTargets {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
     this.assertRuntimeExecutionAllowed(target, custodyWalletId);
+    assertWalletPurposeMaySign(target.wallet.purpose, movement);
     await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
 
     const adapter =
@@ -910,7 +921,7 @@ export class CustodyRuntimeTargets {
       walletId: string;
       publicKey: string;
       label?: string;
-      purpose?: CustodyWalletPurpose;
+      purpose: CustodyWalletPurpose;
       idempotency: CustodyWalletIdempotency | null;
     }
   ): Promise<CreatedCustodyConnectionWallet> {
@@ -981,7 +992,7 @@ export class CustodyRuntimeTargets {
           wallet.walletId,
           wallet.publicKey,
           wallet.label ?? null,
-          wallet.purpose ?? null,
+          wallet.purpose,
           wallet.idempotency?.requestId ?? null,
           wallet.idempotency?.fingerprint ?? null,
         ]
@@ -1068,6 +1079,7 @@ export class CustodyRuntimeTargets {
       wallet: {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
+        purpose: parseWalletPurpose(row.wallet_purpose),
       },
       isRuntimeAvailable: row.status === "active" && row.wallet_status === "active",
     };
@@ -1161,6 +1173,7 @@ export class CustodyRuntimeTargets {
       wallet: {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
+        purpose: parseWalletPurpose(row.wallet_purpose),
       },
       isRuntimeAvailable: this.isConnectionRuntimeAvailable(row) && row.wallet_status === "active",
     };
@@ -1336,6 +1349,23 @@ const KNOWN_WALLET_PURPOSES = {
   dvp_settlement_authority: true,
 } as const satisfies Record<CustodyWalletPurpose, true>;
 
+/**
+ * Refuses a wallet whose purpose may not sign the movement (APE-371). The
+ * signer checks it on every path, cron included; a route checks it again
+ * before its Idempotency-Key is claimed, so a refusal stores nothing.
+ */
+export function assertWalletPurposeMaySign(
+  purpose: CustodyWalletPurpose | null,
+  movement: MovementId
+): void {
+  if (!movementAllowsWalletPurpose(movement, purpose)) {
+    throw forbidden(`A ${purpose ?? "purposeless"} wallet cannot sign ${movement}`, {
+      reason: "wallet_purpose",
+      purpose,
+    });
+  }
+}
+
 function parseWalletPurpose(purpose: string | null): CustodyWalletPurpose | null {
   if (purpose === null) {
     return null;
@@ -1381,6 +1411,7 @@ function connectionTargetSelect(): string {
                  pc.status AS credential_status, c.provider_account_fingerprint,
                  w.wallet_id,
                  w.public_key AS wallet_public_key,
+                 w.purpose AS wallet_purpose,
                  w.status AS wallet_status
           FROM custody_connections c
           JOIN provider_credentials pc
@@ -1395,7 +1426,7 @@ function configWalletSelect(): string {
                  c.config_encrypted, c.encryption_version,
                  c.status, c.created_at, c.updated_at,
                  w.wallet_id, w.public_key AS wallet_public_key,
-                 w.status AS wallet_status
+                 w.purpose AS wallet_purpose, w.status AS wallet_status
           FROM custody_configs c
           JOIN custody_wallets w ON w.custody_config_id = c.id`;
 }

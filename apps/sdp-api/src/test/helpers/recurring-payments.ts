@@ -352,8 +352,8 @@ export async function seedRecurringDatabaseTenant(options: {
     db
       .prepare(
         `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
+           (id, custody_config_id, wallet_id, public_key, purpose, status)
+         VALUES (?, ?, ?, ?, 'transfer', 'active')`
       )
       .bind(
         options.custodyWalletId,

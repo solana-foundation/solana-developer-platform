@@ -507,7 +507,7 @@ describe("CustodyRuntimeTargets", () => {
       walletId: `${connection.walletId}_secondary`,
       publicKey: SECOND_CONNECTION_PUBLIC_KEY,
       label: null,
-      purpose: null,
+      purpose: "transfer",
       status: "active",
     });
     await getDb(env)
@@ -614,6 +614,31 @@ describe("CustodyRuntimeTargets", () => {
     ).rejects.toMatchObject({
       code: "CONFLICT",
       details: { reason: "runtime_execution_unavailable" },
+    });
+    expect(getConfigAdapter).not.toHaveBeenCalled();
+  });
+
+  it("refuses a recurring collection from a DvP settlement authority wallet before constructing its signer", async () => {
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET purpose = 'dvp_settlement_authority' WHERE id = ?")
+      .bind(`cwlt_${config.id}`)
+      .run();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        "recurring.collect",
+        getConfigAdapter
+      )
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      statusCode: 403,
+      details: { reason: "wallet_purpose", purpose: "dvp_settlement_authority" },
     });
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
@@ -1164,7 +1189,7 @@ describe("CustodyRuntimeTargets", () => {
           walletId: config.walletId,
           publicKey: CONFIG_PUBLIC_KEY,
           label: null,
-          purpose: null,
+          purpose: "transfer",
           status: "active",
           createdAt: expect.any(String),
         },
@@ -1176,7 +1201,7 @@ describe("CustodyRuntimeTargets", () => {
           walletId: connection.walletId,
           publicKey: CONNECTION_PUBLIC_KEY,
           label: null,
-          purpose: null,
+          purpose: "transfer",
           status: "active",
           createdAt: expect.any(String),
         },
@@ -1241,7 +1266,7 @@ async function seedConfig(params: {
         walletId,
         publicKey: CONFIG_PUBLIC_KEY,
         label: null,
-        purpose: null,
+        purpose: "transfer",
         status: "active",
       },
     ],
@@ -1267,7 +1292,7 @@ async function seedConnection(
         walletId,
         publicKey: CONNECTION_PUBLIC_KEY,
         label: null,
-        purpose: null,
+        purpose: "transfer",
         status: "active",
       },
     ],
