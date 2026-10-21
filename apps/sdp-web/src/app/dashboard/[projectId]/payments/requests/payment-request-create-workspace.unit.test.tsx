@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import type { Counterparty } from "@sdp/types/counterparties";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -41,19 +40,6 @@ const wallet: PaymentsDashboardWallet = {
   isRuntimeExecutionAllowed: true,
 };
 
-const contact: Counterparty = {
-  id: "cpty_jane",
-  organizationId: "org_test",
-  projectId: "proj_test",
-  externalId: null,
-  displayName: "Jane Smith",
-  entityType: "individual",
-  status: "active",
-  createdBy: null,
-  createdAt: "2026-09-14T00:00:00.000Z",
-  updatedAt: "2026-09-14T00:00:00.000Z",
-};
-
 function wrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -79,9 +65,7 @@ afterEach(() => {
 
 describe("New request page", () => {
   it("says there is nowhere to be paid into when the project has no wallet", () => {
-    render(<PaymentRequestCreateWorkspace wallets={[]} walletsError={null} counterparties={[]} />, {
-      wrapper,
-    });
+    render(<PaymentRequestCreateWorkspace wallets={[]} walletsError={null} />, { wrapper });
 
     expect(screen.getByText("There is no wallet to be paid into")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open Wallets" }).getAttribute("href")).toBe(
@@ -96,14 +80,7 @@ describe("New request page", () => {
       writes.push(JSON.parse(String(init?.body)));
       return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
     });
-    render(
-      <PaymentRequestCreateWorkspace
-        wallets={[wallet]}
-        walletsError={null}
-        counterparties={[contact]}
-      />,
-      { wrapper }
-    );
+    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
     const user = userEvent.setup();
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
 
@@ -126,7 +103,6 @@ describe("New request page", () => {
         walletId: "wallet_treasury",
         token: usdc?.mintAddress,
         amount: "25",
-        counterpartyId: null,
         expiresAt: null,
       },
     ]);
@@ -151,14 +127,7 @@ describe("New request page", () => {
       if (sends.length === 1) throw new TypeError("network down");
       return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
     });
-    render(
-      <PaymentRequestCreateWorkspace
-        wallets={[wallet]}
-        walletsError={null}
-        counterparties={[contact]}
-      />,
-      { wrapper }
-    );
+    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
     const user = userEvent.setup();
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
 
@@ -217,14 +186,7 @@ describe("New request page", () => {
 
   /** Fills the form for `amount` with a one-hour expiry. */
   async function fillRequest(user: ReturnType<typeof userEvent.setup>, amount: string) {
-    render(
-      <PaymentRequestCreateWorkspace
-        wallets={[wallet]}
-        walletsError={null}
-        counterparties={[contact]}
-      />,
-      { wrapper }
-    );
+    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
     await user.type(screen.getByRole("textbox", { name: "Amount" }), amount);
     await user.click(screen.getByRole("button", { name: "Destination wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
@@ -328,14 +290,7 @@ describe("New request page", () => {
     vi.stubGlobal("fetch", async () => {
       throw new Error("offline");
     });
-    render(
-      <PaymentRequestCreateWorkspace
-        wallets={[wallet]}
-        walletsError={null}
-        counterparties={[contact]}
-      />,
-      { wrapper }
-    );
+    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
     const user = userEvent.setup();
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
 
@@ -350,10 +305,7 @@ describe("New request page", () => {
   });
 
   it("keeps create off for an amount the API would refuse", async () => {
-    render(
-      <PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} counterparties={[]} />,
-      { wrapper }
-    );
+    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Destination wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
@@ -363,24 +315,5 @@ describe("New request page", () => {
     expect(
       screen.getByRole("button", { name: "Create and copy link" }).hasAttribute("disabled")
     ).toBe(true);
-  });
-
-  it("names the contact in the sentence and says when they have no address on file", async () => {
-    vi.stubGlobal("fetch", async () => Response.json({ data: { accounts: [] } }));
-    render(
-      <PaymentRequestCreateWorkspace
-        wallets={[wallet]}
-        walletsError={null}
-        counterparties={[contact]}
-      />,
-      { wrapper }
-    );
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "From" }));
-    await user.click(screen.getByRole("button", { name: "Jane Smith" }));
-
-    expect(readsAs()).toBe("Jane Smith can pay an amount into a wallet.");
-    expect(await screen.findByText(/Jane Smith has no Solana address on file\./)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add an address" })).toBeTruthy();
   });
 });

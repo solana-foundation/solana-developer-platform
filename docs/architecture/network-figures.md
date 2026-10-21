@@ -22,14 +22,16 @@ browser reads SDP's own route.
 Every read is `/v1/metrics?provider=preferred`: the data team's pick for each
 metric, one value per metric and UTC day for the past year (about 1.1 MB and
 9.5k rows, values as decimal strings). Every provider's rows would be five times
-that and disagree by more than 10% on a day, so SDP reads no others. The API has no
-metric or date filter, no compression and no ETag, so a read is the whole
-dataset; parsing all of it takes about 8 ms. A row that fails validation, or a
-second value for a metric's day, is dropped and logged. A failed, timed-out,
-oversized (past 4 MB) or truncated read answers 503. `lib/provider-json.ts`, the
-API's one client for third-party JSON outside the ramps (Google Places uses it
-too), maps every way a provider fails to answer and logs the provider's wording
-and the schema's issue paths, never their values.
+that and disagree by more than 10% on a day, so SDP reads no others. The API
+gzips its answer to about 110 KB on the wire: Node's `fetch` asks for gzip and
+unzips it by default, so the client sets no `Accept-Encoding`. It has no metric
+or date filter and no ETag, so a read is the whole dataset; parsing all of it
+takes about 8 ms. A row that fails validation, or a second value for a metric's
+day, is dropped and logged. A failed, timed-out, oversized (past 4 MB unzipped)
+or truncated read answers 503. `lib/provider-json.ts`, the API's one client for
+third-party JSON outside the ramps (Google Places uses it too), maps every way a
+provider fails to answer and logs the provider's wording and the schema's issue
+paths, never their values.
 
 ## Closed days
 
@@ -78,7 +80,7 @@ the KV `cache` store (Redis):
 
 Net effect: about one data.solana.com read every 3 hours across all instances,
 whatever the traffic. Its CDN keeps each copy for hours (an `s-maxage` of 3 to
-12 hours when checked), so reading more often mostly downloads the same 1.1 MB
+12 hours when checked), so reading more often mostly downloads the same copy
 again. The route is not metered for the same reason.
 
 ## Scale
@@ -89,9 +91,8 @@ the 58 KB response) and read the source once. Browsers refetch on load and every
 5 minutes while the tab is visible, so an open Overview costs about a dozen
 cached requests an hour.
 
-What would shrink each read is on the data team's side: gzip (1.1 MB to
-100 KB) and a metric filter (the five metrics SDP reads are 215 KB); both
-together bring a read to about 20 KB.
+What would shrink each read further is on the data team's side: a metric filter.
+The five metrics SDP reads are 215 KB, about 20 KB gzipped.
 
 ## In the Overview
 

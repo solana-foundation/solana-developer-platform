@@ -15,17 +15,19 @@ import { type DataApiMetricTable, dataApiMetricsResponseSchema, indexMetricRows 
 /** The data team's pick for each metric, one value per day: a fifth of every provider's rows,
  * with nothing to reconcile between providers that disagree. */
 const METRICS_URL = "https://data.solana.com/v1/metrics?provider=preferred";
-/** A year of every metric is about 1 MB; a stalled read fails rather than holding the refresh. */
+/** A year of every metric is about 110 KB gzipped; a stalled read fails rather than holding the
+ * refresh. */
 export const DATA_API_REQUEST_TIMEOUT_MS = 20_000;
-/** Four times today's answer: room for more metrics, never a runaway body. */
+/** Four times today's answer, counted unzipped: room for more metrics, never a runaway body. */
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 /** data.solana.com's name in vendor calls, logs and errors. */
 const PROVIDER = "solana-data";
 
 /**
- * The past year of every metric, by metric and closed UTC day. The API has no metric filter and no
- * compression, so each read is the whole 1.1 MB however few metrics the caller uses. Each read
- * logs one line, with the API's `generatedAt` to pin which copy it drew.
+ * The past year of every metric, by metric and closed UTC day. The API has no metric filter, so
+ * each read is the whole year however few metrics the caller uses: about 110 KB gzipped. Node's
+ * fetch asks for gzip and unzips it by default, so no Accept-Encoding is set here. Each read logs
+ * one line, with the API's `generatedAt` to pin which copy it drew.
  *
  * @param env - The deployment's environment, which carries DATA_API_KEY.
  * @returns The metrics table.

@@ -22,7 +22,6 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     public_token: row.public_token as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string | null,
-    counterparty_id: row.counterparty_id as string | null,
     custody_wallet_id: parseNullableCustodyWalletId(row.custody_wallet_id),
     wallet_id: row.wallet_id as string,
     destination_address: row.destination_address as string,
@@ -80,7 +79,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              public_token,
              organization_id,
              project_id,
-             counterparty_id,
              custody_wallet_id,
              wallet_id,
              destination_address,
@@ -91,7 +89,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              created_by,
              lifecycle
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
              jsonb_build_array(jsonb_build_object('status', 'awaiting_payment', 'at', sdp_iso_now()))
            )
            RETURNING *`
@@ -101,7 +99,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           publicToken,
           input.organizationId,
           input.projectId,
-          input.counterpartyId,
           input.custodyWalletId,
           input.walletId,
           input.destinationAddress,

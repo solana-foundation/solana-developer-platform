@@ -1,10 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import {
-  confirmTransaction,
-  getRecentBlockhash,
-  getSignatureStatuses,
-  type SolanaRpc,
-} from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
@@ -296,51 +292,110 @@ export interface SubscriptionStepSignatureRow {
   id: string;
 }
 
-/**
- * The submission store every subscription step sends with. `save` writes the step's signature
- * column(s) before the send; after a provably refused send, `rows` are cleared, each only while
- * it still holds that signature, so a retry sends again instead of waiting on a transaction that
- * never left. Recovery reads the saved signature and the chain, so there is no started marker.
- *
- * @param step - The step's tenant, signature writer and the rows `save` writes.
- * @returns The store.
- */
-export function createSubscriptionStepStore(step: {
+/** Where one subscription step's signature is saved: its tenant and every row that holds it. */
+export interface SubscriptionStep {
   env: Env;
   organizationId: string;
   projectId: string;
-  save: (signature: Signature) => Promise<void>;
   rows: readonly SubscriptionStepSignatureRow[];
-}): SignedSubmissionStore {
+}
+
+/** A step's send that an earlier run saved before broadcasting it. */
+export interface SavedStepSend {
+  signature: Signature;
+  /**
+   * The expiry of the blockhash it was signed with. Null only for a step an earlier attempt saved
+   * and landed: a reset activation carries those signatures into its new attempt without it.
+   */
+  lastValidBlockHeight: bigint | null;
+}
+
+/**
+ * The saved send a step's stored columns describe.
+ *
+ * @param signature - The step's stored signature, or null when no run saved one.
+ * @param lastValidBlockHeight - The attempt's stored block height.
+ * @returns The saved send, or null when there is no signature.
+ */
+export function savedStepSend(
+  signature: string | null,
+  lastValidBlockHeight: string | null
+): SavedStepSend | null {
+  const parsedSignature = parseNullableStoredSignature(signature);
+  if (parsedSignature === null) return null;
   return {
-    persistSigned: ({ signature }) => step.save(signature),
+    signature: parsedSignature,
+    lastValidBlockHeight: lastValidBlockHeight === null ? null : BigInt(lastValidBlockHeight),
+  };
+}
+
+/**
+ * Clears a step's saved signature, and an attempt row's block height, from every row that holds
+ * it, in one transaction. Each row is cleared only while it still holds `signature`.
+ *
+ * @param step - The step whose rows to clear.
+ * @param signature - The signature the step saved.
+ * @param reason - `refused` after a send the RPC provably refused, which leaves a row that no
+ *   longer holds the signature as it is; `cannot_land` when the chain proves the saved send can
+ *   never land, which refuses unless every row still holds it, so a concurrent run keeps its step.
+ * @returns Resolves once the rows are cleared.
+ * @throws ResumedStepUnsettledError for `cannot_land` when a row no longer holds the signature.
+ */
+async function clearSubscriptionStepSignature(
+  step: SubscriptionStep,
+  signature: Signature,
+  reason: "refused" | "cannot_land"
+): Promise<void> {
+  const updatedAt = new Date().toISOString();
+  await getDb(step.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    for (const row of step.rows) {
+      const cleared = await recurringRepo.clearStepSignature({
+        ...row,
+        organizationId: step.organizationId,
+        projectId: step.projectId,
+        signature,
+        updatedAt,
+      });
+      getLogger().info(
+        {
+          project_id: step.projectId,
+          row_id: row.id,
+          slot: `${row.slot.row}.${row.slot.column}`,
+          signature,
+          cleared,
+          reason,
+        },
+        "Recurring payment step signature cleared"
+      );
+      if (!cleared && reason === "cannot_land") {
+        throw new ResumedStepUnsettledError("Recurring payment step changed concurrently; retry");
+      }
+    }
+  });
+}
+
+/**
+ * The submission store every subscription step sends with. `save` writes the step's signature and
+ * its blockhash's expiry before the send; after a provably refused send, the step's rows are
+ * cleared, so a retry sends again instead of waiting on a transaction that never left. Recovery
+ * reads the saved send and the chain, so there is no started marker.
+ *
+ * @param step - The step's rows and the writer that saves its send to them.
+ * @param step.save - Writes the signature and the block height to the step's rows.
+ * @returns The store.
+ */
+export function createSubscriptionStepStore(
+  step: SubscriptionStep & {
+    save: (send: { signature: Signature; lastValidBlockHeight: string }) => Promise<void>;
+  }
+): SignedSubmissionStore {
+  return {
+    persistSigned: ({ signature, lastValidBlockHeight }) =>
+      step.save({ signature, lastValidBlockHeight }),
     markStarted: async () => {},
     hasStarted: async () => false,
-    clearSigned: async (signature) => {
-      const updatedAt = new Date().toISOString();
-      await getDb(step.env).transaction(async (tx) => {
-        const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-        for (const row of step.rows) {
-          const cleared = await recurringRepo.clearStepSignature({
-            ...row,
-            organizationId: step.organizationId,
-            projectId: step.projectId,
-            signature,
-            updatedAt,
-          });
-          getLogger().info(
-            {
-              project_id: step.projectId,
-              row_id: row.id,
-              slot: `${row.slot.row}.${row.slot.column}`,
-              signature,
-              cleared,
-            },
-            "Recurring payment step signature cleared after a refused send"
-          );
-        }
-      });
-    },
+    clearSigned: (signature) => clearSubscriptionStepSignature(step, signature, "refused"),
   };
 }
 
@@ -369,34 +424,16 @@ export interface ResumedStepLogContext {
 }
 
 /**
- * What the chain says about a step an earlier run reached (HOO-2044): `landed`
- * when its effect is on chain at `finalized`, so it is not sent again; `absent`
- * when there is no effect and no saved send, so it is sent (`account` is the
- * `finalized` read, for building it).
+ * A step this run may send: `landed` when its effect is on chain at `finalized`, so it is not sent
+ * again; `not_sent` when nothing of it can still land, so it is sent (`account` is the `finalized`
+ * read, for building it).
  */
-export type ResumedStep<T> = { kind: "landed" | "absent"; account: T };
+export type ResumedStep<T> = { kind: "landed" | "not_sent"; account: T };
 
 /**
- * Settles a step an earlier run reached before this run sends it. A step's
- * signature is saved before its send and cleared only when the send is
- * provably refused, so a saved signature alone cannot say whether that send
- * landed; the step's account can, because only this attempt causes its effect.
- *
- * - The effect at `finalized`: landed.
- * - The effect at `confirmed` only: it is landing, or the `finalized` view lags
- *   (stale attempts too), so this throws for a retry instead of sending.
- * - No effect, no saved signature: absent. A stale attempt's earlier send can no
- *   longer land; a fresh retry's still could, and a duplicate then fails on chain.
- * - No effect, saved signature: looked up with transaction history, since
- *   recovery runs long after the status cache dropped it. Failed, or unknown on a
- *   stale attempt (its blockhash expired), fails the step; succeeded but not yet
- *   visible throws for a retry; unknown on a fresh retry waits for it.
- */
-/**
- * The chain cannot settle a resumed step yet: it is landing but not final, its
- * saved send succeeded but is not visible, or the read itself failed. The step
- * may be on chain, so the attempt stays in flight for the next run instead of
- * failing or resetting; the request answers 409.
+ * The chain cannot settle a step yet: it is landing but not final, its saved send may still land
+ * or succeeded but is not visible, or a read failed. The step may be on chain, so the attempt stays
+ * in flight for the next run instead of failing or resetting; the request answers 409.
  */
 export class ResumedStepUnsettledError extends AppError {
   constructor(message: string) {
@@ -405,26 +442,45 @@ export class ResumedStepUnsettledError extends AppError {
   }
 }
 
-export async function settleResumedStep<T extends { exists: boolean }>(input: {
+/**
+ * Reads what the chain says about a step an earlier run may have sent, before this run sends it.
+ * A step has three outcomes, whatever failed before it (custody, Kora, RPC or the database):
+ *
+ * - Landed: its effect is on chain at `finalized`.
+ * - Not sent: no run saved a send, or the saved send has no record past its blockhash's expiry,
+ *   so it can never land. That signature is cleared first, so a concurrent run keeps its step.
+ * - Unknown: the effect is on chain at `confirmed` only, the saved send succeeded but its effect
+ *   is not visible yet, it has no record before its expiry, or a read failed. It may be on chain,
+ *   so this throws for a later run instead of sending or unwinding.
+ *
+ * A saved send that failed on chain throws TRANSACTION_FAILED once its signature is cleared, so
+ * the flow unwinds instead of signing the same refused step again.
+ *
+ * @param input - The step and how to read it.
+ * @param input.rpc - The cluster's RPC.
+ * @param input.read - Reads the step's account at a commitment.
+ * @param input.landed - Whether the account shows the step's effect.
+ * @param input.savedSend - The send an earlier run saved for this step, if it got that far.
+ * @param input.step - The rows holding the step's signature.
+ * @param input.failureMessage - The TRANSACTION_FAILED message when the saved send failed on chain.
+ * @param input.logContext - What the warnings name.
+ * @returns The step, landed or not sent.
+ * @throws ResumedStepUnsettledError when the outcome is unknown.
+ * @throws AppError `TRANSACTION_FAILED` when the saved send failed on chain.
+ */
+export async function readRecurringPaymentStep<T extends { exists: boolean }>(input: {
   rpc: SolanaRpc;
   read: (commitment: "finalized" | "confirmed") => Promise<T>;
-  /** Whether the account shows the step's effect. */
   landed: (account: T) => boolean;
-  /** The signature an earlier run saved for this step, if it got that far. */
-  savedSignature: Signature | null;
-  /** The attempt is past the operation's stale window, so any earlier send's blockhash expired. */
-  stale: boolean;
-  /** The TRANSACTION_FAILED message when the step's saved send failed. */
+  savedSend: SavedStepSend | null;
+  step: SubscriptionStep;
   failureMessage: string;
   logContext: ResumedStepLogContext;
 }): Promise<ResumedStep<T>> {
   try {
-    return await readResumedStep(input);
+    return await readStepOutcome(input);
   } catch (error) {
-    if (
-      error instanceof ResumedStepUnsettledError ||
-      (error instanceof AppError && error.code === "TRANSACTION_FAILED")
-    ) {
+    if (error instanceof AppError) {
       throw error;
     }
     getLogger().warn(
@@ -435,12 +491,13 @@ export async function settleResumedStep<T extends { exists: boolean }>(input: {
   }
 }
 
-async function readResumedStep<T extends { exists: boolean }>(
-  input: Parameters<typeof settleResumedStep<T>>[0]
+/** {@link readRecurringPaymentStep} without its mapping of read failures to 409. */
+async function readStepOutcome<T extends { exists: boolean }>(
+  input: Parameters<typeof readRecurringPaymentStep<T>>[0]
 ): Promise<ResumedStep<T>> {
   const finalized = await input.read("finalized");
   if (input.landed(finalized)) {
-    if (input.savedSignature === null) {
+    if (input.savedSend === null) {
       getLogger().warn(
         input.logContext,
         "Recurring payment step found on chain without its saved signature"
@@ -451,43 +508,96 @@ async function readResumedStep<T extends { exists: boolean }>(
   if (input.landed(await input.read("confirmed"))) {
     throw stepStillLanding();
   }
-  if (input.savedSignature === null) {
-    return { kind: "absent", account: finalized };
+  if (input.savedSend === null) {
+    return { kind: "not_sent", account: finalized };
   }
 
-  const [status] = await getSignatureStatuses(input.rpc, [input.savedSignature], {
-    searchTransactionHistory: true,
-  });
-  if (status === null || status === undefined) {
-    if (input.stale) {
+  const { signature } = input.savedSend;
+  const outcome = await readSavedSend(input.rpc, input.savedSend);
+  switch (outcome) {
+    case "succeeded":
+      throw stepStillLanding();
+    case "pending":
+      throw new ResumedStepUnsettledError("Recurring payment step may still land on chain; retry");
+    case "failed":
+      await clearSubscriptionStepSignature(input.step, signature, "cannot_land");
       throw transactionFailed(input.failureMessage);
+    case "expired":
+      await clearSubscriptionStepSignature(input.step, signature, "cannot_land");
+      getLogger().warn(
+        { ...input.logContext, signature },
+        "Recurring payment step's saved send expired without landing; sending it again"
+      );
+      return { kind: "not_sent", account: finalized };
+    default: {
+      const exhaustive: never = outcome;
+      throw internalError(`Unknown saved send outcome: ${exhaustive}`);
     }
-    const confirmation = await confirmTransaction(input.rpc, input.savedSignature, {
-      commitment: "confirmed",
-    });
-    if (confirmation.err) {
-      throw transactionFailed(input.failureMessage);
-    }
-    throw stepStillLanding();
   }
-  if (status.err) {
-    throw transactionFailed(input.failureMessage);
+}
+
+/** What the chain says about a saved send. */
+export type SavedSendOutcome =
+  /** It landed and succeeded. */
+  | "succeeded"
+  /** It landed and failed, so it can never succeed. */
+  | "failed"
+  /** No record yet, and its blockhash is still valid: it may land. */
+  | "pending"
+  /** No record past its blockhash's expiry: it can never land. */
+  | "expired";
+
+/**
+ * Reads a saved send from the chain. A send with no record is proven never landed only once the
+ * chain's block height is past the expiry of the blockhash it was signed with.
+ *
+ * @param rpc - The cluster's RPC.
+ * @param savedSend - The send's signature and its blockhash's expiry.
+ * @returns What the chain says about the send.
+ * @throws AppError `INTERNAL_ERROR` when the send has no record and no saved expiry to prove it.
+ */
+export async function readSavedSend(
+  rpc: SolanaRpc,
+  savedSend: SavedStepSend
+): Promise<SavedSendOutcome> {
+  // Read before the status: once the chain is past the expiry, nothing lands after the status read.
+  const chainTip = await withTransientRpcRetry(() =>
+    rpc.getEpochInfo({ commitment: "confirmed" }).send()
+  );
+  const statuses = await withTransientRpcRetry(() =>
+    rpc.getSignatureStatuses([savedSend.signature], { searchTransactionHistory: true }).send()
+  );
+  const [status] = statuses.value;
+  if (status) {
+    return status.err === null ? "succeeded" : "failed";
   }
-  throw stepStillLanding();
+  if (savedSend.lastValidBlockHeight === null) {
+    throw internalError("A saved send with no record has no block height to prove its expiry");
+  }
+  if (chainTip.blockHeight <= savedSend.lastValidBlockHeight) {
+    return "pending";
+  }
+  // The pool may answer the two reads from different nodes: only a node that has processed the
+  // slot the expiry was seen at has seen every block the send could have landed in.
+  return statuses.context.slot >= chainTip.absoluteSlot ? "expired" : "pending";
 }
 
 /**
- * {@link settleResumedStep} for a step only some runs resume: null when this run
- * starts the step, or when the chain says to send it; the account when it landed.
+ * {@link readRecurringPaymentStep} for a step only some runs resume: null when this run starts
+ * the step, or when nothing of it can still land; the account when it landed.
+ *
+ * @param resumed - Whether an earlier run reached this step.
+ * @param input - The step and how to read it, as {@link readRecurringPaymentStep} takes them.
+ * @returns The landed account, or null when the step is to be sent.
  */
-export async function settleStepIfResumed<T extends { exists: boolean }>(
+export async function readRecurringPaymentStepIfResumed<T extends { exists: boolean }>(
   resumed: boolean,
-  input: Parameters<typeof settleResumedStep<T>>[0]
+  input: Parameters<typeof readRecurringPaymentStep<T>>[0]
 ): Promise<T | null> {
   if (!resumed) {
     return null;
   }
-  const step = await settleResumedStep(input);
+  const step = await readRecurringPaymentStep(input);
   return step.kind === "landed" ? step.account : null;
 }
 

@@ -364,7 +364,6 @@ const TRANSFER_SPECS: readonly TransferSpec[] = [
     id: "demo_xfr_lumen_request",
     ago: 26 * HOUR_MS,
     wallet: "treasury",
-    contact: "lumen",
     direction: "inbound",
     kind: "request_deposit",
     status: "finalized",
@@ -432,7 +431,6 @@ const TRANSFER_SPECS: readonly TransferSpec[] = [
     id: "demo_xfr_acme_request",
     ago: 5 * DAY_MS + 4 * HOUR_MS,
     wallet: "treasury",
-    contact: "acme",
     direction: "inbound",
     kind: "request_deposit",
     status: "confirmed",
@@ -655,7 +653,6 @@ const SCHEDULE_SPECS: readonly ScheduleSpec[] = [
 
 interface RequestSpec {
   key: string;
-  contact: ContactKey | null;
   wallet: WalletKey;
   amount: string;
   status: PaymentRequestStatus;
@@ -669,7 +666,6 @@ interface RequestSpec {
 const REQUEST_SPECS: readonly RequestSpec[] = [
   {
     key: "open_invoice",
-    contact: null,
     wallet: "treasury",
     amount: "1000.00",
     status: "awaiting_payment",
@@ -678,7 +674,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
   },
   {
     key: "orbit_q4_fees",
-    contact: "orbit",
     wallet: "treasury",
     amount: "18250.00",
     status: "awaiting_payment",
@@ -687,7 +682,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
   },
   {
     key: "priya_workshop",
-    contact: "priya",
     wallet: "settlement",
     amount: "320.00",
     status: "awaiting_payment",
@@ -696,7 +690,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
   },
   {
     key: "lumen_retainer",
-    contact: "lumen",
     wallet: "treasury",
     amount: "2400.00",
     status: "paid",
@@ -706,7 +699,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
   },
   {
     key: "acme_rebill",
-    contact: "acme",
     wallet: "treasury",
     amount: "1875.00",
     status: "paid",
@@ -716,7 +708,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
   },
   {
     key: "kai_equipment",
-    contact: "kai",
     wallet: "payroll",
     amount: "150.00",
     status: "canceled",
@@ -726,7 +717,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
   },
   {
     key: "northwind_deposit",
-    contact: "northwind",
     wallet: "treasury",
     amount: "5600.00",
     status: "expired",
@@ -1147,7 +1137,6 @@ function buildRequest(
     publicToken: `demo_pt_${demoAddress(`request-token:${spec.key}`).slice(0, 22)}`,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
-    counterpartyId: spec.contact ? world.contacts[spec.contact].id : null,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
     token: DEMO_TOKENS.USDC.mint,
@@ -1505,13 +1494,8 @@ function batchBody(world: DemoWorld, batchId: string) {
 
 function requestsBody(world: DemoWorld, params: URLSearchParams) {
   const status = params.get("status");
-  const counterpartyId = params.get("counterpartyId");
   const page = pageOf(
-    world.requests.filter(
-      (request) =>
-        (status === null || request.status === status) &&
-        (counterpartyId === null || request.counterpartyId === counterpartyId)
-    ),
+    world.requests.filter((request) => status === null || request.status === status),
     params
   );
   return {
