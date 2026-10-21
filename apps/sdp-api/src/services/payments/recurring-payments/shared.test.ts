@@ -21,6 +21,7 @@ import { testSignature } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import {
   planAccount,
+  soleDestination,
   subscriptionAuthorityAccount,
   subscriptionDelegationAccount,
   tokenAccount,
@@ -53,6 +54,7 @@ const LOG_CONTEXT = {
   step: "create_plan",
 } as const satisfies RecurringPaymentStepLogContext;
 const PLAN_CREATED_AT = 1_770_000_000n;
+const PLAN_PARTIES = { owner: OWNER, destinations: soleDestination(STRANGER) };
 const PRE_IMAGE_URI = "https://example.com/recurring/before.json";
 const TARGET_URI = "https://example.com/recurring/after.json";
 const logEventSchema = z.object({ event: z.string() });
@@ -117,7 +119,7 @@ describe("readRecurringPaymentStep", () => {
     answerChain({
       blockHeight: 4_000,
       accountsSlot: TIP_SLOT,
-      accounts: [planAccount({ createdAt: PLAN_CREATED_AT, metadataUri: "" })],
+      accounts: [planAccount({ ...PLAN_PARTIES, createdAt: PLAN_CREATED_AT, metadataUri: "" })],
     });
 
     const step = await readSavedStep({
@@ -332,19 +334,28 @@ describe("readRecurringPaymentStep", () => {
     it.each([
       {
         plan: "holds the target URI",
-        account: planAccount({ createdAt: PLAN_CREATED_AT, metadataUri: TARGET_URI }),
+        account: planAccount({
+          ...PLAN_PARTIES,
+          createdAt: PLAN_CREATED_AT,
+          metadataUri: TARGET_URI,
+        }),
         state: "landed",
         changedOutside: 0,
       },
       {
         plan: "still holds the pre-image URI",
-        account: planAccount({ createdAt: PLAN_CREATED_AT, metadataUri: PRE_IMAGE_URI }),
+        account: planAccount({
+          ...PLAN_PARTIES,
+          createdAt: PLAN_CREATED_AT,
+          metadataUri: PRE_IMAGE_URI,
+        }),
         state: "unsent",
         changedOutside: 0,
       },
       {
         plan: "holds a URI this attempt never wrote",
         account: planAccount({
+          ...PLAN_PARTIES,
           createdAt: PLAN_CREATED_AT,
           metadataUri: "https://example.com/recurring/elsewhere.json",
         }),
@@ -353,7 +364,11 @@ describe("readRecurringPaymentStep", () => {
       },
       {
         plan: "was recreated with the target URI",
-        account: planAccount({ createdAt: PLAN_CREATED_AT + 1n, metadataUri: TARGET_URI }),
+        account: planAccount({
+          ...PLAN_PARTIES,
+          createdAt: PLAN_CREATED_AT + 1n,
+          metadataUri: TARGET_URI,
+        }),
         state: "unsent",
         changedOutside: 1,
       },

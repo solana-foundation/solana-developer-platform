@@ -1,5 +1,6 @@
 import { getBase58Decoder } from "@solana/codecs";
 import {
+  address,
   generateKeyPairSigner,
   getSignatureFromTransaction,
   getTransactionDecoder,
@@ -43,6 +44,7 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 import {
   planAccount,
   type StubPlan,
+  soleDestination,
   subscriptionDelegationAccount,
 } from "@/test/helpers/subscription-accounts";
 import { withIdempotencyKeys } from "./idempotency-keys";
@@ -64,6 +66,9 @@ export function testSignature(seed: number): Signature {
   return signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
 }
 
+/** A recorded plan's parties as its row names them: its owner and its one destination. */
+export type RecordedPlanParties = Pick<StubPlan, "owner" | "destinations">;
+
 /**
  * The chain a resumed recurring step reads at `confirmed`: the tip `getEpochInfo` reports, the
  * plan or delegation at each address SDP recorded as one, and any other account at an address it
@@ -72,7 +77,8 @@ export function testSignature(seed: number): Signature {
 export interface RecurringChainView {
   absoluteSlot: number;
   blockHeight: number;
-  plan: (planPda: string) => StubPlan | null;
+  /** The plan at a recorded plan address, given the parties its row names at the time of the read. */
+  plan: (planPda: string, recorded: RecordedPlanParties) => StubPlan | null;
   /** A delegation's `expiresAtTs`, or null when it does not exist. */
   delegation: (subscriptionPda: string) => bigint | null;
   /** The account at an address recorded as neither, or null when it does not exist. */
@@ -80,68 +86,88 @@ export interface RecurringChainView {
 }
 
 /**
- * Every recorded plan on chain as the fixtures create it, every recorded delegation canceled, as
- * the codama fetch stubs answer, and no other account; the tip is below the default blockhash's
- * expiry.
+ * Every recorded plan on chain as the fixtures create it, owned by and paying the wallets its row
+ * names, every recorded delegation canceled, as the codama fetch stubs answer, and no other
+ * account; the tip is below the default blockhash's expiry.
  */
 export const DEFAULT_RECURRING_CHAIN: RecurringChainView = {
   absoluteSlot: 1_250,
   blockHeight: 940,
-  plan: () => ({ createdAt: 1_770_000_000n, metadataUri: "" }),
+  plan: (_planPda, recorded) => ({ ...recorded, createdAt: 1_770_000_000n, metadataUri: "" }),
   delegation: () => 1_800_000_000n,
   unrecorded: () => null,
 };
 
+/** What SDP recorded at an address a step read asked for. */
+type RecordedSubscriptionAccount =
+  | { kind: "plan"; parties: RecordedPlanParties }
+  | { kind: "delegation" }
+  | { kind: "unrecorded" };
+
 /**
- * Whether SDP recorded `address` as a plan or a subscription delegation.
+ * What SDP recorded at `accountAddress`: a plan, with the parties its row names, a subscription
+ * delegation, or nothing.
  *
- * @param address - An address a step read asked for.
- * @returns The account kind, or null when no plan or subscription row names it.
+ * @param accountAddress - An address a step read asked for.
+ * @returns The recorded account.
  */
-async function recordedSubscriptionAccountKind(
-  address: string
-): Promise<"plan" | "delegation" | null> {
+async function recordedSubscriptionAccount(
+  accountAddress: string
+): Promise<RecordedSubscriptionAccount> {
   // A step reads under its request's tenant identity, which owns every address it asks about.
-  const recorded = required(
-    await getDb(env)
+  const db = getDb(env);
+  const plan = await db
+    .prepare(
+      "SELECT owner_address, destination_address FROM payment_subscription_plans WHERE plan_pda = ?"
+    )
+    .bind(accountAddress)
+    .first<{ owner_address: string; destination_address: string | null }>();
+  if (plan !== null) {
+    return {
+      kind: "plan",
+      parties: {
+        owner: address(plan.owner_address),
+        destinations: soleDestination(address(required(plan.destination_address))),
+      },
+    };
+  }
+  const delegation = required(
+    await db
       .prepare(
-        `SELECT EXISTS (SELECT 1 FROM payment_subscription_plans WHERE plan_pda = ?) AS plan,
-                EXISTS (SELECT 1 FROM payment_subscriptions WHERE subscription_pda = ?) AS delegation`
+        "SELECT EXISTS (SELECT 1 FROM payment_subscriptions WHERE subscription_pda = ?) AS recorded"
       )
-      .bind(address, address)
-      .first<{ plan: boolean; delegation: boolean }>()
+      .bind(accountAddress)
+      .first<{ recorded: boolean }>()
   );
-  if (recorded.plan) return "plan";
-  if (recorded.delegation) return "delegation";
-  return null;
+  return delegation.recorded ? { kind: "delegation" } : { kind: "unrecorded" };
 }
 
 /**
- * The account `view` shows at `address`.
+ * The account `view` shows at `accountAddress`.
  *
  * @param view - The chain to read.
- * @param address - The requested address.
+ * @param accountAddress - The requested address.
  * @returns The encoded account, or null when it does not exist.
  */
 async function recurringChainAccount(
   view: RecurringChainView,
-  address: string
+  accountAddress: string
 ): Promise<StubEncodedAccount | null> {
-  const kind = await recordedSubscriptionAccountKind(address);
-  switch (kind) {
+  const recorded = await recordedSubscriptionAccount(accountAddress);
+  switch (recorded.kind) {
     case "plan": {
-      const plan = view.plan(address);
+      const plan = view.plan(accountAddress, recorded.parties);
       return plan === null ? null : planAccount(plan);
     }
     case "delegation": {
-      const expiresAtTs = view.delegation(address);
+      const expiresAtTs = view.delegation(accountAddress);
       return expiresAtTs === null ? null : subscriptionDelegationAccount(expiresAtTs);
     }
-    case null:
-      return view.unrecorded(address);
+    case "unrecorded":
+      return view.unrecorded(accountAddress);
     default: {
-      const exhaustive: never = kind;
-      throw new Error(`Unexpected subscription account kind ${exhaustive}`);
+      const exhaustive: never = recorded;
+      throw new Error(`Unexpected subscription account ${JSON.stringify(exhaustive)}`);
     }
   }
 }

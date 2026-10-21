@@ -13,21 +13,37 @@ import { AccountState, getTokenEncoder } from "@solana-program/token-2022";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import type { StubEncodedAccount } from "@/test/helpers/cluster-rpc";
 
-const PLAN_OWNER = address(TEST_SOLANA_ADDRESSES.wallet1);
-const PLAN_DESTINATION = address(TEST_SOLANA_ADDRESSES.wallet2);
+const DELEGATOR = address(TEST_SOLANA_ADDRESSES.wallet1);
+const DELEGATEE = address(TEST_SOLANA_ADDRESSES.wallet2);
 const PLAN_MINT = address(TEST_SOLANA_ADDRESSES.mint);
 const PLAN_TERMS = { amount: 25_000_000n, periodHours: 24n } as const;
 
-/** What a stubbed plan account shows: the fields a step's effect compares. */
+/** A plan account's four destination slots; the unused ones hold `ZERO_ADDRESS`. */
+export type PlanDestinations = [Address, Address, Address, Address];
+
+/** What a stubbed plan account shows: the fields a step's effect or a finalize reads. */
 export interface StubPlan {
+  owner: Address;
+  destinations: PlanDestinations;
   createdAt: bigint;
   metadataUri: string;
 }
 
 /**
- * A plan account as the subscriptions program stores it, encoded with the program's own layout.
+ * The destination slots of a plan that pays one destination.
  *
- * @param plan - The plan's creation time and metadata URI.
+ * @param destination - The plan's destination.
+ * @returns `destination` followed by three empty slots.
+ */
+export function soleDestination(destination: Address): PlanDestinations {
+  return [destination, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS];
+}
+
+/**
+ * A plan account as the subscriptions program stores it, encoded with the program's own layout.
+ * Its owner is its only puller, as SDP creates every plan.
+ *
+ * @param plan - The plan's owner, destinations, creation time and metadata URI.
  * @returns The account, owned by the subscriptions program.
  */
 export function planAccount(plan: StubPlan): StubEncodedAccount {
@@ -36,7 +52,7 @@ export function planAccount(plan: StubPlan): StubEncodedAccount {
     data: new Uint8Array(
       getPlanEncoder().encode({
         discriminator: AccountDiscriminator.Plan,
-        owner: PLAN_OWNER,
+        owner: plan.owner,
         bump: 255,
         status: PlanStatus.Active,
         data: {
@@ -44,8 +60,8 @@ export function planAccount(plan: StubPlan): StubEncodedAccount {
           mint: PLAN_MINT,
           terms: { ...PLAN_TERMS, createdAt: plan.createdAt },
           endTs: 0n,
-          destinations: [PLAN_DESTINATION, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
-          pullers: [PLAN_OWNER, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
+          destinations: plan.destinations,
+          pullers: [plan.owner, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
           metadataUri: plan.metadataUri,
         },
       })
@@ -68,9 +84,9 @@ export function subscriptionDelegationAccount(expiresAtTs: bigint): StubEncodedA
           discriminator: AccountDiscriminator.SubscriptionDelegation,
           version: CURRENT_PROGRAM_VERSION,
           bump: 255,
-          delegator: PLAN_OWNER,
-          delegatee: PLAN_DESTINATION,
-          payer: PLAN_OWNER,
+          delegator: DELEGATOR,
+          delegatee: DELEGATEE,
+          payer: DELEGATOR,
           initId: 1n,
         },
         terms: { ...PLAN_TERMS, createdAt: 1_770_000_000n },

@@ -102,6 +102,7 @@ import {
   parseRecurringResponse,
   poolSentSignatures,
   RECURRING_HEADERS,
+  type RecordedPlanParties,
   type RecurringChainView,
   rejectPoolSendAfter,
   seedRecurringCollectionJournal,
@@ -112,6 +113,7 @@ import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import {
   planAccount,
+  soleDestination,
   subscriptionAuthorityAccount,
   tokenAccount,
 } from "@/test/helpers/subscription-accounts";
@@ -1202,7 +1204,7 @@ describe("Payments routes — recurring", () => {
     );
     recurringExecution.showChain({
       ...DEFAULT_RECURRING_CHAIN,
-      plan: () => ({ createdAt: 1_770_000_000n, metadataUri }),
+      plan: (_planPda, recorded) => ({ ...recorded, createdAt: 1_770_000_000n, metadataUri }),
     });
 
     const update = await app.request(
@@ -1713,7 +1715,7 @@ describe("Payments routes — recurring", () => {
     // The saved plan update landed: the plan holds the new URI.
     recurringExecution.showChain({
       ...DEFAULT_RECURRING_CHAIN,
-      plan: () => ({ createdAt: 1_770_000_000n, metadataUri }),
+      plan: (_planPda, recorded) => ({ ...recorded, createdAt: 1_770_000_000n, metadataUri }),
     });
     await seedUnboundWallet();
     await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
@@ -1813,7 +1815,7 @@ describe("Payments routes — recurring", () => {
     // The saved plan update landed: the plan holds the new URI.
     recurringExecution.showChain({
       ...DEFAULT_RECURRING_CHAIN,
-      plan: () => ({ createdAt: 1_770_000_000n, metadataUri }),
+      plan: (_planPda, recorded) => ({ ...recorded, createdAt: 1_770_000_000n, metadataUri }),
     });
 
     const updateRes = await app.request(
@@ -6383,7 +6385,11 @@ describe("Payments routes — recurring", () => {
       // The failed request's plan update landed: the plan holds the recovered URI.
       recurringExecution.showChain({
         ...DEFAULT_RECURRING_CHAIN,
-        plan: () => ({ createdAt: 1_770_000_000n, metadataUri: recovered }),
+        plan: (_planPda, recorded) => ({
+          ...recorded,
+          createdAt: 1_770_000_000n,
+          metadataUri: recovered,
+        }),
       });
 
       // Once stale again, the retry finishes the update and records its answer with it.
@@ -6764,6 +6770,8 @@ describe("Payments routes — recurring", () => {
         expect(recorded.metadata_uri).toBe(recordedMetadataUri);
         // The plan was changed outside SDP: another URI and creation time than the schedule recorded.
         const outsidePlan = planAccount({
+          owner: recurringExecution.sourceSigner().address,
+          destinations: soleDestination(address(DEFAULT_RECURRING_FIXTURE.destinationAddress)),
           createdAt: 1_770_000_777n,
           metadataUri: "https://example.com/recurring/outside.json",
         });
@@ -8117,7 +8125,7 @@ describe("Payments routes — recurring", () => {
         expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
       });
 
-      it("the cron finishes a stale account-changing replacement on its plan's destination after the new account is archived", async () => {
+      it("the cron finishes a stale account-changing replacement on its plan account's destination after the new account is archived", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const oldSubscriptionPda = required(activated.subscriptionPda);
         const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -8166,6 +8174,130 @@ describe("Payments routes — recurring", () => {
           counterpartyAccountId,
           destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
         });
+      });
+
+      /**
+       * Leaves an amount change crashed after its replacement plan landed and its authorization
+       * was sent, for the cron to finish through the old subscription's cancel.
+       */
+      async function leaveLandedReplacementForCron() {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(
+          required(activated.subscriptionPda),
+          null,
+          DEFAULT_RECURRING_CHAIN
+        );
+        const key = crypto.randomUUID();
+        const update = await app.request(
+          actionPath(activated.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+          env
+        );
+        expect(update.status).toBe(409);
+        await leaveUpdateCrashedAt(activated.id, key);
+        const replacementPlan = required(
+          await getDb(env)
+            .prepare(
+              `SELECT p.id, p.plan_pda FROM payment_subscription_plans p
+                 JOIN payment_recurring_payment_update_attempts a ON a.new_plan_id = p.id
+                WHERE a.recurring_payment_id = ?`
+            )
+            .bind(activated.id)
+            .first<{ id: string; plan_pda: string | null }>()
+        );
+        return {
+          activated,
+          replacementPlanId: replacementPlan.id,
+          replacementPlanPda: required(replacementPlan.plan_pda),
+        };
+      }
+
+      /**
+       * The chain the cron reads for `leaveLandedReplacementForCron`: both delegations active and
+       * the replacement plan as `replacementPlan` shows it.
+       */
+      function showLandedReplacement(
+        replacementPlanPda: string,
+        replacementPlan: (recorded: RecordedPlanParties) => RecordedPlanParties
+      ) {
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          plan: (planPda, recorded) => ({
+            ...(planPda === replacementPlanPda ? replacementPlan(recorded) : recorded),
+            createdAt: 1_770_000_000n,
+            metadataUri: "",
+          }),
+          delegation: () => 0n,
+        });
+      }
+
+      it("the cron finishes a stale replacement on its plan account's destination after the plan row's destination is edited", async () => {
+        const { activated, replacementPlanId, replacementPlanPda } =
+          await leaveLandedReplacementForCron();
+        const edited = await app.request(
+          `/v1/payments/subscription-plans/${replacementPlanId}`,
+          {
+            method: "PATCH",
+            headers: RECURRING_HEADERS,
+            body: JSON.stringify({ destinationAddress: TEST_SOLANA_ADDRESSES.wallet3 }),
+          },
+          env
+        );
+        expect(edited.status).toBe(200);
+        const landedDestination = address(DEFAULT_RECURRING_FIXTURE.destinationAddress);
+        showLandedReplacement(replacementPlanPda, (recorded) => ({
+          ...recorded,
+          destinations: soleDestination(landedDestination),
+        }));
+        const sent = sends();
+
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+          recovered: 1,
+          collected: 0,
+          failed: 0,
+          skipped: 0,
+          refused: 0,
+        });
+
+        expect(sent).toHaveBeenCalledTimes(1);
+        const current = await app.request(
+          actionPath(activated.id),
+          { headers: RECURRING_HEADERS },
+          env
+        );
+        expect((await parseRecurringResponse(current)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          destinationAddress: landedDestination,
+        });
+      });
+
+      it("the cron refuses a stale replacement whose plan account is owned by another wallet than its plan row names, sending nothing", async () => {
+        const { activated, replacementPlanPda } = await leaveLandedReplacementForCron();
+        showLandedReplacement(replacementPlanPda, (recorded) => ({
+          ...recorded,
+          owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+        }));
+        const errorLog = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+        onTestFinished(() => errorLog.mockRestore());
+        const sent = sends();
+
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toEqual({
+          recovered: 0,
+          collected: 0,
+          failed: 0,
+          skipped: 1,
+          refused: 0,
+        });
+
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          old_cancel_signature: null,
+          error: "Recurring payment replacement plan on chain belongs to another wallet",
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
       });
 
       it("the cron fails a stale metadata update whose wallet can no longer sign back to active on its old terms, sending nothing", async () => {
@@ -8343,7 +8475,7 @@ describe("Payments routes — recurring", () => {
         await leaveUpdateCrashedAt(activated.id, key);
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
-          plan: () => ({ createdAt: 1_770_000_000n, metadataUri }),
+          plan: (_planPda, recorded) => ({ ...recorded, createdAt: 1_770_000_000n, metadataUri }),
         });
         const claimReached = deferred<undefined>();
         const releaseClaim = deferred<undefined>();
