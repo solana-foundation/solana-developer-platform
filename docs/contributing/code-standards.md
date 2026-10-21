@@ -86,6 +86,11 @@ A change that triggers one of these must handle it.
 
 ## Tests
 
+- **Prove each rule once, at its choke point.** The rule's cases live in the suite of the one function every path passes through (factory, store write, gate, SQL filter). Each entry point gets one wiring case showing it reaches that choke point, never a re-run of the rule table per route, call site, or layer. `it.each` rows cover only a dimension the branch actually reads.
+- **Tests assert current behavior.** Legacy behavior is tested only while production code keeps a backwards-compatible shim for it: the case names the shim and is deleted with it. A case pinning removed behavior, or a "no longer does X" tombstone, is deleted.
+- **A change touches the tests it breaks.** Passing suites whose behavior did not change are not restyled, re-helpered, or migrated in the same PR. Seeding that repeats across suites becomes a shared helper under `apps/sdp-api/src/test/helpers/`, so the next refactor edits one helper instead of every suite.
+- **Assert what proves the behavior.** API contract responses use full-shape `toEqual`, so a dropped field fails; elsewhere assert the fields the case is about.
+- No tests for states the types or database constraints already forbid.
 - Module mocking (`vi.mock`) is for single-valued ambient inputs only: deployment constants, release-stage tables, the request's project. Everything else is injected through real interfaces or swapped with `vi.spyOn` on the shared instance.
 
 ## Dependencies
