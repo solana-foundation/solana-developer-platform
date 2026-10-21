@@ -2,11 +2,16 @@
 // Run: `pnpm check:well-known-mints`
 //
 // For each token, and each cluster it declares a mint on, this fetches the mint
-// account and asserts three things:
+// account and asserts four things:
 //
 //   1. the account parses as a mint at all (not a token account, not a wallet)
 //   2. its on-chain `decimals` matches the declared value
 //   3. its owning program matches the declared `tokenProgram`
+//   4. it carries no Token-2022 extension that rescales UI amounts
+//      (`interestBearingConfig`, `scaledUiAmountConfig`): payment amount
+//      conversion takes a catalogue mint's decimals without reading the chain,
+//      which is exact only for a mint whose UI amount is its raw amount scaled
+//      by decimals. Extensions are fixed at mint initialization, so this holds.
 //
 // Those are exactly the properties that are unsafe to take on trust. A spoofed
 // token shares the real asset's name and symbol, and only the mint address
@@ -27,6 +32,9 @@ import {
   SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKENS,
 } from "../packages/sdp-types/src/well-known-tokens.ts";
+
+// biome-ignore lint/security/noSecrets: Token-2022 extension names, not secrets.
+const UI_AMOUNT_EXTENSIONS = ["interestBearingConfig", "scaledUiAmountConfig"];
 
 const RPC_URLS = {
   devnet: "https://api.devnet.solana.com",
@@ -75,6 +83,13 @@ function findProblems(account, mint, tokenProgram) {
   const expectedOwner = SPL_TOKEN_PROGRAMS[tokenProgram];
   if (account.owner !== expectedOwner) {
     problems.push(`declared ${tokenProgram}, chain says owner ${account.owner}`);
+  }
+
+  const extensions = account.data?.parsed?.info?.extensions ?? [];
+  for (const { extension } of extensions) {
+    if (UI_AMOUNT_EXTENSIONS.includes(extension)) {
+      problems.push(`carries ${extension}, which rescales UI amounts`);
+    }
   }
 
   return problems;

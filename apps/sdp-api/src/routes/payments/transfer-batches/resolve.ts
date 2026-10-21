@@ -89,7 +89,7 @@ async function resolveTokenContext(
   const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
   const [sourceTokenAccount, toBaseUnits] = await Promise.all([
     resolveSourceTokenAccount(rpc, sourceAddress, mintAddress, tokenProgram),
-    loadPaymentAmountConverter(rpc, mintAddress),
+    loadPaymentAmountConverter(mintAddress),
   ]);
 
   return {

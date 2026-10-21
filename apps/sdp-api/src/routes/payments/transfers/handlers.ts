@@ -262,7 +262,7 @@ async function assertRampDepositFunded(
   const tokenProgram = await resolveMintTokenProgram(rpc, mint);
   const [source, toBaseUnits] = await Promise.all([
     resolveSourceTokenAccount(rpc, address(operation.sourceWallet.publicKey), mint, tokenProgram),
-    loadPaymentAmountConverter(rpc, mint),
+    loadPaymentAmountConverter(mint),
   ]);
   const needed = toBaseUnits(operation.amount);
   if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram, toBaseUnits };

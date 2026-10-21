@@ -1,5 +1,7 @@
-import type { SolanaRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, unwrapOption } from "@solana/kit";
 import { fetchSysvarClock } from "@solana/sysvars";
 import {
@@ -38,16 +40,21 @@ function findUiAmountExtension(extensions: readonly Extension[]): UiAmountExtens
 
 /**
  * Reads a mint's decimals and the extension, if any, that rescales its UI amounts.
+ * A well-known mint declared on the open scope's cluster answers from the catalogue
+ * without an RPC read: `pnpm check:well-known-mints` pins its decimals and that it
+ * carries no UI-amount extension. Any other mint is read from the cluster.
  *
- * @param rpc - The cluster RPC the caller already holds.
  * @param mint - The mint to read.
  * @returns The mint's decimals and its UI-amount extension, or null when it has none.
  */
 async function readUiAmountMint(
-  rpc: SolanaRpc,
   mint: Address
 ): Promise<{ decimals: number; uiAmountExtension: UiAmountExtension | null }> {
-  const mintAccount = await fetchMaybeMint(rpc, mint, { commitment: "confirmed" });
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  if (wellKnown?.clusters.includes(currentClusterScope().cluster)) {
+    return { decimals: wellKnown.decimals, uiAmountExtension: null };
+  }
+  const mintAccount = await fetchMaybeMint(createClusterRpc(), mint, { commitment: "confirmed" });
   if (!mintAccount.exists) {
     throw badRequest("Token mint account does not exist");
   }
@@ -65,12 +72,11 @@ async function readUiAmountMint(
  * fixed UI amount drifts with the cluster clock. Token-2022 extensions are fixed
  * at mint initialization, so a mint admitted here stays admissible.
  *
- * @param rpc - The cluster RPC the caller already holds.
  * @param mint - The mint the flow is denominated in.
  * @returns The mint's decimals.
  */
-export async function readStaticAmountMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number> {
-  const { decimals, uiAmountExtension } = await readUiAmountMint(rpc, mint);
+export async function readStaticAmountMintDecimals(mint: Address): Promise<number> {
+  const { decimals, uiAmountExtension } = await readUiAmountMint(mint);
   if (uiAmountExtension !== null) {
     throw badRequest(
       "Recurring payments do not support interest-bearing or scaled UI amount tokens"
@@ -92,22 +98,18 @@ export async function readStaticAmountMintDecimals(rpc: SolanaRpc, mint: Address
  * load it once and reuse it, and a funding check and the build it precedes
  * must share one instance so both see the same raw amount.
  *
- * @param rpc - The cluster RPC the caller already holds.
  * @param mint - The mint the amounts are denominated in.
  * @returns A converter from UI decimal strings to base units for that mint.
  */
-export async function loadPaymentAmountConverter(
-  rpc: SolanaRpc,
-  mint: Address
-): Promise<PaymentAmountConverter> {
-  const { decimals, uiAmountExtension } = await readUiAmountMint(rpc, mint);
+export async function loadPaymentAmountConverter(mint: Address): Promise<PaymentAmountConverter> {
+  const { decimals, uiAmountExtension } = await readUiAmountMint(mint);
   const toStaticBaseUnits: PaymentAmountConverter = (uiAmount) =>
     parseDecimalAmount(uiAmount, decimals);
   if (uiAmountExtension === null) {
     return toStaticBaseUnits;
   }
 
-  const clock = await fetchSysvarClock(rpc, { commitment: "confirmed" });
+  const clock = await fetchSysvarClock(createClusterRpc(), { commitment: "confirmed" });
   switch (uiAmountExtension.__kind) {
     case "InterestBearingConfig": {
       const config = uiAmountExtension;

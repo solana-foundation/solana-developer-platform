@@ -107,7 +107,7 @@ export async function assertRecurringPaymentTokenMint(
   if (issuedTokenStatus !== "active") {
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
-  await readStaticAmountMintDecimals(createClusterRpc(), mint);
+  await readStaticAmountMintDecimals(mint);
 
   return mint;
 }
@@ -137,7 +137,7 @@ export async function resolvePlanRuntime(
   const rpc = createClusterRpc();
   const [tokenProgram, decimals] = await Promise.all([
     resolveMintTokenProgram(rpc, mint),
-    readStaticAmountMintDecimals(rpc, mint),
+    readStaticAmountMintDecimals(mint),
   ]);
   const amountBaseUnits = parseDecimalAmount(plan.amount, decimals);
 

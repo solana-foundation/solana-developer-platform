@@ -264,8 +264,7 @@ export async function buildSplTransferInstructions(
   const sourceTokenAccount =
     input.source ??
     (await resolveSourceTokenAccount(rpc, input.authority.address, input.mint, tokenProgram));
-  const toBaseUnits =
-    input.source?.toBaseUnits ?? (await loadPaymentAmountConverter(rpc, input.mint));
+  const toBaseUnits = input.source?.toBaseUnits ?? (await loadPaymentAmountConverter(input.mint));
   const transferAmount = toBaseUnits(input.amount);
   if (transferAmount <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
