@@ -51,21 +51,6 @@ describe("Payments routes — payment request access before the key", () => {
     expect(await storedKeyCount("payreq-foreign-wallet")).toBe(0);
   });
 
-  it("refuses a counterparty outside the caller's project with 404 and stores nothing under the key", async () => {
-    const response = await postPaymentRequest(
-      {
-        walletId: TEST_WALLET_ID,
-        token: DEVNET_USDC_MINT,
-        amount: "1",
-        counterpartyId: "cp_payment_request_missing",
-      },
-      "payreq-foreign-counterparty"
-    );
-
-    expect(response.status).toBe(404);
-    expect(await storedKeyCount("payreq-foreign-counterparty")).toBe(0);
-  });
-
   it("still creates a request for the project's own wallet", async () => {
     const response = await postPaymentRequest(
       { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },

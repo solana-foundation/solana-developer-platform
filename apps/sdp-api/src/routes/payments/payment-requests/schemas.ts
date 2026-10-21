@@ -5,7 +5,6 @@ export const createPaymentRequestSchema = z.object({
   walletId: z.string().min(1),
   token: solanaAddressSchema("token"),
   amount: paymentAmountSchema,
-  counterpartyId: z.string().min(1).nullable().default(null),
   expiresAt: z.iso.datetime().nullable().default(null),
 });
 

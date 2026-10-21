@@ -36,7 +36,9 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
 import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -119,7 +121,6 @@ async function createRequest(params: { token: string; expiresAt: string | null }
   ).createPaymentRequest({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
-    counterpartyId: null,
     custodyWalletId: TEST_CUSTODY_WALLET_ID,
     walletId: TEST_WALLET_ID,
     destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
@@ -202,15 +203,23 @@ describe("reconcilePaymentRequest", () => {
       .run();
   });
 
-  it("settles an awaiting request and links a recorded inbound transfer", async () => {
+  it("settles an awaiting request and links an inbound transfer attributed to no counterparty", async () => {
     mockSettlementSucceeds();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cp_preq_handler_legacy_payer",
+      counterpartyAccountId: "cpa_preq_handler_legacy_payer",
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+    });
+    await getDb(env)
+      .prepare("UPDATE payment_requests SET counterparty_id = ? WHERE id = ?")
+      .bind("cp_preq_handler_legacy_payer", request.id)
+      .run();
 
-    const settled = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
-    );
+    const settled = await reconcileOnSandbox(request, { bestEffort: false });
 
     expect(settled.status).toBe("paid");
     expect(settled.fulfilled_by_transfer_id).not.toBeNull();
@@ -222,6 +231,7 @@ describe("reconcilePaymentRequest", () => {
     expect(transfers[0].status).toBe("confirmed");
     expect(transfers[0].signature).toBe(SIGNATURE);
     expect(transfers[0].custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(transfers[0].counterparty_id).toBeNull();
   });
 
   it("settles an SPL request, exercising the splToken branch", async () => {
