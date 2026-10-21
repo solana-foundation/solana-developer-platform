@@ -584,13 +584,16 @@ async function runRecurringPaymentLifecycle(
     if (!plan) {
       throw notFound("Subscription plan");
     }
+    // Cancel is an exit and never asks the token admission check; only resume restarts collection.
     const tokenMint = assertValidAddress(
-      await assertRecurringPaymentTokenMint(
-        plan.token,
-        input.organizationId,
-        input.projectId,
-        input.env
-      ),
+      input.operation === "resume"
+        ? await assertRecurringPaymentTokenMint(
+            plan.token,
+            input.organizationId,
+            input.projectId,
+            input.env
+          )
+        : plan.token,
       "tokenMint"
     );
 
