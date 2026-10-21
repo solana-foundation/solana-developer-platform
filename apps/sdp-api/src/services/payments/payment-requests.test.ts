@@ -203,14 +203,13 @@ describe("reconcilePaymentRequest", () => {
 
   it("settles an awaiting request and links a recorded inbound transfer", async () => {
     mockSettlementSucceeds();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
-    const settled = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
-    );
+    const settled = await reconcileOnSandbox(request, { bestEffort: false });
 
+    expect(findReferenceSpy).toHaveBeenCalledWith(expect.anything(), request.reference, {
+      commitment: "finalized",
+    });
     expect(settled.status).toBe("paid");
     expect(settled.fulfilled_by_transfer_id).not.toBeNull();
 
@@ -437,12 +436,30 @@ describe("reconcilePaymentRequest", () => {
     expect(findReferenceSpy).not.toHaveBeenCalled();
   });
 
-  it("short-circuits expired requests without touching the chain", async () => {
-    const expired = await createRequest({ token: SOL_MINT, expiresAt: "2000-01-01T00:00:00.000Z" });
+  it("settles a request that expired inside the settlement grace", async () => {
+    mockSettlementSucceeds();
+    const expired = await createRequest({
+      token: SOL_MINT,
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const settled = await reconcileOnSandbox(expired, { bestEffort: false });
+
+    expect(settled.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
+  it("short-circuits a request expired past the settlement grace without touching the chain", async () => {
+    mockSettlementSucceeds();
+    const expired = await createRequest({
+      token: SOL_MINT,
+      expiresAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+    });
 
     const result = await reconcileOnSandbox(expired, { bestEffort: false });
 
-    expect(result.status).toBe("awaiting_payment");
+    expect(result).toBe(expired);
     expect(findReferenceSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
   });
 });

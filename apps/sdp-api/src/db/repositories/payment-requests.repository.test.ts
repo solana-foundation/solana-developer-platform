@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
+import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -161,6 +163,99 @@ describe("PaymentRequestsRepository (postgres)", () => {
     it("returns null for an unknown token", async () => {
       const row = await repo.getPaymentRequestByPublicToken("does_not_exist0");
       expect(row).toBeNull();
+    });
+  });
+
+  describe("listPaymentRequestsToReconcile", () => {
+    async function seedCandidate(params: {
+      projectId: string;
+      createdAt: string;
+      expiresAt: string | null;
+    }) {
+      const row = await repo.createPaymentRequest(
+        createInput({ projectId: params.projectId, expiresAt: params.expiresAt })
+      );
+      await getDb(env)
+        .prepare("UPDATE payment_requests SET created_at = ? WHERE id = ?")
+        .bind(params.createdAt, row.id)
+        .run();
+      return row;
+    }
+
+    it("selects the environment's open requests inside both cutoffs, oldest first", async () => {
+      const openLater = await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        createdAt: "2026-05-03T00:00:00.000Z",
+        expiresAt: null,
+      });
+      const expiredInsideWindow = await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        createdAt: "2026-05-02T00:00:00.000Z",
+        expiresAt: "2026-05-10T00:01:00.000Z",
+      });
+      await seedCandidate({
+        projectId: `${TEST_PROJECT_ID}_production`,
+        createdAt: "2026-05-02T00:00:00.000Z",
+        expiresAt: null,
+      });
+      const paid = await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        createdAt: "2026-05-02T00:00:00.000Z",
+        expiresAt: null,
+      });
+      await seedTransfer("xfr_reconcile_paid");
+      await repo.markPaymentRequest({
+        requestId: paid.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        status: "paid",
+        fulfilledByTransferId: "xfr_reconcile_paid",
+        canceledBy: null,
+      });
+      const unresolvedWallet = await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        createdAt: "2026-05-02T00:00:00.000Z",
+        expiresAt: null,
+      });
+      await getDb(env)
+        .prepare("UPDATE payment_requests SET custody_wallet_id = NULL WHERE id = ?")
+        .bind(unresolvedWallet.id)
+        .run();
+      await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        createdAt: "2026-04-30T00:00:00.000Z",
+        expiresAt: null,
+      });
+      await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        createdAt: "2026-05-02T00:00:00.000Z",
+        expiresAt: "2026-05-09T00:00:00.000Z",
+      });
+
+      const rows = await repo.listPaymentRequestsToReconcile({
+        environment: "sandbox",
+        createdAfter: "2026-05-01T00:00:00.000Z",
+        expiredAfter: "2026-05-10T00:00:00.000Z",
+        limit: 50,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([expiredInsideWindow.id, openLater.id]);
+    });
+
+    it("is unavailable to a tenant-bound repository", () => {
+      const tenantRepo = createPaymentRequestsRepository(
+        env,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+      );
+
+      expect(() =>
+        tenantRepo.listPaymentRequestsToReconcile({
+          environment: "sandbox",
+          createdAfter: "2026-05-01T00:00:00.000Z",
+          expiredAfter: "2026-05-10T00:00:00.000Z",
+          limit: 50,
+        })
+      ).toThrow(TenantScopeViolationError);
     });
   });
 
