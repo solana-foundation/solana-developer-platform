@@ -5,7 +5,7 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getTransaction, type ParsedInstruction, type SolanaRpc } from "@sdp/rpc/solana";
+import { getTransaction, type ParsedInstruction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -409,7 +409,6 @@ async function resolveDestinationTokenAccount(input: {
  * resolver reads the mint again for any Token-2022 mint, so it is called only for a hook.
  *
  * @param input - The pull's mint and accounts.
- * @param input.rpc - The cluster RPC the hook's accounts are read from.
  * @param input.mintFacts - The mint's facts, which say whether it has a hook.
  * @param input.mint - The mint.
  * @param input.amount - The pull's amount, in base units.
@@ -419,7 +418,6 @@ async function resolveDestinationTokenAccount(input: {
  * @returns The hook's accounts, in the order the pull appends them.
  */
 async function resolveCollectionTransferHookAccounts(input: {
-  rpc: SolanaRpc;
   mintFacts: MintFacts;
   mint: Address;
   amount: bigint;
@@ -430,7 +428,7 @@ async function resolveCollectionTransferHookAccounts(input: {
   if (!input.mintFacts.hasTransferHook) {
     return [];
   }
-  return subscriptionsProgram.resolveTransferHookAccounts(input.rpc, {
+  return subscriptionsProgram.resolveTransferHookAccounts(createClusterRpc(), {
     amount: input.amount,
     authority: input.authority,
     destination: input.destination,
@@ -628,7 +626,6 @@ async function verifyRecurringPaymentCollection(input: {
   const transferHookAccounts =
     input.sentTransferHookAccounts === null
       ? await resolveCollectionTransferHookAccounts({
-          rpc,
           mintFacts,
           mint,
           amount: amountBaseUnits,
@@ -2129,7 +2126,6 @@ export async function collectRecurringPayment(input: {
     attempt = linkedCollection.attempt;
     transfer = linkedCollection.transfer;
 
-    const rpc = createClusterRpc();
     const sourceOwner = assertValidAddress(input.recurringPayment.source_address, "sourceAddress");
     const destinationOwner = assertValidAddress(
       input.recurringPayment.destination_address,
@@ -2174,7 +2170,6 @@ export async function collectRecurringPayment(input: {
       user: sourceOwner,
     });
     const transferHookAccounts = await resolveCollectionTransferHookAccounts({
-      rpc,
       mintFacts,
       mint,
       amount: amountBaseUnits,
