@@ -27,51 +27,44 @@ it("fills only unique scoped plan roles without rewriting recurring source ident
     const tenant = await seedOrgProject(client, "plan_role_backfill");
     const other = await seedOrgProject(client, "plan_role_backfill_other");
     await client.query(
-      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-       VALUES ('foreign_sandbox', $1, 'Other Sandbox', 'other-sandbox', 'sandbox', 'active', $2)`,
-      [tenant.organizationId, tenant.userId]
-    );
-    await client.query(
       `INSERT INTO custody_configs
          (id, organization_id, project_id, provider, config_encrypted, status)
        VALUES ('cfg', $1, $2, 'local', 'test-only', 'active'),
               ('archived', $1, $2, 'local', 'test-only', 'archived'),
-              ('foreign_org', $3, $4, 'local', 'test-only', 'active'),
-              ('foreign_project', $1, $5, 'local', 'test-only', 'active')`,
-      [
-        tenant.organizationId,
-        tenant.projectId,
-        other.organizationId,
-        other.projectId,
-        "foreign_sandbox",
-      ]
+              ('foreign_org', $3, $4, 'local', 'test-only', 'active')`,
+      [tenant.organizationId, tenant.projectId, other.organizationId, other.projectId]
     );
-    await seedStoredProviderCredential(client, {
-      id: "role_credential",
-      label: "role",
-      organizationId: tenant.organizationId,
-      projectId: tenant.projectId,
-      userId: tenant.userId,
-      provider: "privy",
-    });
-    await client.query(
-      `INSERT INTO custody_connections
-         (id, organization_id, project_id, provider, scope, provider_credential_id,
-          provider_credential_scope_key, status, deactivated_at)
-       VALUES ('connection', $1, $2, 'privy', 'project', 'role_credential', $2,
-               'deactivated', '2026-01-01T00:00:00.000Z')`,
-      [tenant.organizationId, tenant.projectId]
-    );
+    for (const projectId of [tenant.projectId, `${tenant.projectId}_production`]) {
+      await seedStoredProviderCredential(client, {
+        id: `credential_${projectId}`,
+        label: projectId,
+        organizationId: tenant.organizationId,
+        projectId,
+        userId: tenant.userId,
+        provider: "privy",
+      });
+      await client.query(
+        `INSERT INTO custody_connections
+           (id, organization_id, project_id, provider, scope, provider_credential_id,
+            provider_credential_scope_key, status, deactivated_at)
+         VALUES ($1, $2, $3, 'privy', 'project', $4, $3,
+                 'deactivated', '2026-01-01T00:00:00.000Z')`,
+        [`connection_${projectId}`, tenant.organizationId, projectId, `credential_${projectId}`]
+      );
+    }
     await client.query(`INSERT INTO custody_wallets
       (id, custody_config_id, wallet_id, public_key, status)
       VALUES ('owner', 'cfg', 'owner_ref', 'owner_address', 'inactive'),
              ('alias_a', 'cfg', 'alias_ref', 'alias_address', 'active'),
              ('alias_b', 'archived', 'alias_ref', 'alias_address', 'inactive'),
-             ('foreign_org_owner', 'foreign_org', 'foreign_org_ref', 'foreign_org_address', 'active'),
-             ('foreign_project_owner', 'foreign_project', 'foreign_project_ref', 'foreign_project_address', 'active')`);
-    await client.query(`INSERT INTO custody_wallets
-      (id, custody_connection_id, wallet_id, public_key, status)
-      VALUES ('puller', 'connection', 'puller_ref', 'puller_address', 'inactive')`);
+             ('foreign_org_owner', 'foreign_org', 'foreign_org_ref', 'foreign_org_address', 'active')`);
+    await client.query(
+      `INSERT INTO custody_wallets
+         (id, custody_connection_id, wallet_id, public_key, status)
+       VALUES ('puller', $1, 'puller_ref', 'puller_address', 'inactive'),
+              ('foreign_project_owner', $2, 'foreign_project_ref', 'foreign_project_address', 'inactive')`,
+      [`connection_${tenant.projectId}`, `connection_${tenant.projectId}_production`]
+    );
     await client.query(
       `INSERT INTO payment_subscription_plans
          (id, organization_id, project_id, owner_wallet_id, owner_address,
