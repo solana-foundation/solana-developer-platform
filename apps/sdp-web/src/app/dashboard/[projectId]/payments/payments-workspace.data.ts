@@ -58,7 +58,6 @@ export interface PaymentWalletBalance {
 
 export interface PaymentWalletBalancesSnapshot {
   custodyWalletId: string;
-  walletId: string;
   address: string;
   balances: PaymentWalletBalance[];
 }

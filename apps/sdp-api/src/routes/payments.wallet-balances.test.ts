@@ -35,14 +35,15 @@ describe("Payments wallet balance identity", () => {
     const response = await readBalances(TEST_CUSTODY_WALLET_ID);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const body = await response.json();
+    expect(body).toMatchObject({
       data: {
         walletBalances: {
           custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          walletId: TEST_WALLET_ID,
         },
       },
     });
+    expect(body).not.toHaveProperty("data.walletBalances.walletId");
   });
 
   it("rejects a provider wallet reference", async () => {
@@ -60,7 +61,7 @@ describe("Payments wallet balance identity", () => {
       const response = await readBalances(id);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
-        data: { walletBalances: { custodyWalletId: id, walletId: TEST_WALLET_ID, address } },
+        data: { walletBalances: { custodyWalletId: id, address } },
       });
     }
     expect((await readBalances(TEST_WALLET_ID)).status).toBe(404);

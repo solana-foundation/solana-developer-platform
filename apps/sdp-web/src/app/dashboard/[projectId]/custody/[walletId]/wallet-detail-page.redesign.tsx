@@ -23,7 +23,6 @@ import { WalletDetailView } from "./wallet-detail-view";
 
 interface WalletBalancesResponse {
   walletBalances?: {
-    walletId: string;
     address: string;
     balances: WalletBalancesResult["balances"];
   };

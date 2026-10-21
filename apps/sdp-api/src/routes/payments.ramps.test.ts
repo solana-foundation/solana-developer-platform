@@ -410,7 +410,7 @@ describe("Payments routes — ramps", () => {
       expect(await res.json()).toMatchObject({
         data: {
           walletBalances: {
-            walletId: TEST_CONNECTION_WALLET_ID,
+            custodyWalletId: TEST_CONNECTION_CUSTODY_WALLET_ID,
             address: TEST_SOLANA_ADDRESSES.wallet2,
           },
         },

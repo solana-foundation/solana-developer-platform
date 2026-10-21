@@ -528,7 +528,6 @@
           "data": {
             "walletBalances": {
               "custodyWalletId": "cwlt_example",
-              "walletId": "privy_wallet_123",
               "address": "So11111111111111111111111111111111111111112",
               "balances": [
                 {

@@ -1325,7 +1325,6 @@ function walletBalancesBody(world: DemoWorld, walletId: string) {
     data: {
       walletBalances: {
         custodyWalletId: wallet.id,
-        walletId: wallet.walletId,
         address: wallet.publicKey,
         balances: wallet.balances,
       },

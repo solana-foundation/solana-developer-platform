@@ -2147,14 +2147,13 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ## Response shape
 
-The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key. `custodyWalletId` identifies the requested SDP wallet; `walletId` retains the provider wallet reference:
+The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key. `custodyWalletId` identifies the requested SDP wallet. Provider wallet references are not included in this response:
 
 ```json title="response.json"
 {
   "data": {
     "walletBalances": {
       "custodyWalletId": "cwlt_example",
-      "walletId": "wal_abc123",
       "address": "3xYZa...2aBc",
       "balances": [
         {

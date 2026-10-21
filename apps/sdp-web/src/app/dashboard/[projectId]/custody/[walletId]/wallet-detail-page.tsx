@@ -42,7 +42,6 @@ import {
 
 interface WalletBalancesResponse {
   walletBalances?: {
-    walletId: string;
     address: string;
     balances: CustodyWalletTokenBalance[];
   };

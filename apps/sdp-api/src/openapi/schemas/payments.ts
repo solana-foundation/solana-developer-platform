@@ -134,7 +134,6 @@ export const tokenBalanceSchema = z
 export const walletBalancesSchema = z
   .object({
     custodyWalletId: custodyWalletIdParamSchema,
-    walletId: walletIdParamSchema,
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
     balances: z.array(tokenBalanceSchema).openapi({ description: "Token balances." }),
   })
