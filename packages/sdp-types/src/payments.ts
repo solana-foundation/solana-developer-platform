@@ -533,6 +533,10 @@ export interface PaymentTransferSummary {
   destination?: string;
   token?: string;
   amount?: string;
+  /** Token-2022 transfer fee withheld from the recipient, in UI units; present when the transaction states one. */
+  transferFee?: string;
+  /** `amount` minus `transferFee`: what the recipient receives; present with `transferFee`. */
+  receivedAmount?: string;
   memo?: string;
   rampsMemo: Record<string, string>;
   /** A retired provider's transfers still read, as stored. */

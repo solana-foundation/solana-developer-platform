@@ -379,6 +379,16 @@ export const transferSchema = z
       }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
+    transferFee: z.string().optional().openapi({
+      description:
+        "Token-2022 transfer fee withheld from the recipient, in UI units at the mint's decimals. The recipient receives `amount` minus this fee. Present when the transfer's transaction states a fee.",
+      example: "0.25",
+    }),
+    receivedAmount: z.string().optional().openapi({
+      description:
+        "What the recipient receives: `amount` minus `transferFee`, in UI units. Present with `transferFee`.",
+      example: "99.75",
+    }),
     provider: z.enum(PERSISTED_RAMP_PROVIDERS).optional().openapi({
       description:
         "Ramp provider for on-ramp and off-ramp transfer records. A retired provider's records keep its id.",

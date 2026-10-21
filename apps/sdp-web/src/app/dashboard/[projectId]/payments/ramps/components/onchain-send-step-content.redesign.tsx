@@ -7,13 +7,16 @@ import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
+import { InfoHint } from "@sdp/ui/info-hint";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import {
+  ArrowDownLeftIcon,
   ArrowUpRightIcon,
   ExternalLinkIcon,
   LandmarkIcon,
   PlusIcon,
+  ReceiptIcon,
   StickyNoteIcon,
   UserRoundIcon,
   WalletIcon,
@@ -361,14 +364,17 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
 
 function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
-  const { selectedWallet, destinationAddress, selectedAsset, fields } = wizard;
+  const locale = useLocale();
+  const { selectedWallet, destinationAddress, selectedAsset, fields, transferResult } = wizard;
   const memo = fields.memo.trim();
+  const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
+  const transferFee = transferResult === null ? undefined : transferResult.transferFee;
+  const receivedAmount = transferResult === null ? undefined : transferResult.receivedAmount;
   return (
     <>
       <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4 refresh:items-start refresh:pb-6">
         <p className="text-3xl font-semibold tracking-tight text-primary refresh:text-amount refresh:font-medium">
-          {fields.amount === "" ? "0" : fields.amount}{" "}
-          {selectedAsset === null ? fields.asset : selectedAsset.label}
+          {fields.amount === "" ? "0" : fields.amount} {assetLabel}
         </p>
         <p className="text-sm text-tertiary refresh:text-body refresh:text-secondary">
           {t("DashboardPayments.onchainSend.toCounterparty", {
@@ -398,6 +404,33 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
         >
           {sourceWalletName(selectedWallet)}
         </DetailRow>
+        {transferFee === undefined ? null : (
+          <DetailRow
+            icon={<ReceiptIcon className="size-3.5" />}
+            label={
+              <span className="flex items-center gap-1.5">
+                {t("DashboardPayments.onchainSend.transferFee")}
+                <InfoHint
+                  text={t("DashboardPayments.onchainSend.transferFeeHint")}
+                  className="[&_svg]:size-3.5"
+                />
+              </span>
+            }
+          >
+            {t("DashboardPayments.onchainSend.transferFeeValue", {
+              amount: formatTokenAmount(transferFee, locale),
+              asset: assetLabel,
+            })}
+          </DetailRow>
+        )}
+        {receivedAmount === undefined ? null : (
+          <DetailRow
+            icon={<ArrowDownLeftIcon className="size-3.5" />}
+            label={t("DashboardPayments.onchainSend.recipientReceives")}
+          >
+            {formatTokenAmount(receivedAmount, locale)} {assetLabel}
+          </DetailRow>
+        )}
         {memo === "" ? null : (
           <DetailRow
             icon={<StickyNoteIcon className="size-3.5" />}

@@ -132,12 +132,41 @@ function transactionAmountLabel(
   const token =
     transaction.token === null
       ? null
-      : resolveTokenByMint(transaction.token, issuedTokensByMint).tokenName;
+      : resolveTokenByMint(transaction.token, issuedTokensByMint, transaction.tokenSymbol)
+          .tokenName;
   const amount =
     transaction.amount === null
       ? null
       : `${formatDecimalAmount(transaction.amount, locale)}${token ? ` ${token}` : ""}`;
   return { amount, token };
+}
+
+/**
+ * What the recipient got after a Token-2022 transfer fee, with the fee, each with its token's
+ * name.
+ *
+ * @param transfer - The transfer record, when the page read one.
+ * @param token - The token's name, or null when the row names none.
+ * @param locale - The locale to format the amounts in.
+ * @returns The received amount and fee labels, or null when the transfer states no fee.
+ */
+function receivedAfterFeeLabel(
+  transfer: PaymentTransferDetail | null,
+  token: string | null,
+  locale: string
+): { received: string; fee: string } | null {
+  if (
+    transfer === null ||
+    transfer.receivedAmount === undefined ||
+    transfer.transferFee === undefined
+  ) {
+    return null;
+  }
+  const tokenSuffix = token ? ` ${token}` : "";
+  return {
+    received: `${formatDecimalAmount(transfer.receivedAmount, locale)}${tokenSuffix}`,
+    fee: `${formatDecimalAmount(transfer.transferFee, locale)}${tokenSuffix}`,
+  };
 }
 
 /**
@@ -202,7 +231,8 @@ function useTransactionSummary(
     ramp?.description ??
     (paymentStatus === null ? undefined : paymentWhy(paymentStatus, transfer, t));
   const soldCrypto = saleFiat ? cryptoAmount : null;
-  return { status, amount, soldCrypto, direction, contact, title, why };
+  const receivedAfterFee = receivedAfterFeeLabel(transfer, token, locale);
+  return { status, amount, soldCrypto, receivedAfterFee, direction, contact, title, why };
 }
 
 /** A payment request's deposit waits on its payer; a ramp waits on its provider instead. */
@@ -267,7 +297,7 @@ function TransactionActions({ transaction }: { transaction: UnifiedTransaction }
   );
 }
 
-/** The fee the wallet paid, in SOL; "None charged" at zero; said plainly when it is not known. */
+/** The transaction's network fee, in SOL; "None charged" at zero; said plainly when it is not known. */
 function NetworkFee({ fee }: { fee: number | null | undefined }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -294,11 +324,13 @@ function TransactionParties({
   transfer,
   direction,
   contact,
+  receivedAfterFee,
 }: {
   transaction: UnifiedTransaction;
   transfer: PaymentTransferDetail | null;
   direction: "inbound" | "outbound" | null;
   contact: string | null;
+  receivedAfterFee: { received: string; fee: string } | null;
 }) {
   const t = useTranslations();
   const wallet = walletLabelOf(transaction);
@@ -321,6 +353,19 @@ function TransactionParties({
           <RecordRow label={t("DashboardPayments.transactionDetail.networkFee")}>
             <NetworkFee fee={transfer?.fee} />
           </RecordRow>
+        ) : null}
+        {receivedAfterFee ? (
+          <>
+            <RecordRow
+              label={t("DashboardPayments.transactionDetail.transferFee")}
+              hint={t("DashboardPayments.transactionDetail.transferFeeHint")}
+            >
+              {receivedAfterFee.fee}
+            </RecordRow>
+            <RecordRow label={t("DashboardPayments.transactionDetail.recipientReceived")}>
+              {receivedAfterFee.received}
+            </RecordRow>
+          </>
         ) : null}
         {transfer?.source
           ? chainRow(t("DashboardPayments.transactionDetail.source"), transfer.source)
@@ -540,6 +585,7 @@ function TransactionRecord({
           transfer={transfer}
           direction={summary.direction}
           contact={summary.contact}
+          receivedAfterFee={summary.receivedAfterFee}
         />
         {transfer?.provider ? (
           <ProviderSection provider={transfer.provider} reference={transfer.providerReference} />

@@ -17,6 +17,7 @@ const commonFields = {
   custodyWalletId: z.string().nullable(),
   custodyWalletLabel: z.string().nullable(),
   token: z.string().nullable(),
+  tokenSymbol: z.string().optional(),
   amount: z.string().nullable(),
   counterpartyId: z.string().nullable(),
   signature: z.string().nullable(),

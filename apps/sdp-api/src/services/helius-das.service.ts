@@ -165,28 +165,36 @@ function enrichBalancesWithTokenSymbols(
   });
 }
 
+/**
+ * The metadata symbols Helius DAS knows for `mints` on the scope's cluster, cached for an hour.
+ * Symbols only decorate: with no Helius endpoint on the cluster, or a failed lookup, the map
+ * holds no entry for those mints and the caller keeps showing the mint.
+ *
+ * @param mints - Mint addresses to resolve; duplicates are looked up once.
+ * @returns The symbols found, keyed by mint.
+ */
+export async function lookupTokenSymbols(mints: readonly string[]): Promise<Map<string, string>> {
+  const uniqueMints = [...new Set(mints)];
+  if (!isHeliusDasConfigured() || uniqueMints.length === 0) {
+    return new Map();
+  }
+  return tokenSymbolCache.lookup(currentClusterScope().cluster, uniqueMints, (batch) =>
+    fetchTokenSymbolsByMint(batch)
+  );
+}
+
 // Symbols decorate balances: with no Helius endpoint on the scope's cluster they stay unset,
 // and a balance read never fails on them.
 export async function attachTokenSymbolsToBalances(
   balances: CustodyWalletTokenBalance[]
 ): Promise<CustodyWalletTokenBalance[]> {
-  const unresolvedMints = [
-    ...new Set(
-      balances.filter((balance) => needsTokenSymbol(balance)).map((balance) => balance.mint)
-    ),
-  ];
-
-  if (!isHeliusDasConfigured() || unresolvedMints.length === 0) {
+  const unresolvedMints = balances
+    .filter((balance) => needsTokenSymbol(balance))
+    .map((balance) => balance.mint);
+  if (unresolvedMints.length === 0) {
     return balances;
   }
-
-  // A failed lookup answers no mints, so those balances keep their mint as the label.
-  const symbolsByMint = await tokenSymbolCache.lookup(
-    currentClusterScope().cluster,
-    unresolvedMints,
-    (mints) => fetchTokenSymbolsByMint(mints)
-  );
-  return enrichBalancesWithTokenSymbols(balances, symbolsByMint);
+  return enrichBalancesWithTokenSymbols(balances, await lookupTokenSymbols(unresolvedMints));
 }
 
 export async function attachTokenSymbolsToBalanceMap(

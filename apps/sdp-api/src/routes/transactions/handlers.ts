@@ -19,6 +19,7 @@ import {
   isRampProviderInChannel,
 } from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
+import { lookupTokenSymbols } from "@/services/helius-das.service";
 import type { Env } from "@/types/env";
 import {
   PAYMENT_TRANSACTION_KIND_ACTIONS,
@@ -72,7 +73,14 @@ export async function listUnifiedTransactions(
     organizationId: auth.organizationId,
     projectId: auth.projectId,
   });
-  return success(c, { transactions: result.rows, nextCursor: result.nextCursor });
+  const symbolsByMint = await lookupTokenSymbols(
+    result.rows.flatMap((row) => (row.token === null ? [] : [row.token]))
+  );
+  const transactions = result.rows.map((row) => ({
+    ...row,
+    tokenSymbol: row.token === null ? undefined : symbolsByMint.get(row.token),
+  }));
+  return success(c, { transactions, nextCursor: result.nextCursor });
 }
 
 function isActionInChannel(c: Context<{ Bindings: Env }>, action: Action): boolean {

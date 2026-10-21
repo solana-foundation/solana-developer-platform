@@ -1,18 +1,37 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
+  type Account,
   type Address,
   address,
   createNoopSigner,
+  decompileTransactionMessage,
+  type EncodedAccount,
+  fetchEncodedAccount,
+  getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
+  isSome,
   type JsonParsedTokenAccount,
   type TransactionSigner,
 } from "@solana/kit";
+import { fetchSysvarClock } from "@solana/sysvars";
 import {
+  decodeMint,
+  type Extension,
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
+  getTransferCheckedWithFeeInstruction,
+  getTransferCheckedWithFeeInstructionDataDecoder,
+  identifyToken2022Instruction,
+  isExtension,
+  type Mint,
+  Token2022Instruction,
+  uiAmountToAmountForScaledUiAmountMintWithoutSimulation,
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 
@@ -237,30 +256,185 @@ export async function resolveSourceTokenAccountOrAta(
   };
 }
 
+type TransferFeeConfig = Extract<Extension, { __kind: "TransferFeeConfig" }>;
+
+/** A mint a transfer reads its terms from: the account and its owning token program. */
+export interface TransferMint {
+  account: EncodedAccount;
+  tokenProgram: Address;
+}
+
+/**
+ * Reads the mint a transfer moves, from the cluster scope's RPC.
+ *
+ * @param mint - The mint address.
+ * @returns The mint's account and the SPL token program that owns it.
+ * @throws AppError `BAD_REQUEST` when the mint does not exist or no SPL token program owns it.
+ */
+export async function readTransferMint(mint: Address): Promise<TransferMint> {
+  const account = await fetchEncodedAccount(createClusterRpc(), mint);
+  if (!account.exists) {
+    throw badRequest("Token mint account does not exist");
+  }
+  return { account, tokenProgram: assertSupportedTokenProgram(account.programAddress) };
+}
+
+/** What a transfer signs: the base units it moves and the fee it states. */
+interface TransferTerms {
+  baseUnits: bigint;
+  /**
+   * The fee the program withholds from the recipient, stated on
+   * `TransferCheckedWithFee` so a changed fee refuses the transfer instead of
+   * settling it short. Null for a mint with no transfer fee config.
+   */
+  transferFee: bigint | null;
+}
+
+/**
+ * The fee Token-2022 withholds on a transfer of `baseUnits` in `epoch`: the
+ * newer fee from its first epoch on, else the older one, as
+ * `ceil(baseUnits × bps / 10000)` capped at its maximum fee. Mirrors the
+ * program's `TransferFeeConfig::calculate_epoch_fee`.
+ *
+ * @param config - The mint's transfer fee config.
+ * @param epoch - The epoch the transfer is built in.
+ * @param baseUnits - The amount the transfer moves, in base units.
+ * @returns The fee in base units.
+ */
+function calculateEpochTransferFee(
+  config: TransferFeeConfig,
+  epoch: bigint,
+  baseUnits: bigint
+): bigint {
+  const fee =
+    epoch >= config.newerTransferFee.epoch ? config.newerTransferFee : config.olderTransferFee;
+  const rawFee = (baseUnits * BigInt(fee.transferFeeBasisPoints) + 9_999n) / 10_000n;
+  return rawFee < fee.maximumFee ? rawFee : fee.maximumFee;
+}
+
+/**
+ * The terms a transfer of `amount` signs, read at the cluster's Clock. A
+ * Token-2022 mint with a scaled UI amount divides by the multiplier in effect
+ * (its new multiplier from the effective timestamp on), the amount its holders
+ * see; a mint with a transfer fee config states the fee for the current epoch.
+ * Every other mint parses exactly at its decimals and states no fee.
+ *
+ * The amount passes SDP's decimal grammar first, so a scaled mint refuses a bad
+ * amount with the same `AmountError`. The scaled conversion is token-2022's f64
+ * helper: it truncates, and loses precision above 2^53 base units.
+ *
+ * @param transferMint - The mint, as `readTransferMint` read it.
+ * @param amount - The decimal amount the caller asked to send.
+ * @param decimals - The mint's decimals.
+ * @returns The base units moved and the fee stated.
+ * @throws AppError `BAD_REQUEST` when a Token-2022 account does not decode as a mint.
+ */
+export async function resolveTransferTerms(
+  transferMint: TransferMint,
+  amount: string,
+  decimals: number
+): Promise<TransferTerms> {
+  const exactBaseUnits = parseDecimalAmount(amount, decimals);
+  if (transferMint.tokenProgram !== SPL_TOKEN_2022_PROGRAM_ID) {
+    return { baseUnits: exactBaseUnits, transferFee: null };
+  }
+
+  let mint: Account<Mint>;
+  try {
+    mint = decodeMint(transferMint.account);
+  } catch {
+    throw badRequest("Token mint account is not a mint");
+  }
+  const extensions = isSome(mint.data.extensions) ? mint.data.extensions.value : [];
+  const scaledUiAmount = extensions.find((extension) =>
+    // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
+    isExtension("ScaledUiAmountConfig", extension)
+  );
+  const transferFeeConfig = extensions.find((extension) =>
+    isExtension("TransferFeeConfig", extension)
+  );
+  if (!scaledUiAmount && !transferFeeConfig) {
+    return { baseUnits: exactBaseUnits, transferFee: null };
+  }
+
+  const clock = await fetchSysvarClock(createClusterRpc());
+  let baseUnits = exactBaseUnits;
+  if (scaledUiAmount) {
+    const multiplier =
+      clock.unixTimestamp >= scaledUiAmount.newMultiplierEffectiveTimestamp
+        ? scaledUiAmount.newMultiplier
+        : scaledUiAmount.multiplier;
+    baseUnits = uiAmountToAmountForScaledUiAmountMintWithoutSimulation(
+      amount,
+      decimals,
+      multiplier
+    );
+  }
+  return {
+    baseUnits,
+    transferFee: transferFeeConfig
+      ? calculateEpochTransferFee(transferFeeConfig, clock.epoch, baseUnits)
+      : null,
+  };
+}
+
+/**
+ * The transfer fee a signed transaction states: the fee and decimals on its
+ * Token-2022 `TransferCheckedWithFee` instruction. The program refuses that
+ * instruction unless the stated fee is the one it withholds, so on a landed
+ * transaction this is the fee the recipient paid.
+ *
+ * @param signedTransaction - The base64 wire transaction a transfer row saved before its send.
+ * @returns The stated fee in base units with the mint's decimals, or null when no
+ *   instruction states a fee.
+ */
+export function readStatedTransferFee(
+  signedTransaction: string
+): { fee: bigint; decimals: number } | null {
+  const transaction = getTransactionDecoder().decode(getBase64Encoder().encode(signedTransaction));
+  const message = decompileTransactionMessage(
+    getCompiledTransactionMessageDecoder().decode(transaction.messageBytes)
+  );
+  for (const instruction of message.instructions) {
+    if (instruction.programAddress !== SPL_TOKEN_2022_PROGRAM_ID) continue;
+    if (
+      instruction.data === undefined ||
+      identifyToken2022Instruction(instruction.data) !== Token2022Instruction.TransferCheckedWithFee
+    ) {
+      continue;
+    }
+    const { fee, decimals } = getTransferCheckedWithFeeInstructionDataDecoder().decode(
+      instruction.data
+    );
+    return { fee, decimals };
+  }
+  return null;
+}
+
 /**
  * Build the standard SPL transfer instruction pair: an idempotent ATA
  * creation for the destination (rent paid by `ataRentPayer`) followed by a
- * transferChecked from the authority's largest token account.
+ * transferChecked from the authority's largest token account, or a
+ * transferCheckedWithFee stating the expected fee on a mint with a transfer
+ * fee config.
  */
-export async function buildSplTransferInstructions(
-  rpc: SolanaRpc,
-  input: {
-    authority: TransactionSigner;
-    destination: Address;
-    mint: Address;
-    amount: string;
-    ataRentPayer: Address;
-    /** The source this request already read, so the build reads nothing again. */
-    source?: SplTransferSource;
-  }
-) {
-  const tokenProgram =
-    input.source?.tokenProgram ?? (await resolveMintTokenProgram(rpc, input.mint));
+export async function buildSplTransferInstructions(input: {
+  authority: TransactionSigner;
+  destination: Address;
+  mint: Address;
+  amount: string;
+  ataRentPayer: Address;
+  /** The source account this request already read, so the build does not read it again. */
+  source?: SplTransferSource;
+}) {
+  const rpc = createClusterRpc();
+  const transferMint = await readTransferMint(input.mint);
+  const { tokenProgram } = transferMint;
   const sourceTokenAccount =
     input.source ??
     (await resolveSourceTokenAccount(rpc, input.authority.address, input.mint, tokenProgram));
-  const transferAmount = parseDecimalAmount(input.amount, sourceTokenAccount.decimals);
-  if (transferAmount <= 0n) {
+  const terms = await resolveTransferTerms(transferMint, input.amount, sourceTokenAccount.decimals);
+  if (terms.baseUnits <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
   }
 
@@ -269,6 +443,14 @@ export async function buildSplTransferInstructions(
     tokenProgram,
     mint: input.mint,
   });
+  const transferCheckedInput = {
+    source: sourceTokenAccount.tokenAccount,
+    mint: input.mint,
+    destination: destinationTokenAccount,
+    authority: input.authority,
+    amount: terms.baseUnits,
+    decimals: sourceTokenAccount.decimals,
+  };
 
   return {
     createDestinationAtaInstruction: getCreateAssociatedTokenIdempotentInstruction({
@@ -278,17 +460,13 @@ export async function buildSplTransferInstructions(
       mint: input.mint,
       tokenProgram,
     }),
-    transferInstruction: getTransferCheckedInstruction(
-      {
-        source: sourceTokenAccount.tokenAccount,
-        mint: input.mint,
-        destination: destinationTokenAccount,
-        authority: input.authority,
-        amount: transferAmount,
-        decimals: sourceTokenAccount.decimals,
-      },
-      { programAddress: tokenProgram }
-    ),
+    transferInstruction:
+      terms.transferFee === null
+        ? getTransferCheckedInstruction(transferCheckedInput, { programAddress: tokenProgram })
+        : getTransferCheckedWithFeeInstruction(
+            { ...transferCheckedInput, fee: terms.transferFee },
+            { programAddress: tokenProgram }
+          ),
   };
 }
 

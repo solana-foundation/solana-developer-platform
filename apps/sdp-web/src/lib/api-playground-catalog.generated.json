@@ -601,6 +601,8 @@
                 "po": "PO-9"
               },
               "amount": "100.00",
+              "transferFee": "0.25",
+              "receivedAmount": "99.75",
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
@@ -884,6 +886,8 @@
                 "po": "PO-9"
               },
               "amount": "100.00",
+              "transferFee": "0.25",
+              "receivedAmount": "99.75",
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
@@ -982,6 +986,8 @@
                 "po": "PO-9"
               },
               "amount": "100.00",
+              "transferFee": "0.25",
+              "receivedAmount": "99.75",
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
@@ -1151,6 +1157,8 @@
                   "po": "PO-9"
                 },
                 "amount": "100.00",
+                "transferFee": "0.25",
+                "receivedAmount": "99.75",
                 "provider": "moonpay",
                 "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
@@ -1390,6 +1398,8 @@
                   "po": "PO-9"
                 },
                 "amount": "100.00",
+                "transferFee": "0.25",
+                "receivedAmount": "99.75",
                 "provider": "moonpay",
                 "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
@@ -1956,6 +1966,8 @@
                 "po": "PO-9"
               },
               "amount": "100.00",
+              "transferFee": "0.25",
+              "receivedAmount": "99.75",
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",

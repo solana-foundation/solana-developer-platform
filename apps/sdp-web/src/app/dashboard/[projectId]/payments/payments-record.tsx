@@ -2,6 +2,7 @@
 
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
 import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -97,15 +98,18 @@ export function RecordList({ children }: { children: ReactNode }) {
 
 /**
  * A label and its value on one 41px rule: 13px, then 14px. `copy` puts a copy button after the
- * value for the full text a shortened value stands for.
+ * value for the full text a shortened value stands for; `hint` puts an info icon after the label
+ * that explains it on hover and focus.
  */
 export function RecordRow({
   label,
   copy,
+  hint,
   children,
 }: {
   label: string;
   copy?: string;
+  hint?: string;
   children: ReactNode;
 }) {
   return (
@@ -113,7 +117,10 @@ export function RecordRow({
       data-slot="record-row"
       className="flex items-baseline justify-between gap-4 border-b border-border-subtle py-2.5 last:border-b-0"
     >
-      <dt className="shrink-0 text-meta leading-5 text-secondary">{label}</dt>
+      <dt className="flex shrink-0 items-center gap-1.5 text-meta leading-5 text-secondary">
+        {label}
+        {hint ? <InfoHint text={hint} className="[&_svg]:size-3.5" /> : null}
+      </dt>
       <dd className="flex min-w-0 items-center gap-1 text-right text-body text-primary">
         <span className="min-w-0 truncate">{children}</span>
         {copy ? <RecordCopyButton value={copy} label={label} /> : null}

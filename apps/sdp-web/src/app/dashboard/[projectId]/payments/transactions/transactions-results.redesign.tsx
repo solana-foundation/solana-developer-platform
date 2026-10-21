@@ -89,7 +89,11 @@ export function TransactionsResults({
               const token =
                 transaction.token === null
                   ? null
-                  : resolveTokenByMint(transaction.token, issuedTokensByMint).tokenName;
+                  : resolveTokenByMint(
+                      transaction.token,
+                      issuedTokensByMint,
+                      transaction.tokenSymbol
+                    ).tokenName;
               const contact =
                 transaction.counterpartyId === null
                   ? null

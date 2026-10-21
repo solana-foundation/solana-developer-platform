@@ -1,3 +1,5 @@
+import { subtractDecimalAmounts } from "@sdp/payments/decimal";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   isRampTransferType,
   type PaymentSubscriptionCollectionAttempt,
@@ -9,6 +11,7 @@ import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/type
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
+import { readStatedTransferFee } from "@/routes/payments/token-accounts";
 import {
   currentProviderSettlement,
   readDeliveryMismatch,
@@ -62,6 +65,27 @@ function rampFiatPayout(row: TransferRow): RampFiatPayout | undefined {
   return payout;
 }
 
+/**
+ * The Token-2022 transfer fee a transfer's saved signed transaction states, in
+ * UI units at the mint's decimals, and what the recipient receives after it.
+ *
+ * @param row - The transfer row.
+ * @returns The stated fee and the amount less that fee; both undefined when the
+ *   row saved no signed transaction, it states no fee, or the row has no amount.
+ */
+function statedTransferFeeFields(row: TransferRow): {
+  transferFee: string | undefined;
+  receivedAmount: string | undefined;
+} {
+  const stated =
+    row.signed_transaction === null ? null : readStatedTransferFee(row.signed_transaction);
+  if (stated === null || row.amount === null) {
+    return { transferFee: undefined, receivedAmount: undefined };
+  }
+  const transferFee = formatDecimalAmount(stated.fee, stated.decimals);
+  return { transferFee, receivedAmount: subtractDecimalAmounts(row.amount, transferFee) };
+}
+
 export function mapTransferRow(row: TransferRow) {
   const base = {
     id: row.id,
@@ -98,6 +122,7 @@ export function mapTransferRow(row: TransferRow) {
     rampsMemo: row.ramps_memo,
     token: row.token,
     ...(row.amount ? { amount: row.amount } : {}),
+    ...statedTransferFeeFields(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

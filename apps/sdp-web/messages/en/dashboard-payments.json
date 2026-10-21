@@ -390,6 +390,10 @@
       "reviewTitle": "Review transfer",
       "submittingTransfer": "Submitting transfer.",
       "memo": "Memo",
+      "transferFee": "Transfer fee",
+      "transferFeeValue": "{amount} {asset}, paid by the recipient",
+      "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
+      "recipientReceives": "Recipient receives",
       "counterparty": "counterparty",
       "toCounterparty": "to {counterparty}",
       "transferSubmitted": "Transfer submitted",
@@ -1520,7 +1524,10 @@
       "openSale": {
         "title": "Deposit",
         "depositAmount": "Amount to send"
-      }
+      },
+      "transferFee": "Transfer fee",
+      "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
+      "recipientReceived": "Recipient received"
     },
     "requestDetail": {
       "paymentLink": "Payment link",

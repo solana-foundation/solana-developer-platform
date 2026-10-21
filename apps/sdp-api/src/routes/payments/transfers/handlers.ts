@@ -1,12 +1,8 @@
+import { sponsoredNetworkFee } from "@sdp/fee-payment/chain-reads";
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 // biome-ignore lint/style/noRestrictedImports: the transfers list reads wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc, createClusterRpc } from "@sdp/rpc/factory";
-import {
-  confirmTransaction,
-  getRecentBlockhash,
-  getSignaturesForAddress,
-  type SolanaRpc,
-} from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash, getSignaturesForAddress } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Action } from "@sdp/types/actions";
@@ -82,9 +78,10 @@ import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import {
   buildSplTransferInstructions,
-  resolveMintTokenProgram,
+  readTransferMint,
   resolveSourceTokenAccount,
   resolveTokenLabel,
+  resolveTransferTerms,
   type SplTransferSource,
 } from "@/routes/payments/token-accounts";
 import {
@@ -258,14 +255,19 @@ async function assertRampDepositFunded(
   if (isNativePaymentToken(operation.token)) return undefined;
   const rpc = createClusterRpc();
   const mint = assertValidAddress(operation.token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+  const transferMint = await readTransferMint(mint);
+  const { tokenProgram } = transferMint;
   const source = await resolveSourceTokenAccount(
     rpc,
     address(operation.sourceWallet.publicKey),
     mint,
     tokenProgram
   );
-  const needed = parseDecimalAmount(operation.amount, source.decimals);
+  const { baseUnits: needed } = await resolveTransferTerms(
+    transferMint,
+    operation.amount,
+    source.decimals
+  );
   if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram };
 
   const token = resolveTokenLabel(mint);
@@ -655,6 +657,14 @@ export function mapTransferExecutionError(error: unknown): AppError {
   return programErrorCode === "0x11" ? accountFrozen(message) : solanaRpcError(message);
 }
 
+/** A sponsored transfer that confirmed, with the network fee its exact message was priced at. */
+interface SponsoredTransferResult {
+  signature: string;
+  slot: number | null;
+  blockTime: string | null;
+  networkFee: number;
+}
+
 async function executeSponsoredTransfer(
   c: AppContext,
   params: {
@@ -663,10 +673,9 @@ async function executeSponsoredTransfer(
     buildInstructions: (context: {
       signer: TransactionSigner;
       feePayer: Address;
-      rpc: SolanaRpc;
     }) => Promise<readonly Instruction[]>;
   }
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+): Promise<SponsoredTransferResult> {
   const auth = getAuth(c);
   const signer = await createOrgSignerForCustodyWallet(
     c.env,
@@ -688,7 +697,7 @@ async function executeSponsoredTransfer(
     "payments.transfer"
   );
   const feePayer = await feePayment.getFeePayer();
-  const instructions = await params.buildInstructions({ signer, feePayer, rpc });
+  const instructions = await params.buildInstructions({ signer, feePayer });
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -701,6 +710,7 @@ async function executeSponsoredTransfer(
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
+  const networkFee = await sponsoredNetworkFee(txBytes);
   const signature = await submitSponsoredTransaction({
     feePayment,
     rpc,
@@ -721,6 +731,7 @@ async function executeSponsoredTransfer(
     signature,
     slot: Number(confirmation.slot),
     blockTime: null,
+    networkFee: Number(networkFee),
   };
 }
 
@@ -730,7 +741,7 @@ async function executeSolTransfer(
   destinationAddress: Address,
   amount: string,
   submissionStore: SignedSubmissionStore
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+): Promise<SponsoredTransferResult> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
@@ -756,13 +767,13 @@ async function executeSplTransfer(
   amount: string,
   submissionStore: SignedSubmissionStore,
   source: SplTransferSource | undefined
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
+): Promise<SponsoredTransferResult> {
   return executeSponsoredTransfer(c, {
     sourceWallet,
     submissionStore,
-    buildInstructions: async ({ signer, feePayer, rpc }) => {
+    buildInstructions: async ({ signer, feePayer }) => {
       const { createDestinationAtaInstruction, transferInstruction } =
-        await buildSplTransferInstructions(rpc, {
+        await buildSplTransferInstructions({
           authority: signer,
           destination: destinationAddress,
           mint: mintAddress,
@@ -957,6 +968,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           signature: solResult.signature,
           slot: solResult.slot,
           blockTime: solResult.blockTime,
+          fee: solResult.networkFee,
           error: null,
         })
       );
@@ -983,6 +995,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         signature: result.signature,
         slot: result.slot,
         blockTime: result.blockTime,
+        fee: result.networkFee,
         error: null,
       })
     );

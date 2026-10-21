@@ -176,6 +176,8 @@ interface UnifiedTransactionCommon {
   custodyWalletLabel: string | null;
   /** For an Earn withdrawal this is the deposit-token mint once the payout was observed at settlement, else the share mint. */
   token: string | null;
+  /** The mint's on-chain metadata symbol, when Helius DAS resolves one; set by the issuer, so a well-known mint's own label comes first. */
+  tokenSymbol?: string;
   /** Exact decimal string in token units, or null when the source cannot resolve token decimals. */
   amount: string | null;
   counterpartyId: string | null;

@@ -66,7 +66,8 @@ function TransactionDetail({
       value:
         transaction.token === null
           ? null
-          : resolveTokenByMint(transaction.token, issuedTokensByMint).tokenName,
+          : resolveTokenByMint(transaction.token, issuedTokensByMint, transaction.tokenSymbol)
+              .tokenName,
       href: null,
     },
     {
@@ -198,7 +199,7 @@ export function TransactionsResults({
                     ? "—"
                     : transaction.token === null
                       ? transaction.amount
-                      : `${transaction.amount} ${resolveTokenByMint(transaction.token, issuedTokensByMint).tokenName}`}
+                      : `${transaction.amount} ${resolveTokenByMint(transaction.token, issuedTokensByMint, transaction.tokenSymbol).tokenName}`}
                 </TableCell>
                 <TableCell>
                   <Badge variant={statusVariants[transaction.status]}>
