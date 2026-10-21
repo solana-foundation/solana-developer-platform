@@ -128,6 +128,13 @@ including a timeout, missing proposal, or unavailable credentials, stay processi
 create a replacement until the original has been reconciled. A crash before the create call
 may require manual reconciliation; automatic resubmission is deliberately not implemented.
 
+Connection deactivation or a failed connection check blocks new payments but does not stop
+these status reads. Recovery verifies the stored connection, provider account, vault and source
+address before reading the retained active credential. It does not require an active wallet or
+a healthy connection, and it stops polling once the payment settles. Credential revocation or
+loss of provider access still requires operator intervention; disabling a connection does not
+cancel a transfer already accepted by Fireblocks.
+
 Fireblocks transaction ID, status and substatus are visible in SDP. COMPLETED with a valid
 Solana signature records confirmation only after the external ID, vault, asset, destination,
 and exact decimal payment/net amounts match the stored intent. Missing or mismatched details

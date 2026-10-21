@@ -11,6 +11,7 @@ import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { internalCustody } from "@/routes/internal-custody";
 import { AuditService } from "@/services/audit.service";
+import * as credentialSecretStore from "@/services/credential-secret-store";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -314,6 +315,125 @@ describe("native Fireblocks BYOK payment routes", () => {
     providerStatus = "COMPLETED";
     expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
     expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it.each([
+    { change: "deactivated", recovery: "dashboard" },
+    { change: "deactivated", recovery: "cron" },
+    { change: "failed check", recovery: "dashboard" },
+    { change: "failed check", recovery: "cron" },
+  ] as const)(
+    "reconciles an accepted transfer through $recovery after a $change connection, but refuses new sends",
+    async ({ change, recovery }) => {
+      const mock = await ready();
+      const response = await send();
+      expect(response.status).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      expect(transfer).toMatchObject({ status: "processing", signature: null });
+      const db = getDb(env);
+      const connection = await db.queryOne<{ id: string }>(
+        "SELECT custody_connection_id AS id FROM custody_wallets WHERE id = ?",
+        [walletId]
+      );
+      if (!connection) throw new Error("Expected Fireblocks connection");
+      if (change === "deactivated") {
+        // The real teardown first requires the connection's wallets to be inactive.
+        await db.execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [walletId]);
+        const deactivated = await request(`/connections/${connection.id}/deactivate`, {});
+        expect(deactivated.status, await deactivated.clone().text()).toBe(200);
+      } else {
+        await db.execute(
+          "UPDATE custody_connections SET status = 'failed', activated_at = NULL, last_check_status = 'failed' WHERE id = ?",
+          [connection.id]
+        );
+      }
+      mock.mockClear();
+      expect((await send("after-connection-change")).status).toBe(409);
+      expect(mock).not.toHaveBeenCalled();
+
+      providerStatus = "COMPLETED";
+      if (recovery === "cron") {
+        await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+          trackPendingTransfers(testEnv)
+        );
+        expect(
+          await db.queryOne<{ status: string; signature: string }>(
+            "SELECT status, signature FROM payment_transfers WHERE id = ?",
+            [transfer.id]
+          )
+        ).toMatchObject({ status: "confirmed", signature: SIG });
+      } else {
+        expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
+      }
+      expect(mock).toHaveBeenCalledTimes(1);
+      expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
+      // Settled intents never acquire recovery access or poll again.
+      expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
+      expect(mock).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each([
+    { connectionId: "another-connection" },
+    { accountFingerprint: "another-account" },
+    { vaultAccountId: "99" },
+  ])("refuses recovery with a mismatched intent %j after a failed check", async (patch) => {
+    const mock = await ready();
+    const response = await send();
+    expect(response.status).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    await getDb(env).execute(
+      "UPDATE custody_connections SET status = 'failed', activated_at = NULL, last_check_status = 'failed' WHERE organization_id = ?",
+      [ORGANIZATION_ID]
+    );
+    await getDb(env).execute(
+      `UPDATE payment_transfers SET provider_data = jsonb_set(provider_data, '{fireblocksTransfer}',
+       (provider_data->'fireblocksTransfer') || ?::jsonb) WHERE id = ?`,
+      [JSON.stringify(patch), transfer.id]
+    );
+    mock.mockClear();
+    const secrets = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+    providerStatus = "COMPLETED";
+    expect(await refresh(transfer.id)).toMatchObject({ status: "processing", signature: null });
+    expect(secrets).not.toHaveBeenCalled();
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it.each([OTHER_ADDRESS, null])(
+    "refuses recovery with a changed source address (%s)",
+    async (source) => {
+      const mock = await ready();
+      const response = await send();
+      expect(response.status).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      await getDb(env).execute("UPDATE payment_transfers SET source_address = ? WHERE id = ?", [
+        source,
+        transfer.id,
+      ]);
+      mock.mockClear();
+      const secrets = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+      providerStatus = "COMPLETED";
+      expect(await refresh(transfer.id)).toMatchObject({ status: "processing", signature: null });
+      expect(secrets).not.toHaveBeenCalled();
+      expect(mock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not read a revoked credential during recovery", async () => {
+    const mock = await ready();
+    const response = await send();
+    expect(response.status).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    await getDb(env).execute(
+      "UPDATE provider_credentials SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE organization_id = ?",
+      [ORGANIZATION_ID]
+    );
+    mock.mockClear();
+    const secrets = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
+    providerStatus = "COMPLETED";
+    expect(await refresh(transfer.id)).toMatchObject({ status: "processing", signature: null });
+    expect(secrets).not.toHaveBeenCalled();
+    expect(mock).not.toHaveBeenCalled();
   });
 
   it("does not confirm mismatched or incomplete settlement details or resubmit the payment", async () => {

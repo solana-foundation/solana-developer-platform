@@ -749,12 +749,24 @@ export class CustodyRuntimeTargets {
   }
 
   /** Exact BYOK owner resolution for native Fireblocks payments; never deployment credentials. */
-  async getFireblocksTransferAccess(params: {
-    organizationId: string;
-    projectId: string;
-    custodyWalletId: string;
-    forSubmission: boolean;
-  }) {
+  async getFireblocksTransferAccess(
+    params: {
+      organizationId: string;
+      projectId: string;
+      custodyWalletId: string;
+    } & (
+      | { forSubmission: true }
+      | {
+          forSubmission: false;
+          intent: {
+            connectionId: string;
+            accountFingerprint: string;
+            vaultAccountId: string;
+            sourceAddress: string | null;
+          };
+        }
+    )
+  ) {
     const target = await this.resolveRetainedWalletRecord(
       params.organizationId,
       params.projectId,
@@ -774,7 +786,24 @@ export class CustodyRuntimeTargets {
       );
     }
     const row = await this.loadConnectionCredential(target);
-    if (!row || !isUsableCredentialOwner(row)) throw conflict("Custody Connection is unavailable");
+    if (row?.credential_status !== "active" || row.provider_account_fingerprint === null)
+      throw conflict("Custody Connection is unavailable");
+    if (params.forSubmission) {
+      if (!isUsableCredentialOwner(row)) throw conflict("Custody Connection is unavailable");
+    } else {
+      // Disabling a connection or failing a health check cannot cancel an accepted
+      // Fireblocks transfer. Recovery may read its retained credential, but only
+      // for the same account and wallet recorded in the pending payment intent.
+      // Check this binding before decrypting; credential revocation still applies.
+      const { intent } = params;
+      if (
+        target.connectionId !== intent.connectionId ||
+        row.provider_account_fingerprint !== intent.accountFingerprint ||
+        target.wallet.walletId !== `fb_${intent.vaultAccountId}` ||
+        target.wallet.publicKey !== intent.sourceAddress
+      )
+        throw conflict("Fireblocks connection does not match the payment intent");
+    }
     const secret = await this.readByokCredential(target, row);
     if (secret.provider !== "fireblocks" || !/^fb_\d+$/.test(target.wallet.walletId))
       throw conflict("Invalid Fireblocks wallet");

@@ -350,15 +350,9 @@ export async function refreshFireblocksTransfer(
       projectId: row.project_id,
       custodyWalletId: row.custody_wallet_id,
       forSubmission: false,
+      intent: { ...intent, sourceAddress: row.source_address },
     });
-    if (
-      !access ||
-      access.connectionId !== intent.connectionId ||
-      access.accountFingerprint !== intent.accountFingerprint ||
-      access.vaultAccountId !== intent.vaultAccountId ||
-      access.publicKey !== row.source_address
-    )
-      throw conflict("Fireblocks connection does not match the payment intent");
+    if (!access) throw conflict("Fireblocks connection does not match the payment intent");
     const result = await readFireblocksTransfer(runtime, access, row.id);
     return result
       ? await persistResult(repo, claimed, result, true)
