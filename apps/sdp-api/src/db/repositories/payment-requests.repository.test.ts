@@ -170,42 +170,54 @@ describe("PaymentRequestsRepository (postgres)", () => {
     async function seedCandidate(params: {
       projectId: string;
       expiresAt: string | null;
+      createdAt: string;
       reconciledAt: string | null;
     }) {
       const row = await repo.createPaymentRequest(
         createInput({ projectId: params.projectId, expiresAt: params.expiresAt })
       );
       await getDb(env)
-        .prepare("UPDATE payment_requests SET reconciled_at = ? WHERE id = ?")
-        .bind(params.reconciledAt, row.id)
+        .prepare("UPDATE payment_requests SET created_at = ?, reconciled_at = ? WHERE id = ?")
+        .bind(params.createdAt, params.reconciledAt, row.id)
         .run();
       return row;
     }
 
-    it("selects the environment's open requests inside the expiry cutoff, least recently reconciled first", async () => {
-      const newerReconciled = await seedCandidate({
+    it("selects the environment's open requests inside the expiry cutoff, queued by last reconcile or creation", async () => {
+      const reconciledRecently = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
+        createdAt: "2026-05-02T00:00:00.000Z",
         reconciledAt: "2026-05-12T00:00:00.000Z",
       });
-      const olderReconciled = await seedCandidate({
-        projectId: TEST_PROJECT_ID,
-        expiresAt: "2026-05-10T00:01:00.000Z",
-        reconciledAt: "2026-05-11T00:00:00.000Z",
-      });
-      const neverReconciled = await seedCandidate({
+      const createdAfterOlderReconcile = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
+        createdAt: "2026-05-11T06:00:00.000Z",
+        reconciledAt: null,
+      });
+      const reconciledEarlier = await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        expiresAt: "2026-05-10T00:01:00.000Z",
+        createdAt: "2026-05-01T00:00:00.000Z",
+        reconciledAt: "2026-05-11T00:00:00.000Z",
+      });
+      const neverReconciledEarly = await seedCandidate({
+        projectId: TEST_PROJECT_ID,
+        expiresAt: null,
+        createdAt: "2026-05-03T00:00:00.000Z",
         reconciledAt: null,
       });
       await seedCandidate({
         projectId: `${TEST_PROJECT_ID}_production`,
         expiresAt: null,
+        createdAt: "2026-04-01T00:00:00.000Z",
         reconciledAt: null,
       });
       const paid = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
+        createdAt: "2026-04-01T00:00:00.000Z",
         reconciledAt: null,
       });
       await seedTransfer("xfr_reconcile_paid");
@@ -220,6 +232,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       const unresolvedWallet = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
+        createdAt: "2026-04-01T00:00:00.000Z",
         reconciledAt: null,
       });
       await getDb(env)
@@ -229,6 +242,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: "2026-05-09T00:00:00.000Z",
+        createdAt: "2026-04-01T00:00:00.000Z",
         reconciledAt: null,
       });
 
@@ -239,9 +253,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
 
       expect(rows.map((row) => row.id)).toEqual([
-        neverReconciled.id,
-        olderReconciled.id,
-        newerReconciled.id,
+        neverReconciledEarly.id,
+        reconciledEarlier.id,
+        createdAfterOlderReconcile.id,
+        reconciledRecently.id,
       ]);
     });
 
