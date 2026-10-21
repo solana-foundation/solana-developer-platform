@@ -2,7 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { parseTokenAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
@@ -233,7 +233,7 @@ async function buildPaymentTransaction(
 
   let instructions: Instruction[];
   if (request.token === SOL_MINT) {
-    const lamports = parseDecimalAmount(request.amount, SOL_DECIMALS);
+    const lamports = parseTokenAmount(request.amount, SOL_DECIMALS);
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }

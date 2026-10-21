@@ -1,183 +1,130 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
-import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { type Address, unwrapOption } from "@solana/kit";
-import { fetchSysvarClock } from "@solana/sysvars";
+import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
+import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
-  type Extension,
-  fetchMaybeMint,
-  uiAmountToAmountForInterestBearingMintWithoutSimulation,
-  uiAmountToAmountForScaledUiAmountMintWithoutSimulation,
-} from "@solana-program/token-2022";
+  type Account,
+  type Address,
+  address,
+  fetchEncodedAccount,
+  unwrapOption,
+} from "@solana/kit";
+import { decodeMint, type Mint } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 
-/** Converts a payment's UI decimal amount string into the base units its mint moves. */
-export type PaymentAmountConverter = (uiAmount: string) => bigint;
+/** An exact decimal-string to u64 base-unit conversion. */
+export type PaymentAmountConverter = (amount: string) => bigint;
 
-type UiAmountExtension = Extract<
-  Extension,
-  { __kind: "InterestBearingConfig" } | { __kind: "ScaledUiAmountConfig" }
->;
-
-function isUiAmountExtension(extension: Extension): extension is UiAmountExtension {
-  return (
-    extension.__kind === "InterestBearingConfig" ||
-    // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
-    extension.__kind === "ScaledUiAmountConfig"
-  );
+export interface PaymentMint {
+  decimals: number;
+  tokenProgram: Address;
+  toBaseUnits: PaymentAmountConverter;
 }
 
-/** Interest-bearing wins over scaled UI amount, the order Kit's own mint dispatch uses. */
-function findUiAmountExtension(extensions: readonly Extension[]): UiAmountExtension | null {
-  const uiAmountExtensions = extensions.filter(isUiAmountExtension);
-  const interestBearing = uiAmountExtensions.find(
-    (extension) => extension.__kind === "InterestBearingConfig"
-  );
-  const selected = interestBearing !== undefined ? interestBearing : uiAmountExtensions.at(0);
-  return selected === undefined ? null : selected;
-}
+const UNSUPPORTED_PAYMENT_EXTENSIONS: ReadonlySet<string> = new Set([
+  "InterestBearingConfig",
+  // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
+  "ScaledUiAmountConfig",
+  "NonTransferable",
+]);
 
-/**
- * Reads a mint's decimals and the extension, if any, that rescales its UI amounts.
- * A well-known mint declared on the open scope's cluster answers from the catalogue
- * without an RPC read: `pnpm check:well-known-mints` pins its decimals and that it
- * carries no UI-amount extension. Any other mint is read from the cluster.
- *
- * @param mint - The mint to read.
- * @returns The mint's decimals and its UI-amount extension, or null when it has none.
- */
-async function readUiAmountMint(
-  mint: Address
-): Promise<{ decimals: number; uiAmountExtension: UiAmountExtension | null }> {
-  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
-  if (wellKnown?.clusters.includes(currentClusterScope().cluster)) {
-    return { decimals: wellKnown.decimals, uiAmountExtension: null };
-  }
-  const mintAccount = await fetchMaybeMint(createClusterRpc(), mint, { commitment: "confirmed" });
-  if (!mintAccount.exists) {
-    throw badRequest("Token mint account does not exist");
-  }
-  const extensions = unwrapOption(mintAccount.data.extensions);
-  return {
-    decimals: mintAccount.data.decimals,
-    uiAmountExtension: extensions === null ? null : findUiAmountExtension(extensions),
-  };
-}
-
-/**
- * Parses a UI amount at a mint's decimals, answering a malformed or too-precise
- * amount with a 400 instead of letting `AmountError` reach the app's error
- * handler as a 500.
- *
- * @param uiAmount - The caller's decimal amount string.
- * @param decimals - The mint's decimals.
- * @returns The amount in base units at that scale.
- */
-function parsePaymentAmount(uiAmount: string, decimals: number): bigint {
+/** Maps invalid precision or a value outside u64 to a client error, without rounding. */
+function parsePaymentAmount(amount: string, decimals: number): bigint {
   try {
-    return parseDecimalAmount(uiAmount, decimals);
+    return parseTokenAmount(amount, decimals);
   } catch (error) {
-    if (error instanceof AmountError) {
-      throw badRequest(error.message);
-    }
+    if (error instanceof AmountError) throw badRequest(error.message);
     throw error;
   }
 }
 
 /**
- * Refuses, with a 400, a UI amount that does not parse at its mint's decimals,
- * so a payment is checked before its row is stored rather than when it executes.
- * Native SOL is checked through `SOL_MINT`, which the catalogue holds at 9 decimals.
- *
- * @param uiAmount - The caller's decimal amount string.
- * @param mint - The mint the amount is denominated in.
+ * Resolves the mint's actual decimals and owning token program in one read.
+ * Refuses extensions that change the requested amount or prevent transfer.
+ * Catalogue facts are verified by check:well-known-mints for the named cluster;
+ * other mints are decoded live. The returned facts and converter are reused
+ * through funding checks and builds, without another mint or clock read.
  */
-export async function assertPaymentAmountFitsMint(uiAmount: string, mint: Address): Promise<void> {
-  const { decimals } = await readUiAmountMint(mint);
-  parsePaymentAmount(uiAmount, decimals);
-}
-
-/**
- * Converts a UI amount for a flow that fixes a raw amount once and reuses it
- * (recurring payments and subscription plans pin a per-period cap in base units),
- * refusing interest-bearing and scaled-UI-amount mints, whose raw amount for a
- * fixed UI amount drifts with the cluster clock. Token-2022 extensions are fixed
- * at mint initialization, so a mint admitted here stays admissible.
- *
- * @param uiAmount - The caller's decimal amount string.
- * @param mint - The mint the flow is denominated in.
- * @returns The amount in base units.
- */
-export async function parseStaticPaymentAmount(uiAmount: string, mint: Address): Promise<bigint> {
-  const { decimals, uiAmountExtension } = await readUiAmountMint(mint);
-  if (uiAmountExtension !== null) {
-    throw badRequest(
-      "Recurring payments do not support interest-bearing or scaled UI amount tokens"
-    );
+async function readPaymentMint(mint: Address): Promise<PaymentMint> {
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  if (wellKnown?.clusters.includes(currentClusterScope().cluster)) {
+    return {
+      decimals: wellKnown.decimals,
+      tokenProgram: address(SPL_TOKEN_PROGRAMS[wellKnown.tokenProgram]),
+      toBaseUnits: (amount) => parsePaymentAmount(amount, wellKnown.decimals),
+    };
   }
-  return parsePaymentAmount(uiAmount, decimals);
+
+  const account = await fetchEncodedAccount(createClusterRpc(), mint, { commitment: "confirmed" });
+  if (!account.exists) throw badRequest("Token mint account does not exist");
+  if (
+    account.programAddress !== SPL_TOKEN_PROGRAMS["spl-token"] &&
+    account.programAddress !== SPL_TOKEN_PROGRAMS["token-2022"]
+  ) {
+    throw badRequest("Unsupported token program for mint");
+  }
+  // Legacy and Token-2022 mints share the base layout; the decoder also reads extensions.
+  let decoded: Account<Mint>;
+  try {
+    decoded = decodeMint(account);
+  } catch {
+    throw badRequest("Token mint account data is invalid");
+  }
+  if (!decoded.data.isInitialized) throw badRequest("Token mint is not initialized");
+  const extensions = unwrapOption(decoded.data.extensions);
+  if (extensions !== null) {
+    for (const extension of extensions) {
+      if (UNSUPPORTED_PAYMENT_EXTENSIONS.has(extension.__kind)) {
+        throw badRequest(`Payments do not support the ${extension.__kind} mint extension`);
+      }
+    }
+  }
+  const decimals = decoded.data.decimals;
+  return {
+    decimals,
+    tokenProgram: account.programAddress,
+    toBaseUnits: (amount) => parsePaymentAmount(amount, decimals),
+  };
 }
 
-/**
- * Reads a mint once and returns the converter every payment path uses to turn its
- * UI amount into base units. A plain SPL Token or Token-2022 mint converts by its
- * decimals alone; a mint with `InterestBearingConfig` or `ScaledUiAmountConfig`
- * reverses the token program's UI scaling as of the cluster clock read here, so
- * `TransferChecked` debits what the caller asked for rather than more. Every
- * conversion validates precision with `parseDecimalAmount` first, so the input
- * grammar and error contract are the same on every mint.
- *
- * The converter is synchronous: callers converting many amounts for one mint
- * load it once and reuse it, and a funding check and the build it precedes
- * must share one instance so both see the same raw amount.
- *
- * @param mint - The mint the amounts are denominated in.
- * @returns A converter from UI decimal strings to base units for that mint.
- */
+// Share immutable mint facts only within this request or cron scope. A failed
+// lookup is removed, and a later scope always reads custom mints afresh.
+const scopedMints = new WeakMap<ClusterScope, Map<Address, Promise<PaymentMint>>>();
+
+export function loadPaymentMint(mint: Address): Promise<PaymentMint> {
+  const scope = currentClusterScope();
+  let mints = scopedMints.get(scope);
+  if (mints === undefined) {
+    mints = new Map();
+    scopedMints.set(scope, mints);
+  }
+  const pending = mints.get(mint);
+  if (pending !== undefined) return pending;
+  const entries = mints;
+  const lookup = readPaymentMint(mint).catch((error: unknown) => {
+    entries.delete(mint);
+    throw error;
+  });
+  entries.set(mint, lookup);
+  return lookup;
+}
+
+/** Resolves a mint once for a batch of exact conversions. */
 export async function loadPaymentAmountConverter(mint: Address): Promise<PaymentAmountConverter> {
-  const { decimals, uiAmountExtension } = await readUiAmountMint(mint);
-  const toStaticBaseUnits: PaymentAmountConverter = (uiAmount) =>
-    parsePaymentAmount(uiAmount, decimals);
-  if (uiAmountExtension === null) {
-    return toStaticBaseUnits;
-  }
+  return (await loadPaymentMint(mint)).toBaseUnits;
+}
 
-  const clock = await fetchSysvarClock(createClusterRpc(), { commitment: "confirmed" });
-  switch (uiAmountExtension.__kind) {
-    case "InterestBearingConfig": {
-      const config = uiAmountExtension;
-      return (uiAmount) => {
-        toStaticBaseUnits(uiAmount);
-        return uiAmountToAmountForInterestBearingMintWithoutSimulation(
-          uiAmount.trim(),
-          decimals,
-          Number(clock.unixTimestamp),
-          Number(config.lastUpdateTimestamp),
-          Number(config.initializationTimestamp),
-          config.preUpdateAverageRate,
-          config.currentRate
-        );
-      };
-    }
-    // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
-    case "ScaledUiAmountConfig": {
-      const multiplier =
-        clock.unixTimestamp >= uiAmountExtension.newMultiplierEffectiveTimestamp
-          ? uiAmountExtension.newMultiplier
-          : uiAmountExtension.multiplier;
-      return (uiAmount) => {
-        toStaticBaseUnits(uiAmount);
-        return uiAmountToAmountForScaledUiAmountMintWithoutSimulation(
-          uiAmount.trim(),
-          decimals,
-          multiplier
-        );
-      };
-    }
-    default: {
-      const exhaustive: never = uiAmountExtension;
-      return exhaustive;
-    }
-  }
+/** Recurring and subscription amounts use the same admissible mints as single payments. */
+export async function readStaticAmountMintDecimals(mint: Address): Promise<number> {
+  return (await loadPaymentMint(mint)).decimals;
+}
+
+/** Validates a payment's precision before a create path persists it. */
+export async function assertPaymentAmountFitsMint(amount: string, mint: Address): Promise<void> {
+  (await loadPaymentMint(mint)).toBaseUnits(amount);
+}
+
+/** Parses recurring and subscription terms with the same strict payment rules. */
+export async function parseStaticPaymentAmount(amount: string, mint: Address): Promise<bigint> {
+  return (await loadPaymentMint(mint)).toBaseUnits(amount);
 }

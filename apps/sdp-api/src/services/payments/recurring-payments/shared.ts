@@ -52,7 +52,6 @@ import {
 import { assertMovementAdmitted, decidePrincipal } from "@/lib/money-admission";
 import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { parseGrantsColumn } from "@/services/api-key.service";
 import {
@@ -60,7 +59,7 @@ import {
   normalizePaymentToken,
   parseU64String,
 } from "@/services/payment-operation.service";
-import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
+import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -170,11 +169,8 @@ export async function resolvePlanRuntime(
   plan: PaymentSubscriptionPlanRow
 ): Promise<{ amountBaseUnits: bigint; mint: Address; tokenProgram: Address }> {
   const mint = assertSubscriptionTokenMint(plan.token);
-  const rpc = createClusterRpc();
-  const [tokenProgram, amountBaseUnits] = await Promise.all([
-    resolveMintTokenProgram(rpc, mint),
-    parseStaticPaymentAmount(plan.amount, mint),
-  ]);
+  const { tokenProgram, toBaseUnits } = await loadPaymentMint(mint);
+  const amountBaseUnits = toBaseUnits(plan.amount);
 
   if (amountBaseUnits <= 0n) {
     throw badRequest("Subscription amount must be greater than zero");

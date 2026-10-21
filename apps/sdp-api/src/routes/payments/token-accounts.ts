@@ -15,8 +15,9 @@ import {
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 import {
-  loadPaymentAmountConverter,
+  loadPaymentMint,
   type PaymentAmountConverter,
+  type PaymentMint,
 } from "@/services/payments/token-amount";
 
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
@@ -212,17 +213,18 @@ export async function resolveSourceTokenAccountOrAta(
   rpc: SolanaRpc,
   owner: Address,
   mint: Address,
-  tokenProgram: Address
-): Promise<{ tokenAccount: Address; exists: boolean }> {
+  paymentMint: PaymentMint
+): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
   const [tokenAccount] = await findAssociatedTokenPda({
     owner,
-    tokenProgram,
+    tokenProgram: paymentMint.tokenProgram,
     mint,
   });
   const tokenAccountInfo = await getAccountInfo(rpc, tokenAccount);
 
   return {
     tokenAccount,
+    decimals: paymentMint.decimals,
     exists: tokenAccountInfo !== null,
   };
 }
@@ -244,13 +246,20 @@ export async function buildSplTransferInstructions(
     source?: SplTransferSource;
   }
 ) {
-  const tokenProgram =
-    input.source?.tokenProgram ?? (await resolveMintTokenProgram(rpc, input.mint));
-  const sourceTokenAccount =
-    input.source ??
-    (await resolveSourceTokenAccount(rpc, input.authority.address, input.mint, tokenProgram));
-  const toBaseUnits = input.source?.toBaseUnits ?? (await loadPaymentAmountConverter(input.mint));
-  const transferAmount = toBaseUnits(input.amount);
+  let source = input.source;
+  if (source === undefined) {
+    const mint = await loadPaymentMint(input.mint);
+    const account = await resolveSourceTokenAccount(
+      rpc,
+      input.authority.address,
+      input.mint,
+      mint.tokenProgram
+    );
+    source = { ...account, ...mint };
+  }
+  const { tokenProgram } = source;
+  const sourceTokenAccount = source;
+  const transferAmount = source.toBaseUnits(input.amount);
   if (transferAmount <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
   }

@@ -6,6 +6,7 @@ import {
   compareDecimalAmounts,
   formatDecimalAmount,
   parseDecimalAmount,
+  parseTokenAmount,
   scaleDecimalAmountByBps,
   toMosaicAmount,
   toNumberAmount,
@@ -161,5 +162,16 @@ describe("kit-backed amount helpers", () => {
       () => compareDecimalAmounts(hugeFraction, "0.1"),
       (error: unknown) => error instanceof AmountError && error.message === "Amount is out of range"
     );
+  });
+});
+
+describe("parseTokenAmount", () => {
+  it("accepts the full u64 range without floating-point conversion", () => {
+    assert.equal(parseTokenAmount("9007199254.740993", 6), 9007199254740993n);
+    assert.equal(parseTokenAmount("18446744073709.551615", 6), 18446744073709551615n);
+  });
+  it("rejects excess precision and u64 overflow", () => {
+    assert.throws(() => parseTokenAmount("1.0000001", 6), AmountError);
+    assert.throws(() => parseTokenAmount("18446744073709.551616", 6), AmountError);
   });
 });

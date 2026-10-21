@@ -79,7 +79,7 @@ import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
+import { loadPaymentMint } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -492,10 +492,8 @@ async function verifyRecurringPaymentCollection(input: {
 
   const rpc = createClusterRpc();
   const mint = assertValidAddress(input.recurringPayment.token, "token");
-  const [tokenProgram, amountBaseUnits] = await Promise.all([
-    resolveMintTokenProgram(rpc, mint),
-    parseStaticPaymentAmount(input.recurringPayment.amount, mint),
-  ]);
+  const { tokenProgram, toBaseUnits } = await loadPaymentMint(mint);
+  const amountBaseUnits = toBaseUnits(input.recurringPayment.amount);
   const confirmedTransaction = await getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {
     throw solanaRpcError(
@@ -1736,14 +1734,15 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Resolved signing wallet does not match source wallet");
     }
 
-    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+    const paymentMint = await loadPaymentMint(mint);
+    const { tokenProgram } = paymentMint;
     const sourceTokenAccount = await resolveSourceTokenAccountOrAta(
       rpc,
       sourceOwner,
       mint,
-      tokenProgram
+      paymentMint
     );
-    const amountBaseUnits = await parseStaticPaymentAmount(input.recurringPayment.amount, mint);
+    const amountBaseUnits = paymentMint.toBaseUnits(input.recurringPayment.amount);
     if (amountBaseUnits <= 0n) {
       throw badRequest("Subscription amount must be greater than zero");
     }

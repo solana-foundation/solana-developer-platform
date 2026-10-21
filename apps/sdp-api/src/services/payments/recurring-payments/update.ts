@@ -61,15 +61,12 @@ import {
 import { normalizeDecimalString } from "@/lib/idempotency";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
-import {
-  resolveMintTokenProgram,
-  resolveSourceTokenAccountOrAta,
-} from "@/routes/payments/token-accounts";
+import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
-import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
+import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -1476,9 +1473,10 @@ async function runReplacementUpdate(input: {
   const owner = assertValidAddress(input.resolved.sourceWallet.publicKey, "sourceAddress");
   const destination = assertValidAddress(input.resolved.destinationAddress, "destinationAddress");
   const mint = assertValidAddress(input.resolved.token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-  const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
-  const amountBaseUnits = await parseStaticPaymentAmount(input.resolved.amount, mint);
+  const paymentMint = await loadPaymentMint(mint);
+  const { tokenProgram } = paymentMint;
+  const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, paymentMint);
+  const amountBaseUnits = paymentMint.toBaseUnits(input.resolved.amount);
   if (amountBaseUnits <= 0n) {
     throw badRequest("Subscription amount must be greater than zero");
   }

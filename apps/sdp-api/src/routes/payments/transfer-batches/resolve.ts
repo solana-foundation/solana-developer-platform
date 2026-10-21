@@ -1,17 +1,14 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseTokenAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { type AppContext, getCounterpartyAccountsRepository } from "@/routes/payments/context";
-import {
-  resolveMintTokenProgram,
-  resolveSourceTokenAccount,
-} from "@/routes/payments/token-accounts";
+import { resolveSourceTokenAccount } from "@/routes/payments/token-accounts";
 import {
   type ResolvedScope,
   resolveScope,
@@ -23,10 +20,7 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
-import {
-  loadPaymentAmountConverter,
-  type PaymentAmountConverter,
-} from "@/services/payments/token-amount";
+import { loadPaymentMint, type PaymentAmountConverter } from "@/services/payments/token-amount";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
   CreateTransferBatchInput,
@@ -38,10 +32,8 @@ import type {
 } from "./types";
 
 /**
- * Parses a recipient amount into token base units; the converter answers a
- * too-precise amount with a 400. A positive UI amount can still convert to zero
- * base units on an interest-bearing or scaled mint; that is refused too, so no
- * recipient becomes a sponsored transfer that moves nothing.
+ * Parses a recipient amount into token base units, mapping amount-format
+ * violations to a 400 response. Every recipient must move positive base units.
  *
  * @param amount - Decimal amount string from the request body.
  * @param toBaseUnits - The batch token's converter from UI amounts to base units.
@@ -74,21 +66,23 @@ async function resolveTokenContext(
       kind: "sol",
       token: SOL_MINT,
       decimals: SOL_DECIMALS,
-      toBaseUnits: (amount) => parseDecimalAmount(amount, SOL_DECIMALS),
+      toBaseUnits: (amount) => parseTokenAmount(amount, SOL_DECIMALS),
     };
   }
 
   const mintAddress = assertValidAddress(token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
-  const [sourceTokenAccount, toBaseUnits] = await Promise.all([
-    resolveSourceTokenAccount(rpc, sourceAddress, mintAddress, tokenProgram),
-    loadPaymentAmountConverter(mintAddress),
-  ]);
+  const { tokenProgram, decimals, toBaseUnits } = await loadPaymentMint(mintAddress);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    rpc,
+    sourceAddress,
+    mintAddress,
+    tokenProgram
+  );
 
   return {
     kind: "spl",
     token,
-    decimals: sourceTokenAccount.decimals,
+    decimals,
     mintAddress,
     tokenProgram,
     sourceTokenAccount: sourceTokenAccount.tokenAccount,
@@ -151,7 +145,7 @@ function resolveRecipients(params: {
       counterpartyId: account.counterparty_id,
       counterpartyAccountId: recipient.counterpartyAccountId,
       destinationAddress: readCryptoWalletAddress(account, index),
-      amount: formatDecimalAmount(parseDecimalAmount(recipient.amount, decimals), decimals),
+      amount: formatDecimalAmount(parseTokenAmount(recipient.amount, decimals), decimals),
       amountBaseUnits,
     };
   });

@@ -1947,7 +1947,7 @@ describe("payment transfer batches", () => {
     }
   );
 
-  it("refuses a scaled UI amount recipient that converts to zero base units before signing anything", async () => {
+  it("refuses a scaled UI mint before storing or signing a batch", async () => {
     const mint = syntheticAddress(22);
     getAccountInfoMock.mockImplementationOnce(
       async (client, account) =>
@@ -2003,7 +2003,10 @@ describe("payment transfer batches", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({
-      error: { code: "BAD_REQUEST", message: "Recipient amount must be greater than zero" },
+      error: {
+        code: "BAD_REQUEST",
+        message: "Payments do not support the ScaledUiAmountConfig mint extension",
+      },
     });
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -2018,7 +2021,7 @@ describe("payment transfer batches", () => {
     expect(count).toEqual({ count: 0 });
   });
 
-  it("moves a scaled UI amount mint's converted base units while recipients keep their requested amount", async () => {
+  it("moves exact base units on a plain Token-2022 mint", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
@@ -2038,13 +2041,7 @@ describe("payment transfer batches", () => {
           mint,
           {
             decimals: 6,
-            extensions: [
-              scaledUiAmountConfig({
-                multiplier: 2,
-                newMultiplier: 4,
-                newMultiplierEffectiveTimestamp: 1_800_000_000n,
-              }),
-            ],
+            extensions: null,
           },
         ],
       ]),
@@ -2095,7 +2092,7 @@ describe("payment transfer batches", () => {
         ? [getTransferCheckedInstructionDataDecoder().decode(instruction.data).amount]
         : []
     );
-    expect(transferCheckedAmounts).toEqual([5_000_000n, 1_250_000n]);
+    expect(transferCheckedAmounts).toEqual([10_000_000n, 2_500_000n]);
     const stored = await getDb(env)
       .prepare(
         `SELECT r.destination_address, r.amount, b.total_amount
