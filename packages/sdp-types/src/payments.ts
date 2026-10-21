@@ -950,6 +950,14 @@ export const PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY = [
   "expired",
 ] as const satisfies readonly PaymentSubscriptionStatus[];
 /**
+ * A subscription in these was recorded before its authorization was sent. It stops holding its
+ * authority once nothing can still authorize it: no live recurring payment names it and no update
+ * in flight is creating it (a failed attempt has proven its authorization never landed).
+ */
+export const PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION = [
+  "pending_authorization",
+] as const satisfies readonly PaymentSubscriptionStatus[];
+/**
  * A recurring payment in these may be about to use its wallet's authority before it records the
  * authority on its row, so nothing on that wallet is revoked meanwhile.
  */

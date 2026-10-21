@@ -120,6 +120,44 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
   });
 
+  it("releases a subscription left awaiting authorization once nothing can still authorize it", async () => {
+    const { recurringPaymentId } = await canceledSchedule();
+    const pending = await seedAuthoritySubscription(tenant, {
+      authority: AUTHORITY,
+      tokenMint: MINT,
+      status: "pending_authorization",
+      changedAt: LONG_AGO,
+      recurring: null,
+    });
+    await getDb(env).execute(
+      `INSERT INTO payment_recurring_payment_update_attempts (
+         id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+         new_subscription_id)
+       VALUES ('rpua_replacement', ?, ?, ?, 'replacement', 'processing', 'authorize_subscription', ?)`,
+      [TEST_ORG.id, tenant.projectId, required(recurringPaymentId), pending.subscriptionId]
+    );
+
+    // The replacement update is still in flight: its authorization may land.
+    expect(await list()).toEqual([]);
+
+    // A live recurring payment still names it as its subscription.
+    await getDb(env).execute(
+      "UPDATE payment_recurring_payment_update_attempts SET status = 'failed' WHERE id = 'rpua_replacement'"
+    );
+    await getDb(env).execute(
+      "UPDATE payment_recurring_payments SET status = 'pending_activation', subscription_id = ? WHERE id = ?",
+      [pending.subscriptionId, required(recurringPaymentId)]
+    );
+    expect(await list()).toEqual([]);
+
+    // The update failed and the payment that named it was canceled: nothing can authorize it.
+    await getDb(env).execute(
+      "UPDATE payment_recurring_payments SET status = 'canceled' WHERE id = ?",
+      [required(recurringPaymentId)]
+    );
+    expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
+  });
+
   it("keeps an authority while a canceled schedule on it is still inside its billing period", async () => {
     await canceledSchedule(RECENTLY);
 

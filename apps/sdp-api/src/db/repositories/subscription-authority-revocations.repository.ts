@@ -1,6 +1,7 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION,
   PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
   RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY,
@@ -63,11 +64,13 @@ const STATUS_BINDINGS = [
   [...RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY],
   [...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES],
   [...SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES],
+  [...PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION],
 ] as const;
 
 /** The `authority_ref` columns after its first five, bound in this order from STATUS_BINDINGS. */
 const STATUS_COLUMNS = `?::text[] AS subscription_released, ?::text[] AS payment_released,
-  ?::text[] AS payment_claiming, ?::text[] AS attempt_in_flight, ?::text[] AS revocation_holding`;
+  ?::text[] AS payment_claiming, ?::text[] AS attempt_in_flight, ?::text[] AS revocation_holding,
+  ?::text[] AS subscription_awaiting`;
 
 /**
  * Whether `authority_ref.authority` has nothing left that needs it. `authority_ref` is a row the
@@ -77,7 +80,9 @@ const STATUS_COLUMNS = `?::text[] AS subscription_released, ?::text[] AS payment
  * - Every subscription SDP recorded on it, in any project of the environment, is released (a
  *   recurring payment's earlier subscriptions included: an update that moves its wallet or token
  *   leaves the old one here), and its last change is more than its plan's period plus the margin
- *   ago, so none can still be resumed.
+ *   ago, so none can still be resumed. One still awaiting authorization counts as released once
+ *   nothing can authorize it: no unreleased recurring payment names it as its subscription and no
+ *   update in flight is creating it. A failed activation or update leaves it so.
  * - Every recurring payment still on it is released and as long past its period.
  * - Nothing may be about to use one of the wallet's authorities before recording it: no recurring
  *   payment from the wallet is activating, updating or resuming, and no update in flight is moving
@@ -92,7 +97,16 @@ const AUTHORITY_IDLE_PREDICATE = `
       JOIN payment_subscription_plans other_plan ON other_plan.id = other.plan_id
      WHERE other.subscription_authority_address = authority_ref.authority
        AND other_project.environment = authority_ref.environment
-       AND (other.status <> ALL(authority_ref.subscription_released)
+       AND ((other.status <> ALL(authority_ref.subscription_released)
+             AND NOT (other.status = ANY(authority_ref.subscription_awaiting)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM payment_recurring_payments owner
+                         WHERE owner.subscription_id = other.id
+                           AND owner.status <> ALL(authority_ref.payment_released))
+                      AND NOT EXISTS (
+                        SELECT 1 FROM payment_recurring_payment_update_attempts creating
+                         WHERE creating.new_subscription_id = other.id
+                           AND creating.status = ANY(authority_ref.attempt_in_flight))))
             OR COALESCE(other.canceled_at, other.updated_at)::timestamptz
                  + make_interval(hours => other_plan.period_hours + ${SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS})
                > authority_ref.idle_before::timestamptz))
