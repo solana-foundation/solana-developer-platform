@@ -7,7 +7,7 @@ import { Button } from "@sdp/ui/button";
 import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect } from "react";
+import type { ReactNode } from "react";
 import {
   resolveTokenByMint,
   shortenAddress,
@@ -41,6 +41,7 @@ import { RampOpenSale, useLiveRampTransfer } from "./ramp-open-sale";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
 import { TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs.redesign";
 import { isPaymentTransferStatus, useTransactionStatus } from "./transaction-status";
+import { usePendingPaymentRefresh } from "./use-pending-payment-refresh";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -501,15 +502,7 @@ function TransactionRecord({
           signature: liveTransfer.signature,
         }
       : initialTransaction;
-  const router = useRouter();
-  const waitingForPayment = transaction.module === "payments" && transaction.status === "pending";
-  useEffect(() => {
-    if (!waitingForPayment) return;
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") router.refresh();
-    }, 15_000);
-    return () => clearInterval(timer);
-  }, [waitingForPayment, router]);
+  usePendingPaymentRefresh(transaction, transfer?.type);
   const summary = useTransactionSummary(
     transaction,
     transfer,
