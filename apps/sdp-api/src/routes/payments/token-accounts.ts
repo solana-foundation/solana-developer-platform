@@ -314,6 +314,27 @@ function calculateEpochTransferFee(
 }
 
 /**
+ * The fewest base units a scaled mint shows as at least the requested UI amount. Token-2022
+ * truncates both ways (`ScaledUiAmountConfig::try_ui_amount_into_amount` and
+ * `amount_to_ui_amount`), so the truncated conversion can show one UI unit short of what the
+ * caller asked to send; one more base unit always covers it. The shown amount mirrors the
+ * program's `trunc(base units × multiplier)` in f64.
+ *
+ * @param truncatedBaseUnits - The program's truncated UI-to-base-units conversion.
+ * @param requestedUiUnits - The requested UI amount at the mint's decimals, exact.
+ * @param multiplier - The multiplier in effect.
+ * @returns The base units to sign.
+ */
+function roundUpScaledBaseUnits(
+  truncatedBaseUnits: bigint,
+  requestedUiUnits: bigint,
+  multiplier: number
+): bigint {
+  const shownUiUnits = BigInt(Math.trunc(Number(truncatedBaseUnits) * multiplier));
+  return shownUiUnits < requestedUiUnits ? truncatedBaseUnits + 1n : truncatedBaseUnits;
+}
+
+/**
  * The terms a transfer of `amount` signs, read at the cluster's Clock. A
  * Token-2022 mint with a scaled UI amount divides by the multiplier in effect
  * (its new multiplier from the effective timestamp on), the amount its holders
@@ -322,7 +343,8 @@ function calculateEpochTransferFee(
  *
  * The amount passes SDP's decimal grammar first, so a scaled mint refuses a bad
  * amount with the same `AmountError`. The scaled conversion is token-2022's f64
- * helper: it truncates, and loses precision above 2^53 base units.
+ * helper rounded up so the recipient sees at least `amount`; it loses precision
+ * above 2^53 base units.
  *
  * @param transferMint - The mint, as `readTransferMint` read it.
  * @param amount - The decimal amount the caller asked to send.
@@ -365,9 +387,9 @@ export async function resolveTransferTerms(
       clock.unixTimestamp >= scaledUiAmount.newMultiplierEffectiveTimestamp
         ? scaledUiAmount.newMultiplier
         : scaledUiAmount.multiplier;
-    baseUnits = uiAmountToAmountForScaledUiAmountMintWithoutSimulation(
-      amount,
-      decimals,
+    baseUnits = roundUpScaledBaseUnits(
+      uiAmountToAmountForScaledUiAmountMintWithoutSimulation(amount, decimals, multiplier),
+      exactBaseUnits,
       multiplier
     );
   }
@@ -387,7 +409,8 @@ export async function resolveTransferTerms(
  *
  * @param signedTransaction - The base64 wire transaction a transfer row saved before its send.
  * @returns The transfer's base units, decimals and stated fee (null on `TransferChecked`), or
- *   null when no Token-2022 transfer instruction is present.
+ *   null unless the transaction holds exactly one Token-2022 transfer: a batch chunk's several
+ *   transfers do not describe its row's total.
  */
 export function readSignedTokenTransfer(
   signedTransaction: string
@@ -396,6 +419,7 @@ export function readSignedTokenTransfer(
   const message = decompileTransactionMessage(
     getCompiledTransactionMessageDecoder().decode(transaction.messageBytes)
   );
+  const transfers: { amount: bigint; decimals: number; fee: bigint | null }[] = [];
   for (const instruction of message.instructions) {
     if (
       instruction.programAddress !== SPL_TOKEN_2022_PROGRAM_ID ||
@@ -408,19 +432,21 @@ export function readSignedTokenTransfer(
         const { amount, decimals } = getTransferCheckedInstructionDataDecoder().decode(
           instruction.data
         );
-        return { amount, decimals, fee: null };
+        transfers.push({ amount, decimals, fee: null });
+        break;
       }
       case Token2022Instruction.TransferCheckedWithFee: {
         const { amount, decimals, fee } = getTransferCheckedWithFeeInstructionDataDecoder().decode(
           instruction.data
         );
-        return { amount, decimals, fee };
+        transfers.push({ amount, decimals, fee });
+        break;
       }
       default:
-        continue;
+        break;
     }
   }
-  return null;
+  return transfers.length === 1 ? transfers[0] : null;
 }
 
 /**
