@@ -54,18 +54,13 @@ const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
 
 export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
 
-/** The sponsor pays fees and rent; the external payer funds the payment (APE-606). */
-function assertPayerIsNotSponsor(payer: Address, feePayer: Address): void {
-  if (payer === feePayer) {
-    throw badRequest("Payment payer cannot be the fee sponsor");
-  }
-}
-
 /** Saved claims retain their original sponsor even after the configured signer rotates. */
 function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): void {
   const transaction = getTransactionDecoder().decode(getBase64Encoder().encode(unsignedBase64));
   const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-  assertPayerIsNotSponsor(payer, message.staticAccounts[0]);
+  if (payer === message.staticAccounts[0]) {
+    throw badRequest("Payment payer cannot be the fee sponsor");
+  }
 }
 
 /**
@@ -187,7 +182,9 @@ export async function issuePaymentRequestTransaction(
 
   const feePayment = await getFeePayment();
   const feePayer = await feePayment.getFeePayer();
-  assertPayerIsNotSponsor(payer, feePayer);
+  if (payer === feePayer) {
+    throw badRequest("Payment payer cannot be the fee sponsor");
+  }
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const unsignedBase64 = await buildPaymentTransaction(rpc, {
     ...params,
