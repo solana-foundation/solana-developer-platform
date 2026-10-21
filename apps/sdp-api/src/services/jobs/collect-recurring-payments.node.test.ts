@@ -331,13 +331,25 @@ describe("collectDueRecurringPayments", () => {
     });
   });
 
-  it("treats collection conflicts as duplicate-prevention skips", async () => {
+  it("treats collection conflicts as duplicate-prevention skips and logs each one", async () => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
     mocks.rows.due = [recurringRow("active")];
     mocks.collectRecurringPayment.mockRejectedValue(new AppError("CONFLICT", "Already claimed"));
 
     const result = await collectDueRecurringPaymentsIn("sandbox", new Date());
 
     expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1, refused: 0 });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      {
+        error: "Already claimed",
+        environment: "sandbox",
+        organization_id: "org_1",
+        project_id: "proj_1",
+        recurring_payment_id: "prp_active",
+      },
+      "collectDueRecurringPayments: skipped recurring payment on conflict"
+    );
+    warn.mockRestore();
   });
 
   it("collects same-organization rows serially while fanning out across organizations", async () => {
