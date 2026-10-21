@@ -91,7 +91,6 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
-  assertRecurringPlanSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   recurringPaymentErrorMessage,
@@ -1671,7 +1670,6 @@ export async function collectRecurringPayment(input: {
     if (!plan) {
       throw notFound("Subscription plan");
     }
-    assertRecurringPlanSourceWallet(plan, input.sourceWallet);
     if (plan.status !== "active") {
       throw badRequest("Subscription plan must be active before collection");
     }
@@ -1782,7 +1780,7 @@ export async function collectRecurringPayment(input: {
       await resolveProjectSponsorshipScope(input.env, {
         organizationId: input.organizationId,
         projectId: input.projectId,
-        actor: { type: "wallet", id: input.recurringPayment.source_wallet_id },
+        actor: { type: "wallet", id: input.sourceWallet.id },
       }),
       "recurring.collect"
     );
@@ -1822,7 +1820,6 @@ export async function collectRecurringPayment(input: {
 
     const signature = await sendSubscriptionInstructions({
       movement: "recurring.collect",
-      sponsorshipActorWalletId: input.recurringPayment.source_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,

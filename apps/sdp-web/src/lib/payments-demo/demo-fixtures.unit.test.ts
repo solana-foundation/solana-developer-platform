@@ -387,7 +387,6 @@ describe("demo world", () => {
 
     for (const schedule of demoSchedules()) {
       expect(walletIds.has(schedule.sourceCustodyWalletId ?? "")).toBe(true);
-      expect(schedule).not.toHaveProperty("sourceProviderWalletId");
       const accounts = demoData<{ accounts: CounterpartyAccount[] }>(
         `/v1/counterparties/${schedule.counterpartyId}/accounts?pageSize=100`
       ).accounts;

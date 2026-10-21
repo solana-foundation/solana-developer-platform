@@ -12,8 +12,6 @@ import { I18nProvider } from "@/i18n/provider";
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace";
 import { RecurringPaymentDetailWorkspace } from "./recurring-payment-detail-workspace";
 
-import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace";
-
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
@@ -103,50 +101,6 @@ afterEach(() => {
 });
 
 describe("Recurring Payment exact source selection", () => {
-  it("searches unresolved history by its full saved address", () => {
-    render(
-      <RecurringPaymentsWorkspace
-        initialRecurringPayments={[{ ...recurring, sourceCustodyWalletId: null }]}
-        total={1}
-        listState={{ page: 1, pageSize: 25, status: null }}
-        wallets={[source]}
-        counterparties={[counterparty]}
-        issuedTokensByMint={{}}
-      />,
-      { wrapper }
-    );
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: source.publicKey } });
-    expect(document.querySelectorAll("tbody tr")).toHaveLength(1);
-    expect(screen.queryByRole("link", { name: "Treasury" })).toBeNull();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "privy_shared" } });
-    expect(document.querySelectorAll("tbody tr")).toHaveLength(0);
-  });
-
-  it("shows saved address for an unresolved source without selecting its provider alias", async () => {
-    vi.stubGlobal("fetch", async () => Response.json({ data: { wallets: [source] } }));
-    render(
-      <RecurringPaymentDetailWorkspace
-        recurringPayment={{ ...recurring, sourceCustodyWalletId: null }}
-        amountLabel="1 USDC"
-        wallet={null}
-        wallets={[source]}
-        issuedTokensByMint={{}}
-        counterpartyAccounts={[]}
-        counterpartyLabel="Receiver"
-        collectionAttempts={[]}
-        collectionAttemptsTotal={0}
-      />,
-      { wrapper }
-    );
-    expect(screen.queryByText(/privy_shared/)).toBeNull();
-    expect(screen.getAllByText("111111…1111").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Treasury" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    await waitFor(() =>
-      expect(screen.getAllByText(/Source wallet unavailable/i).length).toBeGreaterThan(0)
-    );
-  });
-
   it("does not carry a previous wallet preload into another Project's inventory", async () => {
     let inventory = [source];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {

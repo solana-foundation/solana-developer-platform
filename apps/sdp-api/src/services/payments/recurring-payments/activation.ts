@@ -57,7 +57,6 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
-  assertRecurringPlanSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
@@ -532,7 +531,6 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   projectId: string;
   rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
-  sponsorshipActorWalletId: string;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
   subscriptionAuthority: Awaited<
@@ -569,7 +567,6 @@ async function prepareSubscriptionAuthorityForActivation(input: {
       });
   const initSignature = await sendSubscriptionInstructions({
     movement: "recurring.activate",
-    sponsorshipActorWalletId: input.sponsorshipActorWalletId,
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -815,7 +812,6 @@ export async function activateRecurringPayment(input: {
       }
     );
     if (!onChainPlan) {
-      assertRecurringPlanSourceWallet(plan, input.sourceWallet);
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
           amount: amountBaseUnits,
@@ -832,7 +828,6 @@ export async function activateRecurringPayment(input: {
       );
       planCreationSignature = await sendSubscriptionInstructions({
         movement: "recurring.activate",
-        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -970,7 +965,6 @@ export async function activateRecurringPayment(input: {
       }
     );
     if (!onChainSubscription) {
-      assertRecurringPlanSourceWallet(plan, input.sourceWallet);
       let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,
         subscriptionAuthorityAddress,
@@ -981,7 +975,7 @@ export async function activateRecurringPayment(input: {
         await resolveProjectSponsorshipScope(input.env, {
           organizationId: input.organizationId,
           projectId: input.projectId,
-          actor: { type: "wallet", id: claimed.source_wallet_id },
+          actor: { type: "wallet", id: input.sourceWallet.id },
         }),
         "recurring.activate"
       );
@@ -989,7 +983,6 @@ export async function activateRecurringPayment(input: {
       const payer = createNoopSigner(feePayer);
 
       subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
-        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         recurringRepo,
         attempt,
@@ -1023,7 +1016,6 @@ export async function activateRecurringPayment(input: {
       });
       authorizationSignature = await sendSubscriptionInstructions({
         movement: "recurring.activate",
-        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

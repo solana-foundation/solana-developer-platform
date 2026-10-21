@@ -84,53 +84,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     repo = createPostgresPaymentRecurringPaymentsRepository(db);
   });
 
-  it("preserves plan wallet identities when updating metadata or on-chain identifiers", async () => {
-    const plans = createPostgresPaymentSubscriptionsRepository(getDb(env));
-    const plan = await plans.createPlan({
-      id: "plan_metadata_identity",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      ownerWalletId: TEST_PROVIDER_WALLET_ID,
-      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      ownerAddress: TEST_SOURCE_ADDRESS,
-      token: "USDC",
-      amount: "1",
-      periodHours: 24,
-      programPlanId: "12345",
-      planPda: null,
-      destinationAddress: null,
-      pullerWalletId: TEST_PROVIDER_WALLET_ID,
-      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      pullerAddress: TEST_SOURCE_ADDRESS,
-      metadataUri: null,
-      status: "draft",
-      createdBy: TEST_USER.id,
-      createdAt: "2026-10-12T00:00:00Z",
-      updatedAt: "2026-10-12T00:00:00Z",
-    });
-    if (!plan) throw new Error("Missing plan fixture");
-    const updated = await plans.updatePlan({
-      planId: plan.id,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      metadataUri: "https://example.com/metadata.json",
-      planPda: "retained_plan_pda",
-      status: "active",
-      updatedAt: "2026-10-12T01:00:00Z",
-    });
-    expect(updated).toMatchObject({
-      owner_wallet_id: TEST_PROVIDER_WALLET_ID,
-      owner_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
-      owner_address: TEST_SOURCE_ADDRESS,
-      puller_wallet_id: TEST_PROVIDER_WALLET_ID,
-      puller_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
-      puller_address: TEST_SOURCE_ADDRESS,
-      metadata_uri: "https://example.com/metadata.json",
-      plan_pda: "retained_plan_pda",
-      status: "active",
-    });
-  });
-
   async function seedCounterpartyAccount() {
     const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
     const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(getDb(env));
@@ -451,6 +404,7 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
         organizationId: TEST_ORG.id,
         projectId,
         ownerWalletId: sourceWallet.walletId,
+        ownerCustodyWalletId: sourceWallet.custodyWalletId,
         ownerAddress: TEST_SOURCE_ADDRESS,
         token: usdcMint(environment),
         amount: "10.00",

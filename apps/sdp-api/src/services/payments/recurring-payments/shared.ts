@@ -230,29 +230,6 @@ export function assertRecurringPaymentSourceWallet(
   }
 }
 
-export function assertRecurringPlanSourceWallet(
-  plan: PaymentSubscriptionPlanRow,
-  wallet: CustodyWallet
-): void {
-  if (plan.owner_custody_wallet_id !== wallet.id) {
-    throw conflict("Recurring payment plan owner is unresolved or does not match its exact source");
-  }
-  if (plan.owner_address !== wallet.publicKey)
-    throw conflict("Recurring payment plan owner address does not match source wallet");
-  const absentPuller =
-    plan.puller_custody_wallet_id === null &&
-    plan.puller_wallet_id === null &&
-    plan.puller_address === null;
-  if (
-    !absentPuller &&
-    (plan.puller_custody_wallet_id !== wallet.id || plan.puller_address !== wallet.publicKey)
-  ) {
-    throw conflict(
-      "Recurring payment plan puller is unresolved or does not match its exact source"
-    );
-  }
-}
-
 export async function sendSubscriptionInstructions(input: {
   env: Env;
   /** The movement these instructions serve; the custody signer decides on it. */
@@ -260,7 +237,6 @@ export async function sendSubscriptionInstructions(input: {
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
-  sponsorshipActorWalletId: string;
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
@@ -287,7 +263,7 @@ export async function sendSubscriptionInstructions(input: {
     await resolveProjectSponsorshipScope(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
-      actor: { type: "wallet", id: input.sponsorshipActorWalletId },
+      actor: { type: "wallet", id: input.sourceWallet.id },
     }),
     input.movement
   );

@@ -10,7 +10,6 @@ export interface PaymentSubscriptionPlanRow {
   id: string;
   organization_id: string;
   project_id: string;
-  owner_wallet_id: string;
   owner_custody_wallet_id: string | null;
   owner_address: string;
   token: string;
@@ -73,7 +72,7 @@ export interface CreatePaymentSubscriptionPlanInput {
   organizationId: string;
   projectId: string;
   ownerWalletId: string;
-  ownerCustodyWalletId?: string | null;
+  ownerCustodyWalletId: string;
   ownerAddress: string;
   token: string;
   amount: string;

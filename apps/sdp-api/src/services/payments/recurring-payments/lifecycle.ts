@@ -42,7 +42,6 @@ import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
-  assertRecurringPlanSourceWallet,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
@@ -653,9 +652,6 @@ async function runRecurringPaymentLifecycle(
     if (recoveringStaleLifecycle && input.operation === "resume") {
       await input.admitStart();
     }
-    if (input.operation === "resume") {
-      assertRecurringPlanSourceWallet(plan, input.sourceWallet);
-    }
     const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
@@ -696,7 +692,6 @@ async function runRecurringPaymentLifecycle(
 
     signature = await sendSubscriptionInstructions({
       movement: LIFECYCLE_MOVEMENTS[input.operation],
-      sponsorshipActorWalletId: claimed.source_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
