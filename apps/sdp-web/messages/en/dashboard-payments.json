@@ -1318,7 +1318,6 @@
       "noWalletDescription": "A request names the wallet the payment lands in, and this project holds none. Create one and the link has somewhere to go.",
       "openWallets": "Open Wallets",
       "paymentLinkCreated": "Payment link created",
-      "createdLinkUnavailable": "Request created, but its payment link could not be loaded. Check the refreshed list before creating another request.",
       "createPaymentRequest": "Create payment request",
       "createPaymentLink": "Create payment link",
       "createPaymentLinkDescription": "Request a fixed payment to one of your wallets.",

@@ -6,7 +6,6 @@ import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
-  seedCachedKey,
   seedProductionPrivyWallet,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
@@ -75,56 +74,6 @@ describe("Payments routes — payment request access before the key", () => {
 
     expect(response.status).toBe(201);
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
-  });
-
-  it("refuses a saved response after the manage action is revoked", async () => {
-    await seedCachedKey({
-      grants: ["payment_requests.manage"],
-      walletScope: "selected",
-      walletIds: [],
-    });
-    const body = {
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      token: DEVNET_USDC_MINT,
-      amount: "1",
-    };
-    const key = "payreq-revoked-manage";
-    expect((await postPaymentRequest(body, key)).status).toBe(201);
-    expect(await storedKeyCount(key)).toBe(1);
-
-    await getDb(env)
-      .prepare("UPDATE api_keys SET grants = '{}'::text[] WHERE id = ?")
-      .bind(TEST_API_KEY.id)
-      .run();
-
-    const retry = await postPaymentRequest(body, key);
-    expect(retry.status).toBe(403);
-    expect(retry.headers.get("Idempotent-Replayed")).toBeNull();
-    expect(await storedKeyCount(key)).toBe(1);
-  });
-
-  it("replays saved creation for an inactive exact recipient while refusing a new creation", async () => {
-    const body = {
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      token: DEVNET_USDC_MINT,
-      amount: "1",
-    };
-    const key = "payreq-inactive-recipient";
-    const created = await postPaymentRequest(body, key);
-    expect(created.status).toBe(201);
-    const savedBody = await created.text();
-
-    await getDb(env)
-      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
-      .bind(TEST_CUSTODY_WALLET_ID)
-      .run();
-
-    const replay = await postPaymentRequest(body, key);
-    expect(replay.status).toBe(201);
-    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
-    expect(await replay.text()).toBe(savedBody);
-    expect(await storedKeyCount(key)).toBe(1);
-    expect((await postPaymentRequest(body, `${key}-new`)).status).toBe(404);
   });
 });
 

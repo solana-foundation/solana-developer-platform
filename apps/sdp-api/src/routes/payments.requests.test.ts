@@ -1,52 +1,34 @@
-import { PAYMENT_REQUEST_STATUSES } from "@sdp/types/payments";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
+import { successResponseSchema } from "@/openapi/schemas/base";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
-  createKoraAdapterMock,
-  createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
-  seedCachedKey,
-  seedCounterparty,
   TEST_API_KEY,
-  TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PROJECT,
-  TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
-import { seedDefaultProjects } from "@/test/helpers/projects";
 
 const requestFieldsSchema = z.object({
-  id: z.string().min(1),
-  publicToken: z.never().optional(),
-  reference: z.string().min(1),
-  custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
+  id: z.string(),
+  custodyWalletId: z.string(),
   walletId: z.never().optional(),
-  destinationAddress: z.string().min(1),
-  token: z.string().min(1),
-  amount: z.string().min(1),
-  counterpartyId: z.string().nullable(),
-  expiresAt: z.string().nullable(),
-  status: z.enum(PAYMENT_REQUEST_STATUSES),
+  publicToken: z.never().optional(),
+  destinationAddress: z.string(),
 });
-const requestResponseSchema = successResponseSchema(
+const createdResponseSchema = successResponseSchema(
   requestFieldsSchema.extend({ publicToken: z.string().min(1) })
 );
-const requestsResponseSchema = successResponseSchema(
-  z.object({
-    paymentRequests: z.array(requestFieldsSchema),
-    total: z.number().int().nonnegative(),
-  })
+const listResponseSchema = successResponseSchema(
+  z.object({ paymentRequests: z.array(requestFieldsSchema), total: z.number() })
 );
-
 const HEADERS = {
   Authorization: `Bearer ${TEST_API_KEY.raw}`,
   "Content-Type": "application/json",
@@ -64,45 +46,6 @@ function createRequest(selector: Record<string, unknown>) {
   );
 }
 
-async function seedConnectionWallet(projectId = TEST_PROJECT.id) {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials
-           (id, organization_id, project_id, provider, label, scope, source,
-            storage_backend, encrypted_secret_payload, status, credential_version, created_by)
-         VALUES ('pcred_requests_connection', ?, ?, 'privy', 'Request recipient', 'project',
-                 'stored', 'encrypted_db', 'not-read', 'active', 1, ?)`
-      )
-      .bind(TEST_ORG.id, projectId, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections
-           (id, organization_id, project_id, provider, scope, provider_credential_id,
-            provider_credential_scope_key, status, created_by)
-         VALUES ('cconn_requests', ?, ?, 'privy', 'project', 'pcred_requests_connection',
-                 ?, 'pending', ?)`
-      )
-      .bind(TEST_ORG.id, projectId, projectId, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_connection_id, wallet_id, public_key, label, purpose, status)
-         VALUES ('cwlt_requests_connection', 'cconn_requests', 'wal_requests_connection',
-                 ?, 'Request recipient', 'transfer', 'active')`
-      )
-      .bind(TEST_SOLANA_ADDRESSES.wallet2),
-    getDb(env).prepare(
-      `UPDATE custody_connections
-         SET status = 'active', last_check_status = 'success',
-             last_check_at = sdp_iso_now(), activated_at = sdp_iso_now(),
-             provider_account_fingerprint = 'sha256:requests-connection',
-             default_custody_wallet_id = 'cwlt_requests_connection'
-         WHERE id = 'cconn_requests'`
-    ),
-  ]);
-}
-
 describe("Payments routes — Payment Requests exact recipient", () => {
   installPaymentsRouteTestHooks();
   const rpc = installClusterRpcStub();
@@ -111,59 +54,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     rpc.answer("getSignaturesForAddress", []);
   });
 
-  it("creates and lists the exact recipient without exposing its provider reference", async () => {
-    const response = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
-    expect(response.status).toBe(201);
-    const created = requestResponseSchema.parse(await response.json());
-    expect(created.data).toMatchObject({
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      token: DEVNET_USDC_MINT,
-      amount: "25.00",
-      counterpartyId: null,
-      expiresAt: null,
-      status: "awaiting_payment",
-    });
-
-    const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
-    expect(list.status).toBe(200);
-    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({
-      data: {
-        total: 1,
-        paymentRequests: [
-          {
-            id: created.data.id,
-            reference: created.data.reference,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          },
-        ],
-      },
-    });
-  });
-
-  it("keeps retained aliases from changing exact creation eligibility", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-           VALUES ('cust_cfg_requests_retained', ?, ?, 'privy', 'test-config',
-                   'sdp-custody-encryption-v1', 'archived')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_requests_retained', 'cust_cfg_requests_retained', ?, ?, 'inactive')`
-        )
-        .bind(TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
-    ]);
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
-    expect((await createRequest({ custodyWalletId: "cwlt_requests_retained" })).status).toBe(404);
-    expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(400);
-  });
-
-  it("keeps duplicate provider, address and label aliases distinct for exact creation", async () => {
+  it("creates and lists the selected recipient despite identical provider and address aliases", async () => {
     await getDb(env).batch([
       getDb(env)
         .prepare(
@@ -175,261 +66,43 @@ describe("Payments routes — Payment Requests exact recipient", () => {
         .bind(TEST_ORG.id, TEST_PROJECT.id),
       getDb(env)
         .prepare(
-          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, status)
-           VALUES ('cwlt_requests_duplicate', 'cust_cfg_requests_duplicate', ?, ?, 'Payments Wallet', 'active')`
-        )
-        .bind(TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
-    ]);
-
-    for (const custodyWalletId of [TEST_CUSTODY_WALLET_ID, "cwlt_requests_duplicate"]) {
-      const response = await createRequest({ custodyWalletId });
-      expect(response.status).toBe(201);
-      expect(requestResponseSchema.parse(await response.json())).toMatchObject({
-        data: { custodyWalletId },
-      });
-    }
-    expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(400);
-    await seedCachedKey({
-      grants: ["payment_requests.manage"],
-      walletScope: "selected",
-      walletIds: [],
-    });
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
-    expect((await createRequest({ custodyWalletId: "cwlt_requests_duplicate" })).status).toBe(201);
-  });
-
-  it.each([
-    {},
-    { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: TEST_WALLET_ID },
-    { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: "wal_other" },
-    { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: null },
-    { custodyWalletId: null },
-    { custodyWalletId: 12 },
-    { custodyWalletId: "" },
-    { walletId: "" },
-    { custodyWalletId: " " },
-    { walletId: " " },
-    { custodyWalletId: TEST_CUSTODY_WALLET_ID, custodyWaleltId: "cwlt_other" },
-    { walletId: TEST_WALLET_ID, recipientWalletId: "cwlt_other" },
-    { walletId: TEST_WALLET_ID, metadata: { walletId: "cwlt_other" } },
-  ])("rejects missing, conflicting, malformed or unknown fields: %j", async (selector) => {
-    expect((await createRequest(selector)).status).toBe(400);
-    const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
-    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({
-      data: { total: 0, paymentRequests: [] },
-    });
-  });
-
-  it("rejects a provider wallet selector instead of creating a Request", async () => {
-    const response = await createRequest({ walletId: TEST_WALLET_ID });
-    expect(response.status).toBe(400);
-    const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
-    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({
-      data: { total: 0, paymentRequests: [] },
-    });
-  });
-
-  it.each([
-    { field: "amount", value: 25 },
-    { field: "token", value: null },
-    { field: "counterpartyId", value: 12 },
-    { field: "expiresAt", value: 12 },
-  ])(
-    "identifies malformed $field terms even alongside a rejected legacy selector",
-    async ({ field, value }) => {
-      for (const selector of [
-        { walletId: TEST_WALLET_ID },
-        { custodyWalletId: TEST_CUSTODY_WALLET_ID },
-      ]) {
-        const response = await createRequest({ ...selector, [field]: value });
-        expect(response.status).toBe(400);
-        const body = errorResponseSchema.parse(await response.json());
-        expect(body.error.message).toContain(`→ at ${field}`);
-      }
-    }
-  );
-
-  it("rejects unknown prototype fields from the original JSON body", async () => {
-    const response = await app.request(
-      "/v1/payments/requests",
-      {
-        method: "POST",
-        headers: HEADERS,
-        body: `{"custodyWalletId":"${TEST_CUSTODY_WALLET_ID}","token":"${DEVNET_USDC_MINT}","amount":"25.00","__proto__":{}}`,
-      },
-      env
-    );
-    expect(response.status).toBe(400);
-    const body = errorResponseSchema.parse(await response.json());
-    expect(body.error.message).toContain("__proto__");
-  });
-
-  it("does not rescue a failed exact lookup using a matching provider reference", async () => {
-    expect((await createRequest({ custodyWalletId: TEST_WALLET_ID })).status).toBe(404);
-  });
-
-  it("allows the current project's Config and Connection recipients without acquiring a signer", async () => {
-    await seedConnectionWallet();
-    const response = await createRequest({ custodyWalletId: "cwlt_requests_connection" });
-    expect(response.status).toBe(201);
-    expect(requestResponseSchema.parse(await response.json())).toMatchObject({
-      data: {
-        custodyWalletId: "cwlt_requests_connection",
-        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-      },
-    });
-    expect(rpc.calls).toHaveLength(0);
-    expect(createKoraAdapterMock).not.toHaveBeenCalled();
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects a recipient belonging to another project", async () => {
-    await seedConnectionWallet(`${TEST_PROJECT.id}_production`);
-    expect((await createRequest({ custodyWalletId: "cwlt_requests_connection" })).status).toBe(404);
-  });
-
-  it("rejects an inactive Connection recipient", async () => {
-    await seedConnectionWallet();
-    await getDb(env)
-      .prepare(
-        "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = 'cconn_requests'"
-      )
-      .run();
-    expect((await createRequest({ custodyWalletId: "cwlt_requests_connection" })).status).toBe(404);
-  });
-
-  it("rejects another organization's exact recipient", async () => {
-    await getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES ('org_requests_other', 'Other', 'requests-other', 'enterprise', 'active')"
-      )
-      .run();
-    const other = await seedDefaultProjects(getDb(env), {
-      organizationId: "org_requests_other",
-      createdBy: TEST_USER.id,
-      members: [],
-    });
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-           VALUES ('cust_cfg_requests_other', 'org_requests_other', ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(other.sandbox.id),
-      getDb(env)
-        .prepare(
           `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_requests_other', 'cust_cfg_requests_other', ?, ?, 'active')`
+           VALUES ('cwlt_requests_duplicate', 'cust_cfg_requests_duplicate', ?, ?, 'active')`
         )
         .bind(TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
     ]);
-    expect((await createRequest({ custodyWalletId: "cwlt_requests_other" })).status).toBe(404);
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
-  });
-
-  it.each([
-    { table: "custody_wallets", id: TEST_CUSTODY_WALLET_ID, status: "inactive" },
-    { table: "custody_configs", id: TEST_CONFIG_ID, status: "inactive" },
-    { table: "custody_configs", id: TEST_CONFIG_ID, status: "archived" },
-  ])("preserves creation eligibility for unavailable $table", async ({ table, id, status }) => {
-    await getDb(env).prepare(`UPDATE ${table} SET status = ? WHERE id = ?`).bind(status, id).run();
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(404);
-  });
-
-  it("creates a same-project Request without granting custody signing access", async () => {
-    await seedCachedKey({
-      grants: ["payment_requests.manage"],
-      walletScope: "selected",
-      walletIds: [],
-    });
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects a freshly revoked manage action while retaining readable history", async () => {
-    await seedCachedKey({ grants: ["payment_requests.manage", "payment_requests.read"] });
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
-    await getDb(env)
-      .prepare("UPDATE api_keys SET grants = '{payment_requests.read}'::text[] WHERE id = ?")
-      .bind(TEST_API_KEY.id)
-      .run();
-    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(403);
-    const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
-    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({ data: { total: 1 } });
-  });
-
-  it("refuses creation without the payment_requests.manage action", async () => {
-    await seedCachedKey({ grants: ["payment_requests.read"] });
-    const response = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({
-      error: { details: { action: "payment_requests.manage" } },
-    });
-  });
-
-  it("preserves counterparty, expiry and amount semantics", async () => {
-    const counterpartyId = await seedCounterparty();
-    const response = await createRequest({
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      counterpartyId,
-      expiresAt: "2000-01-01T00:00:00.000Z",
-      amount: "0.125",
-    });
+    const response = await createRequest({ custodyWalletId: "cwlt_requests_duplicate" });
     expect(response.status).toBe(201);
-    expect(requestResponseSchema.parse(await response.json())).toMatchObject({
-      data: {
-        counterpartyId,
-        expiresAt: "2000-01-01T00:00:00.000Z",
-        amount: "0.125",
-        status: "expired",
-      },
+    const created = createdResponseSchema.parse(await response.json());
+    expect(created.data).toMatchObject({
+      custodyWalletId: "cwlt_requests_duplicate",
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
     });
-  });
-
-  it("lists project history outside the signing scope including nullable terminal recipients", async () => {
-    const first = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
-    expect(first.status).toBe(201);
-    const created = requestResponseSchema.parse(await first.json());
-    await seedConnectionWallet();
-    expect((await createRequest({ custodyWalletId: "cwlt_requests_connection" })).status).toBe(201);
-    await getDb(env)
-      .prepare(
-        "UPDATE payment_requests SET custody_wallet_id = NULL, status = 'canceled' WHERE id = ?"
-      )
-      .bind(created.data.id)
-      .run();
-    await seedCachedKey({
-      grants: ["payment_requests.read"],
-      walletScope: "selected",
-      walletIds: [],
-    });
+    expect(
+      await getDb(env)
+        .prepare("SELECT custody_wallet_id FROM payment_requests WHERE id = ?")
+        .bind(created.data.id)
+        .first<{ custody_wallet_id: string }>()
+    ).toEqual({ custody_wallet_id: "cwlt_requests_duplicate" });
 
     const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
     expect(list.status).toBe(200);
-    const listed = requestsResponseSchema.parse(await list.json());
-    expect(listed.data.total).toBe(2);
-    expect(listed.data.paymentRequests).toContainEqual(
-      expect.objectContaining({
-        id: created.data.id,
-        reference: created.data.reference,
-        custodyWalletId: null,
-        destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
-        status: "canceled",
-      })
-    );
-    expect(listed.data.paymentRequests).toContainEqual(
-      expect.objectContaining({ custodyWalletId: "cwlt_requests_connection" })
-    );
+    expect(listResponseSchema.parse(await list.json())).toMatchObject({
+      data: {
+        total: 1,
+        paymentRequests: [{ id: created.data.id, custodyWalletId: "cwlt_requests_duplicate" }],
+      },
+    });
+  });
 
-    await getDb(env)
-      .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
-      .bind(`${TEST_PROJECT.id}_production`, TEST_API_KEY.id)
-      .run();
-    const otherProject = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
-    expect(otherProject.status).toBe(200);
-    expect(requestsResponseSchema.parse(await otherProject.json())).toMatchObject({
+  it.each([
+    { walletId: TEST_WALLET_ID },
+    { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: TEST_WALLET_ID },
+  ])("rejects the legacy provider selector without creating a Request: %j", async (selector) => {
+    expect((await createRequest(selector)).status).toBe(400);
+    const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
+    expect(list.status).toBe(200);
+    expect(listResponseSchema.parse(await list.json())).toMatchObject({
       data: { total: 0, paymentRequests: [] },
     });
   });

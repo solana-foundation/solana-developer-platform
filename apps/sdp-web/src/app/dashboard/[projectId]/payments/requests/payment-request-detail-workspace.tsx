@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentRequest } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
@@ -29,10 +30,7 @@ import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { transactionHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
-import {
-  deriveTokenOptions,
-  type DashboardPaymentRequest as PaymentRequest,
-} from "./payment-requests-page.data";
+import { deriveTokenOptions } from "./payment-requests-page.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 

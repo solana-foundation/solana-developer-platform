@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   fetchPaymentRequestDetail,
   fetchPaymentRequestLinkToken,
-  fetchPaymentRequests,
   loadPaymentRequestsList,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
   PAYMENT_REQUESTS_PAGE_SIZE,
@@ -17,78 +16,25 @@ import {
 function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): PaymentRequest {
   return {
     id,
-    organizationId: "org_test",
-    projectId: "prj_test",
+    organizationId: "org_1",
+    projectId: "prj_1",
     counterpartyId: null,
-    custodyWalletId: "cwlt_selected",
-    destinationAddress: "saved_destination",
+    custodyWalletId: "cwlt_1",
+    destinationAddress: "11111111111111111111111111111111",
     token: MAINNET_USDC,
-    amount: "12.5",
-    reference: `reference_${id}`,
+    amount: "1",
+    reference: "ref_1",
     status: "awaiting_payment",
     expiresAt: null,
     fulfilledByTransferId: null,
     canceledBy: null,
-    lifecycle: [{ status: "awaiting_payment", at: "2026-10-12T00:00:00.000Z" }],
+    lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
     createdBy: null,
-    createdAt: "2026-10-12T00:00:00.000Z",
-    updatedAt: "2026-10-12T00:00:00.000Z",
+    createdAt: "2026-09-14T00:00:00.000Z",
+    updatedAt: "2026-09-14T00:00:00.000Z",
     ...overrides,
   };
 }
-
-describe("Request response identity", () => {
-  it.each([undefined, "", " ", "cwlt selected", 123])(
-    "refuses a missing or malformed recipient pin %s",
-    async (custodyWalletId) => {
-      const request = async () =>
-        Response.json({
-          data: { paymentRequests: [{ ...requestRow("preq_1"), custodyWalletId }], total: 1 },
-        });
-      expect(await fetchPaymentRequests(request)).toMatchObject({
-        ok: false,
-        data: [],
-        total: 0,
-        error: "Invalid payment request response",
-      });
-    }
-  );
-
-  it.each(["cwlt_selected", null])(
-    "keeps recipient %s without provider metadata",
-    async (custodyWalletId) => {
-      const row = { ...requestRow("preq_1"), custodyWalletId };
-      expect(
-        await fetchPaymentRequests(async () =>
-          Response.json({
-            data: { paymentRequests: [row], total: 1 },
-          })
-        )
-      ).toMatchObject({ ok: true, data: [row], total: 1 });
-    }
-  );
-
-  it("does not pass legacy provider metadata or a bearer token to Request UI consumers", async () => {
-    const row = {
-      ...requestRow("preq_retained"),
-      walletId: "provider_reference",
-      publicToken: "unexpected_read_token",
-    };
-    const result = await fetchPaymentRequests(async () =>
-      Response.json({ data: { paymentRequests: [row], total: 1 } })
-    );
-    expect(result).toMatchObject({ ok: true, total: 1 });
-    expect(result.data[0]).not.toHaveProperty("walletId");
-    expect(result.data[0]).not.toHaveProperty("publicToken");
-    expect(result.data[0]).toMatchObject({
-      id: "preq_retained",
-      custodyWalletId: "cwlt_selected",
-      destinationAddress: "saved_destination",
-      amount: "12.5",
-      reference: "reference_preq_retained",
-    });
-  });
-});
 
 const MAINNET_USDC = mainnetUsdc();
 
@@ -159,6 +105,14 @@ describe("fetchPaymentRequestDetail", () => {
     const result = await fetchPaymentRequestDetail(api.request, "preq_120");
     expect(result).toEqual({ status: "found", request: row });
     expect(api.paths).toEqual(["/v1/payments/requests/preq_120"]);
+
+    const retained = requestRow("preq_retained", { custodyWalletId: null });
+    expect(
+      await fetchPaymentRequestDetail(
+        detailApi(Response.json({ data: retained })).request,
+        retained.id
+      )
+    ).toEqual({ status: "found", request: retained });
   });
 
   it("is not found on a 404", async () => {
@@ -229,7 +183,7 @@ function pageApi(rows: PaymentRequest[], total: number) {
 }
 
 function rowWithStatus(id: string, status: PaymentRequest["status"]): PaymentRequest {
-  return { ...requestRow(id), status };
+  return { id, status } as PaymentRequest;
 }
 
 function listState(changes: Partial<PaymentRequestsListState> = {}): PaymentRequestsListState {

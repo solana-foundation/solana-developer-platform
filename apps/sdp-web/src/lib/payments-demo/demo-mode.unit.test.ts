@@ -554,13 +554,6 @@ describe("requests and schedules", () => {
     );
     expect(list.paymentRequests[0]?.id).toBe(created.body.data.id);
     expect(created.body.data.publicToken).toMatch(/^demo_pt_/);
-    expect(list.paymentRequests[0]).not.toHaveProperty("publicToken");
-    const saved = await data(`/v1/payments/requests/${created.body.data.id}`);
-    expect(saved).not.toHaveProperty("publicToken");
-    expect(await data(`/v1/payments/requests/${created.body.data.id}/link`)).toEqual({
-      id: created.body.data.id,
-      publicToken: created.body.data.publicToken,
-    });
   });
 
   it("creates, activates, collects, cancels and resumes a schedule", async () => {

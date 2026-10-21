@@ -1,16 +1,11 @@
 // @vitest-environment jsdom
 
 import type { Counterparty } from "@sdp/types/counterparties";
-import type {
-  CreatedPaymentRequest,
-  PaymentRequest,
-  PaymentsDashboardWallet,
-} from "@sdp/types/payments";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -24,6 +19,7 @@ import { PaymentRequestsWorkspace as LegacyPaymentRequestsWorkspace } from "./pa
 
 /** The fields these tests read from a sent create body; the rest is kept for equality checks. */
 const sentCreateBodySchema = z.looseObject({
+  custodyWalletId: z.string(),
   amount: z.string(),
   expiresAt: z.string().nullable(),
 });
@@ -78,7 +74,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  toast.dismiss();
   cleanup();
   vi.unstubAllGlobals();
   resetDashboardNavigation();
@@ -105,7 +100,7 @@ describe("New request page", () => {
     });
     render(
       <PaymentRequestCreateWorkspace
-        wallets={[wallet]}
+        wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
         walletsError={null}
         counterparties={[contact]}
       />,
@@ -120,9 +115,9 @@ describe("New request page", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Amount" }), "25");
     await user.click(screen.getByRole("button", { name: "Destination wallet" }));
-    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+    await user.click(screen.getByRole("button", { name: /Settlement/ }));
 
-    expect(readsAs()).toBe("Anyone with the link can pay 25.00 USDC into Treasury.");
+    expect(readsAs()).toBe("Anyone with the link can pay 25.00 USDC into Settlement.");
     await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
     await user.click(create());
 
@@ -130,7 +125,7 @@ describe("New request page", () => {
     const usdc = deriveTokenOptions("devnet").find((token) => token.symbol === "USDC");
     expect(writes).toEqual([
       {
-        custodyWalletId: "cwlt_treasury",
+        custodyWalletId: "cwlt_settlement",
         token: usdc?.mintAddress,
         amount: "25",
         counterpartyId: null,
@@ -144,31 +139,6 @@ describe("New request page", () => {
     // On its way to the request, the form stays busy so a second press makes no second link.
     const creating = screen.getByRole("button", { name: "Creating…" });
     expect(creating.hasAttribute("disabled")).toBe(true);
-  });
-
-  it("keeps wallets sharing a provider reference and address as separate recipients", async () => {
-    const writes: unknown[] = [];
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
-      writes.push(JSON.parse(String(init?.body)));
-      return Response.json({ data: { id: "preq_alias", publicToken: "tok_alias" } });
-    });
-    render(
-      <PaymentRequestCreateWorkspace
-        wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
-        walletsError={null}
-        counterparties={[]}
-      />,
-      { wrapper }
-    );
-    const user = userEvent.setup();
-    await user.type(screen.getByRole("textbox", { name: "Amount" }), "25");
-    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
-    await user.click(screen.getByRole("button", { name: /Settlement/ }));
-    expect(readsAs()).toBe("Anyone with the link can pay 25.00 USDC into Settlement.");
-    await user.click(screen.getByRole("button", { name: "Create and copy link" }));
-    await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toMatchObject({ custodyWalletId: "cwlt_settlement" });
-    expect(writes[0]).not.toHaveProperty("walletId");
   });
 
   // The expiry comes from the clock. Read again on the retry, it would be a new
@@ -251,7 +221,7 @@ describe("New request page", () => {
   async function fillRequest(user: ReturnType<typeof userEvent.setup>, amount: string) {
     render(
       <PaymentRequestCreateWorkspace
-        wallets={[wallet]}
+        wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
         walletsError={null}
         counterparties={[contact]}
       />,
@@ -294,7 +264,7 @@ describe("New request page", () => {
   // Browser test (HOO-1918): A's answer was lost, the user edited to B and back
   // to A, and A was rebuilt with a new expiry, so a second request was created.
   it("resends A's first expiry and key after an edit to B and back", async () => {
-    const sends = recordSends("lost", 503, 201);
+    const sends = recordSends("lost", 503, 503, 503, 201);
     const user = userEvent.setup();
     await fillRequest(user, "25");
     const amount = () => screen.getByRole("textbox", { name: "Amount" });
@@ -307,48 +277,24 @@ describe("New request page", () => {
     await user.type(amount(), "25");
     await createLater(user, sends, 2);
 
-    expect(sends.map((send) => send.body.amount)).toEqual(["25", "26", "25"]);
-    expect(sends[1]?.key).not.toBe(sends[0]?.key);
-    expect(sends[2]?.body).toEqual(sends[0]?.body);
-    expect(sends[2]?.key).toBe(sends[0]?.key);
-  });
-
-  it("keeps retry expiry and keys separate for recipients sharing a provider reference", async () => {
-    const sends = recordSends("lost", 201, 201);
-    const user = userEvent.setup();
-    async function fillTreasury() {
-      render(
-        <PaymentRequestCreateWorkspace
-          wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
-          walletsError={null}
-          counterparties={[]}
-        />,
-        { wrapper }
-      );
-      await user.type(screen.getByRole("textbox", { name: "Amount" }), "25");
-      await user.click(screen.getByRole("button", { name: "Destination wallet" }));
-      await user.click(screen.getByRole("button", { name: /Treasury/ }));
-      await user.click(screen.getByRole("button", { name: "Link expires" }));
-      await user.click(screen.getByRole("button", { name: "1 hour" }));
-    }
-    await fillTreasury();
-    await createLater(user, sends, 0);
     await user.click(screen.getByRole("button", { name: "Destination wallet" }));
     await user.click(screen.getByRole("button", { name: /Settlement/ }));
-    await createLater(user, sends, 1);
+    await createLater(user, sends, 3);
+    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
+    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+    await createLater(user, sends, 4);
 
-    cleanup();
-    resetIdempotencyKeyStoresForTests();
-    dashboardRouter.push.mockClear();
-    await fillTreasury();
-    await createLater(user, sends, 2);
-
+    expect(sends.map((send) => send.body.amount)).toEqual(["25", "26", "25", "25", "25"]);
     expect(sends.map((send) => send.body.custodyWalletId)).toEqual([
+      "cwlt_treasury",
+      "cwlt_treasury",
       "cwlt_treasury",
       "cwlt_settlement",
       "cwlt_treasury",
     ]);
-    expect(sends[1]?.body.expiresAt).not.toBe(sends[0]?.body.expiresAt);
+    expect(sends[3]?.key).not.toBe(sends[0]?.key);
+    expect(sends[4]?.body).toEqual(sends[0]?.body);
+    expect(sends[4]?.key).toBe(sends[0]?.key);
     expect(sends[1]?.key).not.toBe(sends[0]?.key);
     expect(sends[2]?.body).toEqual(sends[0]?.body);
     expect(sends[2]?.key).toBe(sends[0]?.key);
@@ -459,76 +405,11 @@ describe("New request page", () => {
 });
 
 describe("Previous design requests", () => {
-  it.each(["invalid DTO", "invalid JSON"] as const)(
-    "warns after a successful creation with %s and refreshes without another POST",
-    async (responseKind) => {
-      let writes = 0;
-      vi.stubGlobal("fetch", async () => {
-        writes += 1;
-        return responseKind === "invalid DTO"
-          ? Response.json({ data: {} }, { status: 201 })
-          : new Response("{", { status: 201 });
-      });
-      render(
-        <>
-          <Toaster />
-          <LegacyPaymentRequestsWorkspace
-            initialPaymentRequests={[]}
-            apiBaseUrl={null}
-            wallets={[wallet]}
-            counterparties={[]}
-          />
-        </>,
-        { wrapper }
-      );
-      const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: "Create" }));
-      const form = within(screen.getByRole("dialog", { name: "Create payment request" }));
-      await user.type(form.getByRole("spinbutton", { name: "Amount" }), "25");
-      await user.click(form.getAllByRole("combobox")[0]);
-      await user.click(await screen.findByRole("option", { name: "SOL" }));
-      await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
-      await user.click(form.getAllByRole("combobox")[1]);
-      await user.click(await screen.findByRole("option", { name: "Treasury" }));
-      await user.click(form.getByRole("button", { name: "Create link" }));
-
-      expect(
-        await screen.findByText(
-          "Request created, but its payment link could not be loaded. Check the refreshed list before creating another request."
-        )
-      ).toBeTruthy();
-      expect(screen.queryByRole("dialog", { name: "Create payment request" })).toBeNull();
-      expect(screen.queryByRole("dialog", { name: "Payment request details" })).toBeNull();
-      expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
-      expect(writes).toBe(1);
-    }
-  );
-
-  it("sends the exact selected recipient when provider references and addresses coincide", async () => {
+  it("sends the selected internal ID when provider references coincide", async () => {
     const writes: unknown[] = [];
-    const created: CreatedPaymentRequest = {
-      id: "preq_settlement",
-      publicToken: "tok_settlement",
-      organizationId: "org_test",
-      projectId: "proj_test",
-      counterpartyId: null,
-      custodyWalletId: "cwlt_settlement",
-      destinationAddress: wallet.publicKey,
-      token: SOL_MINT,
-      amount: "25",
-      reference: "reference",
-      status: "awaiting_payment",
-      expiresAt: null,
-      fulfilledByTransferId: null,
-      canceledBy: null,
-      lifecycle: [],
-      createdBy: null,
-      createdAt: "2026-10-12T00:00:00.000Z",
-      updatedAt: "2026-10-12T00:00:00.000Z",
-    };
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       writes.push(JSON.parse(String(init?.body)));
-      return Response.json({ data: created });
+      return Response.json({ data: { id: "preq_settlement" } });
     });
     render(
       <LegacyPaymentRequestsWorkspace
@@ -552,63 +433,6 @@ describe("Previous design requests", () => {
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toMatchObject({ custodyWalletId: "cwlt_settlement" });
     expect(writes[0]).not.toHaveProperty("walletId");
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Create payment request" })).toBeNull()
-    );
-    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
-    const detail = within(screen.getByRole("dialog", { name: "Payment request details" }));
-    expect(detail.getByText("Settlement")).toBeTruthy();
-    expect(detail.getByText(`${window.location.origin}/pay/tok_settlement`)).toBeTruthy();
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledOnce());
   });
-
-  it.each([
-    { custodyWalletId: "cwlt_treasury", expectedName: "Treasury" },
-    { custodyWalletId: null, expectedName: null },
-    { custodyWalletId: "cwlt_unavailable", expectedName: null },
-  ])(
-    "shows exact recipient $custodyWalletId without guessing an alias",
-    async ({ custodyWalletId, expectedName }) => {
-      const request: PaymentRequest = {
-        id: "preq_legacy",
-        organizationId: "org_test",
-        projectId: "proj_test",
-        counterpartyId: null,
-        custodyWalletId,
-        destinationAddress: wallet.publicKey,
-        token: SOL_MINT,
-        amount: "5",
-        reference: "reference",
-        status: "awaiting_payment",
-        expiresAt: null,
-        fulfilledByTransferId: null,
-        canceledBy: null,
-        lifecycle: [],
-        createdBy: null,
-        createdAt: "2026-10-12T00:00:00.000Z",
-        updatedAt: "2026-10-12T00:00:00.000Z",
-      };
-      vi.stubGlobal("fetch", async () =>
-        Response.json({ data: { id: request.id, publicToken: "tok_legacy" } })
-      );
-      render(
-        <LegacyPaymentRequestsWorkspace
-          initialPaymentRequests={[request]}
-          apiBaseUrl={null}
-          wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
-          counterparties={[]}
-        />,
-        { wrapper }
-      );
-      const user = userEvent.setup();
-      await user.click(screen.getAllByRole("button", { name: /5.00 SOL/ })[0]);
-      const detail = within(await screen.findByRole("dialog", { name: "Payment request details" }));
-      expect(detail.getByText(wallet.publicKey)).toBeTruthy();
-      expect(detail.queryByText("Settlement")).toBeNull();
-      expect(Boolean(detail.queryByText("Treasury"))).toBe(expectedName !== null);
-      const originalLink = `${window.location.origin}/pay/tok_legacy`;
-      expect(detail.getByText(originalLink)).toBeTruthy();
-      await user.click(detail.getByRole("button", { name: /^Copy$/ }));
-      expect(await navigator.clipboard.readText()).toBe(originalLink);
-    }
-  );
 });

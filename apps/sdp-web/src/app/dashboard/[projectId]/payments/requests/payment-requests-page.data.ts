@@ -1,6 +1,6 @@
 import type { PaginatedResponse } from "@sdp/types/pagination";
 import {
-  type CreatedPaymentRequest,
+  type ListPaymentRequestsResponse,
   PAYMENT_REQUEST_STATUSES,
   type PaymentRequest,
   type PaymentRequestLink,
@@ -16,6 +16,29 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
 
+/** The detail read's envelope, parsed at the API boundary. */
+const paymentRequestDetailResponseSchema = z.object({
+  data: z.object({
+    id: z.string(),
+    organizationId: z.string(),
+    projectId: z.string().nullable(),
+    counterpartyId: z.string().nullable(),
+    custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
+    destinationAddress: z.string(),
+    token: z.string(),
+    amount: z.string(),
+    reference: z.string(),
+    status: z.enum(PAYMENT_REQUEST_STATUSES),
+    expiresAt: z.string().nullable(),
+    fulfilledByTransferId: z.string().nullable(),
+    canceledBy: z.string().nullable(),
+    lifecycle: z.array(z.object({ status: z.enum(PAYMENT_REQUEST_STATUSES), at: z.string() })),
+    createdBy: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  }) satisfies z.ZodType<PaymentRequest>,
+});
+
 /** The link read's envelope, parsed: its token is a bearer credential (APE-849). */
 const paymentRequestLinkResponseSchema = z.object({
   data: z.object({
@@ -30,46 +53,9 @@ export interface PaymentRequestTokenOption {
 }
 
 export type PaymentRequestsLocalErrorCode = "paymentRequestsLoadFailed";
-export type DashboardPaymentRequest = PaymentRequest;
-export type PaymentRequestsResult = PaginatedResponse<DashboardPaymentRequest> & {
+export type PaymentRequestsResult = PaginatedResponse<PaymentRequest> & {
   localErrorCode?: PaymentRequestsLocalErrorCode;
 };
-
-const paymentRequestStatusSchema = z.enum(PAYMENT_REQUEST_STATUSES);
-export const paymentRequestSchema = z.object({
-  id: z.string(),
-  organizationId: z.string(),
-  projectId: z.string().nullable(),
-  counterpartyId: z.string().nullable(),
-  custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
-  destinationAddress: z.string(),
-  token: z.string(),
-  amount: z.string(),
-  reference: z.string(),
-  status: paymentRequestStatusSchema,
-  expiresAt: z.string().nullable(),
-  fulfilledByTransferId: z.string().nullable(),
-  canceledBy: z.string().nullable(),
-  lifecycle: z.array(z.object({ status: paymentRequestStatusSchema, at: z.string() })),
-  createdBy: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-}) satisfies z.ZodType<DashboardPaymentRequest>;
-
-/** Creation alone returns the bearer token used by the hosted payment link. */
-export const createdPaymentRequestSchema = paymentRequestSchema.extend({
-  publicToken: z.string().min(1),
-}) satisfies z.ZodType<CreatedPaymentRequest>;
-
-/** A detail read uses the same token-free record as list reads. */
-const paymentRequestDetailResponseSchema = z.object({ data: paymentRequestSchema });
-
-const paymentRequestsResponseSchema = z.object({
-  data: z.object({
-    paymentRequests: z.array(paymentRequestSchema),
-    total: z.number().int().nonnegative(),
-  }),
-});
 
 /**
  * Well-known tokens deployed on the given cluster. Payment requests are
@@ -110,11 +96,8 @@ export async function fetchPaymentRequests(
     if (!response.ok) {
       return { ok: false, data: [], total: 0, error: await response.text() };
     }
-    const parsed = paymentRequestsResponseSchema.safeParse(await response.json());
-    if (!parsed.success) {
-      return { ok: false, data: [], total: 0, error: "Invalid payment request response" };
-    }
-    return { ok: true, data: parsed.data.data.paymentRequests, total: parsed.data.data.total };
+    const json = (await response.json()) as { data: ListPaymentRequestsResponse };
+    return { ok: true, data: json.data.paymentRequests, total: json.data.total };
   } catch (error) {
     return {
       ok: false,
@@ -198,7 +181,7 @@ const TOKEN_SYMBOL_BY_MINT: ReadonlyMap<string, string> = new Map(
  * @returns `true` when any of those fields contains the needle.
  */
 export function paymentRequestMatchesSearch(
-  request: DashboardPaymentRequest,
+  request: PaymentRequest,
   needle: string,
   counterpartyNames: ReadonlyMap<string, string>
 ): boolean {
@@ -288,7 +271,7 @@ export async function loadPaymentRequestsList(
 }
 
 export type PaymentRequestDetailResult =
-  | { status: "found"; request: DashboardPaymentRequest }
+  | { status: "found"; request: PaymentRequest }
   | { status: "not_found" }
   | { status: "error"; error: string | undefined };
 

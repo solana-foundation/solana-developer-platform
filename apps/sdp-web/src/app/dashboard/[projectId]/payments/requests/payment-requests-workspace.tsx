@@ -3,6 +3,7 @@
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
   CreatedPaymentRequest,
+  PaymentRequest,
   PaymentRequestLink,
   PaymentRequestStatus,
   PaymentsDashboardWallet,
@@ -71,9 +72,7 @@ import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm } from "@/lib/use-zod-form";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import {
-  createdPaymentRequestSchema,
   deriveTokenOptions,
-  type DashboardPaymentRequest as PaymentRequest,
   type PaymentRequestsLocalErrorCode,
   type PaymentRequestTokenOption,
 } from "./payment-requests-page.data";
@@ -275,19 +274,22 @@ function CreateRequestModal({
       return;
     }
     setSubmitting(true);
-    const res = await dashboardFetch<{ data: unknown }>("/api/dashboard/payments/requests", {
-      method: "POST",
-      body: {
-        custodyWalletId: result.data.wallet,
-        token: result.data.token,
-        amount: result.data.amount,
-        counterpartyId,
-        expiresAt,
-      },
-    });
+    const res = await dashboardFetch<{ data: CreatedPaymentRequest }>(
+      "/api/dashboard/payments/requests",
+      {
+        method: "POST",
+        body: {
+          custodyWalletId: result.data.wallet,
+          token: result.data.token,
+          amount: result.data.amount,
+          counterpartyId,
+          expiresAt,
+        },
+      }
+    );
     settleExpiresAt(input, expiresAt, res);
     setSubmitting(false);
-    if (!res.ok && (res.status === null || res.status < 200 || res.status >= 300)) {
+    if (!res.ok) {
       // The earlier attempt may have created it: close and refresh the list.
       if (notice(fetchResultAnswer(res))) {
         onCreated(null);
@@ -297,15 +299,15 @@ function CreateRequestModal({
       return;
     }
 
-    const created = createdPaymentRequestSchema.safeParse(res.ok ? res.data?.data : undefined);
-    if (!created.success) {
-      // A successful POST may already be committed; refresh instead of inviting another create.
-      toast.warning(t("DashboardPayments.requests.createdLinkUnavailable"));
-      onCreated(null);
-      return;
-    }
     toast.success(t("DashboardPayments.requests.paymentLinkCreated"));
-    onCreated(created.data);
+
+    // The create response is the full request, so the details view can open straight
+    // away. Without this the link was only reachable by waiting for the table to
+    // repopulate and then reopening the row. A response without a `publicToken` still
+    // means the request was created, so fall back to closing rather than reporting a
+    // failure that did not happen — the row will arrive with the refresh.
+    const created = res.data?.data;
+    onCreated(created?.publicToken ? created : null);
   }
 
   return (

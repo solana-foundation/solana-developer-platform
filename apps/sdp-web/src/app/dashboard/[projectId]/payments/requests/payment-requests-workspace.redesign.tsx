@@ -1,11 +1,7 @@
 "use client";
 
 import type { Counterparty } from "@sdp/types/counterparties";
-import {
-  PAYMENT_REQUEST_STATUSES,
-  type PaymentRequestLink,
-  type PaymentRequestStatus,
-} from "@sdp/types/payments";
+import type { PaymentRequest, PaymentRequestLink, PaymentRequestStatus } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
 import { Button } from "@sdp/ui/button";
@@ -44,7 +40,6 @@ import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-
 import {
   deriveTokenOptions,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
-  type DashboardPaymentRequest as PaymentRequest,
   type PaymentRequestsListState,
   type PaymentRequestsLocalErrorCode,
   paymentRequestMatchesSearch,
@@ -78,6 +73,8 @@ interface PaymentRequestsWorkspaceProps {
   hasNextPage: boolean;
   listState: PaymentRequestsListState;
 }
+
+const REQUEST_STATUSES = Object.keys(REQUEST_STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
 
 /** The list's rows: status, amount, who pays, where to, when, and a copy of the link. */
 function PaymentRequestsTable({
@@ -299,12 +296,12 @@ function PaymentRequestsStatusFilter({
             <FilterMenuOptions
               value={value ?? undefined}
               anyLabel={t("Shared.SharedComponents.any")}
-              options={PAYMENT_REQUEST_STATUSES.map((status) => ({
+              options={REQUEST_STATUSES.map((status) => ({
                 value: status,
                 label: t(REQUEST_STATUS_TRANSLATION_KEYS[status]),
               }))}
               onChange={(next) =>
-                onChange(PAYMENT_REQUEST_STATUSES.find((status) => status === next) ?? null)
+                onChange(REQUEST_STATUSES.find((status) => status === next) ?? null)
               }
             />
           ),

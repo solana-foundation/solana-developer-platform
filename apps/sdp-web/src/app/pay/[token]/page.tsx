@@ -1,4 +1,3 @@
-import type { PaymentRequestStatus } from "@sdp/types/payments";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import { notFound } from "next/navigation";
@@ -14,7 +13,7 @@ import { PayQrCode } from "./pay-qr-code";
 
 export const dynamic = "force-dynamic";
 
-type PayStatus = PaymentRequestStatus;
+type PayStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
 
 interface PayRequest {
   amount: string;

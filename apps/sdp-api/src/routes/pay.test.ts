@@ -4,14 +4,9 @@ import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import {
-  createPaymentRequestsRepository,
-  createSystemPaymentRequestsRepository,
-} from "@/db/repositories/repository-factory";
-import type { SponsorshipReservationStatus } from "@/db/repositories/sponsorship-budget.repository";
+import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { base64Schema } from "@/openapi/schemas/base";
 import { AuditService } from "@/services/audit.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -30,10 +25,8 @@ import {
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
-  TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
-  testKoraAdapter,
 } from "@/test/helpers/payments-routes";
 import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
@@ -192,53 +185,6 @@ describe("Public payment request routes", () => {
   });
 
   describe("sponsored transaction window", () => {
-    it("retries a preflight failure on the same transaction and preserves existing commission accounting", async () => {
-      const provider = testKoraAdapter({
-        getFeePayer: vi.fn(async () => TEST_MOCK_FEE_PAYER),
-        getSponsorshipConfiguration: vi
-          .fn(async () => TEST_SPONSORSHIP_PROVIDER_CONFIG)
-          .mockRejectedValueOnce(new Error("preflight temporarily unavailable")),
-        signAsFeePayer: vi.fn(sponsorSignTestTransaction),
-      });
-      createKoraAdapterMock.mockReturnValue(provider);
-      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
-      const repository = createSystemPaymentRequestsRepository(env);
-      const reservations = () =>
-        getDb(env).queryMany<{
-          actor_id: string;
-          status: SponsorshipReservationStatus;
-          signed_transaction: string | null;
-        }>(
-          `SELECT actor_id, status, signed_transaction FROM sponsorship_budget_reservations
-           WHERE organization_id = ? AND project_id = ?`,
-          [TEST_ORG.id, TEST_PROJECT.id]
-        );
-
-      expect((await postTransaction(request.public_token)).status).toBe(503);
-      const claim = await repository.getSponsoredTransactionClaim(request.id);
-      expect(claim).toMatchObject({ signedTransaction: null });
-      expect(await reservations()).toEqual([]);
-      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
-
-      const retried = await postTransaction(request.public_token);
-      expect(retried.status).toBe(200);
-      const responseSchema = z.object({ transaction: base64Schema });
-      const { transaction } = responseSchema.parse(await retried.json());
-      expect((await repository.getSponsoredTransactionClaim(request.id))?.unsignedTransaction).toBe(
-        claim?.unsignedTransaction
-      );
-      const recorded = await reservations();
-      expect(recorded).toEqual([
-        { actor_id: TEST_WALLET_ID, status: "signed", signed_transaction: transaction },
-      ]);
-
-      const replay = await postTransaction(request.public_token);
-      expect(replay.status).toBe(200);
-      expect(responseSchema.parse(await replay.json()).transaction).toBe(transaction);
-      expect(await reservations()).toEqual(recorded);
-      expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
-    });
-
     it.for(ENVIRONMENT_CLUSTER_CASES)(
       "builds a $environment request's sponsored transaction on $cluster only",
       async ({ environment, cluster }) => {

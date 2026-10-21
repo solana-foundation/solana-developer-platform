@@ -1,4 +1,3 @@
-import { PAYMENT_REQUEST_STATUSES } from "@sdp/types/payments";
 import { z } from "zod";
 import { paymentAmountSchema, solanaAddressSchema } from "@/routes/payments/schemas";
 
@@ -13,7 +12,7 @@ export const createPaymentRequestSchema = z.strictObject({
 export const listPaymentRequestsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  status: z.enum(PAYMENT_REQUEST_STATUSES).optional(),
+  status: z.enum(["awaiting_payment", "paid", "canceled", "expired"]).optional(),
 });
 
 export const paymentRequestParamsSchema = z.object({
