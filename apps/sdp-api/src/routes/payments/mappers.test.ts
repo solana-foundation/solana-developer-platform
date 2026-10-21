@@ -205,13 +205,12 @@ describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
     });
   });
 
-  it("states the base units a scaled mint moved and the multiplier the amount was scaled by", () => {
+  it("states the underlying amount a scaled mint moved", () => {
     const scaled = getTransferCheckedInstruction({ ...transferAccounts, amount: 500_000n });
 
     expect(onTheWire(transferRow([scaled]))).toEqual({
       ...unsignedWire,
       unscaledAmount: "0.5",
-      uiAmountMultiplier: "2",
     });
   });
 
