@@ -446,25 +446,28 @@ const rampEstimateCurrencySchema = z.union([
   z.enum(CRYPTO_RAIL_ASSET_LABELS),
 ]);
 
+/** Estimate figures are decimals; any other value refuses the response, as a missing one does. */
+const rampFigureSchema = z.string().refine((value) => isDecimalString(value));
+
 const rampEstimateSchema = z.object({
   provider: z.enum(RAMP_PROVIDERS),
   direction: z.enum(RAMP_DIRECTIONS),
   fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
   assetRail: z.enum(SOLANA_CRYPTO_RAILS),
-  fiatAmount: z.string(),
-  cryptoAmount: z.string(),
-  exchangeRate: z.string(),
-  totalFiatAmount: z.string().optional(),
+  fiatAmount: rampFigureSchema,
+  cryptoAmount: rampFigureSchema,
+  exchangeRate: rampFigureSchema,
+  totalFiatAmount: rampFigureSchema.optional(),
   fees: z.object({
     currency: rampEstimateCurrencySchema,
-    total: z.string(),
-    network: z.string().optional(),
+    total: rampFigureSchema,
+    network: rampFigureSchema.optional(),
     networkCurrency: rampEstimateCurrencySchema.optional(),
-    provider: z.string().optional(),
+    provider: rampFigureSchema.optional(),
     providerCurrency: rampEstimateCurrencySchema.optional(),
   }),
-  minFiatAmount: z.string().optional(),
-  maxFiatAmount: z.string().optional(),
+  minFiatAmount: rampFigureSchema.optional(),
+  maxFiatAmount: rampFigureSchema.optional(),
   expiresAt: z.string().optional(),
 });
 
@@ -479,7 +482,7 @@ const rampProviderEstimateResultSchema = z.discriminatedUnion("status", [
     status: z.literal("error"),
     error: z.string(),
     reason: z.enum([...RAMP_AMOUNT_LIMIT_REASONS, ...STAGED_PROVIDER_REFUSAL_REASONS]).optional(),
-    limit: z.object({ amount: z.string(), currency: z.string() }).optional(),
+    limit: z.object({ amount: rampFigureSchema, currency: z.string() }).optional(),
   }),
 ]);
 
@@ -493,7 +496,7 @@ function withUsableRate(
   t: Translate
 ): RampProviderEstimateResult {
   const rate = result.status === "ok" ? result.estimate.exchangeRate : null;
-  if (rate === null || (isDecimalString(rate) && compareDecimalAmounts(rate, "0") > 0)) {
+  if (rate === null || compareDecimalAmounts(rate, "0") > 0) {
     return result;
   }
   return {

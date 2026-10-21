@@ -1,4 +1,4 @@
-import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type {
   PaymentRampEstimate,
@@ -74,9 +74,9 @@ export function estimateFeeCopy(
   const { provider, network, providerCurrency, networkCurrency } = fees;
   if (
     provider !== undefined &&
-    isPositiveDecimal(provider) &&
+    isPositive(provider) &&
     network !== undefined &&
-    isPositiveDecimal(network) &&
+    isPositive(network) &&
     providerCurrency &&
     networkCurrency &&
     providerCurrency !== networkCurrency
@@ -88,7 +88,7 @@ export function estimateFeeCopy(
       networkCurrency,
     });
   }
-  if (isDecimalString(fees.total) && compareDecimalAmounts(fees.total, "0") === 0) {
+  if (compareDecimalAmounts(fees.total, "0") === 0) {
     return t("DashboardPayments.ramps.noFees");
   }
   return t("DashboardPayments.ramps.fee", {
@@ -100,7 +100,8 @@ export function estimateFeeCopy(
 /**
  * "You pay" on the on-ramp review: the provider's total and how its fees sit in
  * it. Stripe adds them on top of the amount; MoonPay's widget takes them out of
- * it. Without a total the amount typed stands alone.
+ * it. Without a total the amount typed stands alone; the estimate fetch already
+ * refused one that isn't a decimal.
  */
 export function youPayCopy(
   t: Translate,
@@ -112,12 +113,7 @@ export function youPayCopy(
   locale: string
 ): { value: string; aside: string | undefined } {
   const total = estimate?.totalFiatAmount;
-  if (
-    estimate === null ||
-    total === undefined ||
-    !isDecimalString(total) ||
-    !isDecimalString(amount)
-  ) {
+  if (estimate === null || total === undefined) {
     return { value: `${formatDecimalAmount(amount, locale)} ${fiat}`, aside: undefined };
   }
   const value = `${formatDecimalAmount(total, locale)} ${fiat}`;
@@ -131,12 +127,12 @@ export function youPayCopy(
   }
   return {
     value,
-    aside: isPositiveDecimal(estimate.fees.total)
+    aside: isPositive(estimate.fees.total)
       ? t("DashboardPayments.ramps.youPayFeesIncluded")
       : undefined,
   };
 }
 
-function isPositiveDecimal(value: string): boolean {
-  return isDecimalString(value) && compareDecimalAmounts(value, "0") > 0;
+function isPositive(value: string): boolean {
+  return compareDecimalAmounts(value, "0") > 0;
 }

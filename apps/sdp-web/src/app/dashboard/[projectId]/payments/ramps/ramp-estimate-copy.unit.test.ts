@@ -1,3 +1,4 @@
+import { AmountError } from "@sdp/solana/amount";
 import type { PaymentRampEstimate, RampProviderEstimateResult } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
@@ -73,6 +74,28 @@ describe("youPayCopy", () => {
       "en"
     );
     expect(copy).toEqual({ value: "25.00 USD", aside: "Includes the provider's fees" });
+  });
+
+  it("reads an amount typed with stray spaces against the total", () => {
+    const stripe = onramp({ provider: "stripe", totalFiatAmount: "26.02" });
+    expect(youPayCopy(t, { estimate: stripe, amount: "25 ", fiat: "USD" }, "en")).toEqual({
+      value: "26.02 USD",
+      aside: "25.00 USD plus the provider's fees",
+    });
+  });
+
+  it("lets the amount typed stand alone only when the provider sends no total", () => {
+    expect(youPayCopy(t, { estimate: onramp({}), amount: "25", fiat: "USD" }, "en")).toEqual({
+      value: "25.00 USD",
+      aside: undefined,
+    });
+    expect(() =>
+      youPayCopy(
+        t,
+        { estimate: onramp({ totalFiatAmount: "26,02" }), amount: "25", fiat: "USD" },
+        "en"
+      )
+    ).toThrow(AmountError);
   });
 
   it("names no fees for a free buy or before any estimate", () => {

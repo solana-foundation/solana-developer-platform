@@ -208,6 +208,28 @@ describe("fetchRampEstimates", () => {
       "DashboardPayments.workspace.rampEstimateMissing"
     );
   });
+
+  it.each([{ totalFiatAmount: "26,02" }, { fees: { currency: "USD", total: "1.02 USD" } }])(
+    "refuses an estimate whose figures aren't decimals: %o",
+    async (figures) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse({
+            data: {
+              estimates: [
+                { provider: "stripe", status: "ok", estimate: { ...estimate, ...figures } },
+              ],
+            },
+          })
+        )
+      );
+
+      await expect(fetchRampEstimates(request, t)).rejects.toThrow(
+        "DashboardPayments.workspace.rampEstimateMissing"
+      );
+    }
+  );
 });
 
 describe("counterpartyListComplete", () => {
