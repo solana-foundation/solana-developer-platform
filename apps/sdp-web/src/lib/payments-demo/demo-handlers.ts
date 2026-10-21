@@ -17,8 +17,6 @@ import {
   findWalletByCustodyWalletId,
   fromBaseUnits,
   MINUTE_MS,
-  publicDemoBatch,
-  publicDemoTransfer,
   symbolForMint,
   toBaseUnits,
 } from "./demo-fixtures";
@@ -603,7 +601,7 @@ function cancelRamp({ body, world, now }: WriteContext): DemoWriteResult {
   }
   const id = transfer.id;
   return record([{ k: "ramp-cancel", id, at: now.getTime() }], (after) =>
-    ok({ data: { transfer: publicDemoTransfer(transferById(after, id)) } })
+    ok({ data: { transfer: transferById(after, id) } })
   );
 }
 
@@ -642,11 +640,11 @@ function createTransfer({ body, world, now }: WriteContext): DemoWriteResult {
     if (notEnough) return error(400, notEnough, "insufficient_funds");
     const id = existing.id;
     return record([{ k: "ramp-paid", id, at }], (after) =>
-      ok({ data: { transfer: publicDemoTransfer(transferById(after, id)) } }, 201)
+      ok({ data: { transfer: transferById(after, id) } }, 201)
     );
   }
   // The same payment sent again answers with the first one.
-  if (existing) return record([], () => ok({ data: { transfer: publicDemoTransfer(existing) } }));
+  if (existing) return record([], () => ok({ data: { transfer: existing } }));
 
   const wallet = findWalletByCustodyWalletId(world, sourceCustodyWalletId);
   if (!wallet) {
@@ -660,7 +658,7 @@ function createTransfer({ body, world, now }: WriteContext): DemoWriteResult {
   const id = transferId?.startsWith("demo_") ? transferId : newDemoId("xfr");
   return record(
     [{ k: "send", id, at, wallet: wallet.id, to: destination, token, amount, memo: memo || null }],
-    (after) => ok({ data: { transfer: publicDemoTransfer(transferById(after, id)) } }, 201)
+    (after) => ok({ data: { transfer: transferById(after, id) } }, 201)
   );
 }
 
@@ -762,12 +760,11 @@ function createBatch({ body, world, now }: WriteContext): DemoWriteResult {
       return ok(
         {
           data: {
-            batch: publicDemoBatch(entry?.batch),
+            batch: entry?.batch,
             recipients: entry?.recipients ?? [],
             transfers: after.transfers
               .map((row) => row.transfer)
-              .filter((transfer) => transferIds.has(transfer.id))
-              .map(publicDemoTransfer),
+              .filter((transfer) => transferIds.has(transfer.id)),
           },
         },
         201

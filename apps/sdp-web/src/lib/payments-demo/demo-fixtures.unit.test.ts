@@ -412,23 +412,22 @@ describe("demo world", () => {
 });
 
 describe("Payments overview", () => {
-  it("omits provider wallet identity from public transfer history", () => {
-    const body = paymentsDemoBody(
+  it.each([
+    [
       "/v1/payments/transfers/demo_xfr_acme_inv_20931",
-      RAMP_PROVIDERS,
-      NOW
-    );
-    expect(body).toHaveProperty("data.transfer.id", "demo_xfr_acme_inv_20931");
-    expect(body).not.toHaveProperty("data.transfer.providerWalletId");
-  });
-
-  it("omits provider wallet identity from transfer and batch collections", () => {
-    const transfers = paymentsDemoBody("/v1/payments/transfers", RAMP_PROVIDERS, NOW);
-    const batches = paymentsDemoBody("/v1/payments/transfer-batches", RAMP_PROVIDERS, NOW);
-    expect(transfers).toHaveProperty("data.0.custodyWalletId");
-    expect(transfers).not.toHaveProperty("data.0.providerWalletId");
-    expect(batches).toHaveProperty("data.0.sourceCustodyWalletId");
-    expect(batches).not.toHaveProperty("data.0.sourceProviderWalletId");
+      "data.transfer.custodyWalletId",
+      "data.transfer.providerWalletId",
+    ],
+    ["/v1/payments/transfers", "data.0.custodyWalletId", "data.0.providerWalletId"],
+    [
+      "/v1/payments/transfer-batches",
+      "data.0.sourceCustodyWalletId",
+      "data.0.sourceProviderWalletId",
+    ],
+  ])("omits provider wallet identity from %s", (path, custodyField, providerField) => {
+    const body = paymentsDemoBody(path, RAMP_PROVIDERS, NOW);
+    expect(body).toHaveProperty(custodyField);
+    expect(body).not.toHaveProperty(providerField);
   });
 
   it("filters batch history by exact source before counting and paging", () => {
@@ -463,7 +462,7 @@ describe("Payments overview", () => {
     expect(world).toEqual(before);
   });
 
-  it("preserves NULL wallet pins and internal provider evidence when projecting saved history", () => {
+  it("preserves NULL wallet pins and saved history when reading transfer and batch DTOs", () => {
     const world = buildWorld(NOW, RAMP_PROVIDERS);
     const transfer = world.transfers[0]?.transfer;
     const batch = world.batches[0]?.batch;

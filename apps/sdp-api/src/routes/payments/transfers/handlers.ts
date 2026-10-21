@@ -342,7 +342,6 @@ async function updateOnchainTransferForRamp(
   ).updateOnchainTransferForRamp({
     ...tenant,
     custodyWalletId: operation.sourceWallet.id,
-    walletId: existing.wallet_id,
     sourceAddress: operation.sourceWallet.publicKey,
     destinationAddress,
     token: operation.token,

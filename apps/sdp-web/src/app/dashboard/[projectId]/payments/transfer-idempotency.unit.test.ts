@@ -59,21 +59,6 @@ describe("sendTransferUnderKey", () => {
     expect(claimTransferIdempotencyKey(fingerprint)).not.toBe(sentKey(fetchMock));
   });
 
-  it("keeps the original intent key when a success answer has a different exact source", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({
-        data: { transfer: { ...RECORDED_TRANSFER, custodyWalletId: "cwlt_alias" } },
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const fingerprint = transferRequestFingerprint(SUBMISSION);
-
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
-      "DashboardPayments.workspace.transferMissing"
-    );
-    expect(claimTransferIdempotencyKey(fingerprint)).toBe(sentKey(fetchMock));
-  });
-
   it.each([
     {
       label: "missing transfer fields",

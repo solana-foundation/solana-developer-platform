@@ -11,7 +11,6 @@ export interface RampQuoteBinding {
   organizationId: string;
   projectId: string;
   custodyWalletId: string;
-  walletId: string;
   counterpartyId: string;
   direction: "onramp" | "offramp";
   token: string;

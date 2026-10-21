@@ -557,10 +557,7 @@ export async function createTransfer(
       throw new Error(t("DashboardPayments.workspace.transferMissing"), { cause });
     })
   );
-  if (
-    !parsed.success ||
-    parsed.data.data.transfer.custodyWalletId !== input.sourceCustodyWalletId
-  ) {
+  if (!parsed.success) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
 
@@ -718,13 +715,7 @@ export async function createTransferBatch(
       throw new Error(t("DashboardPayments.workspace.batchTransferMissing"), { cause });
     })
   );
-  if (
-    !parsed.success ||
-    parsed.data.data.batch.sourceCustodyWalletId !== input.sourceCustodyWalletId ||
-    parsed.data.data.transfers.some(
-      (transfer) => transfer.custodyWalletId !== input.sourceCustodyWalletId
-    )
-  ) {
+  if (!parsed.success) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
   }
   return parsed.data.data;

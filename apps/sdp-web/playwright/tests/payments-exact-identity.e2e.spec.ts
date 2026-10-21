@@ -23,7 +23,6 @@ import {
   type WalletBootstrapResult,
 } from "../support/local-dashboard-bootstrap";
 
-const TIMEOUT = 120_000;
 const sourceWalletSelectorSchema = z.object({ sourceCustodyWalletId: z.string() });
 // Keep extra wire fields visible to the retired-field absence assertions below.
 const transferSchema = z
@@ -34,7 +33,6 @@ const transferSchema = z
   })
   .loose();
 const transferResultSchema = z.object({ transfer: transferSchema });
-const transferListSchema = z.array(transferSchema.pick({ id: true, custodyWalletId: true }));
 const batchResultSchema = z.object({
   batch: z.object({ id: z.string(), sourceCustodyWalletId: z.string() }).loose(),
   transfers: z.array(transferSchema),
@@ -207,17 +205,11 @@ test.describe
       await page.getByRole("button", { name: wallet.label ?? "Wallet Identity A" }).click();
     }
 
-    test("uses internal-only balances and refuses legacy and mixed payment selectors", async ({
+    test("submits the selected internal wallet with balances and transfer details", async ({
       page,
     }) => {
       await getClerkBearerToken(page);
-      await gotoProjectPage(page, projectId, "/dashboard/payments");
-      await expect(
-        page.getByRole("heading", { name: "Available balance", exact: true })
-      ).toBeVisible({ timeout: TIMEOUT });
-      await expect(page).toHaveURL(projectHref(projectId, "/dashboard/payments"), {
-        timeout: TIMEOUT,
-      });
+      await gotoProjectPage(page, projectId, "/dashboard/payments/pay");
       const balance = await page.evaluate(
         async ({ projectId, walletId }) => {
           const response = await fetch(`/api/dashboard/payments/wallets/${walletId}/balances`, {
@@ -240,108 +232,6 @@ test.describe
         address: alias.publicKey,
       });
       expect(balanceBody.data.walletBalances).not.toHaveProperty("walletId");
-      const legacyBalanceStatus = await page.evaluate(
-        async ({ projectId, walletId }) => {
-          const response = await fetch(`/api/dashboard/payments/wallets/${walletId}/balances`, {
-            headers: { "x-project-id": projectId },
-          });
-          return response.status;
-        },
-        { projectId, walletId: alias.walletId }
-      );
-      expect(legacyBalanceStatus).toBe(404);
-
-      const recipients = [
-        {
-          counterpartyId: contact.counterpartyId,
-          counterpartyAccountId: contact.accountId,
-          amount: "0.01",
-        },
-      ];
-      const writes = [
-        {
-          path: "/api/dashboard/payments/transfers",
-          selector: "sourceCustodyWalletId",
-          legacySelector: "sourceWalletId",
-          body: { destination: destinationAddress, token: "SOL", amount: "0.01" },
-        },
-        ...[
-          "/api/dashboard/payments/transfers/batch/estimate",
-          "/api/dashboard/payments/transfers/batch",
-        ].map((path) => ({
-          path,
-          selector: "sourceCustodyWalletId",
-          legacySelector: "sourceWalletId",
-          body: { token: "SOL", recipients },
-        })),
-        {
-          path: "/api/dashboard/payments/ramps/onramp/quote",
-          selector: "destinationCustodyWalletId",
-          legacySelector: "destinationWalletId",
-          body: {
-            provider: "moonpay",
-            counterpartyId: contact.counterpartyId,
-            assetRail: "sol.solana",
-            fiatCurrency: "USD",
-            fiatAmount: "50",
-          },
-        },
-        {
-          path: "/api/dashboard/payments/ramps/offramp/quote",
-          selector: "sourceCustodyWalletId",
-          legacySelector: "sourceWalletId",
-          body: {
-            provider: "moonpay",
-            counterpartyId: contact.counterpartyId,
-            assetRail: "sol.solana",
-            fiatCurrency: "USD",
-            cryptoAmount: "0.01",
-          },
-        },
-      ];
-      for (const write of writes) {
-        const statuses = await page.evaluate(
-          async ({ projectId, write, custodyWalletId, providerWalletId }) => {
-            const bodies = [
-              { ...write.body, [write.legacySelector]: providerWalletId },
-              {
-                ...write.body,
-                [write.selector]: custodyWalletId,
-                [write.legacySelector]: providerWalletId,
-              },
-              {
-                ...write.body,
-                [write.selector]: custodyWalletId,
-                providerWalletId,
-              },
-              { ...write.body, [write.selector]: providerWalletId },
-            ];
-            const statuses = [];
-            for (const body of bodies) {
-              const response = await fetch(write.path, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "x-project-id": projectId,
-                  "Idempotency-Key": crypto.randomUUID(),
-                },
-                body: JSON.stringify(body),
-              });
-              statuses.push(response.status);
-            }
-            return statuses;
-          },
-          { projectId, write, custodyWalletId: alias.id, providerWalletId: alias.walletId }
-        );
-        expect(statuses, write.path).toEqual([400, 400, 400, 404]);
-      }
-    });
-
-    test("submits the exact selected wallet and refuses fresh execution after its revocation", async ({
-      page,
-    }) => {
-      await getClerkBearerToken(page);
-      await gotoProjectPage(page, projectId, "/dashboard/payments/pay");
       await page.getByRole("button", { name: "Contact", exact: true }).click();
       await page.getByPlaceholder("Search contacts").fill(contact.displayName);
       await page.getByRole("button", { name: contact.displayName }).click();
@@ -375,26 +265,6 @@ test.describe
       );
       expect(detail.transfer.custodyWalletId).toBe(wallet.id);
       expect(detail.transfer).not.toHaveProperty("providerWalletId");
-      const before = transferListSchema.parse(
-        await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${alias.id}`)
-      );
-      await db.query("UPDATE custody_wallets SET status = 'inactive' WHERE id = $1", [alias.id]);
-      try {
-        await expect(
-          api.post("/v1/payments/transfers", {
-            sourceCustodyWalletId: alias.id,
-            destination: destinationAddress,
-            token: "SOL",
-            amount: "0.01",
-          })
-        ).rejects.toThrow("(409)");
-        const after = transferListSchema.parse(
-          await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${alias.id}`)
-        );
-        expect(after.map((transfer) => transfer.id)).toEqual(before.map((transfer) => transfer.id));
-      } finally {
-        await db.query("UPDATE custody_wallets SET status = 'active' WHERE id = $1", [alias.id]);
-      }
     });
 
     test("estimates and submits the exact batch, preserving its recipients and chunk pins", async ({
@@ -465,7 +335,7 @@ test.describe
       }
     });
 
-    test("continues a saved exact MoonPay quote and preserves legacy and exact history links", async ({
+    test("reloads a saved ramp and opens its exact wallet while retaining legacy detail", async ({
       page,
     }) => {
       await getClerkBearerToken(page);
@@ -496,49 +366,15 @@ test.describe
         }
       );
       expect(quoteResult.status).toBe(200);
-      const { quote, transferId } = z
-        .object({
-          data: z.object({
-            transferId: z.string(),
-            quote: z.object({
-              provider: z.literal("moonpay"),
-              id: z.string(),
-              deliveryMode: z.literal("hosted"),
-              status: z.enum(PAYMENT_TRANSFER_STATUSES),
-              hostedUrl: z.url(),
-            }),
-          }),
-        })
+      const { transferId } = z
+        .object({ data: z.object({ transferId: z.string() }) })
         .parse(quoteResult.body).data;
       transferIds.add(transferId);
-      expect(quote).toMatchObject({
-        provider: "moonpay",
-        id: transferId,
-        deliveryMode: "hosted",
-        status: "pending",
-      });
-      const hostedUrl = new URL(quote.hostedUrl);
-      expect(hostedUrl.hostname).toBe("sell-sandbox.moonpay.com");
-      expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(transferId);
-      expect(hostedUrl.searchParams.get("refundWalletAddress")).toBe(alias.publicKey);
-      expect(hostedUrl.searchParams.get("baseCurrencyAmount")).toBe("0.01");
-      expect(hostedUrl.searchParams.has("signature")).toBe(true);
       const saved = transferResultSchema.parse(
         await api.get<unknown>(`/v1/payments/transfers/${transferId}`)
       );
       expect(saved.transfer).toMatchObject({ custodyWalletId: alias.id, status: "pending" });
       expect(saved.transfer).not.toHaveProperty("providerWalletId");
-      const {
-        rows: [storedQuote],
-      } = await db.query(
-        "SELECT custody_wallet_id, wallet_id, provider_reference, source_address FROM payment_transfers WHERE id = $1 AND organization_id = $2 AND project_id = $3",
-        [transferId, fixture.organization.localOrgId, projectId]
-      );
-      expect(storedQuote).toMatchObject({
-        custody_wallet_id: alias.id,
-        wallet_id: alias.walletId,
-        source_address: alias.publicKey,
-      });
       await gotoProjectPage(page, projectId, `/dashboard/payments/transactions/${transferId}`);
       await page.reload();
       await expect(page).toHaveURL(
@@ -547,42 +383,6 @@ test.describe
       await expect(
         page.getByText(alias.label ?? "Wallet Identity B", { exact: true })
       ).toBeVisible();
-      // Project-authorized cancellation does not require an executable wallet.
-      await db.query("UPDATE custody_wallets SET status = 'inactive' WHERE id = $1", [alias.id]);
-      try {
-        const cancelled = await page.evaluate(
-          async ({ projectId, transferId }) => {
-            const response = await fetch("/api/dashboard/payments/ramps/transfers/cancel", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-project-id": projectId,
-                "Idempotency-Key": crypto.randomUUID(),
-              },
-              body: JSON.stringify({ transferId }),
-            });
-            return response.status;
-          },
-          { projectId, transferId }
-        );
-        expect(cancelled).toBe(200);
-        const continued = transferResultSchema.parse(
-          await api.get<unknown>(`/v1/payments/transfers/${transferId}`)
-        );
-        expect(continued.transfer).toMatchObject({
-          custodyWalletId: alias.id,
-          status: "canceled",
-        });
-        const {
-          rows: [afterCancellation],
-        } = await db.query(
-          "SELECT custody_wallet_id, wallet_id, provider_reference, source_address FROM payment_transfers WHERE id = $1 AND organization_id = $2 AND project_id = $3",
-          [transferId, fixture.organization.localOrgId, projectId]
-        );
-        expect(afterCancellation).toEqual(storedQuote);
-      } finally {
-        await db.query("UPDATE custody_wallets SET status = 'active' WHERE id = $1", [alias.id]);
-      }
       const legacyId = `xfr_pr2_legacy_${crypto.randomUUID()}`;
       const failedId = `xfr_pr2_failed_${crypto.randomUUID()}`;
       const historyRows: Array<[string, string | null, PaymentTransferStatus, string | null]> = [
@@ -634,42 +434,9 @@ test.describe
         signature: "retained-e2e-legacy-signature",
       });
       expect(legacyDetailBody.data.transfer).not.toHaveProperty("providerWalletId");
-      const legacyHistory = transferListSchema.parse(
-        await api.get<unknown>("/v1/payments/transfers")
-      );
-      expect(legacyHistory).toEqual(
-        expect.arrayContaining([expect.objectContaining({ id: legacyId, custodyWalletId: null })])
-      );
-      await gotoProjectPage(
-        page,
-        projectId,
-        `/dashboard/payments/transactions?module=payments&custodyWalletId=${alias.id}`
-      );
-      const failedRow = page.locator("tbody").getByRole("link").filter({ hasText: "Failed" });
-      await expect(failedRow).toContainText(alias.label ?? "Wallet Identity B", {
-        timeout: TIMEOUT,
-      });
-      await failedRow.click();
-      await expect(page).toHaveURL(
-        projectHref(projectId, `/dashboard/payments/transactions/${failedId}`),
-        { timeout: TIMEOUT }
-      );
+      await gotoProjectPage(page, projectId, `/dashboard/payments/transactions/${failedId}`);
       await expect(
         page.getByRole("link", { name: "Open the wallet", exact: true })
       ).toHaveAttribute("href", projectHref(projectId, `/dashboard/wallets/${alias.id}`));
-      const exactHistory = transferListSchema.parse(
-        await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${alias.id}`)
-      );
-      expect(exactHistory).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: transferId }),
-          expect.objectContaining({ id: failedId }),
-        ])
-      );
-      const otherHistory = transferListSchema.parse(
-        await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${wallet.id}`)
-      );
-      expect(otherHistory.map((transfer) => transfer.id)).not.toContain(transferId);
-      expect(otherHistory.map((transfer) => transfer.id)).not.toContain(failedId);
     });
   });

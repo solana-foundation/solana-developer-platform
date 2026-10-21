@@ -404,7 +404,6 @@ describe("Payments routes — on-chain transfers", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
       sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
       destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
       token: SOL_MINT,

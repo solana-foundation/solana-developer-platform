@@ -74,94 +74,17 @@ beforeEach(() => {
   now = NOW;
 });
 
-describe("exact wallet selectors", () => {
-  const sourceRequests = [
-    {
-      path: "/v1/payments/transfers",
-      body: { sourceCustodyWalletId: TREASURY, destination: ADDRESS, token: USDC, amount: "1" },
-    },
-    ...["estimate", ""].map((action) => ({
-      path: `/v1/payments/transfer-batches${action ? `/${action}` : ""}`,
-      body: {
-        sourceCustodyWalletId: TREASURY,
-        token: USDC,
-        recipients: [
-          { counterpartyId: "demo_cpty_jane", counterpartyAccountId: "demo_cpa_jane", amount: "1" },
-        ],
-      },
-    })),
-    {
-      path: "/v1/payments/ramps/offramp/quote",
-      body: {
-        provider: "moonpay",
-        counterpartyId: "demo_cpty_jane",
-        sourceCustodyWalletId: TREASURY,
-        assetRail: "usdc.solana",
-        fiatCurrency: "USD",
-        cryptoAmount: "1",
-      },
-    },
-  ];
-  it.each(
-    sourceRequests.flatMap(({ path, body }) =>
-      [
-        "source",
-        "wallet",
-        "sourceWallet",
-        "sourceWalletId",
-        "sourceProviderWalletId",
-        "providerWalletId",
-        "walletId",
-        "destinationWallet",
-        "destinationWalletId",
-        "destinationProviderWalletId",
-      ].map((field) => ({ path, body, field }))
-    )
-  )("refuses $field alongside exact source at $path", ({ path, body, field }) => {
-    expect(refusal(write("POST", path, { ...body, [field]: "demo_privy_treasury" }))).toEqual([
-      400,
-      "invalid_request",
-    ]);
-    expect(ops).toEqual([]);
-  });
-  it.each([
-    "destination",
-    "destinationWallet",
-    "destinationWalletId",
-    "destinationProviderWalletId",
-    "providerWalletId",
-    "walletId",
-    "source",
-    "wallet",
-    "sourceWallet",
-    "sourceWalletId",
-    "sourceProviderWalletId",
-  ])("refuses %s alongside an exact on-ramp destination", (field) => {
-    expect(
-      refusal(
-        write("POST", "/v1/payments/ramps/onramp/quote", {
-          provider: "coinbase",
-          counterpartyId: "demo_cpty_jane",
-          destinationCustodyWalletId: TREASURY,
-          assetRail: "usdc.solana",
-          fiatCurrency: "USD",
-          fiatAmount: "10",
-          [field]: "demo_privy_treasury",
-        })
-      )
-    ).toEqual([400, "invalid_request"]);
-    expect(ops).toEqual([]);
-  });
+describe("exact requirements selectors", () => {
   it("refuses provider aliases when requirements name an exact destination", () => {
     expect(
       read(
-        "/v1/counterparties/demo_cpty_jane/requirements?provider=coinbase&destinationCustodyWalletId=demo_privy_treasury"
+        "/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&destinationCustodyWalletId=demo_privy_treasury"
       ).status
     ).toBe(404);
     expect(
       refusal(
         write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
-          provider: "coinbase",
+          provider: "moonpay",
           direction: "onramp",
           destinationCustodyWalletId: "demo_privy_treasury",
         })
@@ -169,15 +92,15 @@ describe("exact wallet selectors", () => {
     ).toEqual([404, "not_found"]);
     expect(ops).toEqual([]);
   });
-  it.each(["destination", "destinationWallet", "wallet", "sourceWallet"])(
+  it.each(["destination", "destinationWalletId"])(
     "refuses %s on requirements reads and writes alongside an exact destination",
     (field) => {
       const readStatus = read(
-        `/v1/counterparties/demo_cpty_jane/requirements?provider=coinbase&destinationCustodyWalletId=${TREASURY}&${field}=demo_privy_treasury`
+        `/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&destinationCustodyWalletId=${TREASURY}&${field}=demo_privy_treasury`
       ).status;
       const writeRefusal = refusal(
         write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
-          provider: "coinbase",
+          provider: "moonpay",
           direction: "onramp",
           destinationCustodyWalletId: TREASURY,
           [field]: "demo_privy_treasury",
@@ -482,7 +405,7 @@ describe("ramp pay-ins and cancels", () => {
 });
 
 describe("transfers and batches", () => {
-  it("keeps custody identity in the created transfer while provider evidence stays internal", () => {
+  it("returns the created transfer with custody identity and no provider wallet field", () => {
     const result = write("POST", "/v1/payments/transfers", {
       sourceCustodyWalletId: TREASURY,
       destination: ADDRESS,
@@ -494,7 +417,7 @@ describe("transfers and batches", () => {
     expect(result?.body).not.toHaveProperty("data.transfer.providerWalletId");
   });
 
-  it("projects created batch and transfer DTOs while retaining provider evidence in the session world", () => {
+  it("returns the created batch and chunks without provider wallet fields", () => {
     const result = write("POST", "/v1/payments/transfer-batches", {
       sourceCustodyWalletId: TREASURY,
       token: USDC,
@@ -507,10 +430,6 @@ describe("transfers and batches", () => {
     expect(result?.body).not.toHaveProperty("data.batch.sourceProviderWalletId");
     expect(result?.body).toHaveProperty("data.transfers.0.custodyWalletId", TREASURY);
     expect(result?.body).not.toHaveProperty("data.transfers.0.providerWalletId");
-    expect(
-      world().batches.find(({ batch }) => batch.id === result?.body.data.batch.id)?.batch
-        .sourceProviderWalletId
-    ).toBe("demo_privy_treasury");
   });
 
   const exactWalletWrites = [
@@ -564,6 +483,35 @@ describe("transfers and batches", () => {
   it.each(exactWalletWrites)("uses the exact wallet and its balance at $path", (input) => {
     const { collision, original, source } = collisionWorld();
     const existingIds = new Set(collision.transfers.map(({ transfer }) => transfer.id));
+    const legacySelector =
+      input.selector === "sourceCustodyWalletId" ? "sourceWalletId" : "destinationWalletId";
+    for (const includeExact of [false, true]) {
+      const legacy = demoWrite("POST", {
+        segments: input.path.split("/"),
+        body: {
+          ...input.body,
+          [input.selector]: includeExact ? source.id : undefined,
+          [legacySelector]: source.walletId,
+        },
+        world: collision,
+        ops: [],
+        now,
+      });
+      expect(legacy?.answer(collision)).toMatchObject({
+        status: 400,
+        body: { error: { code: "invalid_request" } },
+      });
+      expect(legacy?.ops).toEqual([]);
+    }
+    const refused = demoWrite("POST", {
+      segments: input.path.split("/"),
+      body: { ...input.body, [input.selector]: source.walletId },
+      world: collision,
+      ops: [],
+      now,
+    });
+    expect(refused?.answer(collision).status).toBe(404);
+    expect(refused?.ops).toEqual([]);
     const result = demoWrite("POST", {
       segments: input.path.split("/"),
       body: { ...input.body, [input.selector]: source.id },
@@ -586,7 +534,7 @@ describe("transfers and batches", () => {
       ({ transfer }) => !existingIds.has(transfer.id)
     )) {
       expect(transfer.custodyWalletId).toBe(source.id);
-      expect(transfer.providerWalletId).toBe(source.walletId);
+      expect(transfer).not.toHaveProperty("providerWalletId");
       expect(transfer.direction === "inbound" ? transfer.destination : transfer.source).toBe(
         source.publicKey
       );
@@ -595,37 +543,32 @@ describe("transfers and batches", () => {
     if (input.path === "payments/transfer-batches") {
       expect(batch?.batch).toMatchObject({
         sourceCustodyWalletId: source.id,
-        sourceProviderWalletId: source.walletId,
         sourceAddress: source.publicKey,
       });
+      expect(batch?.batch).not.toHaveProperty("sourceProviderWalletId");
     }
     expect(walletHolding(source, USDC)).toBe(input.balance);
     expect(walletHolding(original, USDC)).toBe("1000");
-  });
-
-  it.each(exactWalletWrites.filter((input) => input.selector === "sourceCustodyWalletId"))(
-    "checks the selected wallet's funds at $path",
-    (input) => {
-      const { collision, source } = collisionWorld();
+    if (input.selector === "sourceCustodyWalletId") {
       source.balances = [];
       const before = structuredClone(collision);
-      const result = demoWrite("POST", {
+      const insufficient = demoWrite("POST", {
         segments: input.path.split("/"),
         body: { ...input.body, [input.selector]: source.id },
         world: collision,
         ops: [],
         now,
       });
-      expect(result?.answer(collision)).toMatchObject({
+      expect(insufficient?.answer(collision)).toMatchObject({
         status: 400,
         body: { error: { code: "insufficient_funds" } },
       });
-      expect(result?.ops).toEqual([]);
+      expect(insufficient?.ops).toEqual([]);
       expect(collision).toEqual(before);
     }
-  );
+  });
 
-  it("funds a saved off-ramp from its exact source despite another provider reference", () => {
+  it("funds a saved off-ramp from its exact source without debiting an alias", () => {
     const { collision, original, source } = collisionWorld();
     const ramp = transferById(collision, "demo_xfr_offramp_orbit");
     if (!ramp) throw new Error("Missing demo ramp fixture");
@@ -633,7 +576,6 @@ describe("transfers and batches", () => {
     ramp.status = "awaiting_payment";
     ramp.token = USDC;
     ramp.amount = "1";
-    const providerEvidence = ramp.providerWalletId;
     const context = {
       segments: ["payments", "transfers"],
       body: {
@@ -663,12 +605,12 @@ describe("transfers and batches", () => {
     applyDemoOps(collision, result?.ops ?? [], now);
     expect(ramp.status).toBe("settling");
     expect(ramp.custodyWalletId).toBe(source.id);
-    expect(ramp.providerWalletId).toBe(providerEvidence);
+    expect(ramp).not.toHaveProperty("providerWalletId");
     expect(walletHolding(source, USDC)).toBe("9");
     expect(walletHolding(original, USDC)).toBe("1000");
   });
 
-  it("credits a settled on-ramp to its exact wallet despite another provider reference", () => {
+  it("credits a settled on-ramp to its exact wallet without crediting an alias", () => {
     const { collision, original, source } = collisionWorld();
     const ramp = transferById(collision, "demo_xfr_onramp_moonpay");
     if (!ramp) throw new Error("Missing demo ramp fixture");
@@ -686,59 +628,40 @@ describe("transfers and batches", () => {
     expect(walletHolding(original, USDC)).toBe("1000");
   });
 
-  it.each([null, "demo_cwlt_missing", "provider_b"])(
-    "does not fund or simulate a ramp without an exact wallet: %s",
-    (pin) => {
-      const { collision } = collisionWorld();
-      const ramp = transferById(collision, "demo_xfr_onramp_moonpay");
-      if (!ramp) throw new Error("Missing demo ramp fixture");
-      ramp.custodyWalletId = pin;
-      ramp.status = "awaiting_payment";
-      const before = structuredClone(collision);
-      const result = demoWrite("POST", {
-        segments: ["payments", "ramps", "sandbox", "simulate"],
-        body: { transferId: ramp.id },
-        world: collision,
-        ops: [
-          {
-            k: "ramp",
-            id: ramp.id,
-            at: now.getTime(),
-            provider: "moonpay",
-            dir: "onramp",
-            cp: "demo_cpty_jane",
-            wallet: "provider_b",
-            rail: "usdc.solana",
-            fiat: "USD",
-            fiatAmount: "3",
-            crypto: "3",
-            quote: "demo_quote",
-          },
-        ],
-        now,
-      });
-      expect(result?.answer(collision).status).toBe(404);
-      expect(result?.ops).toEqual([]);
-      applyDemoOps(collision, [{ k: "ramp-paid", id: ramp.id, at: now.getTime() }], now);
-      expect(collision).toEqual(before);
-    }
-  );
-
-  it.each(exactWalletWrites)(
-    "refuses a provider reference in the exact selector at $path",
-    (input) => {
-      const providerReference = Object.values(world().wallets).find(
-        (wallet) => wallet.id === TREASURY
-      )?.walletId;
-
-      expect(
-        refusal(
-          write("POST", `/v1/${input.path}`, { ...input.body, [input.selector]: providerReference })
-        )
-      ).toEqual([404, "not_found"]);
-      expect(ops).toEqual([]);
-    }
-  );
+  it("does not fund or simulate a ramp whose pin is a provider alias", () => {
+    const { collision, source } = collisionWorld();
+    const ramp = transferById(collision, "demo_xfr_onramp_moonpay");
+    if (!ramp) throw new Error("Missing demo ramp fixture");
+    ramp.custodyWalletId = source.walletId;
+    ramp.status = "awaiting_payment";
+    const before = structuredClone(collision);
+    const result = demoWrite("POST", {
+      segments: ["payments", "ramps", "sandbox", "simulate"],
+      body: { transferId: ramp.id },
+      world: collision,
+      ops: [
+        {
+          k: "ramp",
+          id: ramp.id,
+          at: now.getTime(),
+          provider: "moonpay",
+          dir: "onramp",
+          cp: "demo_cpty_jane",
+          wallet: source.walletId,
+          rail: "usdc.solana",
+          fiat: "USD",
+          fiatAmount: "3",
+          crypto: "3",
+          quote: "demo_quote",
+        },
+      ],
+      now,
+    });
+    expect(result?.answer(collision).status).toBe(404);
+    expect(result?.ops).toEqual([]);
+    applyDemoOps(collision, [{ k: "ramp-paid", id: ramp.id, at: now.getTime() }], now);
+    expect(collision).toEqual(before);
+  });
 
   const send = (body: Record<string, unknown>) =>
     write("POST", "/v1/payments/transfers", {

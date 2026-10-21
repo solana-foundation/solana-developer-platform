@@ -639,7 +639,6 @@ export function createPostgresPaymentsRepository(
           clauses: [
             "direction = 'outbound'",
             "custody_wallet_id = ?",
-            "wallet_id = ?",
             "source_address = ?",
             "token = ?",
             "amount::numeric = ?::numeric",
@@ -657,7 +656,6 @@ export function createPostgresPaymentsRepository(
           ],
           clauseValues: [
             input.custodyWalletId,
-            input.walletId,
             input.sourceAddress,
             input.token,
             input.amount,

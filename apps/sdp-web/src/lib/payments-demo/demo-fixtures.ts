@@ -740,7 +740,6 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
 export type DemoWallet = PaymentsDashboardWallet & { balances: CustodyWalletTokenBalance[] };
 
 export type DemoTransfer = PaymentTransferSummary & {
-  providerWalletId: string;
   organizationId: string;
   projectId: string;
   type: PaymentTransferType;
@@ -757,7 +756,7 @@ export interface DemoTransferRow {
 }
 
 export interface DemoBatch {
-  batch: PaymentTransferBatch & { sourceProviderWalletId: string };
+  batch: PaymentTransferBatch;
   recipients: PaymentTransferRecipient[];
 }
 
@@ -883,7 +882,6 @@ function buildTransfer(spec: TransferSpec, world: WorldBase, clock: Clock): Demo
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     custodyWalletId: spec.observed ? null : wallet.id,
-    providerWalletId: wallet.walletId,
     type: spec.type ?? "transfer",
     kind: spec.kind,
     direction: spec.direction,
@@ -963,7 +961,6 @@ function buildBatch(spec: BatchSpec, world: WorldBase, clock: Clock): DemoBatch 
       projectId: PROJECT_ID,
       externalId: spec.externalId,
       sourceCustodyWalletId: wallet.id,
-      sourceProviderWalletId: wallet.walletId,
       sourceAddress: wallet.publicKey,
       token: DEMO_TOKENS.USDC.mint,
       status: spec.status,
@@ -1412,24 +1409,12 @@ function transfersBody(world: DemoWorld, params: URLSearchParams) {
         .map((row) => row.transfer)
         .filter((transfer) => filters.every((filter) => filter(transfer)));
   const page = pageOf(rows, params);
-  return { data: page.rows.map(publicDemoTransfer), meta: paginatedMeta(page) };
+  return { data: page.rows, meta: paginatedMeta(page) };
 }
 
 function transferBody(world: DemoWorld, transferId: string) {
   const transfer = world.transfers.find((row) => row.transfer.id === transferId)?.transfer;
-  return transfer ? { data: { transfer: publicDemoTransfer(transfer) } } : undefined;
-}
-
-export function publicDemoTransfer(transfer: DemoTransfer | undefined) {
-  if (!transfer) return undefined;
-  const { providerWalletId: _providerWalletId, ...result } = transfer;
-  return result;
-}
-
-export function publicDemoBatch(batch: DemoBatch["batch"] | undefined) {
-  if (!batch) return undefined;
-  const { sourceProviderWalletId: _sourceProviderWalletId, ...result } = batch;
-  return result;
+  return transfer ? { data: { transfer } } : undefined;
 }
 
 // ─── Unified transactions ────────────────────────────────────────────────────
@@ -1516,7 +1501,7 @@ function batchesBody(world: DemoWorld, params: URLSearchParams) {
       ),
     params
   );
-  return { data: page.rows.map(publicDemoBatch), meta: paginatedMeta(page) };
+  return { data: page.rows, meta: paginatedMeta(page) };
 }
 
 function batchBody(world: DemoWorld, batchId: string) {
@@ -1525,12 +1510,11 @@ function batchBody(world: DemoWorld, batchId: string) {
   const transferIds = new Set(entry.recipients.map((recipient) => recipient.transferId));
   return {
     data: {
-      batch: publicDemoBatch(entry.batch),
+      batch: entry.batch,
       recipients: entry.recipients,
       transfers: world.transfers
         .map((row) => row.transfer)
-        .filter((transfer) => transferIds.has(transfer.id))
-        .map(publicDemoTransfer),
+        .filter((transfer) => transferIds.has(transfer.id)),
     },
   };
 }
