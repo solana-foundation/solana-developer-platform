@@ -8014,7 +8014,7 @@ describe("Payments routes — recurring", () => {
           status: "failed",
           stage: "authorize_subscription",
           authorization_signature: null,
-          last_valid_block_height: null,
+          last_valid_block_height: "1000",
         });
         expect((await recurringPaymentDueAt(created.id)).status).toBe("pending_activation");
         const sent = sends();
