@@ -8,9 +8,6 @@ on:
 permissions:
   contents: read
 
-env:
-  BASH_ENV: ${{ github.workspace }}/.github/scripts/node-trust-env.sh
-
 jobs:
   plan:
     if: "${{ !startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
@@ -27,7 +24,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Plan release
         id: plan
@@ -63,7 +60,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Prepare release PR
         env:
@@ -102,7 +99,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Translate missing UI strings
         env:
@@ -155,7 +152,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Publish release tag and GitHub release
         env:

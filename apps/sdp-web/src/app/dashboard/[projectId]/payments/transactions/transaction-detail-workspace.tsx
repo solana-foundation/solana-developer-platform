@@ -16,6 +16,7 @@ import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/paym
 import {
   formatDateTime,
   formatDecimalAmount,
+  saleFiatLabel,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import {
   RecordAmount,
@@ -26,6 +27,7 @@ import {
   RecordSection,
   RecordStateBand,
 } from "@/app/dashboard/[projectId]/payments/payments-record";
+import { rampPhaseCopy } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
@@ -35,6 +37,7 @@ import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { getRampProviderLabel } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { RampOpenSale, useLiveRampTransfer } from "./ramp-open-sale";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
 import { TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs.redesign";
 import { isPaymentTransferStatus, useTransactionStatus } from "./transaction-status";
@@ -76,32 +79,21 @@ function paymentDirection(
 }
 
 /**
- * Why a payment is in its state, in the design's words. Ramp states name the provider and the
- * token when the transfer says which; a failure carries the API's own reason when it gave one.
+ * Why a payment is in its state, in the design's words; a ramp reads from its phase instead. A
+ * failure carries the API's own reason when it gave one.
  */
 function paymentWhy(
   status: PaymentTransferStatus,
   transfer: PaymentTransferDetail | null,
-  token: string | null,
   t: Translate
 ): string {
-  const provider = transfer?.provider ? getRampProviderLabel(transfer.provider) : null;
   switch (status) {
     case "processing":
-      return provider
-        ? t("DashboardPayments.transactionDetail.why.processingProvider", { provider })
-        : t("DashboardPayments.transactionDetail.why.processing");
+      return t("DashboardPayments.transactionDetail.why.processing");
     case "settling":
-      return provider
-        ? t("DashboardPayments.transactionDetail.why.settlingProvider", {
-            provider,
-            token: token ?? t("DashboardPayments.transactionDetail.theTokens"),
-          })
-        : t("DashboardPayments.transactionDetail.why.settling");
+      return t("DashboardPayments.transactionDetail.why.settling");
     case "completed":
-      return provider
-        ? t("DashboardPayments.transactionDetail.why.completedProvider", { provider })
-        : t("DashboardPayments.transactionDetail.why.completed");
+      return t("DashboardPayments.transactionDetail.why.completed");
     case "failed":
       return transfer?.error?.trim() || t("DashboardPayments.transactionDetail.why.failed");
     case "awaiting_payment":
@@ -176,8 +168,15 @@ function useTransactionSummary(
 ) {
   const t = useTranslations();
   const locale = useLocale();
-  const status = useTransactionStatus()(transaction);
-  const { amount, token } = transactionAmountLabel(transaction, issuedTokensByMint, locale);
+  const ledgerStatus = useTransactionStatus()(transaction);
+  const { amount: cryptoAmount, token } = transactionAmountLabel(
+    transaction,
+    issuedTokensByMint,
+    locale
+  );
+  // A sale moves crypto to the provider, but the contact gets fiat: name what they get.
+  const saleFiat = transfer?.type === "offramp" ? saleFiatLabel(transfer, locale) : null;
+  const amount = saleFiat ?? cryptoAmount;
   const direction = paymentDirection(transaction, transfer);
   const { contact, party } = transactionParty(transaction, transfer, direction, counterpartyName);
   const titleKey =
@@ -185,11 +184,34 @@ function useTransactionSummary(
       ? "DashboardPayments.transactionDetail.titleFrom"
       : "DashboardPayments.transactionDetail.titleTo";
   const title = amount && party ? t(titleKey, { amount, party }) : (amount ?? transaction.id);
-  const why =
+  // A ramp reads from its whole transfer, so a held delivery or a reported payout says so.
+  const ramp =
+    transfer && (transfer.type === "onramp" || transfer.type === "offramp")
+      ? rampPhaseCopy(t, transfer, { tokenLabel: token, locale })
+      : null;
+  const status =
+    ramp?.kind === "needs_review"
+      ? { label: t("DashboardPayments.ramps.phase.review.badge"), tone: "attention" as const }
+      : ledgerStatus;
+  const paymentStatus =
     transaction.module === "payments" && isPaymentTransferStatus(transaction.moduleStatus)
-      ? paymentWhy(transaction.moduleStatus, transfer, token, t)
-      : undefined;
-  return { status, amount, direction, contact, title, why };
+      ? transaction.moduleStatus
+      : null;
+  // A ramp's phase says why; any other payment, its status.
+  const why =
+    ramp?.description ??
+    (paymentStatus === null ? undefined : paymentWhy(paymentStatus, transfer, t));
+  const soldCrypto = saleFiat ? cryptoAmount : null;
+  return { status, amount, soldCrypto, direction, contact, title, why };
+}
+
+/** A payment request's deposit waits on its payer; a ramp waits on its provider instead. */
+function awaitsRequestPayment(transaction: UnifiedTransaction): boolean {
+  return (
+    transaction.moduleStatus === "awaiting_payment" &&
+    transaction.kind !== "onramp" &&
+    transaction.kind !== "offramp"
+  );
 }
 
 /** Whether the band has anything to offer: the explorer, the wallet, Requests, the module. */
@@ -197,7 +219,7 @@ function hasTransactionAction(transaction: UnifiedTransaction): boolean {
   return (
     transaction.signature !== null ||
     (transaction.moduleStatus === "failed" && transaction.custodyWalletId !== null) ||
-    transaction.moduleStatus === "awaiting_payment" ||
+    awaitsRequestPayment(transaction) ||
     transaction.module !== "payments"
   );
 }
@@ -227,7 +249,7 @@ function TransactionActions({ transaction }: { transaction: UnifiedTransaction }
           </Link>
         </Button>
       ) : null}
-      {transaction.moduleStatus === "awaiting_payment" ? (
+      {awaitsRequestPayment(transaction) ? (
         <Button asChild variant="outline" size="sm">
           <Link href={href(PAYMENT_REQUESTS_HREF)}>
             {t("DashboardPayments.transactionDetail.openRequests")}
@@ -260,6 +282,13 @@ function NetworkFee({ fee }: { fee: number | null | undefined }) {
 }
 
 /** The record's two columns: how it moved (direction, fee, source, memo) and between whom. */
+/** The wallet a transaction moved through: its label, else its shortened id. */
+function walletLabelOf(transaction: UnifiedTransaction): string | null {
+  return transaction.custodyWalletId === null
+    ? null
+    : (transaction.custodyWalletLabel ?? shortenAddress(transaction.custodyWalletId));
+}
+
 function TransactionParties({
   transaction,
   transfer,
@@ -272,10 +301,7 @@ function TransactionParties({
   contact: string | null;
 }) {
   const t = useTranslations();
-  const wallet =
-    transaction.custodyWalletId === null
-      ? null
-      : (transaction.custodyWalletLabel ?? shortenAddress(transaction.custodyWalletId));
+  const wallet = walletLabelOf(transaction);
   const memo = memoText(transfer);
   return (
     <RecordColumns>
@@ -371,7 +397,7 @@ function ProofSection({
             </RecordRow>
           ) : null}
           <RecordRow
-            label={t("DashboardPayments.transactions.transactionId")}
+            label={t("DashboardPayments.transactionDetail.sdpTransactionId")}
             copy={transaction.id}
           >
             <span className="tabular-nums">{transaction.id}</span>
@@ -444,8 +470,8 @@ export function TransactionDetailWorkspace({
 }
 
 function TransactionRecord({
-  transaction,
-  transfer,
+  transaction: initialTransaction,
+  transfer: initialTransfer,
   issuedTokensByMint,
   counterpartyName = null,
 }: {
@@ -456,6 +482,19 @@ function TransactionRecord({
   counterpartyName?: string | null;
 }) {
   const t = useTranslations();
+  const liveTransfer = useLiveRampTransfer(initialTransfer);
+  const transfer = liveTransfer;
+  // A live ramp's state replaces the server's snapshot of it.
+  const transaction: UnifiedTransaction =
+    initialTransaction.module === "payments" &&
+    liveTransfer &&
+    (liveTransfer.type === "onramp" || liveTransfer.type === "offramp")
+      ? {
+          ...initialTransaction,
+          moduleStatus: liveTransfer.status,
+          signature: liveTransfer.signature,
+        }
+      : initialTransaction;
   const summary = useTransactionSummary(
     transaction,
     transfer,
@@ -482,11 +521,19 @@ function TransactionRecord({
             ) : undefined
           }
         />
+        {transfer ? (
+          <RampOpenSale transfer={transfer} walletLabel={walletLabelOf(transaction)} />
+        ) : null}
         <RecordAmount
           label={t("DashboardPayments.transactions.amount")}
           muted={summary.amount === null}
         >
           {summary.amount ?? t("DashboardPayments.transactionDetail.notRecorded")}
+          {summary.soldCrypto ? (
+            <span className="ml-2 text-body font-normal text-tertiary">
+              {t("DashboardPayments.transactionDetail.saleOf", { amount: summary.soldCrypto })}
+            </span>
+          ) : null}
         </RecordAmount>
         <TransactionParties
           transaction={transaction}

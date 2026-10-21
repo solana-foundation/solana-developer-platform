@@ -280,6 +280,14 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   const clauses = ["id = ?"];
   const values: unknown[] = [input.transferId];
 
+  if (input.requireUnsigned) {
+    clauses.push(
+      "signature IS NULL",
+      "signed_transaction IS NULL",
+      "submission_started_at IS NULL"
+    );
+  }
+
   if (input.organizationId) {
     clauses.push("organization_id = ?");
     values.push(input.organizationId);
@@ -291,6 +299,9 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   if (input.expectedStatus !== undefined) {
     clauses.push("status = ?");
     values.push(input.expectedStatus);
+  }
+  if (input.requireUnstarted) {
+    clauses.push("submission_started_at IS NULL");
   }
   // Ramp statuses move only through RAMP_TRANSFER_TRANSITIONS.
   if (input.status !== undefined) {

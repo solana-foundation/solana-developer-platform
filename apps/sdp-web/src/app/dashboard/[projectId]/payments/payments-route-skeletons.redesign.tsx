@@ -1,3 +1,4 @@
+import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
@@ -26,6 +27,8 @@ interface ListSkeletonColumn {
   id: string;
   headerClassName?: string;
   cellSkeletonClassName: string;
+  /** The settled list drops the column below md, so the skeleton does too. */
+  fromMd?: true;
 }
 
 type ListSkeletonVariant =
@@ -40,9 +43,9 @@ const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonCo
     { id: "status", cellSkeletonClassName: "h-4 w-20" },
     { id: "type", cellSkeletonClassName: "h-4 w-24" },
     { id: "amount", headerClassName: "text-right", cellSkeletonClassName: "ml-auto h-4 w-24" },
-    { id: "contact", cellSkeletonClassName: "h-4 w-28" },
-    { id: "wallet", cellSkeletonClassName: "h-4 w-24" },
-    { id: "created", cellSkeletonClassName: "h-4 w-24" },
+    { id: "contact", cellSkeletonClassName: "h-4 w-28", fromMd: true },
+    { id: "wallet", cellSkeletonClassName: "h-4 w-24", fromMd: true },
+    { id: "created", cellSkeletonClassName: "h-4 w-24", fromMd: true },
   ],
   "counterparty-directory": [
     { id: "name", cellSkeletonClassName: "h-4 w-32" },
@@ -95,13 +98,18 @@ function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
       data-loading-table
       data-loading-table-variant={variant}
     >
-      <Table className="min-w-[760px] rounded-none border-0">
+      <Table
+        className={cn(
+          "rounded-none border-0",
+          columns.some((column) => column.fromMd) ? "md:min-w-[47.5rem]" : "min-w-[47.5rem]"
+        )}
+      >
         <TableHeader>
           <TableRow>
             {columns.map((column) => (
               <TableHead
                 key={column.id}
-                className={column.headerClassName}
+                className={cn(column.headerClassName, column.fromMd && "hidden md:table-cell")}
                 data-loading-column={column.id}
               >
                 {column.id === "actions" ? null : (
@@ -119,7 +127,7 @@ function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
           {TABLE_ROW_IDS.map((rowId) => (
             <TableRow key={`${variant}-${rowId}`} data-loading-table-row>
               {columns.map((column) => (
-                <TableCell key={column.id}>
+                <TableCell key={column.id} className={cn(column.fromMd && "hidden md:table-cell")}>
                   <SkeletonBlock className={`${column.cellSkeletonClassName} max-w-full`} />
                 </TableCell>
               ))}

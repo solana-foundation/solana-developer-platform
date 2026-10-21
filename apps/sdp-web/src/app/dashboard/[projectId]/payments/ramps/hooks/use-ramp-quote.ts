@@ -105,6 +105,12 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
     setQuoteCreationError(null);
   };
 
+  /** Drops the quote itself too: a finished transfer can't take another payment. */
+  const discardQuote = () => {
+    resetQuoteCreation();
+    setCreated(null);
+  };
+
   return {
     quote: created === null ? null : created.quote,
     quoteTransferId: created === null ? null : created.transferId,
@@ -115,5 +121,6 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
       quoteCreationRetrying || (readyToCreate && created === null && quoteCreationError === null),
     retryQuoteCreation: () => void runQuoteCreation(),
     resetQuoteCreation,
+    discardQuote,
   };
 }

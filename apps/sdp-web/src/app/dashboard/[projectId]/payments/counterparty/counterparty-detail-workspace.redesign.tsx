@@ -23,6 +23,7 @@ import {
   formatDate,
   formatDateTime,
   formatDecimalAmount,
+  isInboundTransfer,
   PAYMENT_STATUS_TONE,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
@@ -339,11 +340,14 @@ function SavedAddresses({
 function PaymentAmount({ transfer }: { transfer: PaymentTransferSummary }) {
   const t = useTranslations();
   const locale = useLocale();
+  // A buy and a sale of the same size would otherwise read the same.
+  const sign = isInboundTransfer(transfer) ? "+" : "−";
   if (transfer.amount) {
     const token = resolveTransferTokenLabel(transfer.token);
     return (
       <>
         <span className="font-medium text-primary">
+          {sign}
           {formatDecimalAmount(transfer.amount, locale)}
         </span>
         {token === undefined ? null : <span className="text-secondary"> {token}</span>}
@@ -354,6 +358,7 @@ function PaymentAmount({ transfer }: { transfer: PaymentTransferSummary }) {
     return (
       <>
         <span className="font-medium text-primary">
+          {sign}
           {formatDecimalAmount(transfer.fiatAmount, locale)}
         </span>
         <span className="text-secondary"> {transfer.fiatCurrency.toUpperCase()}</span>

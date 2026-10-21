@@ -44,7 +44,7 @@ async function cancelProviderSale(c: AppContext, transfer: PaymentTransferRow): 
   };
   try {
     const outcome = await client.cancelOfframpSale(
-      rampRuntime(c),
+      rampRuntime(c, transfer.provider),
       transfer.id,
       AbortSignal.timeout(PROVIDER_CANCEL_TIMEOUT_MS)
     );

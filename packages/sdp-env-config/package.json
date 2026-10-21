@@ -33,10 +33,6 @@
       "types": "./src/validate.ts",
       "import": "./src/validate.ts",
       "default": "./src/validate.ts"
-    },
-    "./tls-trust": {
-      "types": "./src/tls-trust.d.cts",
-      "default": "./src/tls-trust.cjs"
     }
   },
   "scripts": {

@@ -1,10 +1,13 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PaymentRampQuote, RampDirection } from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type {
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
+  RampProviderCredentials,
+  RampRuntimeContext,
   RampSettlementEvent,
   RampTransferLookup,
 } from "./types";
@@ -56,10 +59,10 @@ export interface RampTransferStatusCase extends RampKitCase<RampTransferLookup> 
  * provider runs has an estimate case and a quote case.
  */
 export interface RampProviderTestKit {
-  /** The managed credentials, for every mode in `managedModes`. */
-  env: Record<string, string>;
-  /** The modes SDP holds credentials for. Every other mode must fail closed before any request. */
-  managedModes: readonly SdpEnvironment[];
+  /** Test-mode keys: the kit's cases run with them in sandbox. */
+  credentials: RampProviderCredentials;
+  /** Live-mode keys: production accepts them, and sandbox refuses them before any request. */
+  liveCredentials: RampProviderCredentials;
   onramp?: {
     estimate: RampKitCase<RampEstimateOnrampInput>;
     quote: RampKitCase<RampOnrampQuoteInput>;
@@ -68,17 +71,28 @@ export interface RampProviderTestKit {
     estimate: RampKitCase<RampEstimateOfframpInput>;
     quote: RampKitCase<RampOfframpQuoteInput>;
   };
-  /** Status lookups by name, present exactly when the provider has `fetchTransferStatus`. */
-  transferStatus?: Readonly<Record<string, RampTransferStatusCase>>;
-  /** Whether a request carries the credential the adapter must use for `mode`. */
-  usesModeCredential: (request: ReplayedRequest, mode: SdpEnvironment) => boolean;
+  /** Status lookups by name: every provider has `fetchTransferStatus`. */
+  transferStatus: Readonly<Record<string, RampTransferStatusCase>>;
+  /** Whether a request carries the kit's test-mode keys. */
+  usesCredentials: (request: ReplayedRequest) => boolean;
   /**
-   * Whether a quote carries the credential the adapter must use for `mode`.
-   * Required when the provider builds quotes without a request.
+   * Whether a quote carries the kit's test-mode keys. Required when the
+   * provider builds quotes without a request.
    */
-  quoteUsesModeCredential?: (quote: PaymentRampQuote, mode: SdpEnvironment) => boolean;
+  quoteUsesCredentials?: (quote: PaymentRampQuote) => boolean;
   /** An estimate reply with one field the adapter reads given the wrong type. */
   malformedEstimate: { direction: RampDirection; exchange: RecordedExchange };
+}
+
+/**
+ * The runtime a test call runs under: `mode`, the cluster it picks, and
+ * `credentials`.
+ */
+export function rampTestRuntime(
+  mode: SdpEnvironment,
+  credentials: RampProviderCredentials
+): RampRuntimeContext {
+  return { mode, cluster: CLUSTER_BY_SDP_ENVIRONMENT[mode], credentials };
 }
 
 /** The live state of one replay. */

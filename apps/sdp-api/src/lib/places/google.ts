@@ -1,8 +1,8 @@
-import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types/places";
 import { z } from "zod";
 import { providerUnavailable } from "@/lib/errors";
 import { fetchProviderJson, type ProviderJsonRequest } from "@/lib/provider-json";
+import { requireEnv } from "@/lib/runtime-env";
 
 const PLACES_API_BASE_URL = "https://places.googleapis.com/v1";
 const STATIC_MAPS_API_BASE_URL = "https://maps.googleapis.com/maps/api/staticmap";

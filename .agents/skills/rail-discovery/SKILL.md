@@ -39,15 +39,18 @@ For discovery-backed support, add an entry to `RAMP_RAIL_DUMPS` in `packages/sdp
 
 ## Step 2 — `discoverCurrencyAndRails`
 
-One contract method does both halves. Unless `context.offline`, read **sandbox** creds from `context.env` with `requireEnv`, fetch each upstream endpoint with the injected `context.fetchJson`, and persist the raw answer with `context.writeDump`. Then always read the dumps back with `context.readDump` and distill them, so an offline run re-distills the dumps already on disk. For static support, return the snapshot and read no credentials.
+One contract method does both halves. Unless `context.offline`, take SDP's **sandbox** keys from `context.credentials` (the discovery script resolves them; refuse when it says why there are none), fetch each upstream endpoint with the injected `context.fetchJson`, and persist the raw answer with `context.writeDump`. Then always read the dumps back with `context.readDump` and distill them, so an offline run re-distills the dumps already on disk. For static support, return the snapshot and read no credentials.
 
 ```ts
 async discoverCurrencyAndRails(context: RampDiscoveryContext): Promise<ProviderRailSupportDistillation> {
   if (!context.offline) {
-    const apiKey = requireEnv(context.env, "<PROVIDER>_SANDBOX_API_KEY");
+    if (!context.credentials.ok) {
+      throw providerNotConfigured(context.credentials.reason);
+    }
+    const { publicKey } = context.credentials.credentials;
     await context.writeDump(
       RAMP_RAIL_DUMPS.<id>.currencies.name,
-      await context.fetchJson(this.id, "GET /currencies", `https://.../currencies?apiKey=${apiKey}`)
+      await context.fetchJson(this.id, "GET /currencies", `https://.../currencies?apiKey=${publicKey}`)
     );
   }
   return distill<Id>RailSupport(await context.readDump(RAMP_RAIL_DUMPS.<id>.currencies.file));
@@ -138,7 +141,7 @@ Commit `.ramp-support/<id>.currency.json` and the regenerated `ramp.generated.ts
 
 - HTTP only in `discoverCurrencyAndRails` — no DB, no business logic.
 - `distill<Id>RailSupport` is pure over the dumps — no fetching. A malformed dump should throw, not silently yield empty support; unsupported currency/country codes get reported in `droppedCurrencyCodes`/`droppedCountryCodes`, not swallowed.
-- No fallbacks: a missing cred throws via `requireEnv`.
+- No fallbacks: missing keys throw `providerNotConfigured` with the resolver's reason.
 - Strong typing: the declared-support const is `as const satisfies ProviderDeclaredRailSupport`; no `any`.
 - Your provider must already be registered (`register-provider`) — the codegen iterates `RAMP_PROVIDERS` and will fail if a client is missing.
 - Verify with `pnpm --filter @sdp/api ramp-support:drift`, plus `@sdp/payments` typecheck, lint, and tests.

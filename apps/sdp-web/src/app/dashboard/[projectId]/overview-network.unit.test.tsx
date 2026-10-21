@@ -133,10 +133,15 @@ describe("OverviewNetwork figures", () => {
     expect(hint?.className.split(" ")).toContain("[&_svg]:size-3");
   });
 
-  it("states the headline's change over the range for assistive technology", () => {
+  it("headlines each figure alone, with no change over the range", () => {
     renderNetwork({ status: "ready", snapshot: FIXTURE });
-    const supply = document.querySelector('[data-network-metric="stablecoinSupply"]');
-    expect(supply?.textContent).toContain("$16.27B+29.7% over 1Y");
+    const headlines = [...document.querySelectorAll("[data-network-metric] > p")];
+    expect(headlines.map((headline) => headline.textContent)).toEqual([
+      "$16.27B",
+      "18.80M",
+      "18.2%",
+      "$0.0064",
+    ]);
   });
 
   it("marks a metric with no complete day as unavailable and keeps the rest", () => {

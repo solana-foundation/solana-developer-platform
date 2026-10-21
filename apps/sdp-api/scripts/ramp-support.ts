@@ -22,6 +22,7 @@ import {
 } from "@sdp/types/payment-rails";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { resolveManagedRampCredentials } from "@/services/ramps/runtime";
 import {
   describeRailSupportShrink,
   discoverWithShrinkGuard,
@@ -746,7 +747,7 @@ async function discoverProviderRails(
   offline: boolean
 ): Promise<RailDiscoveryAttempt> {
   const distillation = await RAMP_PROVIDER_CLIENTS[provider].discoverCurrencyAndRails({
-    env: process.env,
+    credentials: resolveManagedRampCredentials(process.env, provider, "sandbox"),
     fetchJson,
     fetchText,
     writeDump: writeCurrencySupportDump,

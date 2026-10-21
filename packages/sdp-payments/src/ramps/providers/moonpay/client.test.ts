@@ -6,23 +6,21 @@ import { type CryptoRailId, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails
 import type { PaymentRampQuote } from "@sdp/types/payments";
 import { addDecimalAmounts, subtractDecimalAmounts } from "#/decimal";
 import { rampAmountLimitOf, SdpPaymentsError } from "#/errors";
-import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
-import { replayExchanges } from "#/ramps/test-kit";
-import type {
-  RampOfframpQuoteInput,
-  RampOnrampQuoteInput,
-  RampRuntimeContext,
-} from "#/ramps/types";
-import { distillMoonpayRailSupport, MoonpayRampClient } from "./client";
+import { RAMP_PROVIDER_CLIENTS, rampClientFor } from "#/ramps/index";
+import { rampTestRuntime } from "#/ramps/test-kit";
+import type { RampOfframpQuoteInput, RampOnrampQuoteInput } from "#/ramps/types";
+import { distillMoonpayRailSupport } from "./client";
 import { MOONPAY_TEST_KIT } from "./test-kit";
 
 const WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
 const SECRET_KEY = "sk_test_moonpay";
 
-const runtimeContext = {
-  env: { MOONPAY_SANDBOX_API_KEY: "pk_test_moonpay", MOONPAY_SANDBOX_SECRET_KEY: SECRET_KEY },
-  mode: "sandbox",
-} satisfies RampRuntimeContext;
+const runtimeContext = rampTestRuntime("sandbox", {
+  publicKey: "pk_test_moonpay",
+  secretKey: SECRET_KEY,
+});
+const moonpayOnramp = rampClientFor("moonpay", "onramp");
+const moonpayOfframp = rampClientFor("moonpay", "offramp");
 
 const EXPECTED_MOONPAY_CODES = {
   "sol.solana": "sol",
@@ -101,14 +99,12 @@ describe("MoonpayRampClient currency codes", () => {
         paths.push(new URL(String(input)).pathname);
         return Response.json(QUOTE_RESPONSE);
       };
-
-      const client = new MoonpayRampClient();
-      await client.estimateOnramp(runtimeContext, {
+      await moonpayOnramp.estimateOnramp(runtimeContext, {
         assetRail,
         fiatCurrency: "USD",
         fiatAmount: "50",
       });
-      await client.estimateOfframp(runtimeContext, {
+      await moonpayOfframp.estimateOfframp(runtimeContext, {
         assetRail,
         fiatCurrency: "USD",
         cryptoAmount: "1",
@@ -122,10 +118,11 @@ describe("MoonpayRampClient currency codes", () => {
 
     it(`signs ${code} into both widget URLs for ${assetRail}`, async () => {
       refuseProviderCalls();
-
-      const client = new MoonpayRampClient();
-      const onramp = await client.createOnrampQuote(runtimeContext, { ...onrampInput, assetRail });
-      const offramp = await client.createOfframpQuote(runtimeContext, {
+      const onramp = await moonpayOnramp.createOnrampQuote(runtimeContext, {
+        ...onrampInput,
+        assetRail,
+      });
+      const offramp = await moonpayOfframp.createOfframpQuote(runtimeContext, {
         ...offrampInput,
         assetRail,
       });
@@ -155,23 +152,30 @@ describe("MoonpayRampClient currency codes", () => {
   it("refuses a rail with no MoonPay code before calling MoonPay", async () => {
     refuseProviderCalls();
     const assetRail = "eurc.solana" as string as CryptoRailId;
-    const client = new MoonpayRampClient();
     const unsupported = isBadRequest(/^MoonPay does not support eurc\.solana$/);
 
     await assert.rejects(
-      client.estimateOnramp(runtimeContext, { assetRail, fiatCurrency: "USD", fiatAmount: "50" }),
+      moonpayOnramp.estimateOnramp(runtimeContext, {
+        assetRail,
+        fiatCurrency: "USD",
+        fiatAmount: "50",
+      }),
       unsupported
     );
     await assert.rejects(
-      client.estimateOfframp(runtimeContext, { assetRail, fiatCurrency: "USD", cryptoAmount: "1" }),
+      moonpayOfframp.estimateOfframp(runtimeContext, {
+        assetRail,
+        fiatCurrency: "USD",
+        cryptoAmount: "1",
+      }),
       unsupported
     );
     await assert.rejects(
-      client.createOnrampQuote(runtimeContext, { ...onrampInput, assetRail }),
+      moonpayOnramp.createOnrampQuote(runtimeContext, { ...onrampInput, assetRail }),
       unsupported
     );
     await assert.rejects(
-      client.createOfframpQuote(runtimeContext, { ...offrampInput, assetRail }),
+      moonpayOfframp.createOfframpQuote(runtimeContext, { ...offrampInput, assetRail }),
       unsupported
     );
   });
@@ -189,7 +193,7 @@ describe("MoonpayRampClient on-ramp total", () => {
       return Response.json({ ...QUOTE_RESPONSE, baseCurrencyAmount: 48.4 });
     };
 
-    const estimate = await RAMP_PROVIDER_CLIENTS.moonpay.estimateOnramp(runtimeContext, {
+    const estimate = await moonpayOnramp.estimateOnramp(runtimeContext, {
       assetRail: "sol.solana",
       fiatCurrency: "USD",
       fiatAmount: "50",
@@ -204,7 +208,7 @@ describe("MoonpayRampClient on-ramp total", () => {
   it("takes MoonPay's own total when it sends one", async () => {
     answerBuyQuote({ ...QUOTE_RESPONSE, totalAmount: 51.61 });
 
-    const estimate = await RAMP_PROVIDER_CLIENTS.moonpay.estimateOnramp(runtimeContext, {
+    const estimate = await moonpayOnramp.estimateOnramp(runtimeContext, {
       assetRail: "sol.solana",
       fiatCurrency: "USD",
       fiatAmount: "50",
@@ -216,10 +220,7 @@ describe("MoonpayRampClient on-ramp total", () => {
   it("opens the buy widget on card, the method its estimate priced", async () => {
     refuseProviderCalls();
 
-    const quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(
-      runtimeContext,
-      onrampInput
-    );
+    const quote = await moonpayOnramp.createOnrampQuote(runtimeContext, onrampInput);
 
     assert.equal(signedHostedUrl(quote).searchParams.get("paymentMethod"), "credit_debit_card");
   });
@@ -256,7 +257,7 @@ describe("MoonpayRampClient off-ramp limits", () => {
   }
 
   function estimateUsdc(cryptoAmount: string) {
-    return RAMP_PROVIDER_CLIENTS.moonpay.estimateOfframp(runtimeContext, {
+    return moonpayOfframp.estimateOfframp(runtimeContext, {
       assetRail: "usdc.solana",
       fiatCurrency: "USD",
       cryptoAmount,
@@ -313,6 +314,12 @@ describe("MoonpayRampClient off-ramp limits", () => {
 describe("MoonpayRampClient sale cancel", () => {
   const TRANSFER_ID = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
 
+  function cancelSale(transferId: string) {
+    const moonpay = RAMP_PROVIDER_CLIENTS.moonpay;
+    assert.ok(moonpay.cancelOfframpSale, "MoonPay cancels the sales it holds");
+    return moonpay.cancelOfframpSale(runtimeContext, transferId);
+  }
+
   function answerCancel(status: number): Array<{ url: string; init: RequestInit | undefined }> {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     globalThis.fetch = async (input, init) => {
@@ -328,10 +335,7 @@ describe("MoonpayRampClient sale cancel", () => {
   it("deletes the sale by SDP's id with the secret key", async () => {
     const requests = answerCancel(204);
 
-    const outcome = await RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(
-      runtimeContext,
-      TRANSFER_ID
-    );
+    const outcome = await cancelSale(TRANSFER_ID);
 
     assert.equal(outcome, "canceled");
     assert.equal(requests.length, 1);
@@ -344,28 +348,19 @@ describe("MoonpayRampClient sale cancel", () => {
 
   it("reads no sale and a finished sale as answers, not failures", async () => {
     answerCancel(404);
-    assert.equal(
-      await RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(runtimeContext, TRANSFER_ID),
-      "not_found"
-    );
+    assert.equal(await cancelSale(TRANSFER_ID), "not_found");
     answerCancel(409);
-    assert.equal(
-      await RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(runtimeContext, TRANSFER_ID),
-      "not_cancelable"
-    );
+    assert.equal(await cancelSale(TRANSFER_ID), "not_cancelable");
   });
 
   it("throws when MoonPay refuses the key", async () => {
     answerCancel(401);
 
-    await assert.rejects(
-      RAMP_PROVIDER_CLIENTS.moonpay.cancelOfframpSale(runtimeContext, TRANSFER_ID),
-      (cause: unknown) => {
-        assert.ok(cause instanceof SdpPaymentsError);
-        assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
-        return true;
-      }
-    );
+    await assert.rejects(cancelSale(TRANSFER_ID), (cause: unknown) => {
+      assert.ok(cause instanceof SdpPaymentsError);
+      assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
+      return true;
+    });
   });
 });
 
@@ -374,7 +369,7 @@ describe("MoonpayRampClient on-ramp limits", () => {
   const usd = MOONPAY_ONRAMP_CURRENCIES.USD;
 
   async function quoteAud(fiatAmount: string) {
-    return new MoonpayRampClient().createOnrampQuote(runtimeContext, {
+    return moonpayOnramp.createOnrampQuote(runtimeContext, {
       ...onrampInput,
       fiatCurrency: "AUD",
       fiatAmount,
@@ -417,7 +412,7 @@ describe("MoonpayRampClient on-ramp limits", () => {
     assert.equal(Object.hasOwn(MOONPAY_ONRAMP_CURRENCIES, unlisted), false);
 
     await assert.rejects(
-      new MoonpayRampClient().createOnrampQuote(runtimeContext, {
+      moonpayOnramp.createOnrampQuote(runtimeContext, {
         ...onrampInput,
         // SAFETY: every RampFiatCurrency has a MoonPay row today, so the guard
         // under test is fed a code from outside the type on purpose.
@@ -431,9 +426,8 @@ describe("MoonpayRampClient on-ramp limits", () => {
     refuseProviderCalls();
     const { paymentTransferId, externalCustomerId, destinationWalletAddress, assetRail } =
       onrampInput;
-    const client = new MoonpayRampClient();
     const quote = (fiatAmount: string) =>
-      client.createOnrampQuote(runtimeContext, {
+      moonpayOnramp.createOnrampQuote(runtimeContext, {
         paymentTransferId,
         externalCustomerId,
         destinationWalletAddress,
@@ -460,62 +454,24 @@ describe("MoonpayRampClient on-ramp limits", () => {
   });
 });
 
-describe("MoonpayRampClient credentials", () => {
-  /** Estimates the kit's onramp with `env` in `mode`, counting every request. */
-  async function estimateWith(env: Record<string, string>, mode: "sandbox" | "production") {
-    assert.ok(MOONPAY_TEST_KIT.onramp, "the MoonPay kit records an onramp");
-    const replay = replayExchanges(MOONPAY_TEST_KIT.onramp.estimate.exchanges);
-    const settled = await RAMP_PROVIDER_CLIENTS.moonpay
-      .estimateOnramp({ env, mode }, MOONPAY_TEST_KIT.onramp.estimate.input)
-      .then(
-        () => ({ ok: true as const }),
-        (cause: unknown) => ({ ok: false as const, cause })
-      );
-    return { settled, requests: replay.requests.length + replay.unrecorded.length };
-  }
-
-  function refusedBeforeAnyRequest(
-    result: Awaited<ReturnType<typeof estimateWith>>,
-    message: string
-  ): void {
-    assert.equal(result.requests, 0, "no request reaches MoonPay");
-    assert.ok(!result.settled.ok, "the estimate is refused");
-    assert.ok(result.settled.cause instanceof SdpPaymentsError);
-    assert.equal(result.settled.cause.code, "PROVIDER_NOT_CONFIGURED");
-    assert.equal(result.settled.cause.message, message);
-  }
-
-  it("refuses production projects, which bring their own keys", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith(MOONPAY_TEST_KIT.env, "production"),
-      "MoonPay is not configured for production projects."
-    );
-  });
-
-  it("refuses a live secret key mounted under the sandbox names", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith(
-        { ...MOONPAY_TEST_KIT.env, MOONPAY_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" },
-        "sandbox"
-      ),
-      "MoonPay sandbox keys must be test-mode keys."
-    );
-  });
-
-  it("refuses a live publishable key mounted under the sandbox names", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith(
-        { ...MOONPAY_TEST_KIT.env, MOONPAY_SANDBOX_API_KEY: "pk_live_mounted_by_mistake" },
-        "sandbox"
-      ),
-      "MoonPay sandbox keys must be test-mode keys."
-    );
-  });
-
-  it("refuses when the sandbox keys are missing", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith({ MOONPAY_SANDBOX_API_KEY: "pk_test_contract" }, "sandbox"),
-      "MoonPay sandbox is not configured. Set MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_SECRET_KEY."
-    );
+describe("MoonpayRampClient widget hosts", () => {
+  it("opens each mode's widget host", async () => {
+    refuseProviderCalls();
+    for (const [mode, credentials, onrampHost, offrampHost] of [
+      [
+        "sandbox",
+        MOONPAY_TEST_KIT.credentials,
+        "buy-sandbox.moonpay.com",
+        "sell-sandbox.moonpay.com",
+      ],
+      ["production", MOONPAY_TEST_KIT.liveCredentials, "buy.moonpay.com", "sell.moonpay.com"],
+    ] as const) {
+      const runtime = rampTestRuntime(mode, credentials);
+      const onramp = await moonpayOnramp.createOnrampQuote(runtime, onrampInput);
+      const offramp = await moonpayOfframp.createOfframpQuote(runtime, offrampInput);
+      assert.ok(onramp.deliveryMode === "hosted" && offramp.deliveryMode === "hosted");
+      assert.equal(new URL(onramp.hostedUrl).host, onrampHost);
+      assert.equal(new URL(offramp.hostedUrl).host, offrampHost);
+    }
   });
 });

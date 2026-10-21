@@ -4,11 +4,13 @@ import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import type { OfframpWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-offramp-wizard";
+import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
+import { OfframpOutcome, OfframpSendError } from "./offramp-final-step";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
@@ -150,12 +152,24 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
   }
 
+  // A sale that ended another way has nothing left to do in the provider's window.
+  if (
+    currentStepId === "COMPLETE" &&
+    transferStatus &&
+    getRampTransferState(transferStatus.status).terminal
+  ) {
+    return <OfframpOutcome wizard={wizard} />;
+  }
+
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
     return (
-      <MoonpayRampFrame
-        title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
-        src={quote.hostedUrl}
-      />
+      <div className="space-y-4">
+        <OfframpSendError message={wizard.onchainSendError} />
+        <MoonpayRampFrame
+          title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
+          src={quote.hostedUrl}
+        />
+      </div>
     );
   }
 

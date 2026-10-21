@@ -10,7 +10,6 @@ import {
   badRequest,
   estimateNotAvailable,
   internalError,
-  providerNotConfigured,
   providerUnavailable,
   SdpPaymentsError,
 } from "#/errors";
@@ -18,18 +17,21 @@ import { providerFetchJson } from "#/ramps/fetch";
 import { readyCounterparty } from "#/ramps/requirements";
 import {
   basicAuthHeader,
+  checkRampKeyFormats,
+  type RampKeyFormats,
+  rampCredentials,
   UNREPORTED_COUNTRY_SUPPORT,
   unreportedCurrencyLimit,
 } from "#/ramps/shared";
 import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
+  RampCustomerDetails,
   RampDiscoveryContext,
-  RampEstimateOfframpInput,
   RampEstimateOnrampInput,
-  RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
+  RampProviderCredentials,
   RampRuntimeContext,
   RampSettlementEvent,
   RampTransferLookup,
@@ -55,25 +57,11 @@ export const STRIPE_DECLARED_RAIL_SUPPORT = {
   },
 } as const satisfies ProviderDeclaredRailSupport;
 
-interface StripeConfig {
-  secretKey: string;
-  publishableKey: string;
-}
-
-export interface StripeCustomerInfo {
-  email?: string;
-  firstName?: string;
-  lastName?: string;
-  dob?: { year: number; month: number; day: number };
-  address?: {
-    line1?: string;
-    line2?: string;
-    city?: string;
-    state?: string;
-    postalCode?: string;
-    country?: string;
-  };
-}
+/** A secret key may be standard (`sk_`) or restricted (`rk_`). */
+const STRIPE_KEY_FORMATS = {
+  sandbox: { publicKey: /^pk_test_/, secretKey: /^(sk|rk)_test_/ },
+  production: { publicKey: /^pk_live_/, secretKey: /^(sk|rk)_live_/ },
+} as const satisfies RampKeyFormats;
 
 type StripeFormValue =
   | string
@@ -158,63 +146,6 @@ const stripeOnrampQuotesSchema = z.object({
   ),
 });
 
-/** The env keys SDP's managed Stripe credentials live under. */
-interface StripeManagedEnv {
-  readonly STRIPE_SANDBOX_SECRET_KEY?: string;
-  readonly STRIPE_SANDBOX_PUBLISHABLE_KEY?: string;
-}
-
-/** A test-mode Stripe secret key: standard (`sk_`) or restricted (`rk_`). */
-const STRIPE_TEST_SECRET_KEY = /^(sk|rk)_test_/;
-const STRIPE_TEST_PUBLISHABLE_KEY = /^pk_test_/;
-
-/**
- * The managed Stripe keys for `mode`, or why SDP can't use them. SDP holds
- * sandbox keys only; a production project brings its own (HOO-1943), so
- * production fails closed until it can. Both keys must be test-mode keys, so
- * a live key mounted under the sandbox names can never reach Stripe.
- */
-function readStripeManagedKeys(
-  env: StripeManagedEnv,
-  mode: SdpEnvironment
-): { ok: true; config: StripeConfig } | { ok: false; reason: string } {
-  if (mode === "production") {
-    return { ok: false, reason: "Stripe is not configured for production projects." };
-  }
-  const secretKey = env.STRIPE_SANDBOX_SECRET_KEY?.trim();
-  const publishableKey = env.STRIPE_SANDBOX_PUBLISHABLE_KEY?.trim();
-  if (!secretKey || !publishableKey) {
-    return {
-      ok: false,
-      reason:
-        "Stripe sandbox is not configured. Set STRIPE_SANDBOX_SECRET_KEY and STRIPE_SANDBOX_PUBLISHABLE_KEY.",
-    };
-  }
-  if (
-    !STRIPE_TEST_SECRET_KEY.test(secretKey) ||
-    !STRIPE_TEST_PUBLISHABLE_KEY.test(publishableKey)
-  ) {
-    return { ok: false, reason: "Stripe sandbox keys must be test-mode keys." };
-  }
-  return { ok: true, config: { secretKey, publishableKey } };
-}
-
-/**
- * Whether SDP's managed Stripe keys can serve `mode`: the same check every
- * Stripe call makes before its first request, so availability never disagrees.
- */
-export function hasStripeManagedKeys(env: StripeManagedEnv, mode: SdpEnvironment): boolean {
-  return readStripeManagedKeys(env, mode).ok;
-}
-
-function readStripeConfig(env: StripeManagedEnv, mode: SdpEnvironment): StripeConfig {
-  const keys = readStripeManagedKeys(env, mode);
-  if (!keys.ok) {
-    throw providerNotConfigured(keys.reason);
-  }
-  return keys.config;
-}
-
 function normalizeStripeOnrampAsset(cryptoToken: string): { currency: string; network: string } {
   const normalized = cryptoToken.trim().toLowerCase().replace(/_/g, ".");
   const separator = normalized.indexOf(".");
@@ -257,7 +188,7 @@ function encodeStripeForm(form: StripeForm): URLSearchParams {
   return params;
 }
 
-function buildCustomerInformation(info: StripeCustomerInfo | undefined): StripeForm | undefined {
+function buildCustomerInformation(info: RampCustomerDetails | undefined): StripeForm | undefined {
   if (!info) {
     return undefined;
   }
@@ -356,7 +287,12 @@ async function stripeGet<TSchema extends z.ZodType>(
 
 export class StripeRampClient implements RampProvider {
   readonly id = "stripe";
+  readonly label = "Stripe";
   readonly declaredRailSupport = STRIPE_DECLARED_RAIL_SUPPORT;
+
+  checkCredentials(credentials: RampProviderCredentials, mode: SdpEnvironment): string | null {
+    return checkRampKeyFormats(this.label, STRIPE_KEY_FORMATS, credentials, mode);
+  }
 
   validateCounterparty(
     _counterparty: Counterparty,
@@ -393,14 +329,14 @@ export class StripeRampClient implements RampProvider {
   }
 
   async estimateOnramp(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    const config = readStripeConfig(env, mode);
+    const { secretKey } = rampCredentials(this, ctx);
     const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
 
     const quotes = await stripeGet(
-      config.secretKey,
+      secretKey,
       `${STRIPE_API_BASE_URL}/v1/crypto/onramp/quotes`,
       {
         source_amount: input.fiatAmount,
@@ -460,25 +396,18 @@ export class StripeRampClient implements RampProvider {
     };
   }
 
-  async estimateOfframp(
-    _ctx: RampRuntimeContext,
-    _input: RampEstimateOfframpInput
-  ): Promise<PaymentRampEstimate> {
-    throw estimateNotAvailable("Stripe supports on-ramp only.", { provider: this.id });
-  }
-
   async createOnrampQuote(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
-    const config = readStripeConfig(env, mode);
+    const { secretKey, publicKey } = rampCredentials(this, ctx);
     const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
     if (!input.fiatCurrency) {
       throw badRequest("Stripe on-ramp requires a fiat currency.", { provider: this.id });
     }
 
     const session = await stripeRequest(
-      config.secretKey,
+      secretKey,
       `${STRIPE_API_BASE_URL}/v1/crypto/onramp_sessions`,
       {
         customer_ip_address: input.customerIpAddress,
@@ -492,7 +421,7 @@ export class StripeRampClient implements RampProvider {
         destination_currencies: [currency],
         destination_networks: [network],
         metadata: { externalCustomerId: input.externalCustomerId },
-        customer_information: buildCustomerInformation(input.stripeCustomerInfo),
+        customer_information: buildCustomerInformation(input.customerDetails),
       },
       stripeOnrampSessionSchema
     );
@@ -530,16 +459,9 @@ export class StripeRampClient implements RampProvider {
       deliveryMode: "session_widget",
       clientSecret: session.client_secret,
       sessionId: id,
-      publishableKey: config.publishableKey,
+      publishableKey: publicKey,
       ...(session.redirect_url ? { redirectUrl: session.redirect_url } : {}),
     };
-  }
-
-  async createOfframpQuote(
-    _ctx: RampRuntimeContext,
-    _input: RampOfframpQuoteInput
-  ): Promise<PaymentRampQuote> {
-    throw badRequest("Stripe off-ramp is not supported.", { provider: this.id });
   }
 
   /**
@@ -547,10 +469,10 @@ export class StripeRampClient implements RampProvider {
    * its webhook is. The key picks the mode, so there is no `livemode` to check.
    */
   async fetchTransferStatus(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     lookup: RampTransferLookup
   ): Promise<readonly RampSettlementEvent[]> {
-    const config = readStripeConfig(env, mode);
+    const { secretKey } = rampCredentials(this, ctx);
     if (lookup.rampType !== "onramp") {
       throw badRequest("Stripe off-ramp is not supported.", { provider: this.id });
     }
@@ -561,7 +483,7 @@ export class StripeRampClient implements RampProvider {
       });
     }
     const session = await stripeGet(
-      config.secretKey,
+      secretKey,
       `${STRIPE_API_BASE_URL}/v1/crypto/onramp_sessions/${encodeURIComponent(sessionId)}`,
       {},
       stripeOnrampSessionStatusSchema

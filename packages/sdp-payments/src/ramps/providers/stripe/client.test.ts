@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "#/errors";
-import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
-import { replayExchanges } from "#/ramps/test-kit";
-import { StripeRampClient } from "./client";
+import { rampClientFor } from "#/ramps/index";
+import { rampTestRuntime, replayExchanges } from "#/ramps/test-kit";
+import type { RampOnrampQuoteInput } from "#/ramps/types";
 import { STRIPE_SESSION_TERMS, STRIPE_TEST_KIT, stripeSessionExchange } from "./test-kit";
+
+const stripe = rampClientFor("stripe", "onramp");
+const sandbox = rampTestRuntime("sandbox", STRIPE_TEST_KIT.credentials);
+
+function kitQuoteInput(): RampOnrampQuoteInput {
+  assert.ok(STRIPE_TEST_KIT.onramp, "the Stripe kit records an onramp");
+  return STRIPE_TEST_KIT.onramp.quote.input;
+}
 
 const originalFetch = globalThis.fetch;
 
@@ -14,12 +22,8 @@ afterEach(() => {
 
 /** Quotes the kit's onramp against a session that echoes `terms`. */
 async function quoteAgainst(terms: typeof STRIPE_SESSION_TERMS) {
-  assert.ok(STRIPE_TEST_KIT.onramp, "the Stripe kit records an onramp");
   replayExchanges([stripeSessionExchange(terms)]);
-  return new StripeRampClient().createOnrampQuote(
-    { env: STRIPE_TEST_KIT.env, mode: "sandbox" },
-    STRIPE_TEST_KIT.onramp.quote.input
-  );
+  return stripe.createOnrampQuote(sandbox, kitQuoteInput());
 }
 
 /** Asserts the quote failed closed, naming exactly `mismatched` in diagnostics. */
@@ -73,72 +77,79 @@ describe("StripeRampClient session terms", () => {
   });
 });
 
+describe("StripeRampClient session request", () => {
+  /** Quotes `input` against a session locked to `currency`, answering with the form it sent. */
+  async function sentForm(input: RampOnrampQuoteInput, currency: string) {
+    let form: URLSearchParams | undefined;
+    const { body } = stripeSessionExchange({
+      ...STRIPE_SESSION_TERMS,
+      destination_currency: currency,
+      destination_currencies: [currency],
+    });
+    globalThis.fetch = async (_url, init) => {
+      form = new URLSearchParams(String(init?.body));
+      return Response.json(body);
+    };
+    await stripe.createOnrampQuote(sandbox, input);
+    assert.ok(form, "the quote sent a session request");
+    return form;
+  }
+
+  it("pre-fills the buyer's identity it was given", async () => {
+    const form = await sentForm(
+      {
+        ...kitQuoteInput(),
+        customerDetails: {
+          email: "john@doe.com",
+          dob: { year: 1990, month: 7, day: 4 },
+          address: { state: "CA", country: "US" },
+        },
+      },
+      "usdc"
+    );
+    assert.equal(form.get("customer_information[email]"), "john@doe.com");
+    assert.equal(form.get("customer_information[dob][year]"), "1990");
+    assert.equal(form.get("customer_information[address][state]"), "CA");
+  });
+
+  it("locks sol.solana to Stripe's sol", async () => {
+    const form = await sentForm({ ...kitQuoteInput(), assetRail: "sol.solana" }, "sol");
+    assert.equal(form.get("destination_currency"), "sol");
+    assert.deepEqual(form.getAll("destination_currencies[]"), ["sol"]);
+  });
+
+  it("refuses a quote it can't send before any request", async () => {
+    globalThis.fetch = async () => assert.fail("Stripe must not be called");
+    for (const [input, message] of [
+      [{ ...kitQuoteInput(), fiatCurrency: undefined }, /requires a fiat currency/],
+      [{ ...kitQuoteInput(), assetRail: "usdt.solana" }, /usdc\.solana and sol\.solana/],
+    ] as const) {
+      await assert.rejects(stripe.createOnrampQuote(sandbox, input), (cause: unknown) => {
+        assert.ok(cause instanceof SdpPaymentsError);
+        assert.equal(cause.code, "BAD_REQUEST");
+        assert.match(cause.message, message);
+        return true;
+      });
+    }
+  });
+});
+
 describe("StripeRampClient credentials", () => {
-  /** Estimates the kit's onramp with `env` in `mode`, recording every request. */
-  async function estimateWith(env: Record<string, string>, mode: "sandbox" | "production") {
-    assert.ok(STRIPE_TEST_KIT.onramp, "the Stripe kit records an onramp");
-    const replay = replayExchanges(STRIPE_TEST_KIT.onramp.estimate.exchanges);
-    const settled = await RAMP_PROVIDER_CLIENTS.stripe
-      .estimateOnramp({ env, mode }, STRIPE_TEST_KIT.onramp.estimate.input)
-      .then(
-        () => ({ ok: true as const }),
-        (cause: unknown) => ({ ok: false as const, cause })
-      );
-    return { settled, requests: replay.requests.length + replay.unrecorded.length };
-  }
-
-  function refusedBeforeAnyRequest(
-    result: Awaited<ReturnType<typeof estimateWith>>,
-    message: string
-  ): void {
-    assert.equal(result.requests, 0, "no request reaches Stripe");
-    assert.ok(!result.settled.ok, "the estimate is refused");
-    assert.ok(result.settled.cause instanceof SdpPaymentsError);
-    assert.equal(result.settled.cause.code, "PROVIDER_NOT_CONFIGURED");
-    assert.equal(result.settled.cause.message, message);
-  }
-
-  it("refuses production projects, which bring their own keys", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith(STRIPE_TEST_KIT.env, "production"),
-      "Stripe is not configured for production projects."
-    );
-  });
-
-  it("refuses a live secret key mounted under the sandbox names", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith(
-        { ...STRIPE_TEST_KIT.env, STRIPE_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" },
+  it("accepts a restricted secret key in either mode", () => {
+    assert.equal(
+      stripe.checkCredentials(
+        { ...STRIPE_TEST_KIT.credentials, secretKey: "rk_test_restricted" },
         "sandbox"
       ),
-      "Stripe sandbox keys must be test-mode keys."
+      null
     );
-  });
-
-  it("refuses a live publishable key mounted under the sandbox names", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith(
-        { ...STRIPE_TEST_KIT.env, STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_live_mounted_by_mistake" },
-        "sandbox"
+    assert.equal(
+      stripe.checkCredentials(
+        { ...STRIPE_TEST_KIT.liveCredentials, secretKey: "rk_live_restricted" },
+        "production"
       ),
-      "Stripe sandbox keys must be test-mode keys."
+      null
     );
-  });
-
-  it("refuses when the sandbox keys are missing", async () => {
-    refusedBeforeAnyRequest(
-      await estimateWith({ STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_contract" }, "sandbox"),
-      "Stripe sandbox is not configured. Set STRIPE_SANDBOX_SECRET_KEY and STRIPE_SANDBOX_PUBLISHABLE_KEY."
-    );
-  });
-
-  it("accepts a restricted test-mode secret key", async () => {
-    const result = await estimateWith(
-      { ...STRIPE_TEST_KIT.env, STRIPE_SANDBOX_SECRET_KEY: "rk_test_restricted" },
-      "sandbox"
-    );
-    assert.ok(result.settled.ok, "the estimate succeeds");
-    assert.equal(result.requests, 1);
   });
 });
 
@@ -151,9 +162,8 @@ describe("StripeRampClient estimate total", () => {
     fees: { network_fee_monetary: "0.01", transaction_fee_monetary: "0.80" },
   };
 
-  /** Estimates 20 USD of USDC against a Stripe quote set holding `answer`. */
-  async function estimateAgainst(answer: Record<string, unknown>) {
-    assert.ok(STRIPE_TEST_KIT.env, "the Stripe kit carries sandbox credentials");
+  /** Estimates 20 USD of USDC against a Stripe quote set holding `answers`. */
+  async function estimateAgainst(...answers: Record<string, unknown>[]) {
     replayExchanges([
       {
         method: "GET",
@@ -166,14 +176,15 @@ describe("StripeRampClient estimate total", () => {
           source_amount: "20.00",
           source_currency: "usd",
           rate_fetched_at: 1719947634,
-          destination_network_quotes: { solana: [answer] },
+          destination_network_quotes: { solana: answers },
         },
       },
     ]);
-    return RAMP_PROVIDER_CLIENTS.stripe.estimateOnramp(
-      { env: STRIPE_TEST_KIT.env, mode: "sandbox" },
-      { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: "20" }
-    );
+    return stripe.estimateOnramp(sandbox, {
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "20",
+    });
   }
 
   it("reports what the buyer pays in all, Stripe's fees on top of the amount", async () => {
@@ -184,6 +195,15 @@ describe("StripeRampClient estimate total", () => {
 
   it("adds the fees itself when Stripe leaves the total out", async () => {
     const estimate = await estimateAgainst(quote);
+    assert.equal(estimate.fees.total, "0.81");
     assert.equal(estimate.totalFiatAmount, "20.81");
+  });
+
+  it("answers ESTIMATE_NOT_AVAILABLE when Stripe quotes nothing for the asset", async () => {
+    await assert.rejects(estimateAgainst(), (cause: unknown) => {
+      assert.ok(cause instanceof SdpPaymentsError);
+      assert.equal(cause.code, "ESTIMATE_NOT_AVAILABLE");
+      return true;
+    });
   });
 });

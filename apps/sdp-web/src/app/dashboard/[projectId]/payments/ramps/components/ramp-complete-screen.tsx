@@ -11,10 +11,11 @@ import {
   resolveTransferTokenLabel,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { saleFiatLabel } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
 import { EntityLink } from "@/components/entity-link";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS, RAMP_PROVIDER_WEBSITES } from "@/lib/ramps";
@@ -91,7 +92,8 @@ function completionDetailRows(
     copyValue: transfer.id,
   });
 
-  const exchangeRateRow = derivedExchangeRateRow(transfer, tokenLabel, t);
+  // A sale's fiat is the payout net of fees, so a rate derived from it would misstate the rate.
+  const exchangeRateRow = onramp ? derivedExchangeRateRow(transfer, tokenLabel, t) : undefined;
   const exchangeRate = exchangeRateRow?.value;
   if (exchangeRateRow) {
     rows.push(exchangeRateRow);
@@ -101,6 +103,11 @@ function completionDetailRows(
   for (const row of providerTransferDetailRows(transfer, { cluster }, t)) {
     if (row.key === "DashboardPayments.transferDetails.receipt") {
       receiptRow = row;
+    } else if (
+      row.key === "DashboardPayments.transferDetails.solanaSignature" &&
+      row.copyValue === transfer.signature
+    ) {
+      // The transfer's own signature row below names the same transaction.
     } else if (!exchangeRate || row.key !== "DashboardPayments.transferDetails.exchangeRate") {
       rows.push(row);
     }
@@ -128,10 +135,11 @@ function completionDetailRows(
       value: formatTimestamp(transfer.createdAt, t),
     });
   }
-  if (transfer.updatedAt) {
+  const completedAt = transfer.confirmedAt ?? transfer.updatedAt;
+  if (completedAt) {
     rows.push({
       label: t("DashboardPayments.ramps.completed"),
-      value: formatTimestamp(transfer.updatedAt, t),
+      value: formatTimestamp(completedAt, t),
     });
   }
   if (receiptRow) {
@@ -214,14 +222,13 @@ export function RampCompleteScreen({
   transfer: PaymentTransferSummary;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const cluster = useSolanaCluster();
   const onramp = direction === "onramp";
   const tokenLabel = resolveTransferTokenLabel(transfer.token);
   const cryptoAmount = transfer.amount && tokenLabel ? `${transfer.amount} ${tokenLabel}` : null;
-  const fiatAmount =
-    transfer.fiatAmount && transfer.fiatCurrency
-      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
-      : null;
+  // A completed sale leads with what the provider paid out; the quote stays among the rows.
+  const fiatAmount = saleFiatLabel(transfer, locale);
 
   const primaryAmount = onramp ? cryptoAmount : fiatAmount;
   const secondaryAmount = onramp ? fiatAmount : cryptoAmount;

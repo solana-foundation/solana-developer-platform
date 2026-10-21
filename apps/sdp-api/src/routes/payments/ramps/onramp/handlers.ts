@@ -1,4 +1,4 @@
-import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { rampClientFor } from "@sdp/payments/ramps";
 import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { PaymentRampQuote } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -63,8 +63,8 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   );
   const providers = row ? filterProviders(c, row.providers) : [];
 
-  const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
-    RAMP_PROVIDER_CLIENTS[provider].estimateOnramp(ctx, {
+  const estimates = await estimateAcrossProviders(c, "onramp", providers, (client, ctx) =>
+    client.estimateOnramp(ctx, {
       assetRail: input.assetRail,
       fiatCurrency: input.fiatCurrency,
       fiatAmount: input.fiatAmount,
@@ -126,14 +126,17 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       }
       precreatedTransferId = pendingTransfer.id;
       try {
-        quote = await RAMP_PROVIDER_CLIENTS.moonpay.createOnrampQuote(rampRuntime(c), {
-          assetRail: input.assetRail,
-          fiatCurrency: input.fiatCurrency,
-          fiatAmount: input.fiatAmount,
-          destinationWalletAddress,
-          externalCustomerId: counterparty.id,
-          paymentTransferId: pendingTransfer.id,
-        });
+        quote = await rampClientFor("moonpay", "onramp").createOnrampQuote(
+          rampRuntime(c, "moonpay"),
+          {
+            assetRail: input.assetRail,
+            fiatCurrency: input.fiatCurrency,
+            fiatAmount: input.fiatAmount,
+            destinationWalletAddress,
+            externalCustomerId: counterparty.id,
+            paymentTransferId: pendingTransfer.id,
+          }
+        );
         const updated = await auditedRampWrite(c, "create", (repository) =>
           repository.transitionRampTransfer({
             transferId: pendingTransfer.id,
@@ -161,7 +164,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       break;
     }
     case "stripe": {
-      quote = await RAMP_PROVIDER_CLIENTS.stripe.createOnrampQuote(rampRuntime(c), {
+      quote = await rampClientFor("stripe", "onramp").createOnrampQuote(rampRuntime(c, "stripe"), {
         assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,

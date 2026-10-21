@@ -11,14 +11,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
+import { loadOrganizationProviderAccess } from "@/app/dashboard/[projectId]/payments/payments-provider-access.server";
 import { TokenMark } from "@/components/token-mark";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { projectHref } from "@/lib/dashboard-project-path";
-import {
-  fetchProviderAvailability,
-  filterEnabledRampProviderAccess,
-} from "@/lib/provider-availability";
+import { filterEnabledRampProviderAccess } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
@@ -451,13 +449,7 @@ async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientP
   );
 }
 
-async function PaymentNetwork({
-  apiClientPromise,
-  organizationId,
-}: {
-  apiClientPromise: ApiClientPromise;
-  organizationId: string;
-}) {
+async function PaymentNetwork({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
   const [{ request }, t, projectId] = await Promise.all([
     apiClientPromise,
     getTranslations(),
@@ -468,7 +460,7 @@ async function PaymentNetwork({
     trace.step("fetch_network_summary", () =>
       Promise.all([
         fetchCounterparties(request, { page: 1, pageSize: 1 }),
-        fetchProviderAvailability(request, organizationId).catch(() => null),
+        loadOrganizationProviderAccess(),
       ])
     ),
     getEnabledRampProviders(),
@@ -527,10 +519,8 @@ async function PaymentNetwork({
 
 export function PaymentsCommandCenter({
   apiClientPromise,
-  organizationId,
 }: {
   apiClientPromise: ApiClientPromise;
-  organizationId: string;
 }) {
   return (
     <div
@@ -549,7 +539,7 @@ export function PaymentsCommandCenter({
           <UpcomingOpen apiClientPromise={apiClientPromise} />
         </Suspense>
         <Suspense fallback={<PaymentsNetworkSkeleton />}>
-          <PaymentNetwork apiClientPromise={apiClientPromise} organizationId={organizationId} />
+          <PaymentNetwork apiClientPromise={apiClientPromise} />
         </Suspense>
       </div>
     </div>
