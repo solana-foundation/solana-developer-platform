@@ -112,6 +112,11 @@ export function assertRequiredEnv(env: Env): void {
   if (!env.REDIS_URL?.trim()) {
     throw new Error("REDIS_URL is required for the Node runtime");
   }
+  // Every API key is stored and looked up peppered (HOO-2219): without it, keys
+  // minted under the pepper stop matching and new ones hash as plain SHA-256.
+  if (!env.API_KEY_PEPPER?.trim()) {
+    throw new Error("API_KEY_PEPPER is required");
+  }
   parseDatabaseEnv(env);
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
