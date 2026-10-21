@@ -475,8 +475,6 @@ describe("Payments routes — ramps", () => {
             amount: "12500000",
             uiAmount: "12.5",
             decimals: 6,
-            usdPrice: 1,
-            usdValue: 12.5,
           },
         ]);
         expect(balanceReadConfigs()).toEqual([
