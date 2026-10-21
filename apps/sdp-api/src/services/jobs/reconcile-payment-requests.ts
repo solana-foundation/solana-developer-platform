@@ -23,7 +23,11 @@ import type { Env } from "@/types/env";
 /** How far back the sweep looks; an older request that never expires settles when it is read. */
 export const PAYMENT_REQUEST_RECONCILE_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Requests reconciled per run; each costs one reference lookup on the cluster. */
+/**
+ * Requests reconciled per run, newest first; each costs one reference lookup on the cluster.
+ * ponytail: past this many open requests in one environment the oldest wait for a read to
+ * settle; a last-checked column with oldest-checked-first ordering lifts that.
+ */
 const RECONCILE_BATCH_SIZE = 100;
 
 /**

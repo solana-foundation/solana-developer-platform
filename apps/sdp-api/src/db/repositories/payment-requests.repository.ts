@@ -85,7 +85,7 @@ export interface PaymentRequestsRepository {
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
   /**
-   * The open requests one environment's reconciler checks, oldest first: awaiting payment with a
+   * The open requests one environment's reconciler checks, newest first: awaiting payment with a
    * custody wallet, created after `createdAfter`, and unexpired or expired after `expiredAfter`.
    * System-only: it reads across tenants.
    */

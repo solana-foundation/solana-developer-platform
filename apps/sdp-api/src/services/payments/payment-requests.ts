@@ -4,13 +4,8 @@ import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import type { Signature } from "@solana/kit";
-import {
-  FindReferenceError,
-  findReference,
-  ValidateTransferError,
-  validateTransfer,
-} from "@solana/pay";
+import type { Address } from "@solana/kit";
+import { ValidateTransferError, validateTransfer } from "@solana/pay";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import {
@@ -33,6 +28,13 @@ import type { Env } from "@/types/env";
  */
 export const PAYMENT_REQUEST_SETTLEMENT_GRACE_MS = 5 * 60 * 1000;
 
+/** Signatures read per reference; a reference carries its payment and little else. */
+const REFERENCE_SIGNATURE_LIMIT = 25;
+
+type ReferenceSignature = Awaited<
+  ReturnType<ReturnType<SolanaRpc["getSignaturesForAddress"]>["send"]>
+>[number];
+
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
 }
@@ -48,23 +50,6 @@ function isPastSettlementGrace(expiresAt: string | null): boolean {
   return (
     expiresAt !== null && Date.parse(expiresAt) + PAYMENT_REQUEST_SETTLEMENT_GRACE_MS <= Date.now()
   );
-}
-
-/**
- * Whether any transaction naming the request's reference has reached `confirmed`, so a payment
- * may be on its way to finalizing. Reads the open cluster scope's cluster.
- *
- * @param row - The payment request.
- * @returns `true` when the reference has at least one confirmed signature.
- */
-export async function hasPaymentInFlight(row: PaymentRequestRow): Promise<boolean> {
-  const signatures = await createClusterRpc()
-    .getSignaturesForAddress(assertValidAddress(row.reference, "reference"), {
-      commitment: "confirmed",
-      limit: 1,
-    })
-    .send();
-  return signatures.length > 0;
 }
 
 /**
@@ -148,29 +133,8 @@ async function settlePaymentRequestIfPaid(
 
   const reference = assertValidAddress(row.reference, "reference");
 
-  const found = await nullOnExpected(
-    findReference(rpc, reference, { commitment: "finalized" }),
-    FindReferenceError
-  );
+  const found = await findFirstValidPayment(rpc, row, reference);
   if (found === null) {
-    return row;
-  }
-
-  const verified = await verifyTransactionLanded(rpc, found.signature as unknown as Signature);
-  if (!verified.ok) {
-    return row;
-  }
-
-  const validated = await nullOnExpected(
-    validateTransfer(rpc, found.signature, {
-      recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-      amount: toNumberAmount(row.amount),
-      reference,
-      ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
-    }),
-    ValidateTransferError
-  );
-  if (validated === null) {
     return row;
   }
 
@@ -204,6 +168,53 @@ async function settlePaymentRequestIfPaid(
 }
 
 /**
+ * The oldest finalized transaction on the request's reference that landed and pays the request:
+ * the right recipient, amount and mint. The reference is public, so anyone can name it in a
+ * transaction of their own; a failed or non-paying one is skipped, never taken as the payment.
+ *
+ * @param rpc - Solana RPC on the request's cluster.
+ * @param row - The payment request.
+ * @param reference - The request's reference account.
+ * @returns The paying transaction's signature entry, or null when none pays the request yet.
+ */
+async function findFirstValidPayment(
+  rpc: SolanaRpc,
+  row: PaymentRequestRow,
+  reference: Address
+): Promise<ReferenceSignature | null> {
+  // NOTE: a reference flooded with more than REFERENCE_SIGNATURE_LIMIT successful transactions
+  // after its payment hides the payment from this read; the money still lands in the wallet.
+  const signatures = await rpc
+    .getSignaturesForAddress(reference, {
+      commitment: "finalized",
+      limit: REFERENCE_SIGNATURE_LIMIT,
+    })
+    .send();
+  for (const candidate of [...signatures].reverse()) {
+    if (candidate.err !== null) {
+      continue;
+    }
+    const verified = await verifyTransactionLanded(rpc, candidate.signature);
+    if (!verified.ok) {
+      continue;
+    }
+    const validated = await nullOnExpected(
+      validateTransfer(rpc, candidate.signature, {
+        recipient: assertValidAddress(row.destination_address, "destinationAddress"),
+        amount: toNumberAmount(row.amount),
+        reference,
+        ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
+      }),
+      ValidateTransferError
+    );
+    if (validated !== null) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
  * Records the inbound transfer that fulfilled a payment request.
  *
  * A concurrent reconcile of the same request inserts the same signature
@@ -219,7 +230,7 @@ async function recordInboundTransfer(
   row: PaymentRequestRow,
   projectId: string,
   custodyWalletId: string,
-  found: Awaited<ReturnType<typeof findReference>>
+  found: ReferenceSignature
 ): Promise<PaymentTransferRow> {
   const paymentsRepo = createPaymentsRepository(
     env,

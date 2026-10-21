@@ -171,7 +171,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.custody_wallet_id IS NOT NULL
               AND pr.created_at::timestamptz > ?::timestamptz
               AND (pr.expires_at IS NULL OR pr.expires_at::timestamptz > ?::timestamptz)
-            ORDER BY pr.created_at ASC, pr.id ASC
+            ORDER BY pr.created_at DESC, pr.id DESC
             LIMIT ?`
         )
         .bind(environment, createdAfter, expiredAfter, limit)

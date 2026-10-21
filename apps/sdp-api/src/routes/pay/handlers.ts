@@ -4,13 +4,12 @@ import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
-import { badRequest, conflict, internalError } from "@/lib/errors";
+import { badRequest, internalError } from "@/lib/errors";
 import { assertMoneyStartAdmitted, checkMoneyStart } from "@/lib/money-admission";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveTokenLabel } from "@/routes/payments/token-accounts";
 import { buildPaymentRequestTransaction } from "@/services/payments/payment-request-transaction";
 import {
-  hasPaymentInFlight,
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
@@ -122,7 +121,6 @@ export function getTransactionMetadata(c: Context<{ Bindings: Env }, "/:token/tx
  * @returns The unsigned transaction and the message the wallet shows.
  * @throws AppError `BAD_REQUEST` when the request is no longer payable.
  * @throws MoneyMovementRefusedError when the organization may no longer take payment.
- * @throws AppError `CONFLICT` when a payment for the request is already confirmed on chain.
  */
 export async function createPaymentTransaction(
   c: ValidatedBodyContext<typeof transactionRequestBodySchema>
@@ -134,12 +132,9 @@ export async function createPaymentTransaction(
     throw badRequest("Payment request is no longer payable");
   }
   await assertMoneyStartAdmitted(c.env, ...paymentRequestMoneyStart(request));
-  // NOTE: Known race-condition: two payers who both build before either payment confirms can
+  // NOTE: Known race-condition: two payers who both build before either payment finalizes can
   // both pay. The first to finalize settles the request; the second lands in the wallet as an
   // unlinked inbound payment, visible in its observed activity, and is refunded by hand.
-  if (await hasPaymentInFlight(request)) {
-    throw conflict("A payment for this request is already on its way");
-  }
 
   const transaction = await buildPaymentRequestTransaction({
     request,
