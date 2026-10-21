@@ -2,7 +2,7 @@
 /**
  * What `createTransfer` makes of each answer.
  *
- * Only a response carrying the selected exact source is a completed result.
+ * Successful responses are validated against the transfer result schema.
  */
 
 import { address } from "@solana/kit";
