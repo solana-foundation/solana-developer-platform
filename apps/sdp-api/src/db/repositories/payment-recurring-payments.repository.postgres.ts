@@ -110,7 +110,9 @@ const activationAttemptRowSchema = z.object({
   status: z.enum(PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES),
   stage: z.enum(PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES),
   plan_creation_signature: z.string().nullable(),
+  authorization_setup_signature: z.string().nullable(),
   authorization_signature: z.string().nullable(),
+  last_valid_block_height: z.string().nullable(),
   error: z.string().nullable(),
   metadata: z.record(z.string(), z.unknown()),
   created_at: z.string(),
@@ -126,6 +128,7 @@ const lifecycleAttemptRowSchema = z.object({
   status: z.enum(PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES),
   stage: z.enum(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_ATTEMPT_STAGES),
   signature: z.string().nullable(),
+  last_valid_block_height: z.string().nullable(),
   error: z.string().nullable(),
   metadata: z.record(z.string(), z.unknown()),
   created_at: z.string(),
@@ -150,6 +153,7 @@ const updateAttemptRowSchema = z.object({
   authorization_setup_signature: z.string().nullable(),
   authorization_signature: z.string().nullable(),
   old_cancel_signature: z.string().nullable(),
+  last_valid_block_height: z.string().nullable(),
   changed_fields: z.array(z.string()),
   before_values: z.record(z.string(), z.unknown()),
   after_values: z.record(z.string(), z.unknown()),
@@ -938,8 +942,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   stage = COALESCE(?, stage),
                   plan_creation_signature =
                     CASE WHEN ?::boolean THEN ? ELSE plan_creation_signature END,
+                  authorization_setup_signature =
+                    CASE WHEN ?::boolean THEN ? ELSE authorization_setup_signature END,
                   authorization_signature =
                     CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
+                  last_valid_block_height =
+                    CASE WHEN ?::boolean THEN ?::numeric ELSE last_valid_block_height END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
                   metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
                   idempotency_key = COALESCE(idempotency_key, ?),
@@ -953,8 +961,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.stage === undefined ? null : input.stage,
           input.planCreationSignature !== undefined,
           input.planCreationSignature ?? null,
+          input.authorizationSetupSignature !== undefined,
+          input.authorizationSetupSignature ?? null,
           input.authorizationSignature !== undefined,
           input.authorizationSignature ?? null,
+          input.lastValidBlockHeight !== undefined,
+          input.lastValidBlockHeight ?? null,
           input.error !== undefined,
           input.error ?? null,
           input.metadata !== undefined,
@@ -1074,6 +1086,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               SET status = COALESCE(?, status),
                   stage = COALESCE(?, stage),
                   signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
+                  last_valid_block_height =
+                    CASE WHEN ?::boolean THEN ?::numeric ELSE last_valid_block_height END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
                   metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
                   idempotency_key = COALESCE(idempotency_key, ?),
@@ -1088,6 +1102,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.stage === undefined ? null : input.stage,
           input.signature !== undefined,
           input.signature ?? null,
+          input.lastValidBlockHeight !== undefined,
+          input.lastValidBlockHeight ?? null,
           input.error !== undefined,
           input.error ?? null,
           input.metadata !== undefined,
@@ -1233,14 +1249,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     async clearStepSignature(input: ClearPaymentRecurringPaymentStepSignatureInput) {
       const table = STEP_SIGNATURE_TABLES[input.slot.row];
       const { column } = input.slot;
-      // Table and column come from the typed slot, never from caller text.
-      const [assignment, match] =
-        column === "metadata.authorizationSetupSignature"
-          ? [
-              "metadata = metadata - 'authorizationSetupSignature'",
-              "metadata ->> 'authorizationSetupSignature' = ?",
-            ]
-          : [`${column} = NULL`, `${column} = ?`];
+      // Table and column come from the typed slot, never from caller text. Only attempt rows keep
+      // the block height, and it belongs to the one step in flight.
+      const assignment =
+        input.slot.row === "recurring_payment"
+          ? `${column} = NULL`
+          : `${column} = NULL, last_valid_block_height = NULL`;
       const rowsAffected = await db
         .prepare(
           `UPDATE ${table}
@@ -1249,7 +1263,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND ${match}`
+              AND ${column} = ?`
         )
         .bind(input.updatedAt, input.id, input.organizationId, input.projectId, input.signature)
         .run();
@@ -1275,6 +1289,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                     CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
                   old_cancel_signature =
                     CASE WHEN ?::boolean THEN ? ELSE old_cancel_signature END,
+                  last_valid_block_height =
+                    CASE WHEN ?::boolean THEN ?::numeric ELSE last_valid_block_height END,
                   changed_fields =
                     CASE WHEN ?::boolean THEN ?::text[] ELSE changed_fields END,
                   before_values =
@@ -1309,6 +1325,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.authorizationSignature ?? null,
           input.oldCancelSignature !== undefined,
           input.oldCancelSignature ?? null,
+          input.lastValidBlockHeight !== undefined,
+          input.lastValidBlockHeight ?? null,
           input.changedFields !== undefined,
           input.changedFields === undefined ? null : toPostgresTextArray(input.changedFields),
           input.beforeValues !== undefined,
