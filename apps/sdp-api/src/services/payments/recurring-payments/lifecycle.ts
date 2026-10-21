@@ -41,7 +41,7 @@ import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
-  assertRecurringPaymentTokenMint,
+  assertRecurringPaymentTerms,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
@@ -584,15 +584,16 @@ async function runRecurringPaymentLifecycle(
     if (!plan) {
       throw notFound("Subscription plan");
     }
-    // Cancel is an exit and never asks the token admission check; only resume restarts collection.
+    // Cancel is an exit and never asks the terms admission check; only resume restarts collection.
     const tokenMint = assertValidAddress(
       input.operation === "resume"
-        ? await assertRecurringPaymentTokenMint(
-            plan.token,
-            input.organizationId,
-            input.projectId,
-            input.env
-          )
+        ? await assertRecurringPaymentTerms({
+            token: plan.token,
+            amount: claimed.amount,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            env: input.env,
+          })
         : plan.token,
       "tokenMint"
     );

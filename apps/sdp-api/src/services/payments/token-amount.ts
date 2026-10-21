@@ -1,6 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, unwrapOption } from "@solana/kit";
 import { fetchSysvarClock } from "@solana/sysvars";
@@ -66,23 +66,57 @@ async function readUiAmountMint(
 }
 
 /**
- * Reads a mint's decimals for a flow that fixes a raw amount once and reuses it
+ * Parses a UI amount at a mint's decimals, answering a malformed or too-precise
+ * amount with a 400 instead of letting `AmountError` reach the app's error
+ * handler as a 500.
+ *
+ * @param uiAmount - The caller's decimal amount string.
+ * @param decimals - The mint's decimals.
+ * @returns The amount in base units at that scale.
+ */
+function parsePaymentAmount(uiAmount: string, decimals: number): bigint {
+  try {
+    return parseDecimalAmount(uiAmount, decimals);
+  } catch (error) {
+    if (error instanceof AmountError) {
+      throw badRequest(error.message);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Refuses, with a 400, a UI amount that does not parse at its mint's decimals,
+ * so a payment is checked before its row is stored rather than when it executes.
+ * Native SOL is checked through `SOL_MINT`, which the catalogue holds at 9 decimals.
+ *
+ * @param uiAmount - The caller's decimal amount string.
+ * @param mint - The mint the amount is denominated in.
+ */
+export async function assertPaymentAmountFitsMint(uiAmount: string, mint: Address): Promise<void> {
+  const { decimals } = await readUiAmountMint(mint);
+  parsePaymentAmount(uiAmount, decimals);
+}
+
+/**
+ * Converts a UI amount for a flow that fixes a raw amount once and reuses it
  * (recurring payments and subscription plans pin a per-period cap in base units),
  * refusing interest-bearing and scaled-UI-amount mints, whose raw amount for a
  * fixed UI amount drifts with the cluster clock. Token-2022 extensions are fixed
  * at mint initialization, so a mint admitted here stays admissible.
  *
+ * @param uiAmount - The caller's decimal amount string.
  * @param mint - The mint the flow is denominated in.
- * @returns The mint's decimals.
+ * @returns The amount in base units.
  */
-export async function readStaticAmountMintDecimals(mint: Address): Promise<number> {
+export async function parseStaticPaymentAmount(uiAmount: string, mint: Address): Promise<bigint> {
   const { decimals, uiAmountExtension } = await readUiAmountMint(mint);
   if (uiAmountExtension !== null) {
     throw badRequest(
       "Recurring payments do not support interest-bearing or scaled UI amount tokens"
     );
   }
-  return decimals;
+  return parsePaymentAmount(uiAmount, decimals);
 }
 
 /**
@@ -104,7 +138,7 @@ export async function readStaticAmountMintDecimals(mint: Address): Promise<numbe
 export async function loadPaymentAmountConverter(mint: Address): Promise<PaymentAmountConverter> {
   const { decimals, uiAmountExtension } = await readUiAmountMint(mint);
   const toStaticBaseUnits: PaymentAmountConverter = (uiAmount) =>
-    parseDecimalAmount(uiAmount, decimals);
+    parsePaymentAmount(uiAmount, decimals);
   if (uiAmountExtension === null) {
     return toStaticBaseUnits;
   }

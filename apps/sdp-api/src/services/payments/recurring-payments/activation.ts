@@ -7,7 +7,6 @@ import {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isActivatingRecurringPaymentStatus,
@@ -48,6 +47,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
+import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -746,7 +746,7 @@ export async function activateRecurringPayment(input: {
     }
     const tokenProgram = await resolveMintTokenProgram(rpc, mint);
     const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
-    const amountBaseUnits = parseDecimalAmount(claimed.amount, sourceTokenAccount.decimals);
+    const amountBaseUnits = await parseStaticPaymentAmount(claimed.amount, mint);
 
     if (amountBaseUnits <= 0n) {
       throw badRequest("Subscription amount must be greater than zero");

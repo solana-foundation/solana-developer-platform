@@ -21,6 +21,7 @@ import {
   type PaymentTransferType as TransferType,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
+import { SOL_DECIMALS } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -104,7 +105,10 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { loadPaymentAmountConverter } from "@/services/payments/token-amount";
+import {
+  assertPaymentAmountFitsMint,
+  loadPaymentAmountConverter,
+} from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -730,7 +734,7 @@ async function executeSolTransfer(
   amount: string,
   submissionStore: SignedSubmissionStore
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const lamports = parseDecimalAmount(amount, 9);
+  const lamports = parseDecimalAmount(amount, SOL_DECIMALS);
   if (lamports <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
   }
@@ -867,6 +871,8 @@ function compareTransferRows(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
+  // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
+  await assertPaymentAmountFitsMint(operation.amount, assertValidAddress(operation.token, "token"));
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);

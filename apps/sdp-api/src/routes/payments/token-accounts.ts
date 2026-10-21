@@ -74,17 +74,6 @@ export function withIssuedTokenLabels<T extends { mint: string; token: string }>
   });
 }
 
-export async function resolveMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number> {
-  const response = await rpc.getTokenSupply(mint, { commitment: "confirmed" }).send();
-  const decimals = response.value.decimals;
-
-  if (typeof decimals !== "number" || !Number.isInteger(decimals) || decimals < 0) {
-    throw badRequest("Token mint decimals could not be resolved");
-  }
-
-  return decimals;
-}
-
 function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
   mint: Address;
   amount: bigint;
@@ -224,20 +213,16 @@ export async function resolveSourceTokenAccountOrAta(
   owner: Address,
   mint: Address,
   tokenProgram: Address
-): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
+): Promise<{ tokenAccount: Address; exists: boolean }> {
   const [tokenAccount] = await findAssociatedTokenPda({
     owner,
     tokenProgram,
     mint,
   });
-  const [tokenAccountInfo, decimals] = await Promise.all([
-    getAccountInfo(rpc, tokenAccount),
-    resolveMintDecimals(rpc, mint),
-  ]);
+  const tokenAccountInfo = await getAccountInfo(rpc, tokenAccount);
 
   return {
     tokenAccount,
-    decimals,
     exists: tokenAccountInfo !== null,
   };
 }

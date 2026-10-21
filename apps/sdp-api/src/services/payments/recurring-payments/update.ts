@@ -7,7 +7,6 @@ import {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   assertNever,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
@@ -70,6 +69,7 @@ import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
+import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -80,7 +80,7 @@ import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
-  assertRecurringPaymentTokenMint,
+  assertRecurringPaymentTerms,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
@@ -325,15 +325,16 @@ async function resolveRecurringPaymentUpdate(input: {
   const accountChanged =
     counterpartyId !== input.recurringPayment.counterparty_id ||
     counterpartyAccountId !== input.recurringPayment.counterparty_account_id;
+  const amount =
+    input.request.amount === undefined ? input.recurringPayment.amount : input.request.amount;
   const [token, destination] = await Promise.all([
-    input.request.token !== undefined
-      ? assertRecurringPaymentTokenMint(
-          input.request.token,
-          input.organizationId,
-          input.projectId,
-          input.env
-        )
-      : input.recurringPayment.token,
+    assertRecurringPaymentTerms({
+      token: input.request.token === undefined ? input.recurringPayment.token : input.request.token,
+      amount,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      env: input.env,
+    }),
     accountChanged
       ? resolveSolanaCounterpartyAccount({
           env: input.env,
@@ -344,8 +345,6 @@ async function resolveRecurringPaymentUpdate(input: {
         })
       : { destinationAddress: input.recurringPayment.destination_address },
   ]);
-  const amount =
-    input.request.amount === undefined ? input.recurringPayment.amount : input.request.amount;
   const periodHours =
     input.request.periodHours === undefined
       ? input.recurringPayment.period_hours
@@ -1455,7 +1454,7 @@ async function runReplacementUpdate(input: {
   const mint = assertValidAddress(input.resolved.token, "token");
   const tokenProgram = await resolveMintTokenProgram(rpc, mint);
   const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
-  const amountBaseUnits = parseDecimalAmount(input.resolved.amount, sourceTokenAccount.decimals);
+  const amountBaseUnits = await parseStaticPaymentAmount(input.resolved.amount, mint);
   if (amountBaseUnits <= 0n) {
     throw badRequest("Subscription amount must be greater than zero");
   }

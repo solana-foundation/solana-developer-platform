@@ -6,7 +6,6 @@ import {
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
 import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
@@ -61,7 +60,7 @@ import {
   normalizePaymentToken,
   parseU64String,
 } from "@/services/payment-operation.service";
-import { readStaticAmountMintDecimals } from "@/services/payments/token-amount";
+import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -78,36 +77,46 @@ const RECURRING_PAYMENT_TOKEN_ERROR =
   "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported";
 
 /**
- * Resolves a recurring-payment token to its mint, allowing only well-known USD
- * stablecoins on the open scope's cluster or active tokens issued in the project.
+ * Admits a recurring payment's token and amount: the token must be a well-known
+ * USD stablecoin on the open scope's cluster or an active token issued in the
+ * project, and the amount must convert to a fixed raw amount at its mint's
+ * decimals. Create, update and resume all start collection on these terms.
+ *
+ * @param params - The terms and the tenant they belong to.
+ * @param params.token - The requested token, a mint address or well-known symbol.
+ * @param params.amount - The per-period UI amount.
+ * @param params.organizationId - The schedule's organization.
+ * @param params.projectId - The schedule's project, where issued tokens are looked up.
+ * @param params.env - The API environment.
+ * @returns The token's mint.
  */
-export async function assertRecurringPaymentTokenMint(
-  token: string,
-  organizationId: string,
-  projectId: string,
-  env: Env
-): Promise<string> {
-  if (isNativePaymentToken(token)) {
+export async function assertRecurringPaymentTerms(params: {
+  token: string;
+  amount: string;
+  organizationId: string;
+  projectId: string;
+  env: Env;
+}): Promise<Address> {
+  if (isNativePaymentToken(params.token)) {
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  const mint = assertValidAddress(normalizePaymentToken(token), "token");
+  const mint = assertValidAddress(normalizePaymentToken(params.token), "token");
   const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   if (wellKnown) {
-    if (wellKnown.isUsdStable) {
-      return mint;
+    if (!wellKnown.isUsdStable) {
+      throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
     }
-    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
+  } else {
+    const issuedTokenStatus = await createTokenRepository(
+      params.env,
+      createTenantScope({ organizationId: params.organizationId, projectId: params.projectId })
+    ).getStatusByMint(params.projectId, mint);
+    if (issuedTokenStatus !== "active") {
+      throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
+    }
   }
-
-  const issuedTokenStatus = await createTokenRepository(
-    env,
-    createTenantScope({ organizationId, projectId })
-  ).getStatusByMint(projectId, mint);
-  if (issuedTokenStatus !== "active") {
-    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
-  }
-  await readStaticAmountMintDecimals(mint);
+  await parseStaticPaymentAmount(params.amount, mint);
 
   return mint;
 }
@@ -135,11 +144,10 @@ export async function resolvePlanRuntime(
 ): Promise<{ amountBaseUnits: bigint; mint: Address; tokenProgram: Address }> {
   const mint = assertSubscriptionTokenMint(plan.token);
   const rpc = createClusterRpc();
-  const [tokenProgram, decimals] = await Promise.all([
+  const [tokenProgram, amountBaseUnits] = await Promise.all([
     resolveMintTokenProgram(rpc, mint),
-    readStaticAmountMintDecimals(mint),
+    parseStaticPaymentAmount(plan.amount, mint),
   ]);
-  const amountBaseUnits = parseDecimalAmount(plan.amount, decimals);
 
   if (amountBaseUnits <= 0n) {
     throw badRequest("Subscription amount must be greater than zero");

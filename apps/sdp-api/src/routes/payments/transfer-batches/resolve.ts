@@ -1,7 +1,7 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
@@ -38,8 +38,8 @@ import type {
 } from "./types";
 
 /**
- * Parses a recipient amount into token base units, mapping amount-format
- * violations to a 400 response. A positive UI amount can still convert to zero
+ * Parses a recipient amount into token base units; the converter answers a
+ * too-precise amount with a 400. A positive UI amount can still convert to zero
  * base units on an interest-bearing or scaled mint; that is refused too, so no
  * recipient becomes a sponsored transfer that moves nothing.
  *
@@ -48,18 +48,11 @@ import type {
  * @returns The amount in token base units.
  */
 function parseRecipientAmount(amount: string, toBaseUnits: PaymentAmountConverter): bigint {
-  try {
-    const amountBaseUnits = toBaseUnits(assertPositivePaymentAmount(amount));
-    if (amountBaseUnits <= 0n) {
-      throw badRequest("Recipient amount must be greater than zero");
-    }
-    return amountBaseUnits;
-  } catch (error) {
-    if (error instanceof AmountError) {
-      throw badRequest(error.message);
-    }
-    throw error;
+  const amountBaseUnits = toBaseUnits(assertPositivePaymentAmount(amount));
+  if (amountBaseUnits <= 0n) {
+    throw badRequest("Recipient amount must be greater than zero");
   }
+  return amountBaseUnits;
 }
 
 /**
