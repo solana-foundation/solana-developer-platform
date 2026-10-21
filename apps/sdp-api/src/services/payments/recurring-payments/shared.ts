@@ -693,8 +693,10 @@ export type RecurringPaymentUnwindCheck = "unwind" | "last_step_landed";
  * already on chain.
  */
 export interface RecurringPaymentStepUnwindCheck<T> {
-  /** The chain check an unwind must pass. */
-  check: (stepFailure: RecurringPaymentStepFailedError) => Promise<RecurringPaymentUnwindCheck>;
+  /** The phase's last step, whose effect the check reads. */
+  finalStep: RecurringPaymentStepSignatureSlot;
+  /** Reads the last step's effect, naming the failure or pending error it was asked for. */
+  check: (cause: Error) => Promise<RecurringPaymentUnwindCheck>;
   /**
    * What the steps would have returned, read back from the rows the first pass recorded: the
    * landed last step proves every earlier one landed, so nothing is read on chain as a step again
@@ -707,17 +709,20 @@ export interface RecurringPaymentStepUnwindCheck<T> {
  * Runs a flow's unwinding steps. Inside them any error but a pending step becomes
  * `RecurringPaymentStepFailedError`, once no saved step is unread: the step runner settles every
  * send before it returns or throws, so nothing this run sent can still land. Every step failure,
- * raised or converted, passes the unwind check first. When it finds the phase's last step on
+ * raised or converted, passes the unwind check first, and so does a pending step that is not the
+ * phase's last: the last step's effect on chain proves every earlier step landed, so an earlier
+ * step that cannot settle (a revoked token approval read against a missing expiry stays pending
+ * forever) never holds a flow whose last step landed. When the check finds the last step on
  * chain, the flow never unwinds: it continues from the landed step through `continueFromLanded`,
  * whose failures leave the attempt in flight.
  *
  * @param phase - The run's unwinding steps.
  * @param run - The steps.
- * @param unwindCheck - The unwind check and the landed continuation, or null when an unwind needs
- *   no check.
+ * @param unwindCheck - The final step, its check and the landed continuation, or null when an
+ *   unwind needs no check.
  * @returns What the steps return, or what the landed continuation reads back.
- * @throws ResumedStepUnsettledError when a step is pending, or the unwind check cannot read the
- *   chain.
+ * @throws ResumedStepUnsettledError when a step is pending and the last step is not on chain, or
+ *   the unwind check cannot read the chain.
  * @throws RecurringPaymentStepFailedError when a step fails with nothing in flight and its last
  *   step is not on chain.
  */
@@ -730,11 +735,21 @@ export async function insideRecurringPaymentStepPhase<T>(
   try {
     return await run();
   } catch (error) {
-    if (
-      !(error instanceof Error) ||
-      error instanceof ResumedStepUnsettledError ||
-      (phase.unreadSavedStep !== null && !(error instanceof RecurringPaymentStepFailedError))
-    ) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    if (error instanceof ResumedStepUnsettledError) {
+      // A pending last step is waited on; only a pending earlier step can be overtaken by it.
+      if (
+        unwindCheck === null ||
+        (phase.step.row === unwindCheck.finalStep.row &&
+          phase.step.column === unwindCheck.finalStep.column)
+      ) {
+        throw error;
+      }
+      return continueIfLastStepLanded(unwindCheck, error, error);
+    }
+    if (phase.unreadSavedStep !== null && !(error instanceof RecurringPaymentStepFailedError)) {
       throw error;
     }
     stepFailure =
@@ -749,10 +764,28 @@ export async function insideRecurringPaymentStepPhase<T>(
   if (unwindCheck === null) {
     throw stepFailure;
   }
-  const check = await unwindCheck.check(stepFailure);
+  return continueIfLastStepLanded(unwindCheck, stepFailure.failure, stepFailure);
+}
+
+/**
+ * Continues a flow from its landed last step, or throws what it would have thrown without it.
+ *
+ * @param unwindCheck - The flow's unwind check.
+ * @param cause - The failure or pending error the check names.
+ * @param otherwise - What to throw when the last step is not on chain.
+ * @returns What the landed continuation reads back.
+ * @throws `otherwise` when the last step is not on chain.
+ * @throws ResumedStepUnsettledError when the check cannot read the chain.
+ */
+async function continueIfLastStepLanded<T>(
+  unwindCheck: RecurringPaymentStepUnwindCheck<T>,
+  cause: Error,
+  otherwise: Error
+): Promise<T> {
+  const check = await unwindCheck.check(cause);
   switch (check) {
     case "unwind":
-      throw stepFailure;
+      throw otherwise;
     case "last_step_landed":
       return unwindCheck.continueFromLanded();
     default:

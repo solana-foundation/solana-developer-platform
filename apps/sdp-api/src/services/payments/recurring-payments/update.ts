@@ -936,7 +936,8 @@ type UpdateAttemptStepColumn = UpdateAttemptStepSlot["column"];
  * @param input.organizationId - The schedule's organization.
  * @param input.projectId - The schedule's project.
  * @param input.attempt - The run's attempt as it stands.
- * @param input.stepFailure - The step failure the update would unwind for.
+ * @param input.cause - The step failure, or the earlier step still pending, the flow would
+ *   unwind or wait for.
  * @returns `unwind` when no new delegation exists, `last_step_landed` when it does.
  * @throws ResumedStepUnsettledError when the new delegation cannot be read; the attempt stays in
  *   flight.
@@ -947,7 +948,7 @@ async function checkReplacementUnwind(input: {
   organizationId: string;
   projectId: string;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  stepFailure: RecurringPaymentStepFailedError;
+  cause: Error;
 }): Promise<RecurringPaymentUnwindCheck> {
   if (input.attempt.new_plan_id === null) {
     return "unwind";
@@ -988,7 +989,7 @@ async function checkReplacementUnwind(input: {
         event: "sdp_api_recurring_payment_unwind_found_step_landed",
         ...logContext,
         subscription_pda: subscriptionPda,
-        ...describeError(input.stepFailure.failure),
+        ...describeError(input.cause),
       });
       return "last_step_landed";
     case "pending":
@@ -997,7 +998,7 @@ async function checkReplacementUnwind(input: {
         ...logContext,
         delegation_state: delegation.state,
         subscription_pda: subscriptionPda,
-        ...describeError(input.stepFailure.failure),
+        ...describeError(input.cause),
       });
       throw new ResumedStepUnsettledError();
     default:
@@ -2222,6 +2223,7 @@ async function runReplacementUpdate(input: {
       step: "authorize_subscription",
     };
     if (savedAuthorizationSignature !== null) {
+      phase.step = authorizeSlot;
       await readSavedRecurringPaymentStep({
         phase,
         slot: authorizeSlot,
@@ -2277,13 +2279,14 @@ async function runReplacementUpdate(input: {
     };
   };
   const replacement = await insideRecurringPaymentStepPhase(phase, replacementSteps, {
-    check: (stepFailure) =>
+    finalStep: { row: "update_attempt", column: "authorization_signature" },
+    check: (cause) =>
       checkReplacementUnwind({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
         attempt,
-        stepFailure,
+        cause,
       }),
     continueFromLanded: async () => {
       const landed = await readLandedReplacement({

@@ -36,6 +36,7 @@ import {
   type ListPaymentRecurringPaymentsResult,
   type LockPaymentRecurringPaymentEmptyStepSlotsInput,
   laterStepSignatureColumns,
+  otherStepSignatureColumns,
   type PaymentRecurringPaymentActivationAttemptRow,
   type PaymentRecurringPaymentLifecycleAttemptRow,
   type PaymentRecurringPaymentRow,
@@ -1283,11 +1284,19 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       const laterSlotsEmpty = laterStepSignatureColumns(input.slot)
         .map((laterColumn) => `AND ${laterColumn} IS NULL`)
         .join(" ");
+      const otherColumns = otherStepSignatureColumns(input.slot);
+      // A saved earlier step still needs an expiry to be read against: the row keeps its expiry
+      // until the last saved slot is cleared.
+      const noOtherSlotSaved =
+        otherColumns.length === 0
+          ? "TRUE"
+          : otherColumns.map((otherColumn) => `${otherColumn} IS NULL`).join(" AND ");
       const rowsAffected = await db
         .prepare(
           `UPDATE ${table}
               SET ${column} = NULL,
-                  last_valid_block_height = NULL,
+                  last_valid_block_height = CASE WHEN ${noOtherSlotSaved}
+                    THEN NULL ELSE last_valid_block_height END,
                   updated_at = ?
             WHERE id = ?
               AND recurring_payment_id = ?

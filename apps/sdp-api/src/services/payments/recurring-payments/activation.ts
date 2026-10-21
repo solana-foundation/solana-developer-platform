@@ -280,7 +280,8 @@ async function failRecurringPaymentActivation(input: {
  * @param input.recurringPaymentId - The schedule.
  * @param input.attemptId - The run's attempt.
  * @param input.planId - The activation's plan row, or null when none is recorded.
- * @param input.stepFailure - The step failure the activation would unwind for.
+ * @param input.cause - The step failure, or the earlier step still pending, the flow would
+ *   unwind or wait for.
  * @returns `unwind` when no delegation exists, `last_step_landed` when it does.
  * @throws ResumedStepUnsettledError when the delegation cannot be read; the attempt stays in
  *   flight.
@@ -293,7 +294,7 @@ async function checkActivationUnwind(input: {
   recurringPaymentId: string;
   attemptId: string;
   planId: string | null;
-  stepFailure: RecurringPaymentStepFailedError;
+  cause: Error;
 }): Promise<RecurringPaymentUnwindCheck> {
   if (input.planId === null) {
     return "unwind";
@@ -334,7 +335,7 @@ async function checkActivationUnwind(input: {
         event: "sdp_api_recurring_payment_unwind_found_step_landed",
         ...logContext,
         subscription_pda: subscriptionPda,
-        ...describeError(input.stepFailure.failure),
+        ...describeError(input.cause),
       });
       return "last_step_landed";
     case "pending":
@@ -343,7 +344,7 @@ async function checkActivationUnwind(input: {
         ...logContext,
         delegation_state: delegation.state,
         subscription_pda: subscriptionPda,
-        ...describeError(input.stepFailure.failure),
+        ...describeError(input.cause),
       });
       throw new ResumedStepUnsettledError();
     default:
@@ -942,6 +943,7 @@ async function settleActivationSubscription(input: {
   programPlanId: bigint;
 }): Promise<Signature | null> {
   const slot = { row: "activation_attempt", column: "authorization_signature" } as const;
+  input.phase.step = slot;
   const logContext: RecurringPaymentStepLogContext = {
     recurring_payment_id: input.claimed.id,
     attempt_id: input.attempt.id,
@@ -1309,7 +1311,8 @@ export async function activateRecurringPayment(input: {
 
   try {
     const activation = await insideRecurringPaymentStepPhase(phase, activationSteps, {
-      check: (stepFailure) =>
+      finalStep: { row: "activation_attempt", column: "authorization_signature" },
+      check: (cause) =>
         checkActivationUnwind({
           env: input.env,
           organizationId: input.organizationId,
@@ -1317,7 +1320,7 @@ export async function activateRecurringPayment(input: {
           recurringPaymentId: claimed.id,
           attemptId: attempt.id,
           planId: activationPlanId,
-          stepFailure,
+          cause,
         }),
       continueFromLanded: () =>
         readLandedActivation({

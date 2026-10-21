@@ -409,6 +409,17 @@ export function laterStepSignatureColumns(slot: RecurringPaymentStepSignatureSlo
   return order.slice(order.indexOf(slot.column) + 1);
 }
 
+/**
+ * The step signature columns of `slot`'s attempt row other than its own.
+ *
+ * @param slot - A step's slot.
+ * @returns The row's other columns, empty for a row with one step.
+ */
+export function otherStepSignatureColumns(slot: RecurringPaymentStepSignatureSlot): string[] {
+  const order: readonly string[] = RECURRING_PAYMENT_STEP_SLOT_ORDER[slot.row];
+  return order.filter((column) => column !== slot.column);
+}
+
 /** One or more step slots of the same attempt row. */
 export type RecurringPaymentStepSignatureSlots = {
   [TRow in RecurringPaymentStepSignatureRow]: readonly [
@@ -742,10 +753,11 @@ export interface PaymentRecurringPaymentsRepository {
    */
   setStepSignature(input: SetPaymentRecurringPaymentStepSignatureInput): Promise<boolean>;
   /**
-   * Null a step's saved signature and expiry after its send was provably refused or dropped, only
-   * while the slot still holds that signature, the attempt is in flight, and every later slot of
-   * the row is empty: the expiry belongs to the latest saved step, so a later saved step's is
-   * never nulled with it.
+   * Null a step's saved signature after its send was provably refused or dropped, only while the
+   * slot still holds that signature, the attempt is in flight, and every later slot of the row is
+   * empty. The row's one expiry is nulled with it only when no other slot of the row is still
+   * saved: an earlier step that saved keeps an expiry to be read against, and the cleared step's
+   * own expiry is the later one, so keeping it only delays that earlier step reading as dropped.
    *
    * @returns False when the slot no longer holds it, the attempt has settled, or a later slot
    *   holds a signature.
