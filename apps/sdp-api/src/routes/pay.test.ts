@@ -1,6 +1,18 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { getSdpDocsOrigin } from "@sdp/types/site";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-
+import {
+  AccountRole,
+  blockhash,
+  decompileTransactionMessage,
+  getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
+} from "@solana/kit";
+import {
+  getTransferSolInstructionDataDecoder,
+  SYSTEM_PROGRAM_ADDRESS,
+} from "@solana-program/system";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -8,11 +20,15 @@ import { createPaymentRequestsRepository } from "@/db/repositories/repository-fa
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import {
+  clusterOfRpcClient,
+  ENVIRONMENT_CLUSTER_CASES,
+  installClusterRpcStub,
+} from "@/test/helpers/cluster-rpc";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
-  DEVNET_USDC_MINT,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
@@ -21,6 +37,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { required } from "@/test/helpers/required";
 
 interface RequestWallet {
   projectId: string;
@@ -50,6 +67,10 @@ const PRODUCTION_REQUEST_WALLET: RequestWallet = {
 
 const SOL_PAYMENT: RequestPayment = { token: SOL_MINT, amount: "1.5" };
 
+const PAYER = TEST_SOLANA_ADDRESSES.wallet2;
+
+const PAY_BLOCKHASH = blockhash("2Z8oHviEbrqDD5kg2sW8h8kYceqdVTnrrPL6Lk2nBfRG");
+
 async function seedProductionRequestWallet(): Promise<RequestWallet> {
   await seedUnreadPrivyWallet(getDb(env), {
     organizationId: TEST_ORG.id,
@@ -64,7 +85,7 @@ const REQUEST_WALLET_BY_ENVIRONMENT = {
   production: seedProductionRequestWallet,
 } as const satisfies Record<SdpEnvironment, () => Promise<RequestWallet>>;
 
-const payableViewSchema = z.object({ solanaPayUrl: z.string() });
+const transactionResponseSchema = z.object({ transaction: z.string(), message: z.string() });
 
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
@@ -72,6 +93,10 @@ describe("Public payment request routes", () => {
 
   beforeEach(() => {
     rpc.answer("getSignaturesForAddress", []);
+    getRecentBlockhashMock.mockResolvedValue({
+      blockhash: PAY_BLOCKHASH,
+      lastValidBlockHeight: 1_000n,
+    });
   });
 
   function createAwaitingPaymentRequest(wallet: RequestWallet, payment: RequestPayment) {
@@ -99,10 +124,20 @@ describe("Public payment request routes", () => {
     return app.request(`/pay/${publicToken}`, {}, env);
   }
 
-  async function payableUrl(publicToken: string): Promise<URL> {
-    const response = await getPayView(publicToken);
-    expect(response.status).toBe(200);
-    return new URL(payableViewSchema.parse(await response.json()).solanaPayUrl);
+  function postTransaction(publicToken: string) {
+    return app.request(
+      `/pay/${publicToken}/tx`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account: PAYER }),
+      },
+      env
+    );
+  }
+
+  async function updateOrganization(sql: string) {
+    await getDb(env).prepare(sql).bind(TEST_ORG.id).run();
   }
 
   it.for(ENVIRONMENT_CLUSTER_CASES)(
@@ -113,7 +148,7 @@ describe("Public payment request routes", () => {
         SOL_PAYMENT
       );
 
-      const response = await app.request(`/pay/${request.public_token}`, {}, env);
+      const response = await getPayView(request.public_token);
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({
@@ -125,7 +160,7 @@ describe("Public payment request routes", () => {
     }
   );
 
-  it("keeps an unresolved legacy request readable with no payable link", async () => {
+  it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
     await getDb(env)
       .prepare("UPDATE payment_requests SET custody_wallet_id = NULL WHERE id = ?")
@@ -139,88 +174,199 @@ describe("Public payment request routes", () => {
       status: "awaiting_payment",
       solanaPayUrl: null,
     });
+
+    const transactionResponse = await postTransaction(request.public_token);
+
+    expect(transactionResponse.status).toBe(409);
+    await expect(transactionResponse.json()).resolves.toMatchObject({
+      error: { code: "CONFLICT" },
+    });
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
   });
 
-  describe("transfer request link", () => {
-    it("asks for the exact stored amount of an awaiting SPL request", async () => {
-      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, {
-        token: DEVNET_USDC_MINT,
-        amount: "1234567.123456",
-      });
-
-      const url = await payableUrl(request.public_token);
-
-      expect(url.protocol).toBe("solana:");
-      expect(url.pathname).toBe(TEST_SOLANA_ADDRESSES.wallet1);
-      expect([...url.searchParams]).toEqual([
-        ["spl-token", DEVNET_USDC_MINT],
-        ["reference", request.reference],
-        ["label", "Solana Developer Platform"],
-        ["message", "Pay 1234567.123456 USDC to Solana Developer Platform"],
-        ["amount", "1234567.123456"],
-      ]);
-    });
-
-    it("names no spl-token for a SOL request", async () => {
+  describe("payment link", () => {
+    it("links an awaiting request to its transaction request", async () => {
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
 
-      const url = await payableUrl(request.public_token);
+      const response = await getPayView(request.public_token);
 
-      expect(url.pathname).toBe(TEST_SOLANA_ADDRESSES.wallet1);
-      expect([...url.searchParams]).toEqual([
-        ["reference", request.reference],
-        ["label", "Solana Developer Platform"],
-        ["message", "Pay 1.5 SOL to Solana Developer Platform"],
-        ["amount", "1.5"],
-      ]);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        amount: "1.5",
+        token: SOL_MINT,
+        tokenSymbol: "SOL",
+        recipient: SANDBOX_REQUEST_WALLET.publicKey,
+        reference: request.reference,
+        status: "awaiting_payment",
+        expiresAt: null,
+        network: "devnet",
+        solanaPayUrl: `solana:https://localhost/pay/${request.public_token}/tx`,
+      });
     });
 
-    it("stops advertising a production request's link once its organization loses the entitlement (APE-351)", async () => {
+    it("stops linking a production request once its organization loses the entitlement (APE-351)", async () => {
       const request = await createAwaitingPaymentRequest(
         await seedProductionRequestWallet(),
         SOL_PAYMENT
       );
-      expect((await payableUrl(request.public_token)).pathname).toBe(
-        PRODUCTION_REQUEST_WALLET.publicKey
+      await expect((await getPayView(request.public_token)).json()).resolves.toMatchObject({
+        solanaPayUrl: `solana:https://localhost/pay/${request.public_token}/tx`,
+      });
+
+      await updateOrganization("UPDATE organizations SET settings = NULL WHERE id = ?");
+      const refused = await getPayView(request.public_token);
+
+      expect(refused.status).toBe(200);
+      await expect(refused.json()).resolves.toMatchObject({
+        status: "awaiting_payment",
+        solanaPayUrl: null,
+      });
+    });
+
+    it("stops linking every request once its organization is deleted (HOO-1955)", async () => {
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
+      await updateOrganization("UPDATE organizations SET status = 'deleted' WHERE id = ?");
+
+      const refused = await getPayView(request.public_token);
+
+      expect(refused.status).toBe(200);
+      await expect(refused.json()).resolves.toMatchObject({
+        status: "awaiting_payment",
+        solanaPayUrl: null,
+      });
+    });
+
+    it("keeps linking a sandbox request without the production entitlement", async () => {
+      await updateOrganization("UPDATE organizations SET settings = NULL WHERE id = ?");
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
+
+      await expect((await getPayView(request.public_token)).json()).resolves.toMatchObject({
+        solanaPayUrl: `solana:https://localhost/pay/${request.public_token}/tx`,
+      });
+    });
+  });
+
+  describe("transaction request", () => {
+    it("describes the request to the wallet before it posts its account", async () => {
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
+
+      const response = await app.request(`/pay/${request.public_token}/tx`, {}, env);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        label: "Solana Developer Platform",
+        icon: `${getSdpDocsOrigin()}/icon.svg`,
+      });
+    });
+
+    it.for(ENVIRONMENT_CLUSTER_CASES)(
+      "builds a $environment SOL request as an unsigned payer-paid transfer on $cluster only",
+      async ({ environment, cluster }) => {
+        const wallet = await REQUEST_WALLET_BY_ENVIRONMENT[environment]();
+        const request = await createAwaitingPaymentRequest(wallet, {
+          token: SOL_MINT,
+          amount: "0.123456789",
+        });
+
+        const response = await postTransaction(request.public_token);
+
+        expect(response.status).toBe(200);
+        const body = transactionResponseSchema.parse(await response.json());
+        expect(body.message).toBe("Pay 0.123456789 SOL to Solana Developer Platform");
+        const transaction = getTransactionDecoder().decode(
+          getBase64Encoder().encode(body.transaction)
+        );
+        expect(transaction.signatures).toEqual({ [PAYER]: null });
+        const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+        expect(compiled.lifetimeToken).toBe(PAY_BLOCKHASH);
+        const message = decompileTransactionMessage(compiled);
+        expect(message.feePayer.address).toBe(PAYER);
+        expect(message.instructions).toHaveLength(1);
+        const [transfer] = message.instructions;
+        expect(transfer.programAddress).toBe(SYSTEM_PROGRAM_ADDRESS);
+        expect(transfer.accounts).toEqual([
+          { address: PAYER, role: AccountRole.WRITABLE_SIGNER },
+          { address: wallet.publicKey, role: AccountRole.WRITABLE },
+          { address: request.reference, role: AccountRole.READONLY },
+        ]);
+        expect(getTransferSolInstructionDataDecoder().decode(required(transfer.data)).amount).toBe(
+          123_456_789n
+        );
+        expect(
+          new Set(getRecentBlockhashMock.mock.calls.map(([client]) => clusterOfRpcClient(client)))
+        ).toEqual(new Set([cluster]));
+        expect(calledClusters()).toEqual(new Set([cluster]));
+      }
+    );
+
+    it.for([
+      {
+        state: "canceled",
+        close: async (requestId: string) => {
+          required(
+            await createPaymentRequestsRepository(
+              env,
+              createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+            ).markPaymentRequest({
+              requestId,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+              status: "canceled",
+              fulfilledByTransferId: null,
+              canceledBy: TEST_USER.id,
+            })
+          );
+        },
+      },
+      {
+        state: "expired",
+        close: async (requestId: string) => {
+          await getDb(env)
+            .prepare("UPDATE payment_requests SET expires_at = ? WHERE id = ?")
+            .bind("2026-01-01T00:00:00.000Z", requestId)
+            .run();
+        },
+      },
+    ])("refuses to build a $state request's transaction", async ({ close }) => {
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
+      await close(request.id);
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "BAD_REQUEST", message: "Payment request is no longer payable" },
+      });
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses to build a transaction once the organization is deleted (HOO-1955)", async () => {
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
+      await updateOrganization("UPDATE organizations SET status = 'deleted' WHERE id = ?");
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "FORBIDDEN", message: "Organization is not active" },
+      });
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses to build a production request's transaction once the organization loses the entitlement (APE-351)", async () => {
+      const request = await createAwaitingPaymentRequest(
+        await seedProductionRequestWallet(),
+        SOL_PAYMENT
       );
+      await updateOrganization("UPDATE organizations SET settings = NULL WHERE id = ?");
 
-      await getDb(env)
-        .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
-        .bind(TEST_ORG.id)
-        .run();
-      const refused = await getPayView(request.public_token);
+      const response = await postTransaction(request.public_token);
 
-      expect(refused.status).toBe(200);
-      await expect(refused.json()).resolves.toMatchObject({
-        status: "awaiting_payment",
-        solanaPayUrl: null,
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "FORBIDDEN", message: "Production is not enabled for this organization" },
       });
-    });
-
-    it("stops advertising every request's link once its organization is deleted (HOO-1955)", async () => {
-      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
-      await getDb(env)
-        .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
-        .bind(TEST_ORG.id)
-        .run();
-
-      const refused = await getPayView(request.public_token);
-
-      expect(refused.status).toBe(200);
-      await expect(refused.json()).resolves.toMatchObject({
-        status: "awaiting_payment",
-        solanaPayUrl: null,
-      });
-    });
-
-    it("keeps advertising a sandbox request's link without the production entitlement", async () => {
-      await getDb(env)
-        .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
-        .bind(TEST_ORG.id)
-        .run();
-      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
-
-      expect((await payableUrl(request.public_token)).pathname).toBe(TEST_SOLANA_ADDRESSES.wallet1);
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
     });
   });
 });
