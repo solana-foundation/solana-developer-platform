@@ -64,7 +64,7 @@ describe("reconcilePaymentRequests", () => {
     );
   }
 
-  it("lists the scope's environment with the final-check window and reconciles each row best effort", async () => {
+  it("lists the scope's environment with the final-check window and reconciles each row against current chain state", async () => {
     const first = openPaymentRequestRow("preq_sweep_first");
     const second = openPaymentRequestRow("preq_sweep_second");
     listToReconcile.mockResolvedValue([first, second]);
@@ -81,13 +81,13 @@ describe("reconcilePaymentRequests", () => {
       limit: 200,
     });
     expect(reconcile.mock.calls).toEqual([
-      [env, first, { bestEffort: true }],
-      [env, second, { bestEffort: true }],
+      [env, first, { bestEffort: false }],
+      [env, second, { bestEffort: false }],
     ]);
     expect(markChecked.mock.calls).toEqual([[[first.id, second.id]]]);
   });
 
-  it("keeps sweeping past a row that throws, stamps it with the rest, and reports it in the run summary", async () => {
+  it("keeps sweeping past a row that throws, stamps only the rows it checked, and reports the failure in the run summary", async () => {
     const failing = openPaymentRequestRow("preq_sweep_failing");
     const settling = openPaymentRequestRow("preq_sweep_settling");
     listToReconcile.mockResolvedValue([failing, settling]);
@@ -105,10 +105,10 @@ describe("reconcilePaymentRequests", () => {
     await runOnProduction();
 
     expect(reconcile.mock.calls).toEqual([
-      [env, failing, { bestEffort: true }],
-      [env, settling, { bestEffort: true }],
+      [env, failing, { bestEffort: false }],
+      [env, settling, { bestEffort: false }],
     ]);
-    expect(markChecked.mock.calls).toEqual([[[failing.id, settling.id]]]);
+    expect(markChecked.mock.calls).toEqual([[[settling.id]]]);
     expect(markChecked.mock.invocationCallOrder[0]).toBeGreaterThan(
       Math.max(...reconcile.mock.invocationCallOrder)
     );
