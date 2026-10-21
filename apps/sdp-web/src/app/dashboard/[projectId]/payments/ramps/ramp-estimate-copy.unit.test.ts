@@ -95,11 +95,6 @@ describe("estimateRateCopy", () => {
       estimateRateCopy(t, estimate({ assetRail: "usdc.solana", exchangeRate: "0.998" }), "en")
     ).toBe("1 USDC = 0.998 USD");
   });
-
-  it("says nothing for a rate it can't read", () => {
-    expect(estimateRateCopy(t, estimate({ exchangeRate: "0" }), "en")).toBeNull();
-    expect(estimateRateCopy(t, estimate({ exchangeRate: "" }), "en")).toBeNull();
-  });
 });
 
 describe("estimateLimitCopy", () => {

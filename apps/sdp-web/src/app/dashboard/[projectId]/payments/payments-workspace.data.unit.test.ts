@@ -7,6 +7,7 @@ import {
   createTransfer,
   createTransferBatch,
   estimateTransferBatch,
+  fetchRampEstimates,
   TransferRequestError,
 } from "./payments-workspace.data";
 
@@ -122,6 +123,67 @@ describe("Payments write requests", () => {
       });
       expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
     }
+  });
+});
+
+describe("fetchRampEstimates", () => {
+  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/deposit"));
+  afterEach(() => vi.unstubAllGlobals());
+
+  const request = {
+    direction: "onramp",
+    assetRail: "sol.solana",
+    fiatCurrency: "USD",
+    amount: "25",
+  } as const;
+  const estimate = {
+    provider: "stripe",
+    direction: "onramp",
+    fiatCurrency: "USD",
+    assetRail: "sol.solana",
+    fiatAmount: "25",
+    cryptoAmount: "0.2",
+    exchangeRate: "110.25",
+    totalFiatAmount: "26.02",
+    fees: { currency: "USD", total: "1.02" },
+  } as const;
+
+  it("turns an estimate without a usable rate into that provider's error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            estimates: [
+              { provider: "moonpay", status: "ok", estimate: { ...estimate, exchangeRate: "0" } },
+              { provider: "stripe", status: "ok", estimate },
+            ],
+          },
+        })
+      )
+    );
+
+    expect(await fetchRampEstimates(request, t)).toEqual([
+      {
+        provider: "moonpay",
+        status: "error",
+        error: "DashboardPayments.workspace.rampEstimateInvalidRate",
+      },
+      { provider: "stripe", status: "ok", estimate },
+    ]);
+  });
+
+  it("refuses a response that is not an estimate list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ data: { estimates: [{ provider: "stripe", status: "ok" }] } })
+      )
+    );
+
+    await expect(fetchRampEstimates(request, t)).rejects.toThrow(
+      "DashboardPayments.workspace.rampEstimateMissing"
+    );
   });
 });
 

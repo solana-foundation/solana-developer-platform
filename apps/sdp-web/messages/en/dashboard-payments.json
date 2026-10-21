@@ -43,6 +43,7 @@
       "transferCancellationFailed": "Transfer cancellation failed ({status}).",
       "rampEstimateRequestFailed": "Ramp estimate request failed ({status}).",
       "rampEstimateMissing": "Ramp estimate response is missing estimates.",
+      "rampEstimateInvalidRate": "The provider's estimate has no usable exchange rate.",
       "walletBalancesRequestFailed": "Wallet balances request failed ({status}).",
       "walletBalancesMissing": "Wallet balances response is missing balance details.",
       "transferRequestFailed": "Transfer request failed ({status}).",

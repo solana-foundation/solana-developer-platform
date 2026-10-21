@@ -1,33 +1,42 @@
 "use client";
 
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type {
   Counterparty,
   CounterpartyAccount,
   ListCounterpartiesResponse,
   ListCounterpartyAccountsResponse,
 } from "@sdp/types/counterparties";
-import type { CustodyWalletAggregate } from "@sdp/types/custody";
-import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
-import type { CryptoRailId } from "@sdp/types/payment-rails";
-import type {
-  ListProjectCounterpartyAccountsEnvelope,
-  ListProjectCounterpartyAccountsResponse,
-  PaymentRampEstimateEnvelope,
-  PaymentsWalletAggregateEnvelope,
-  PaymentTransferBatch,
-  PaymentTransferBatchEnvelope,
-  PaymentTransferBatchEstimate,
-  PaymentTransferBatchEstimateEnvelope,
-  PaymentTransferBatchRequest,
-  PaymentTransferRecipient,
-  RampDirection,
-  RampProviderEstimateResult,
-  PaymentTransferEnvelope as TransferEnvelope,
-  PaymentTransferSummary as TransferRecord,
-  PaymentsDashboardWallet as WalletRecord,
-  PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
+import { type CustodyWalletAggregate, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types/custody";
+import { RAMP_FIAT_CURRENCIES, type RampFiatCurrency } from "@sdp/types/generated/ramp";
+import {
+  CRYPTO_RAIL_ASSET_LABELS,
+  type CryptoRailId,
+  SOLANA_CRYPTO_RAILS,
+} from "@sdp/types/payment-rails";
+import {
+  type ListProjectCounterpartyAccountsEnvelope,
+  type ListProjectCounterpartyAccountsResponse,
+  type PaymentsWalletAggregateEnvelope,
+  type PaymentTransferBatch,
+  type PaymentTransferBatchEnvelope,
+  type PaymentTransferBatchEstimate,
+  type PaymentTransferBatchEstimateEnvelope,
+  type PaymentTransferBatchRequest,
+  type PaymentTransferRecipient,
+  RAMP_AMOUNT_LIMIT_REASONS,
+  RAMP_DIRECTIONS,
+  type RampDirection,
+  type RampProviderEstimateResult,
+  type PaymentTransferEnvelope as TransferEnvelope,
+  type PaymentTransferSummary as TransferRecord,
+  type PaymentsDashboardWallet as WalletRecord,
+  type PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types/payments";
+// biome-ignore lint/style/noRestrictedImports: validates the provider ids an estimate response names; which providers to ask comes from getEnabledRampProviders()
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import type { Address } from "@solana/kit";
+import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import {
@@ -415,7 +424,7 @@ export async function fetchRampEstimates(
       }),
     }
   );
-  const body = (await response.json().catch(() => ({}))) as PaymentRampEstimateEnvelope;
+  const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(
       getApiError(
@@ -425,12 +434,80 @@ export async function fetchRampEstimates(
     );
   }
 
-  const estimates = body.data?.estimates;
-  if (!estimates) {
+  const parsed = rampEstimateEnvelopeSchema.safeParse(body);
+  if (!parsed.success) {
     throw new Error(t("DashboardPayments.workspace.rampEstimateMissing"));
   }
+  return parsed.data.data.estimates.map((result) => withUsableRate(result, t));
+}
 
-  return estimates;
+const rampEstimateCurrencySchema = z.union([
+  z.enum(RAMP_FIAT_CURRENCIES),
+  z.enum(CRYPTO_RAIL_ASSET_LABELS),
+]);
+
+const rampEstimateSchema = z.object({
+  provider: z.enum(RAMP_PROVIDERS),
+  direction: z.enum(RAMP_DIRECTIONS),
+  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
+  assetRail: z.enum(SOLANA_CRYPTO_RAILS),
+  fiatAmount: z.string(),
+  cryptoAmount: z.string(),
+  exchangeRate: z.string(),
+  totalFiatAmount: z.string().optional(),
+  fees: z.object({
+    currency: rampEstimateCurrencySchema,
+    total: z.string(),
+    network: z.string().optional(),
+    networkCurrency: rampEstimateCurrencySchema.optional(),
+    provider: z.string().optional(),
+    providerCurrency: rampEstimateCurrencySchema.optional(),
+  }),
+  minFiatAmount: z.string().optional(),
+  maxFiatAmount: z.string().optional(),
+  expiresAt: z.string().optional(),
+});
+
+const rampProvider = z.enum(RAMP_PROVIDERS);
+
+// The most specific error first: an object drops the keys it doesn't name.
+const rampProviderEstimateResultSchema = z.union([
+  z.object({ provider: rampProvider, status: z.literal("ok"), estimate: rampEstimateSchema }),
+  z.object({ provider: rampProvider, status: z.literal("unsupported") }),
+  z.object({
+    provider: rampProvider,
+    status: z.literal("error"),
+    error: z.string(),
+    reason: z.enum(RAMP_AMOUNT_LIMIT_REASONS),
+    limit: z.object({ amount: z.string(), currency: z.string() }),
+  }),
+  z.object({
+    provider: rampProvider,
+    status: z.literal("error"),
+    error: z.string(),
+    reason: z.enum(STAGED_PROVIDER_REFUSAL_REASONS),
+  }),
+  z.object({ provider: rampProvider, status: z.literal("error"), error: z.string() }),
+]);
+
+const rampEstimateEnvelopeSchema = z.object({
+  data: z.object({ estimates: z.array(rampProviderEstimateResultSchema) }),
+});
+
+/** An estimate without a positive rate is that provider's error, never a figure to hide. */
+function withUsableRate(
+  result: RampProviderEstimateResult,
+  t: Translate
+): RampProviderEstimateResult {
+  const rate = result.status === "ok" ? result.estimate.exchangeRate : null;
+  if (rate === null || (isDecimalString(rate) && compareDecimalAmounts(rate, "0") > 0)) {
+    return result;
+  }
+  return {
+    provider: result.provider,
+    status: "error",
+    error: t("DashboardPayments.workspace.rampEstimateInvalidRate"),
+  };
 }
 
 export async function fetchWalletBalances(

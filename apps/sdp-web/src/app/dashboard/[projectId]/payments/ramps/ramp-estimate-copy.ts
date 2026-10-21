@@ -45,17 +45,18 @@ export function estimateLimitCopy(
   );
 }
 
-/** "1 SOL = 109.21 USD": what one unit of the crypto costs, the same way round both directions. */
+/**
+ * "1 SOL = 109.21 USD": what one unit of the crypto costs, the same way round
+ * both directions. The estimate fetch already refused any rate that isn't positive.
+ */
 export function estimateRateCopy(
   t: Translate,
   estimate: PaymentRampEstimate,
   locale: string
-): string | null {
-  const rate = estimate.exchangeRate;
-  if (!isPositiveDecimal(rate)) return null;
+): string {
   return t("DashboardPayments.ramps.rateLine", {
     asset: getCryptoRailAssetLabel(estimate.assetRail),
-    rate: formatEstimateFigure(rate, locale),
+    rate: formatEstimateFigure(estimate.exchangeRate, locale),
     fiat: estimate.fiatCurrency,
   });
 }
