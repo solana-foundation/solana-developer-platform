@@ -11,6 +11,7 @@ import {
   getTransactionDecoder,
   type Signature,
 } from "@solana/kit";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
@@ -26,6 +27,7 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { clearMintFactsForTests } from "@/services/mint-facts";
 import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -36,6 +38,7 @@ import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
   enableMainnetSponsorship,
+  encodedAccountInfo,
   MAINNET_USDC_MINT,
   seedProjectPrivyWallet,
   sendTransactionMock,
@@ -48,6 +51,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { tokenMintAccount } from "@/test/helpers/subscription-accounts";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -405,12 +409,15 @@ describe("payment transfer batches", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
+    clearMintFactsForTests();
 
     sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
-    getAccountInfoMock.mockResolvedValue({
-      lamports: 4200000000n,
-      owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-    } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    getAccountInfoMock.mockResolvedValue(
+      encodedAccountInfo({
+        account: tokenMintAccount({ programAddress: TOKEN_PROGRAM_ADDRESS, decimals: 6 }),
+        lamports: 4_200_000_000n,
+      })
+    );
     getRecentBlockhashMock.mockResolvedValue({
       blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N" as Awaited<
         ReturnType<typeof solanaRpc.getRecentBlockhash>
@@ -1850,10 +1857,12 @@ describe("payment transfer batches", () => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-      getAccountInfoMock.mockResolvedValueOnce({
-        lamports: 4200000000n,
-        owner: tokenProgram,
-      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+      getAccountInfoMock.mockResolvedValueOnce(
+        encodedAccountInfo({
+          account: tokenMintAccount({ programAddress: address(tokenProgram), decimals: 6 }),
+          lamports: 4_200_000_000n,
+        })
+      );
       answerSourceTokenAccount(expectedMint);
 
       const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);

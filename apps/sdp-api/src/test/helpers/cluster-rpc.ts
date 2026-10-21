@@ -409,20 +409,6 @@ export function systemAccountInfoResult(slot: number, lamports: number): JsonRpc
 }
 
 /**
- * A `getTokenSupply` result for a mint with no supply yet, which is all a decimals read needs.
- *
- * @param slot - The context slot the answer claims.
- * @param decimals - The mint's decimals.
- * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
- */
-export function tokenSupplyResult(slot: number, decimals: number): JsonRpcResult {
-  return {
-    context: { slot },
-    value: { amount: "0", decimals, uiAmount: 0, uiAmountString: "0" },
-  };
-}
-
-/**
  * The cluster whose `createClusterRpc()` client `client` is, so a test can tell which cluster a
  * spied chain helper was handed. The factory memoizes one client per cluster and pool, so the
  * client work received under a scope is the one this resolves; call it while the stub is installed
@@ -498,22 +484,32 @@ export function multipleAccountsResult(
 
 const multipleAccountsParamsSchema = z.tuple([
   z.array(z.string()),
-  z.object({ commitment: z.string(), minContextSlot: z.number(), encoding: z.string() }),
+  z.object({
+    commitment: z.string(),
+    minContextSlot: z.number().optional(),
+    encoding: z.string(),
+  }),
 ]);
 
 /**
  * The addresses and options a `getMultipleAccounts` request carried.
  *
  * @param request - A recorded `getMultipleAccounts` request.
- * @returns The requested addresses and the read's commitment, slot floor and encoding.
- * @throws ZodError when the request names no commitment, slot floor or encoding.
+ * @returns The requested addresses and the read's commitment, slot floor (null for a read that
+ *   names none) and encoding.
+ * @throws ZodError when the request names no commitment or encoding.
  */
 export function multipleAccountsRead(request: ClusterRpcRequest): {
   addresses: readonly string[];
   commitment: string;
-  minContextSlot: number;
+  minContextSlot: number | null;
   encoding: string;
 } {
   const [addresses, options] = multipleAccountsParamsSchema.parse(request.params);
-  return { addresses, ...options };
+  return {
+    addresses,
+    commitment: options.commitment,
+    minContextSlot: options.minContextSlot ?? null,
+    encoding: options.encoding,
+  };
 }

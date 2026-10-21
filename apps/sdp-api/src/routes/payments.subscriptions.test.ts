@@ -1,5 +1,5 @@
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { app } from "@/index";
@@ -16,7 +16,7 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -78,11 +78,7 @@ function expectPreparedSubscriptionTransaction(
 
 describe("Payments routes — subscriptions", () => {
   installPaymentsRouteTestHooks();
-  const rpc = installClusterRpcStub();
-
-  beforeEach(() => {
-    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
-  });
+  installClusterRpcStub();
 
   it("stores a Production plan's USDC as the mainnet mint", async () => {
     await seedProductionPrivyWallet({

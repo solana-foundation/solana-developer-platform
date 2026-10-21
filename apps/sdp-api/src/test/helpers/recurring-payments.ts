@@ -1,5 +1,6 @@
 import { getBase58Decoder } from "@solana/codecs";
 import {
+  type Address,
   address,
   generateKeyPairSigner,
   getSignatureFromTransaction,
@@ -27,7 +28,6 @@ import {
   multipleAccountsRead,
   multipleAccountsResult,
   type StubEncodedAccount,
-  tokenSupplyResult,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
@@ -49,7 +49,9 @@ import {
   type StubDelegation,
   type StubPlan,
   soleDestination,
+  subscriptionAuthorityAccount,
   subscriptionDelegationAccount,
+  tokenAccount,
   tokenMintAccount,
 } from "@/test/helpers/subscription-accounts";
 import { withIdempotencyKeys } from "./idempotency-keys";
@@ -71,7 +73,7 @@ export function testSignature(seed: number): Signature {
   return signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
 }
 
-/** The decimals every fixture token's mint reports, to `getTokenSupply` and in its account. */
+/** The decimals every fixture token's mint reports in its account. */
 export const RECURRING_FIXTURE_TOKEN_DECIMALS = 6;
 
 /** `DEFAULT_RECURRING_FIXTURE.amount` in base units at the fixture decimals. */
@@ -119,10 +121,17 @@ export function delegationPulledOnce(expiresAtTs: bigint): StubDelegation {
 /** A recorded plan's parties as its row names them: its owner and its one destination. */
 export type RecordedPlanParties = Pick<StubPlan, "owner" | "destinations">;
 
+/** The wallet a recorded subscription subscribes from, and its plan's mint. */
+export interface RecordedSourceWallet {
+  owner: Address;
+  mint: Address;
+}
+
 /**
- * The chain a resumed recurring step reads at `confirmed`: the tip `getEpochInfo` reports, the
- * plan or delegation at each address SDP recorded as one, every schedule's token mint at the
- * fixture decimals, and any other account at an address it never recorded.
+ * The chain a recurring step reads at `confirmed`: the tip `getEpochInfo` reports, the plan or
+ * delegation at each address SDP recorded as one, each recorded subscription's authority and
+ * token account, every schedule's token mint at the fixture decimals, and any other account at
+ * an address it never recorded.
  */
 export interface RecurringChainView {
   absoluteSlot: number;
@@ -131,6 +140,10 @@ export interface RecurringChainView {
   plan: (planPda: string, recorded: RecordedPlanParties) => StubPlan | null;
   /** The delegation at `subscriptionPda`, or null when it does not exist. */
   delegation: (subscriptionPda: string) => StubDelegation | null;
+  /** The subscription authority at a recorded authority address, or null when it does not exist. */
+  subscriptionAuthority: (sourceWallet: RecordedSourceWallet) => StubEncodedAccount | null;
+  /** The token account at a recorded subscriber token account, or null when it does not exist. */
+  sourceTokenAccount: (sourceWallet: RecordedSourceWallet) => StubEncodedAccount | null;
   /** The account at an address recorded as none of them, or null when it does not exist. */
   unrecorded: (accountAddress: string) => StubEncodedAccount | null;
 }
@@ -138,13 +151,19 @@ export interface RecurringChainView {
 /**
  * Every recorded plan on chain as the fixtures create it, owned by and paying the wallets its row
  * names, every recorded delegation canceled with nothing pulled, as the codama fetch stubs answer,
- * and no other account; the tip is below the default blockhash's expiry.
+ * every recorded subscription's authority and token account on chain with the token account
+ * approving no delegate, so an authority setup finds nothing to send and a saved one never reads
+ * as landed, and no other account; the tip is below the default blockhash's expiry.
  */
 export const DEFAULT_RECURRING_CHAIN: RecurringChainView = {
   absoluteSlot: 1_250,
   blockHeight: 940,
   plan: (_planPda, recorded) => ({ ...recorded, createdAt: 1_770_000_000n, metadataUri: "" }),
   delegation: () => unpulledDelegation(1_800_000_000n),
+  subscriptionAuthority: ({ owner, mint }) =>
+    subscriptionAuthorityAccount({ user: owner, tokenMint: mint }),
+  sourceTokenAccount: ({ owner, mint }) =>
+    tokenAccount({ programAddress: TOKEN_PROGRAM_ADDRESS, mint, owner, delegate: null }),
   unrecorded: () => null,
 };
 
@@ -153,11 +172,14 @@ type RecordedSubscriptionAccount =
   | { kind: "plan"; parties: RecordedPlanParties }
   | { kind: "delegation" }
   | { kind: "mint" }
+  | { kind: "subscriptionAuthority"; sourceWallet: RecordedSourceWallet }
+  | { kind: "sourceTokenAccount"; sourceWallet: RecordedSourceWallet }
   | { kind: "unrecorded" };
 
 /**
  * What SDP recorded at `accountAddress`: a plan, with the parties its row names, a subscription
- * delegation, a schedule's token mint, or nothing.
+ * delegation, a schedule's token mint, a subscription's authority or token account, with the
+ * wallet and mint it names, or nothing.
  *
  * @param accountAddress - An address a step read asked for.
  * @returns The recorded account.
@@ -193,7 +215,25 @@ async function recordedSubscriptionAccount(
   );
   if (recorded.delegation) return { kind: "delegation" };
   if (recorded.mint) return { kind: "mint" };
-  return { kind: "unrecorded" };
+  const subscription = await db
+    .prepare(
+      `SELECT s.subscriber_address, p.token,
+              s.subscription_authority_address IS NOT DISTINCT FROM ? AS authority
+         FROM payment_subscriptions s
+         JOIN payment_subscription_plans p ON p.id = s.plan_id
+        WHERE s.subscription_authority_address = ? OR s.subscriber_token_account = ?
+        LIMIT 1`
+    )
+    .bind(accountAddress, accountAddress, accountAddress)
+    .first<{ subscriber_address: string; token: string; authority: boolean }>();
+  if (subscription === null) return { kind: "unrecorded" };
+  const sourceWallet = {
+    owner: address(subscription.subscriber_address),
+    mint: address(subscription.token),
+  };
+  return subscription.authority
+    ? { kind: "subscriptionAuthority", sourceWallet }
+    : { kind: "sourceTokenAccount", sourceWallet };
 }
 
 /**
@@ -222,6 +262,10 @@ async function recurringChainAccount(
         programAddress: TOKEN_PROGRAM_ADDRESS,
         decimals: RECURRING_FIXTURE_TOKEN_DECIMALS,
       });
+    case "subscriptionAuthority":
+      return view.subscriptionAuthority(recorded.sourceWallet);
+    case "sourceTokenAccount":
+      return view.sourceTokenAccount(recorded.sourceWallet);
     case "unrecorded":
       return view.unrecorded(accountAddress);
     default: {
@@ -233,7 +277,8 @@ async function recurringChainAccount(
 
 /**
  * Answer the current test's step reads (`getEpochInfo`, then `getMultipleAccounts` at the tip's
- * slot) from `view`, replacing any earlier view.
+ * slot) and the authority setup's floor-less `getMultipleAccounts` from `view`, replacing any
+ * earlier view.
  *
  * @param rpc - The suite's responder.
  * @param view - The chain the reads see.
@@ -265,7 +310,6 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    rpc.answer("getTokenSupply", tokenSupplyResult(1, RECURRING_FIXTURE_TOKEN_DECIMALS));
     answerRecurringChain(rpc, DEFAULT_RECURRING_CHAIN);
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()

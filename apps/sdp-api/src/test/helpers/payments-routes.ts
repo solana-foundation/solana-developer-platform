@@ -9,20 +9,26 @@ import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
   address,
+  type Base64EncodedBytes,
   createNoopSigner,
+  getBase64Decoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
+  lamports,
   type Signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { clearMintFactsForTests } from "@/services/mint-facts";
 import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import type { StubEncodedAccount } from "@/test/helpers/cluster-rpc";
 import {
   seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
@@ -30,10 +36,9 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { tokenMintAccount } from "@/test/helpers/subscription-accounts";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
-
-export const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 
 export const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 
@@ -148,6 +153,31 @@ export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 export const MAINNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+
+/**
+ * An account as the `@sdp/rpc/solana` `getAccountInfo` wrapper returns it, base64-encoded.
+ *
+ * @param input - The account and its balance.
+ * @param input.account - The program owning the account and its raw data.
+ * @param input.lamports - The account's balance.
+ * @returns The wrapper's value for the account.
+ */
+export function encodedAccountInfo(input: {
+  account: StubEncodedAccount;
+  lamports: bigint;
+}): NonNullable<Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>> {
+  return {
+    data: [
+      // SAFETY: kit brands base64 strings only in types; the decoder's output is base64.
+      getBase64Decoder().decode(input.account.data) as Base64EncodedBytes,
+      "base64",
+    ],
+    executable: false,
+    lamports: lamports(input.lamports),
+    owner: address(input.account.owner),
+    space: BigInt(input.account.data.length),
+  };
+}
 
 let originalMoonPaySandboxApiKey: string | undefined;
 
@@ -490,17 +520,16 @@ export async function recurringCollectionTransactionForSignature(options: {
 export function installPaymentsRouteTestHooks(): void {
   beforeEach(async () => {
     vi.clearAllMocks();
+    clearMintFactsForTests();
 
-    createRpcMock.mockReturnValue({
-      getTokenSupply: () => ({
-        send: async () => ({ value: { decimals: 6 } }),
-      }),
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
-    getAccountInfoMock.mockResolvedValue({
-      lamports: 4200000000n,
-      owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-    } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    // Every address reads as a funded legacy mint at 6 decimals, the fixture tokens' mint.
+    getAccountInfoMock.mockResolvedValue(
+      encodedAccountInfo({
+        account: tokenMintAccount({ programAddress: TOKEN_PROGRAM_ADDRESS, decimals: 6 }),
+        lamports: 4_200_000_000n,
+      })
+    );
     getRecentBlockhashMock.mockResolvedValue({
       blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N" as Awaited<
         ReturnType<typeof solanaRpc.getRecentBlockhash>
