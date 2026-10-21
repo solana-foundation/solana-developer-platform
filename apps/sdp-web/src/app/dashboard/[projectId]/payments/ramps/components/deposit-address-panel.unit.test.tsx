@@ -101,4 +101,15 @@ describe("DepositAddressPanel", () => {
 
     expect(await screen.findByText("· nothing yet")).toBeTruthy();
   });
+
+  it("draws the route's deposit skeleton while its wallets load", () => {
+    vi.stubGlobal("fetch", () => new Promise<Response>(() => {}));
+
+    const { container } = render(
+      <DepositAddressPanel wallets={[]} walletsError={null} issuedTokenSymbolsByMint={{}} />,
+      { wrapper }
+    );
+
+    expect(container.querySelectorAll("[data-loading-deposit-address]")).toHaveLength(1);
+  });
 });

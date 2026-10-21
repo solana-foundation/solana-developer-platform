@@ -108,7 +108,7 @@ describe("home and payments route loading states", () => {
     // The four refresh Payments lists; the Overview loads its balance and charts, not a table.
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(4);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
+    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(2);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
@@ -191,7 +191,10 @@ describe("home and payments route loading states", () => {
     const deposit = renderToStaticMarkup(<PaymentsDepositPageSkeleton />);
     expect(deposit).toContain('data-loading-layout="payments-deposit"');
     expect(deposit.match(/data-loading-deposit-address=/g)).toHaveLength(1);
-    expect(deposit).toContain("size-28");
+    expect(deposit).toContain("size-44");
+    expect(deposit).toContain("sm:size-32");
+    expect(deposit).toContain("max-w-flow");
+    expect(deposit).toContain("md:pt-9");
     expect(deposit).not.toContain("data-loading-wizard");
   });
 

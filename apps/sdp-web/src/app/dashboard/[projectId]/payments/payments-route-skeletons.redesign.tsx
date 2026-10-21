@@ -207,19 +207,6 @@ function FlowPageSkeleton({
   );
 }
 
-function DetailRowsSkeleton({ count = 8 }: { count?: number }) {
-  return (
-    <div className="divide-y divide-border-default" data-loading-detail-rows>
-      {DETAIL_ROW_IDS.slice(0, count).map((id, index) => (
-        <div key={id} className="flex min-h-12 items-center justify-between gap-6 py-3">
-          <SkeletonBlock className="h-4 w-24 shrink-0" />
-          <SkeletonBlock className={index % 3 === 0 ? "h-5 w-24 rounded-full" : "h-4 w-40"} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function PaymentRequestsPageSkeleton() {
   return <ListPageSkeleton layout="payment-requests" />;
 }
@@ -243,24 +230,53 @@ export function PaymentsPayPageSkeleton() {
   );
 }
 
-/** Deposit opens on its address tab: the wallet's address and QR card, then its terms. */
+/**
+ * The address tab while its wallets load, cut to the settled panel: the address card (the code
+ * on top on a phone, on the right from sm) and its three 40px fact rows. The route skeleton and
+ * the panel's own loading pass both draw it, so Deposit settles without a jump.
+ */
+export function DepositAddressSkeleton() {
+  return (
+    <div data-loading-deposit-address aria-busy="true">
+      <div className="flex flex-col gap-4 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
+        <SkeletonBlock className="size-44 shrink-0 self-center rounded-control sm:order-last sm:size-32 sm:self-auto" />
+        <div className="flex min-w-0 flex-1 flex-col gap-4 sm:justify-between">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <SkeletonBlock className="h-6 w-40 max-w-full" />
+            <div className="flex flex-col gap-1">
+              <SkeletonBlock className="h-6 w-full" />
+              <SkeletonBlock className="h-4 w-2/3 sm:hidden" />
+            </div>
+          </div>
+          <SkeletonBlock className="h-11 w-full rounded-control sm:hidden" />
+          <SkeletonBlock className="h-4 w-64 max-w-full" />
+        </div>
+      </div>
+      <div className="mt-6 divide-y divide-border-subtle">
+        {DETAIL_ROW_IDS.slice(0, 3).map((id) => (
+          <div key={id} className="flex items-center justify-between gap-4 py-2.5">
+            <SkeletonBlock className="h-5 w-20" />
+            <SkeletonBlock className="h-5 w-32" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Deposit opens on its address tab, in the column the tab lays out itself: the shell's gutter,
+ * 36px under the tabs (32px on a phone) and the flow's width.
+ */
 export function PaymentsDepositPageSkeleton() {
   return (
     <div
-      className="mx-auto w-full max-w-flow space-y-10 pt-2"
+      className="h-full min-h-0 overflow-y-auto px-4 pt-8 pb-16 md:px-6 md:pt-9"
       data-loading-layout="payments-deposit"
-      data-loading-deposit-address
-      aria-busy="true"
     >
-      <div className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-6 sm:flex-row sm:items-start">
-        <div className="min-w-0 flex-1 space-y-4">
-          <SkeletonBlock className="h-5 w-40 max-w-full" />
-          <SkeletonBlock className="h-5 w-full" />
-          <SkeletonBlock className="h-4 w-64 max-w-full" />
-        </div>
-        <SkeletonBlock className="size-28 shrink-0 rounded-control" />
+      <div className="mx-auto w-full max-w-flow">
+        <DepositAddressSkeleton />
       </div>
-      <DetailRowsSkeleton count={3} />
     </div>
   );
 }
