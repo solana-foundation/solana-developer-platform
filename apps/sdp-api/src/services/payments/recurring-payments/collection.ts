@@ -1045,10 +1045,11 @@ export async function journalAutomatedCollectionFailure(input: {
 /**
  * Atomically fails a collection attempt and its linked transfer, so the period is retried after
  * the cooldown. Both status writes share one transaction: split, they could strand a processing
- * transfer behind a failed attempt and block the retry. The transfer write is compared and set on
- * the status the caller read it in; a transfer that moved since (the generic tracker saw it
- * confirmed) is logged and left for the next recovery, which reads it again, so an attempt is
- * never confirmed here, only by `finalizeRecurringPaymentCollection`.
+ * transfer behind a failed attempt and block the retry. Each write is compared and set on the
+ * status the caller read its row in, and the attempt's must also be one a failure may be written
+ * on; a row that moved since (the generic tracker saw the transfer confirmed, another run settled
+ * the attempt) is logged, the transaction rolls back, and the next recovery reads both again. An
+ * attempt is never confirmed here, only by `finalizeRecurringPaymentCollection`.
  *
  * @param input - The attempt, its transfer as the caller read it, and why it failed.
  * @param input.env - The API environment.
@@ -1059,8 +1060,8 @@ export async function journalAutomatedCollectionFailure(input: {
  * @param input.transfer - Its transfer as the caller read it, or null when none was linked.
  * @param input.submittedSignature - The pull's saved signature, or null when none was saved.
  * @param input.error - Why the attempt failed.
- * @throws ResumedStepUnsettledError when the transfer is no longer in the status it was read in,
- *   or reads successful; nothing is written.
+ * @throws ResumedStepUnsettledError when the transfer reads successful, or either row is no
+ *   longer in the status it was read in; nothing is written.
  */
 async function markRecurringPaymentCollectionFailedAtomically(input: {
   env: Env;
@@ -1080,19 +1081,29 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     transferId: transfer === null ? null : transfer.id,
     ...collectionRetryMetadata(input.error),
   });
-  const transferMoved = (): ResumedStepUnsettledError => {
+  const rowMoved = (
+    event:
+      | "sdp_api_recurring_payment_collection_transfer_moved"
+      | "sdp_api_recurring_payment_collection_attempt_moved",
+    expectedStatus: string | null
+  ): ResumedStepUnsettledError => {
     logEvent("error", {
-      event: "sdp_api_recurring_payment_collection_transfer_moved",
+      event,
       organization_id: input.organizationId,
       project_id: input.projectId,
       recurring_payment_id: input.recurringPaymentId,
       attempt_id: input.attempt.id,
       transfer_id: transfer === null ? null : transfer.id,
-      expected_status: transfer === null ? null : transfer.status,
+      expected_status: expectedStatus,
       signature: input.submittedSignature,
     });
     return new ResumedStepUnsettledError();
   };
+  const transferMoved = (): ResumedStepUnsettledError =>
+    rowMoved(
+      "sdp_api_recurring_payment_collection_transfer_moved",
+      transfer === null ? null : transfer.status
+    );
   if (transfer !== null && isSuccessfulPaymentTransferStatus(transfer.status)) {
     throw transferMoved();
   }
@@ -1139,6 +1150,7 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           WHERE id = ?
             AND organization_id = ?
             AND project_id = ?
+            AND status = ?
             AND status = ANY(?::text[])`
       )
       .bind(
@@ -1152,11 +1164,12 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
         input.attempt.id,
         input.organizationId,
         input.projectId,
+        input.attempt.status,
         [...COLLECTION_ATTEMPT_STATUSES_FAILABLE]
       )
       .run();
     if (attemptRows === 0) {
-      throw internalError("Failed to mark collection attempt failed");
+      throw rowMoved("sdp_api_recurring_payment_collection_attempt_moved", input.attempt.status);
     }
   });
 }
