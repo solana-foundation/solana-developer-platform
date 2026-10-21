@@ -1,5 +1,5 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
@@ -32,7 +32,6 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
-import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 
 /** An off-ramp awaiting its 25 USDC deposit to wallet2, as a MoonPay sell leaves it. */
 async function seedUsdcOfframpDeposit(transferId: string) {
@@ -97,10 +96,6 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
   installPaymentsRouteTestHooks();
   const rpc = installClusterRpcStub();
 
-  beforeEach(() => {
-    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
-  });
-
   function answerSourceUsdc(baseUnits: string, state: StubTokenAccount["state"]) {
     rpc.answer(
       "getTokenAccountsByOwner",
@@ -119,10 +114,6 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
 
   function tokenAccountReads(): number {
     return rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner").length;
-  }
-
-  function mintAccountReads(): number {
-    return rpc.calls.filter((call) => call.method === "getAccountInfo").length;
   }
 
   it("refuses a deposit the wallet cannot cover, leaving the sale open for the same key", async () => {
@@ -148,7 +139,6 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     answerSourceUsdc("25000000", "initialized");
     const tokenAccountReadsBefore = tokenAccountReads();
     const mintReadsBefore = getAccountInfoMock.mock.calls.length;
-    const mintAccountReadsBefore = mintAccountReads();
     const funded = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
 
     const fundedText = await funded.text();
@@ -161,7 +151,6 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     // The send reuses the source the check read: one read of each, as before the check.
     expect(tokenAccountReads() - tokenAccountReadsBefore).toBe(1);
     expect(getAccountInfoMock.mock.calls.length - mintReadsBefore).toBe(1);
-    expect(mintAccountReads() - mintAccountReadsBefore).toBe(1);
   });
 
   it("refuses a deposit from a frozen token account before claiming it", async () => {

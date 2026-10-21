@@ -54,11 +54,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import {
-  mintAccountInfoResult,
-  respondMintAccounts,
-  scaledUiAmountConfig,
-} from "@/test/helpers/token-mints";
+import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -398,7 +394,6 @@ describe("payment transfer batches", () => {
   const rpc = installClusterRpcResponder();
 
   function answerSourceTokenAccount(mint: string) {
-    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [

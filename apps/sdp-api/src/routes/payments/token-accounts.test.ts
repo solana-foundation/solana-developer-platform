@@ -113,15 +113,16 @@ describe("buildSplTransferInstructions", () => {
       ])
     );
 
-    const { transferInstruction } = await buildSplTransferInstructions(
-      runInClusterScope({ projectId: null, environment: "sandbox" }, () => createClusterRpc()),
-      {
-        authority: createNoopSigner(syntheticAddress(13)),
-        destination: syntheticAddress(14),
-        mint,
-        amount: "10",
-        ataRentPayer: syntheticAddress(15),
-      }
+    const { transferInstruction } = await runInClusterScope(
+      { projectId: null, environment: "sandbox" },
+      () =>
+        buildSplTransferInstructions(createClusterRpc(), {
+          authority: createNoopSigner(syntheticAddress(13)),
+          destination: syntheticAddress(14),
+          mint,
+          amount: "10",
+          ataRentPayer: syntheticAddress(15),
+        })
     );
 
     expect(transferInstruction.programAddress).toBe(TOKEN_2022_PROGRAM_ADDRESS);

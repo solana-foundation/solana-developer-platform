@@ -9,6 +9,10 @@ import {
 } from "@solana/kit";
 import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import {
+  getMintEncoder as getLegacyMintEncoder,
+  type TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
+import {
   type ExtensionArgs,
   extension,
   getMintEncoder,
@@ -26,6 +30,12 @@ const SCALED_UI_AMOUNT_AUTHORITY = syntheticAddress(9_001);
 export interface StubMint {
   decimals: number;
   extensions: ExtensionArgs[] | null;
+}
+
+/** A legacy SPL Token mint as a stubbed `getAccountInfo` serves it: 82 bytes, no extensions. */
+export interface LegacyStubMint {
+  tokenProgram: typeof TOKEN_PROGRAM_ADDRESS;
+  decimals: number;
 }
 
 /**
@@ -75,13 +85,25 @@ export function scaledUiAmountConfig(scale: {
 }
 
 /**
- * A base64 `getAccountInfo` result for a Token-2022 mint, encoded by the token program's own
- * mint encoder.
+ * A base64 `getAccountInfo` result for a Token-2022 or legacy SPL Token mint, encoded by its
+ * owning program's own mint encoder.
  *
- * @param mint - The mint's decimals and extensions.
+ * @param mint - The mint's decimals, and its extensions or legacy owner.
  * @returns The JSON-RPC `result` to pass to `answer("getAccountInfo", …)`.
  */
-export function mintAccountInfoResult(mint: StubMint): JsonRpcResult {
+export function mintAccountInfoResult(mint: StubMint | LegacyStubMint): JsonRpcResult {
+  if ("tokenProgram" in mint) {
+    return base64AccountInfoResult({
+      owner: mint.tokenProgram,
+      data: getLegacyMintEncoder().encode({
+        mintAuthority: none(),
+        supply: 0n,
+        decimals: mint.decimals,
+        isInitialized: true,
+        freezeAuthority: none(),
+      }),
+    });
+  }
   return base64AccountInfoResult({
     owner: TOKEN_2022_PROGRAM_ADDRESS,
     data: getMintEncoder().encode({
@@ -116,8 +138,8 @@ function clockAccountInfoResult(clockUnixTimestamp: bigint): JsonRpcResult {
 
 /**
  * Answer every `getAccountInfo` of the current test by the address it asks for: each of `mints`
- * as a Token-2022 mint, the Clock sysvar at `clockUnixTimestamp`, and any other address as no
- * account.
+ * as its Token-2022 or legacy SPL Token mint, the Clock sysvar at `clockUnixTimestamp`, and any
+ * other address as no account.
  *
  * @param rpc - The suite's cluster RPC responder.
  * @param params.mints - The mints the cluster holds, by address.
@@ -125,7 +147,7 @@ function clockAccountInfoResult(clockUnixTimestamp: bigint): JsonRpcResult {
  */
 export function respondMintAccounts(
   rpc: ClusterRpcResponder,
-  params: { mints: ReadonlyMap<string, StubMint>; clockUnixTimestamp: bigint }
+  params: { mints: ReadonlyMap<string, StubMint | LegacyStubMint>; clockUnixTimestamp: bigint }
 ): void {
   rpc.respond("getAccountInfo", (request) => {
     const accountAddress = z.string().parse(request.params[0]);
