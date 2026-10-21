@@ -80,7 +80,14 @@ export function useLiveRampTransfer(
  * An open sale's own actions, so leaving the wizard never strands it: where
  * the deposit goes, sending it (confirmed first), and canceling the sale.
  */
-export function RampOpenSale({ transfer }: { transfer: PaymentTransferDetail }) {
+export function RampOpenSale({
+  transfer,
+  walletLabel,
+}: {
+  transfer: PaymentTransferDetail;
+  /** The wallet that pays the deposit, named in Send's confirmation. */
+  walletLabel: string | null;
+}) {
   const t = useTranslations();
   const router = useRouter();
   const [confirmingSend, setConfirmingSend] = useState(false);
@@ -197,7 +204,7 @@ export function RampOpenSale({ transfer }: { transfer: PaymentTransferDetail }) 
           provider={transfer.provider}
           depositTarget={deposit}
           token={token}
-          walletLabel={null}
+          walletLabel={walletLabel}
           onClose={() => setConfirmingSend(false)}
           onSend={() => {
             setConfirmingSend(false);
