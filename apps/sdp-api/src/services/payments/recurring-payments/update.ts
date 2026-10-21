@@ -80,7 +80,7 @@ import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
-  assertRecurringPaymentTerms,
+  assertRecurringPaymentTokenAdmitted,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
@@ -91,6 +91,7 @@ import {
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
+  resolveRecurringPaymentTokenMint,
   sendSubscriptionInstructions,
   settleResumedStep,
   settleStepIfResumed,
@@ -303,6 +304,7 @@ async function resolveRecurringPaymentUpdate(input: {
   sourceWallet: CustodyWallet;
   nextSourceWallet?: CustodyWallet;
   request: UpdatePaymentRecurringPaymentRequest;
+  recoveringStaleUpdate: boolean;
 }): Promise<ResolvedRecurringPaymentUpdate> {
   const finalSourceWallet =
     input.nextSourceWallet === undefined ? input.sourceWallet : input.nextSourceWallet;
@@ -327,14 +329,12 @@ async function resolveRecurringPaymentUpdate(input: {
     counterpartyAccountId !== input.recurringPayment.counterparty_account_id;
   const amount =
     input.request.amount === undefined ? input.recurringPayment.amount : input.request.amount;
-  const [token, destination] = await Promise.all([
-    assertRecurringPaymentTerms({
-      token: input.request.token === undefined ? input.recurringPayment.token : input.request.token,
-      amount,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      env: input.env,
-    }),
+  const token = resolveRecurringPaymentTokenMint(
+    input.request.token === undefined ? input.recurringPayment.token : input.request.token
+  );
+  // A new token is start admission; a recovered stale update settles work already sent.
+  const admitsToken = input.request.token !== undefined && !input.recoveringStaleUpdate;
+  const [destination] = await Promise.all([
     accountChanged
       ? resolveSolanaCounterpartyAccount({
           env: input.env,
@@ -344,6 +344,15 @@ async function resolveRecurringPaymentUpdate(input: {
           counterpartyAccountId,
         })
       : { destinationAddress: input.recurringPayment.destination_address },
+    admitsToken
+      ? assertRecurringPaymentTokenAdmitted({
+          mint: token,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          env: input.env,
+        })
+      : null,
+    parseStaticPaymentAmount(amount, token),
   ]);
   const periodHours =
     input.request.periodHours === undefined
@@ -2086,7 +2095,10 @@ export async function updateRecurringPayment(input: {
     if (input.request.nextCollectionDueAt !== undefined) {
       throw badRequest("nextCollectionDueAt can only be updated after activation");
     }
-    const resolved = await resolveRecurringPaymentUpdate(input);
+    const resolved = await resolveRecurringPaymentUpdate({
+      ...input,
+      recoveringStaleUpdate: false,
+    });
     return updatePendingRecurringPayment({
       env: input.env,
       organizationId: input.organizationId,
@@ -2123,15 +2135,16 @@ export async function updateRecurringPayment(input: {
   assertRecurringPaymentUpdateStatus(settled.recurringPayment, new Date().toISOString());
   assertRecurringPaymentSourceWallet(settled.recurringPayment, input.sourceWallet);
 
+  const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
   const resolved = await resolveRecurringPaymentUpdate({
     ...input,
     recurringPayment: settled.recurringPayment,
+    recoveringStaleUpdate,
   });
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
   const mode = requestedActiveUpdateMode(resolved.changedFields);
   const requiresRuntimeExecution =
     mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;
-  const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
   if (requiresRuntimeExecution) {
     await admitUpdateExecution({
       env: input.env,

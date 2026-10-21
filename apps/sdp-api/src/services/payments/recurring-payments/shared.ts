@@ -77,10 +77,55 @@ const RECURRING_PAYMENT_TOKEN_ERROR =
   "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported";
 
 /**
- * Admits a recurring payment's token and amount: the token must be a well-known
- * USD stablecoin on the open scope's cluster or an active token issued in the
- * project, and the amount must convert to a fixed raw amount at its mint's
- * decimals. Create, update and resume all start collection on these terms.
+ * Resolves a recurring-payment token to its mint, refusing native SOL.
+ *
+ * @param token - The requested token, a mint address or well-known symbol.
+ * @returns The token's mint.
+ */
+export function resolveRecurringPaymentTokenMint(token: string): Address {
+  if (isNativePaymentToken(token)) {
+    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
+  }
+  return assertValidAddress(normalizePaymentToken(token), "token");
+}
+
+/**
+ * Admits a mint for new recurring work: a well-known USD stablecoin on the open
+ * scope's cluster or an active token issued in the project. It is start
+ * admission, so recovering work already sent does not ask it.
+ *
+ * @param params - The mint and the tenant it is admitted for.
+ * @param params.mint - The schedule's mint.
+ * @param params.organizationId - The schedule's organization.
+ * @param params.projectId - The schedule's project, where issued tokens are looked up.
+ * @param params.env - The API environment.
+ */
+export async function assertRecurringPaymentTokenAdmitted(params: {
+  mint: Address;
+  organizationId: string;
+  projectId: string;
+  env: Env;
+}): Promise<void> {
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(params.mint);
+  if (wellKnown) {
+    if (!wellKnown.isUsdStable) {
+      throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
+    }
+    return;
+  }
+  const issuedTokenStatus = await createTokenRepository(
+    params.env,
+    createTenantScope({ organizationId: params.organizationId, projectId: params.projectId })
+  ).getStatusByMint(params.projectId, params.mint);
+  if (issuedTokenStatus !== "active") {
+    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
+  }
+}
+
+/**
+ * Admits a recurring payment's token and amount for new work: the token must be
+ * admitted (`assertRecurringPaymentTokenAdmitted`), and the amount must convert to
+ * a fixed raw amount at its mint's decimals.
  *
  * @param params - The terms and the tenant they belong to.
  * @param params.token - The requested token, a mint address or well-known symbol.
@@ -97,27 +142,9 @@ export async function assertRecurringPaymentTerms(params: {
   projectId: string;
   env: Env;
 }): Promise<Address> {
-  if (isNativePaymentToken(params.token)) {
-    throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
-  }
-
-  const mint = assertValidAddress(normalizePaymentToken(params.token), "token");
-  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
-  if (wellKnown) {
-    if (!wellKnown.isUsdStable) {
-      throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
-    }
-  } else {
-    const issuedTokenStatus = await createTokenRepository(
-      params.env,
-      createTenantScope({ organizationId: params.organizationId, projectId: params.projectId })
-    ).getStatusByMint(params.projectId, mint);
-    if (issuedTokenStatus !== "active") {
-      throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
-    }
-  }
+  const mint = resolveRecurringPaymentTokenMint(params.token);
+  await assertRecurringPaymentTokenAdmitted({ ...params, mint });
   await parseStaticPaymentAmount(params.amount, mint);
-
   return mint;
 }
 

@@ -584,9 +584,10 @@ async function runRecurringPaymentLifecycle(
     if (!plan) {
       throw notFound("Subscription plan");
     }
-    // Cancel is an exit and never asks the terms admission check; only resume restarts collection.
+    // Cancel is an exit and never asks the terms admission check; a fresh resume restarts
+    // collection, while a resume recovered at submit settles work already sent.
     const tokenMint = assertValidAddress(
-      input.operation === "resume"
+      input.operation === "resume" && !resumedAtSubmit
         ? await assertRecurringPaymentTerms({
             token: plan.token,
             amount: claimed.amount,
