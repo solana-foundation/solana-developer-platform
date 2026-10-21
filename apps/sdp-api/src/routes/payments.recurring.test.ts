@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import * as solanaRpc from "@sdp/rpc/solana";
+import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isCollectableRecurringPaymentStatus,
@@ -50,7 +50,13 @@ import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurr
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
-import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";
+import {
+  clusterOfRpcClient,
+  epochInfoResult,
+  type StubSignatureStatus,
+  signatureStatusesRead,
+  signatureStatusesReplyAt,
+} from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
@@ -101,23 +107,8 @@ import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
 
-/**
- * Resumed recurring steps look saved signatures up in transaction history
- * (HOO-2044). By default history knows none of them; a test sets what it saw.
- */
-const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
-
 const SAVED_LAST_VALID_BLOCK_HEIGHT = 1000;
-
-function recordSignatureStatus(recorded: string, err: solanaRpc.SignatureStatusInfo["err"]): void {
-  getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
-    signatures.map((candidate) =>
-      candidate === recorded
-        ? { slot: 100n, confirmations: null, confirmationStatus: "finalized", err }
-        : null
-    )
-  );
-}
+const CHAIN_TIP_SLOT = 2000;
 
 /** A subscription delegation on chain; `expiresAtTs` 0 is active, set is canceled. */
 function delegation(
@@ -635,11 +626,33 @@ describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
   const recurringExecution = installRecurringExecutionHooks();
   beforeEach(() => {
-    getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
-      signatures.map(() => null)
-    );
-    recurringExecution.rpc.answer("getBlockHeight", SAVED_LAST_VALID_BLOCK_HEIGHT);
+    answerChainTip(SAVED_LAST_VALID_BLOCK_HEIGHT);
+    answerSignatureStatuses(() => null);
   });
+
+  function answerChainTip(blockHeight: number): void {
+    recurringExecution.rpc.answer(
+      "getEpochInfo",
+      epochInfoResult({ absoluteSlot: CHAIN_TIP_SLOT, blockHeight })
+    );
+  }
+
+  function answerSignatureStatuses(status: (signature: string) => StubSignatureStatus | null) {
+    recurringExecution.rpc.respond("getSignatureStatuses", (request) =>
+      signatureStatusesReplyAt(
+        CHAIN_TIP_SLOT,
+        signatureStatusesRead(request).signatures.map(status)
+      )
+    );
+  }
+
+  function recordSignatureStatus(recorded: string, err: StubSignatureStatus["err"]): void {
+    answerSignatureStatuses((signature) =>
+      signature === recorded
+        ? { slot: 100, confirmations: null, confirmationStatus: "finalized", err }
+        : null
+    );
+  }
 
   it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
     await getDb(env).batch([
@@ -2682,7 +2695,7 @@ describe("Payments routes — recurring", () => {
   it("fails a recovered collection whose pull has no record past its expiry, then pulls the period again", async () => {
     mockDistinctRecentBlockhashes();
     const { subscriptionId, collect } = await leaveCollectionUnanswered();
-    recurringExecution.rpc.answer("getBlockHeight", SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
+    answerChainTip(SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
 
     const recovered = await collect();
 
@@ -4697,7 +4710,7 @@ describe("Payments routes — recurring", () => {
     fetchMaybeSubscriptionDelegationMock
       .mockResolvedValueOnce(noAccount)
       .mockResolvedValueOnce(noAccount);
-    recurringExecution.rpc.answer("getBlockHeight", SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
+    answerChainTip(SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
     expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
       recovered: 1,
     });
@@ -7064,7 +7077,7 @@ describe("Payments routes — recurring", () => {
 
       it("sends a replacement subscription again once its saved send expired, finishing the update", async () => {
         const { request, savedSignature } = await leaveReplacementAuthorizationUnanswered();
-        recurringExecution.rpc.answer("getBlockHeight", SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
+        answerChainTip(SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
         const sent = sends();
 
         const retry = await request();
@@ -7203,7 +7216,7 @@ describe("Payments routes — recurring", () => {
           .bind(testSignature(7), SAVED_LAST_VALID_BLOCK_HEIGHT, activated.id)
           .run();
         fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(0n));
-        recurringExecution.rpc.answer("getBlockHeight", SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
+        answerChainTip(SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
         const sent = sends();
 
         const retry = await app.request(
@@ -7214,11 +7227,6 @@ describe("Payments routes — recurring", () => {
 
         expect(retry.status).toBe(200);
         expect(sent).toHaveBeenCalledTimes(1);
-        expect(getSignatureStatusesMock).toHaveBeenCalledWith(
-          expect.anything(),
-          [testSignature(7)],
-          { searchTransactionHistory: true }
-        );
         expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
           { status: "confirmed", stage: "finalize", signature: poolSentSignatures()[3] },
         ]);
@@ -7246,9 +7254,7 @@ describe("Payments routes — recurring", () => {
           .run();
         // History has the signature succeeding; this node's account read lags behind it.
         fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(0n));
-        getSignatureStatusesMock.mockResolvedValueOnce([
-          { slot: 100n, confirmations: null, confirmationStatus: "finalized", err: null },
-        ]);
+        recordSignatureStatus(testSignature(7), null);
         const sent = sends();
 
         const retry = await app.request(

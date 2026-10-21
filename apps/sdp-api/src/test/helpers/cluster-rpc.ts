@@ -262,9 +262,24 @@ export function signatureStatusesRead(request: ClusterRpcRequest): SignatureStat
 export function signatureStatusesReply(
   statuses: readonly (StubSignatureStatus | null)[]
 ): ClusterRpcReply {
+  return signatureStatusesReplyAt(1, statuses);
+}
+
+/**
+ * A `getSignatureStatuses` answer from a node that has processed through `contextSlot`, listing
+ * `statuses` in request order.
+ *
+ * @param contextSlot - The slot the answering node reports its view at.
+ * @param statuses - Each requested signature's status, or null when the node has none.
+ * @returns The reply to return from a {@link ClusterRpcResponder.respond} responder.
+ */
+export function signatureStatusesReplyAt(
+  contextSlot: number,
+  statuses: readonly (StubSignatureStatus | null)[]
+): ClusterRpcReply {
   return {
     result: {
-      context: { slot: 1 },
+      context: { slot: contextSlot },
       value: statuses.map((status) =>
         status === null
           ? null
@@ -330,6 +345,25 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
         return signatureStatusesReply(read.signatures.map((signature) => verdict(signature, read)));
       });
     },
+  };
+}
+
+/**
+ * A `getEpochInfo` result for a chain tip at `absoluteSlot` and `blockHeight`, in epoch 0.
+ *
+ * @param tip - The tip the answering node reports.
+ * @param tip.absoluteSlot - Its slot.
+ * @param tip.blockHeight - Its block height.
+ * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
+ */
+export function epochInfoResult(tip: { absoluteSlot: number; blockHeight: number }): JsonRpcResult {
+  return {
+    absoluteSlot: tip.absoluteSlot,
+    blockHeight: tip.blockHeight,
+    epoch: 0,
+    slotIndex: tip.absoluteSlot,
+    slotsInEpoch: 432_000,
+    transactionCount: null,
   };
 }
 

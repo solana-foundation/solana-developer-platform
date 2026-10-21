@@ -9,7 +9,12 @@ import {
   type SavedStepSend,
   type SubscriptionStep,
 } from "@/services/payments/recurring-payments/shared";
-import type { StubSignatureStatus } from "@/test/helpers/cluster-rpc";
+import {
+  epochInfoResult,
+  type StubSignatureStatus,
+  signatureStatusesRead,
+  signatureStatusesReplyAt,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
@@ -28,7 +33,8 @@ const SAVED_SEND = {
   signature: testSignature(1),
   lastValidBlockHeight: 1000n,
 } satisfies SavedStepSend;
-const SAVED_SEND_READS: ReadonlySet<string> = new Set(["getBlockHeight", "getSignatureStatuses"]);
+const CHAIN_TIP_SLOT = 2000;
+const SAVED_SEND_READS: ReadonlySet<string> = new Set(["getEpochInfo", "getSignatureStatuses"]);
 const STEP_EFFECTS = {
   finalized: { finalized: true, confirmed: true },
   confirmed: { finalized: false, confirmed: true },
@@ -115,9 +121,13 @@ describe("readRecurringPaymentStep", () => {
     );
   }
 
-  function answerChain(blockHeight: number, status: StubSignatureStatus | null) {
-    rpc.answer("getBlockHeight", blockHeight);
-    rpc.respondSignatureStatuses(() => status);
+  function answerChain(
+    blockHeight: number,
+    statusSlot: number,
+    status: StubSignatureStatus | null
+  ) {
+    rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: CHAIN_TIP_SLOT, blockHeight }));
+    rpc.respond("getSignatureStatuses", () => signatureStatusesReplyAt(statusSlot, [status]));
   }
 
   const savedSendReads = () =>
@@ -169,29 +179,42 @@ describe("readRecurringPaymentStep", () => {
       state: "its effect shows only at confirmed",
       effect: "confirmed",
       blockHeight: 1001,
+      statusSlot: CHAIN_TIP_SLOT,
       status: null,
     },
     {
       state: "its saved send succeeded",
       effect: "none",
       blockHeight: 1000,
+      statusSlot: CHAIN_TIP_SLOT,
       status: landedStatus(null),
     },
     {
       state: "its saved send has no record before expiry",
       effect: "none",
       blockHeight: 1000,
+      statusSlot: CHAIN_TIP_SLOT,
       status: null,
     },
-  ] as const)("keeps a step in flight when $state", async ({ effect, blockHeight, status }) => {
-    answerChain(blockHeight, status);
+    {
+      state: "its saved send has no record past expiry from a node behind the tip",
+      effect: "none",
+      blockHeight: 1001,
+      statusSlot: CHAIN_TIP_SLOT - 1,
+      status: null,
+    },
+  ] as const)(
+    "keeps a step in flight when $state",
+    async ({ effect, blockHeight, statusSlot, status }) => {
+      answerChain(blockHeight, statusSlot, status);
 
-    await expect(readStep(effect, SAVED_SEND)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
-    expect(await savedRows()).toEqual(untouchedRows);
-  });
+      await expect(readStep(effect, SAVED_SEND)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
+      expect(await savedRows()).toEqual(untouchedRows);
+    }
+  );
 
   it("clears a saved send that failed on chain, then fails the step", async () => {
-    answerChain(1000, landedStatus({ InstructionError: [0, { Custom: 1 }] }));
+    answerChain(1000, CHAIN_TIP_SLOT, landedStatus({ InstructionError: [0, { Custom: 1 }] }));
 
     await expect(readStep("none", SAVED_SEND)).rejects.toMatchObject({
       code: "TRANSACTION_FAILED",
@@ -199,14 +222,21 @@ describe("readRecurringPaymentStep", () => {
     expect(await savedRows()).toEqual(clearedRows);
   });
 
-  it("clears a saved send with no record past its expiry, reading the height first, and sends the step", async () => {
-    answerChain(1001, null);
+  it("clears a saved send with no record past its expiry, reading the chain tip first, and sends the step", async () => {
+    answerChain(1001, CHAIN_TIP_SLOT, null);
 
     expect(await readStep("none", SAVED_SEND)).toEqual({
       kind: "not_sent",
       account: { exists: false },
     });
-    expect(savedSendReads()).toEqual(["getBlockHeight", "getSignatureStatuses"]);
+    expect(savedSendReads()).toEqual(["getEpochInfo", "getSignatureStatuses"]);
+    expect(
+      rpc.requests
+        .filter(({ method }) => method === "getSignatureStatuses")
+        .map(signatureStatusesRead)
+    ).toEqual([
+      { cluster: "devnet", signatures: [SAVED_SEND.signature], searchTransactionHistory: true },
+    ]);
     expect(await savedRows()).toEqual(clearedRows);
   });
 
@@ -220,7 +250,7 @@ describe("readRecurringPaymentStep", () => {
         updatedAt: new Date().toISOString(),
       })
     );
-    answerChain(1001, null);
+    answerChain(1001, CHAIN_TIP_SLOT, null);
 
     await expect(readStep("none", SAVED_SEND)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
     expect(await savedRows()).toEqual({ ...untouchedRows, attempt_signature: testSignature(2) });
