@@ -9,6 +9,7 @@ import { getE2EEnv } from "@/playwright/env";
 import { createLocalApiClient, type LocalApiClient } from "@/playwright/support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
+  enableLocalCustodyForPlaywrightOrg,
   getBootstrapApiBaseUrl,
   gotoProjectPage,
   provisionLinkedOrgProjects,
@@ -166,9 +167,7 @@ async function bootstrapWalletRouteFixture(browser: Browser, input: { labelPrefi
 
 test.describe
   .serial("dashboard wallets e2e", () => {
-    test("preserves existing organization settings when enabling local custody", async ({
-      browser,
-    }) => {
+    test("preserves existing organization settings when enabling local custody", async () => {
       const databaseUrl = new URL(z.url().parse(process.env.DATABASE_URL));
       const apiUrl = new URL(getBootstrapApiBaseUrl());
       if (
@@ -181,17 +180,14 @@ test.describe
         throw new Error("Organization settings fixture requires loopback API and Postgres");
       }
 
-      await provisionWithAdminSession(browser, async (session) => {
-        const fixtures = await bootstrapLocalWalletFixtures({
-          identity: session.identity,
-          bearerToken: session.getBearerToken,
-          provider: "local",
-          walletCount: 1,
-          fundSourceWallet: false,
-          preserveExistingFixtures: true,
-        });
-        const db = new Client({ connectionString: databaseUrl.toString() });
-        await db.connect();
+      const db = new Client({ connectionString: databaseUrl.toString() });
+      await db.connect();
+      try {
+        const organizationId = `org_e2e_settings_${crypto.randomUUID()}`;
+        await db.query(
+          "INSERT INTO organizations (id, name, slug) VALUES ($1, 'E2E settings', $1)",
+          [organizationId]
+        );
         try {
           const organizationSchema = z.object({
             id: z.string(),
@@ -200,12 +196,9 @@ test.describe
           });
           const original = organizationSchema.parse(
             (
-              await db.query(
-                `SELECT org.id, org.settings, org.updated_at FROM organizations org
-                 JOIN projects project ON project.organization_id = org.id
-                 WHERE org.id = $1 AND project.id = $2`,
-                [fixtures.organization.localOrgId, fixtures.projectId]
-              )
+              await db.query("SELECT id, settings, updated_at FROM organizations WHERE id = $1", [
+                organizationId,
+              ])
             ).rows[0]
           );
           const topLevel = {
@@ -260,17 +253,7 @@ test.describe
                   "UPDATE organizations SET settings = $2, updated_at = $3 WHERE id = $1",
                   [original.id, savedSettings, unchangedTimestamp]
                 );
-                const retained = await bootstrapLocalWalletFixtures({
-                  identity: session.identity,
-                  bearerToken: session.getBearerToken,
-                  provider: "local",
-                  walletCount: 1,
-                  fundSourceWallet: false,
-                  preserveExistingFixtures: true,
-                });
-                expect(retained.wallets.map((wallet) => wallet.id)).toEqual(
-                  fixtures.wallets.map((wallet) => wallet.id)
-                );
+                await enableLocalCustodyForPlaywrightOrg(organizationId);
                 const current = organizationSchema.parse(
                   (
                     await db.query(
@@ -279,6 +262,7 @@ test.describe
                     )
                   ).rows[0]
                 );
+                expect(current.id).toBe(original.id);
                 expect(z.json().parse(JSON.parse(z.string().parse(current.settings)))).toEqual(
                   expected
                 );
@@ -295,9 +279,11 @@ test.describe
             );
           }
         } finally {
-          await db.end();
+          await db.query("DELETE FROM organizations WHERE id = $1", [organizationId]);
         }
-      });
+      } finally {
+        await db.end();
+      }
     });
 
     test("bootstrapped Privy wallet appears in the wallets overview", async ({ browser, page }) => {

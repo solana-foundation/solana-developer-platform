@@ -140,7 +140,7 @@ const collectionAttemptsResponseSchema = z.object({
   pageSize: z.number(),
 });
 const recurringPaymentsListEnvelopeSchema = z.object({ data: recurringPaymentsListResponseSchema });
-export const recurringPaymentEnvelopeSchema = z.object({ data: recurringPaymentResponseSchema });
+const recurringPaymentEnvelopeSchema = z.object({ data: recurringPaymentResponseSchema });
 const collectionAttemptsEnvelopeSchema = z.object({ data: collectionAttemptsResponseSchema });
 const apiErrorEnvelopeSchema = z.object({
   error: z.union([z.string(), z.object({ message: z.string(), code: z.string().optional() })]),

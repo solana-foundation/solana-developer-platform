@@ -213,51 +213,6 @@ describe("Payments routes — subscriptions", () => {
     expect(response.status).toBe(400);
   });
 
-  it.each([
-    { pullerWalletId: TEST_WALLET_ID },
-    { pullerWalletId: null },
-    { pullerWalletId: TEST_WALLET_ID, pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID },
-    { pullerWalletId: null, pullerCustodyWalletId: null },
-  ])("rejects legacy subscription plan updates: %j", async (patch) => {
-    const created = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "25",
-          periodHours: 720,
-        }),
-      },
-      env
-    );
-    expect(created.status).toBe(201);
-    const planId = (await created.json()).data.subscriptionPlan.id;
-    const rejected = await app.request(
-      `/v1/payments/subscription-plans/${planId}`,
-      {
-        method: "PATCH",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({ status: "active", ...patch }),
-      },
-      env
-    );
-    expect(rejected.status).toBe(400);
-    const retained = await app.request(
-      `/v1/payments/subscription-plans/${planId}`,
-      { headers: SUBSCRIPTION_HEADERS },
-      env
-    );
-    expect((await retained.json()).data.subscriptionPlan).toMatchObject({
-      status: "draft",
-      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      pullerAddress: TEST_SOLANA_ADDRESSES.wallet1,
-    });
-  });
-
   it("never interprets an exact owner selector as a provider reference", async () => {
     const response = await app.request(
       "/v1/payments/subscription-plans",
@@ -353,15 +308,38 @@ describe("Payments routes — subscriptions", () => {
       puller_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
     });
     for (const patch of [
+      { pullerWalletId: TEST_WALLET_ID },
+      { pullerWalletId: null },
+      { pullerWalletId: TEST_WALLET_ID, pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID },
       { pullerWalletId: null, pullerCustodyWalletId: null },
-      { status: "active", pullerWalletID: TEST_WALLET_ID },
+      { pullerWalletID: TEST_WALLET_ID },
     ]) {
       const rejected = await app.request(
         `/v1/payments/subscription-plans/${planId}`,
-        { method: "PATCH", headers: SUBSCRIPTION_HEADERS, body: JSON.stringify(patch) },
+        {
+          method: "PATCH",
+          headers: SUBSCRIPTION_HEADERS,
+          body: JSON.stringify({ status: "active", ...patch }),
+        },
         env
       );
       expect(rejected.status).toBe(400);
+      const retained = await app.request(
+        `/v1/payments/subscription-plans/${planId}`,
+        { headers: SUBSCRIPTION_HEADERS },
+        env
+      );
+      expect(retained.status).toBe(200);
+      expect((await retained.json()).data.subscriptionPlan).toMatchObject({
+        status: "draft",
+        ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        pullerAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      expect(await savedRoles()).toEqual({
+        owner_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+        puller_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      });
     }
     const unchanged = await app.request(
       `/v1/payments/subscription-plans/${planId}`,
