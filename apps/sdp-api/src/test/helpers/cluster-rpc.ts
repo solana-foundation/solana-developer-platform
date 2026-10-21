@@ -9,8 +9,14 @@ import {
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types/well-known-tokens";
-import { type Commitment, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND } from "@solana/kit";
+import {
+  type Commitment,
+  getBase64Decoder,
+  type ReadonlyUint8Array,
+  SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND,
+} from "@solana/kit";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
+import { getMintEncoder, type MintArgs } from "@solana-program/token-2022";
 import { afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
 import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
@@ -430,6 +436,61 @@ export function systemAccountInfoResult(slot: number, lamports: number): JsonRpc
       space: 0,
     },
   };
+}
+
+/**
+ * A base64 `getAccountInfo` result for an account `owner` holds with `data`, such as a sysvar.
+ *
+ * @param slot - The context slot the answer claims.
+ * @param owner - The program that owns the account.
+ * @param data - The account's data.
+ * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
+ */
+export function ownedAccountInfoResult(
+  slot: number,
+  owner: string,
+  data: ReadonlyUint8Array
+): JsonRpcResult {
+  return {
+    context: { slot },
+    value: {
+      data: [getBase64Decoder().decode(data), "base64"],
+      executable: false,
+      lamports: 1_461_600,
+      owner,
+      rentEpoch: 0,
+      space: data.length,
+    },
+  };
+}
+
+/**
+ * A base64 `getAccountInfo` result for an initialized mint with no supply or authorities.
+ *
+ * @param slot - The context slot the answer claims.
+ * @param tokenProgram - The token program that owns the mint.
+ * @param mint - The mint's decimals and extensions.
+ * @param mint.decimals - The mint's decimals.
+ * @param mint.extensions - The mint's Token-2022 extensions, or null for none.
+ * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
+ */
+export function mintAccountInfoResult(
+  slot: number,
+  tokenProgram: string,
+  mint: Pick<MintArgs, "decimals" | "extensions">
+): JsonRpcResult {
+  return ownedAccountInfoResult(
+    slot,
+    tokenProgram,
+    getMintEncoder().encode({
+      mintAuthority: null,
+      supply: 0,
+      decimals: mint.decimals,
+      isInitialized: true,
+      freezeAuthority: null,
+      extensions: mint.extensions,
+    })
+  );
 }
 
 /**

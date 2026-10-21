@@ -1,8 +1,25 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import type { Address } from "@solana/kit";
+import { type Address, address, createNoopSigner, unixTimestamp } from "@solana/kit";
+import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
+import { extension, type MintArgs } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
-import { getSplTokenBalances, resolveTokenLabel, withIssuedTokenLabels } from "./token-accounts";
+import {
+  installClusterRpcResponder,
+  mintAccountInfoResult,
+  ownedAccountInfoResult,
+} from "@/test/helpers/cluster-rpc";
+import { syntheticAddress, syntheticWireTransaction } from "@/test/helpers/parsed-transactions";
+import {
+  buildSplTransferInstructions,
+  getSplTokenBalances,
+  readSignedTokenTransfer,
+  readTransferMint,
+  resolveTokenLabel,
+  resolveTransferTerms,
+  withIssuedTokenLabels,
+} from "./token-accounts";
 
 describe("resolveTokenLabel", () => {
   it("uses the issued token symbol for a known mint", () => {
@@ -60,4 +77,172 @@ describe("getSplTokenBalances", () => {
     for (const answer of answers) answer();
     await expect(balances).resolves.toEqual([]);
   });
+});
+
+const TEST_MINT = syntheticAddress(10);
+const TEST_AUTHORITY = createNoopSigner(syntheticAddress(11));
+const TEST_CLOCK_TIMESTAMP = 1_800_000_000n;
+
+function scaledUiAmount(newMultiplierEffectiveTimestamp: bigint) {
+  return extension("ScaledUiAmountConfig", {
+    authority: syntheticAddress(12),
+    multiplier: 2,
+    newMultiplierEffectiveTimestamp,
+    newMultiplier: 4,
+  });
+}
+
+const TRANSFER_FEE_CONFIG = extension("TransferFeeConfig", {
+  transferFeeConfigAuthority: syntheticAddress(13),
+  withdrawWithheldAuthority: syntheticAddress(14),
+  withheldAmount: 0n,
+  olderTransferFee: { epoch: 0n, maximumFee: 1_000_000n, transferFeeBasisPoints: 1 },
+  newerTransferFee: { epoch: 10n, maximumFee: 1_000n, transferFeeBasisPoints: 50 },
+});
+
+describe("Token-2022 transfer terms", () => {
+  const rpc = installClusterRpcResponder();
+
+  function serveChain(
+    tokenProgram: string,
+    extensions: MintArgs["extensions"],
+    clockEpoch: bigint
+  ): void {
+    const clock = getSysvarClockEncoder().encode({
+      slot: 1n,
+      epochStartTimestamp: unixTimestamp(TEST_CLOCK_TIMESTAMP),
+      epoch: clockEpoch,
+      leaderScheduleEpoch: clockEpoch,
+      unixTimestamp: unixTimestamp(TEST_CLOCK_TIMESTAMP),
+    });
+    rpc.respond("getAccountInfo", (request) => ({
+      result:
+        request.params[0] === SYSVAR_CLOCK_ADDRESS
+          ? ownedAccountInfoResult(1, "Sysvar1111111111111111111111111111111111111", clock)
+          : mintAccountInfoResult(1, tokenProgram, { decimals: 6, extensions }),
+    }));
+  }
+
+  function inSandbox<TResult>(operation: () => Promise<TResult>): Promise<TResult> {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, operation);
+  }
+
+  function termsFor(amount: string) {
+    return inSandbox(async () =>
+      resolveTransferTerms(await readTransferMint(TEST_MINT), amount, 6)
+    );
+  }
+
+  function buildTransfer(tokenProgram: string, amount: string) {
+    return inSandbox(() =>
+      buildSplTransferInstructions({
+        authority: TEST_AUTHORITY,
+        destination: syntheticAddress(15),
+        mint: TEST_MINT,
+        amount,
+        ataRentPayer: syntheticAddress(16),
+        source: {
+          tokenAccount: syntheticAddress(17),
+          decimals: 6,
+          amount: 10_000_000n,
+          frozen: false,
+          tokenProgram: address(tokenProgram),
+        },
+      })
+    );
+  }
+
+  function clockReads(): number {
+    return rpc.requests.filter((request) => request.params[0] === SYSVAR_CLOCK_ADDRESS).length;
+  }
+
+  it.each([SPL_TOKEN_PROGRAMS["spl-token"], SPL_TOKEN_PROGRAMS["token-2022"]])(
+    "parses a %s mint without extensions exactly, stating no fee, without reading the Clock",
+    async (tokenProgram) => {
+      serveChain(tokenProgram, null, 0n);
+
+      expect(await termsFor("1.5")).toEqual({ baseUnits: 1_500_000n, transferFee: null });
+      expect(clockReads()).toBe(0);
+    }
+  );
+
+  it.each([
+    { effectiveAt: TEST_CLOCK_TIMESTAMP + 1n, baseUnits: 500_000n },
+    { effectiveAt: TEST_CLOCK_TIMESTAMP, baseUnits: 250_000n },
+  ])(
+    "divides a scaled amount by the multiplier in effect at the Clock: $baseUnits",
+    async ({ effectiveAt, baseUnits }) => {
+      serveChain(SPL_TOKEN_PROGRAMS["token-2022"], [scaledUiAmount(effectiveAt)], 0n);
+
+      expect(await termsFor("1")).toEqual({ baseUnits, transferFee: null });
+      expect(clockReads()).toBe(1);
+    }
+  );
+
+  it.each([
+    { epoch: 9n, amount: "1", transferFee: 100n },
+    { epoch: 9n, amount: "0.0005", transferFee: 1n },
+    { epoch: 10n, amount: "1", transferFee: 1_000n },
+  ])(
+    "states the fee of epoch $epoch on $amount, rounded up and capped: $transferFee",
+    async ({ epoch, amount, transferFee }) => {
+      serveChain(SPL_TOKEN_PROGRAMS["token-2022"], [TRANSFER_FEE_CONFIG], epoch);
+
+      expect((await termsFor(amount)).transferFee).toBe(transferFee);
+    }
+  );
+
+  it("refuses a Token-2022 account that is not a mint", async () => {
+    rpc.respond("getAccountInfo", () => ({
+      result: ownedAccountInfoResult(1, SPL_TOKEN_PROGRAMS["token-2022"], new Uint8Array(10)),
+    }));
+
+    await expect(termsFor("1")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Token mint account is not a mint",
+    });
+  });
+
+  it("refuses a scaled amount that moves no base units", async () => {
+    serveChain(SPL_TOKEN_PROGRAMS["token-2022"], [scaledUiAmount(TEST_CLOCK_TIMESTAMP + 1n)], 0n);
+
+    await expect(buildTransfer(SPL_TOKEN_PROGRAMS["token-2022"], "0.000001")).rejects.toMatchObject(
+      {
+        code: "BAD_REQUEST",
+        message: "Transfer amount must be greater than zero",
+      }
+    );
+  });
+
+  it.each([
+    {
+      tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+      extensions: [TRANSFER_FEE_CONFIG],
+      signed: { amount: 1_000_000n, decimals: 6, fee: 100n },
+    },
+    {
+      tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
+      extensions: null,
+      signed: { amount: 1_000_000n, decimals: 6, fee: null },
+    },
+    { tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"], extensions: null, signed: null },
+  ])(
+    "reads back the Token-2022 transfer the builder signed on a $tokenProgram mint",
+    async ({ tokenProgram, extensions, signed }) => {
+      serveChain(tokenProgram, extensions, 9n);
+      const { createDestinationAtaInstruction, transferInstruction } = await buildTransfer(
+        tokenProgram,
+        "1"
+      );
+
+      expect(
+        readSignedTokenTransfer(
+          syntheticWireTransaction(TEST_AUTHORITY.address, [
+            createDestinationAtaInstruction,
+            transferInstruction,
+          ])
+        )
+      ).toEqual(signed);
+    }
+  );
 });

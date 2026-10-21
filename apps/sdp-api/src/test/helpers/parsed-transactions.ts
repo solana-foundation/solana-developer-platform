@@ -1,6 +1,21 @@
 import type { SignatureInfo } from "@sdp/rpc/solana";
 import { getBase58Decoder } from "@solana/codecs";
-import { type Address, address, type Commitment, type Signature, signature } from "@solana/kit";
+import {
+  type Address,
+  address,
+  appendTransactionMessageInstructions,
+  blockhash,
+  type Commitment,
+  compileTransaction,
+  createTransactionMessage,
+  getBase64EncodedWireTransaction,
+  type Instruction,
+  pipe,
+  type Signature,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+  signature,
+} from "@solana/kit";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import type { JsonRpcResult } from "@/test/helpers/cluster-rpc";
@@ -26,6 +41,37 @@ function syntheticBytes(length: number, index: number): Uint8Array {
  */
 export function syntheticSignature(index: number): Signature {
   return signature(getBase58Decoder().decode(syntheticBytes(64, index)));
+}
+
+/**
+ * The base64 wire transaction of an unsigned v0 message carrying `instructions`, the form a
+ * transfer row saves its signed transaction in.
+ *
+ * @param feePayer - The message's fee payer.
+ * @param instructions - The message's instructions, in order.
+ * @returns The base64 wire transaction, its signatures zeroed.
+ */
+export function syntheticWireTransaction(
+  feePayer: Address,
+  instructions: readonly Instruction[]
+): string {
+  return getBase64EncodedWireTransaction(
+    compileTransaction(
+      pipe(
+        createTransactionMessage({ version: 0 }),
+        (message) => setTransactionMessageFeePayer(feePayer, message),
+        (message) =>
+          setTransactionMessageLifetimeUsingBlockhash(
+            {
+              blockhash: blockhash(getBase58Decoder().decode(syntheticBytes(32, 0))),
+              lastValidBlockHeight: 1000n,
+            },
+            message
+          ),
+        (message) => appendTransactionMessageInstructions(instructions, message)
+      )
+    )
+  );
 }
 
 /**

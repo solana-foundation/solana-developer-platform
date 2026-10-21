@@ -1,9 +1,10 @@
 import type { Action } from "@sdp/types/actions";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { clearHeliusDasCachesForTests } from "@/services/helius-das.service";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
@@ -107,5 +108,32 @@ describe("GET /v1/transactions: Payments rows by the read of their module", () =
       details: { action: "onramp.read" },
     });
     expect(await listedKinds("?module=payments&kind=pay")).toEqual(["pay"]);
+  });
+
+  it("labels a row's token with the symbol Helius DAS resolves for its mint", async () => {
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://devnet.helius-das.sdp.test/");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({
+        result: [{ id: wellKnownMint("USDC", "devnet"), token_info: { symbol: "DASUSD" } }],
+      })
+    );
+    onTestFinished(() => {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+      clearHeliusDasCachesForTests();
+    });
+    await grantKey(["transactions.read", "transfers.read"]);
+
+    const response = await list();
+
+    expect(response.status).toBe(200);
+    expect(
+      z
+        .object({
+          data: z.object({ transactions: z.array(z.object({ tokenSymbol: z.string() })) }),
+        })
+        .parse(await response.json()).data.transactions
+    ).toEqual([{ tokenSymbol: "DASUSD" }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });

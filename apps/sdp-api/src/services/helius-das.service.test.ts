@@ -2,17 +2,27 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
   clearHeliusDasCachesForTests,
+  lookupTokenSymbols,
 } from "@/services/helius-das.service";
 import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
 import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { required } from "@/test/helpers/required";
 
 const TEST_DAS_MINT = "DasC1usterMint11111111111111111111111111111";
 const TEST_LOOKALIKE_USDC_MINT = "FakeUsdcMint1111111111111111111111111111111";
+const dasAssetBatchRequestSchema = z.object({
+  body: z
+    .string()
+    .transform((body) =>
+      z.object({ params: z.object({ ids: z.array(z.string()) }) }).parse(JSON.parse(body))
+    ),
+});
 const HELIUS_DAS_URL_BY_CLUSTER = {
   devnet: "https://devnet.helius-das.sdp.test/?api-key=devnet",
   "mainnet-beta": "https://mainnet.helius-das.sdp.test/?api-key=mainnet",
@@ -132,6 +142,43 @@ describe("helius-das service", () => {
     vi.advanceTimersByTime(60_000);
     await inScope("sandbox", () => attachTokenSymbolsToBalances([balance]));
     expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("looks each mint up once however often it is asked for", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({
+        result: [
+          { id: TEST_DAS_MINT, token_info: { symbol: "DASEUR" } },
+          { id: TEST_LOOKALIKE_USDC_MINT, token_info: { symbol: "FAKEUSD" } },
+        ],
+      })
+    );
+
+    const symbols = await inScope("sandbox", () =>
+      lookupTokenSymbols([TEST_DAS_MINT, TEST_LOOKALIKE_USDC_MINT, TEST_DAS_MINT])
+    );
+
+    expect(symbols).toEqual(
+      new Map([
+        [TEST_DAS_MINT, "DASEUR"],
+        [TEST_LOOKALIKE_USDC_MINT, "FAKEUSD"],
+      ])
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = required(fetchSpy.mock.calls[0]);
+    expect(dasAssetBatchRequestSchema.parse(init).body.params.ids).toEqual([
+      TEST_DAS_MINT,
+      TEST_LOOKALIKE_USDC_MINT,
+    ]);
+  });
+
+  it("answers no symbols without a request when there are no mints or no DAS endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    expect(await inScope("sandbox", () => lookupTokenSymbols([]))).toEqual(new Map());
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "");
+    expect(await inScope("sandbox", () => lookupTokenSymbols([TEST_DAS_MINT]))).toEqual(new Map());
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("keeps configured token labels even when they are long", async () => {

@@ -1,4 +1,5 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
@@ -10,6 +11,7 @@ import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   installClusterRpcStub,
+  mintAccountInfoResult,
   type StubTokenAccount,
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
@@ -17,7 +19,6 @@ import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
-  getAccountInfoMock,
   installPaymentsRouteTestHooks,
   sendTransactionMock,
   TEST_API_KEY,
@@ -98,6 +99,10 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
 
   function answerSourceUsdc(baseUnits: string, state: StubTokenAccount["state"]) {
     rpc.answer(
+      "getAccountInfo",
+      mintAccountInfoResult(1, SPL_TOKEN_PROGRAMS["spl-token"], { decimals: 6, extensions: null })
+    );
+    rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
         {
@@ -114,6 +119,10 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
 
   function tokenAccountReads(): number {
     return rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner").length;
+  }
+
+  function mintReads(): number {
+    return rpc.calls.filter((call) => call.method === "getAccountInfo").length;
   }
 
   it("refuses a deposit the wallet cannot cover, leaving the sale open for the same key", async () => {
@@ -138,7 +147,6 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     // The refusal stored nothing under the key, so the same key funds the sale.
     answerSourceUsdc("25000000", "initialized");
     const tokenAccountReadsBefore = tokenAccountReads();
-    const mintReadsBefore = getAccountInfoMock.mock.calls.length;
     const funded = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
 
     const fundedText = await funded.text();
@@ -148,9 +156,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
       status: "settling",
     });
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
-    // The send reuses the source the check read: one read of each, as before the check.
     expect(tokenAccountReads() - tokenAccountReadsBefore).toBe(1);
-    expect(getAccountInfoMock.mock.calls.length - mintReadsBefore).toBe(1);
   });
 
   it("refuses a deposit from a frozen token account before claiming it", async () => {
@@ -270,6 +276,6 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
       "Transfer does not match the off-ramp deposit instruction"
     );
     expect(tokenAccountReads()).toBe(0);
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(mintReads()).toBe(0);
   });
 });

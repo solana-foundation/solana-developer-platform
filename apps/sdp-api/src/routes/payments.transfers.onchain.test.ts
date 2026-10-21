@@ -1,4 +1,4 @@
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
   generateKeyPairSigner,
   getSignatureFromTransaction,
@@ -12,7 +12,11 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import {
+  installClusterRpcStub,
+  mintAccountInfoResult,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
@@ -28,6 +32,7 @@ import {
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
+  TEST_SPONSORED_NETWORK_FEE_LAMPORTS,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_WALLET_ID,
   testKoraAdapter,
@@ -103,6 +108,10 @@ describe("Payments routes — on-chain transfers", () => {
   const rpc = installClusterRpcStub();
 
   function answerSourceUsdcTokenAccount(mint: string) {
+    rpc.answer(
+      "getAccountInfo",
+      mintAccountInfoResult(1, SPL_TOKEN_PROGRAMS["spl-token"], { decimals: 6, extensions: null })
+    );
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
@@ -632,6 +641,10 @@ describe("Payments routes — on-chain transfers", () => {
     const body = await readTransferResponse(res);
     expect(body.data.transfer.status).toBe("confirmed");
     expect(body.data.transfer.signature).toBeTruthy();
+    expect(body.data.transfer.fee).toBe(Number(TEST_SPONSORED_NETWORK_FEE_LAMPORTS));
+    expect((await readTransferRow(body.data.transfer.id)).fee).toBe(
+      Number(TEST_SPONSORED_NETWORK_FEE_LAMPORTS)
+    );
   });
 
   it("builds a Production project's USDC transfer on mainnet-beta with the mainnet mint", async () => {
