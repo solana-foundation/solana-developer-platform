@@ -184,7 +184,7 @@ describe("readRecurringPaymentStep", () => {
     {
       state: "its saved send succeeded",
       effect: "none",
-      blockHeight: 1000,
+      blockHeight: 1001,
       statusSlot: CHAIN_TIP_SLOT,
       status: landedStatus(null),
     },
