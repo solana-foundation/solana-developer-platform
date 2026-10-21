@@ -130,6 +130,19 @@ SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 SIGNING_PROVIDER=local
 CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
 CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>
+
+# API keys are stored as HMAC-SHA-256 under this pepper; the API refuses to
+# start without it. Generate with `openssl rand -hex 32`.
+API_KEY_PEPPER=<64 hex characters>
+```
+
+`pnpm db:seed:local` seeds the documented dev key hashed under the same pepper,
+and it runs `psql` directly, so it does not read `.env.local`. Export the value
+in the shell first, or the seed refuses to run:
+
+```bash
+export API_KEY_PEPPER=<the value in .env.local>
+pnpm -C apps/sdp-api db:seed:local
 ```
 
 Kora is a fee-payment provider, not a signing provider. `pnpm dev` starts
