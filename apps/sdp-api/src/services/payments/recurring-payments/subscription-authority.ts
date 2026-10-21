@@ -131,7 +131,7 @@ function lazySponsoredFeePayer(input: {
  * each other before subscribe. A setup an earlier send of this attempt saved is read first, as
  * every other step is, so a pending or dropped one reads nothing else and asks Kora nothing;
  * otherwise the authority and the token account are read in one `getMultipleAccounts`, a wallet
- * that already has both skips the step, and one missing either sends the setup (the token account
+ * that already has both (the token account owned by the mint's token program) skips the step, and one missing either sends the setup (the token account
  * create when it is missing, then the authority init, always) through the step runner. The skip
  * takes an existing authority and token account as set up without reading the token account's
  * delegate (the setup effect does); a revoked approval there is not repaired.
@@ -200,7 +200,12 @@ async function prepareRecurringPaymentSubscriptionAuthority(
     { commitment: "confirmed" }
   );
   const existingAuthority = subscriptionsProgram.decodeSubscriptionAuthority(authorityAccount);
-  if (existingAuthority.exists && existingSourceTokenAccount.exists) {
+  // Only the token program can own an account at the ATA address once the ATA program created it;
+  // a system-owned one (lamports sent there) still needs the create, which adopts it.
+  const sourceTokenAccountCreated =
+    existingSourceTokenAccount.exists &&
+    existingSourceTokenAccount.programAddress === input.tokenProgram;
+  if (existingAuthority.exists && sourceTokenAccountCreated) {
     return existingAuthority;
   }
 
@@ -217,7 +222,7 @@ async function prepareRecurringPaymentSubscriptionAuthority(
       tokenProgram: input.tokenProgram,
       userAta: input.sourceTokenAccount,
     });
-  const instructions = existingSourceTokenAccount.exists
+  const instructions = sourceTokenAccountCreated
     ? [initAuthorityInstruction]
     : [
         getCreateAssociatedTokenIdempotentInstruction({

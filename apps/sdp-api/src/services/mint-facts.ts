@@ -1,16 +1,22 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { getAccountInfo } from "@sdp/rpc/solana";
-import { type Account, type Address, isSolanaError, parseBase64RpcAccount } from "@solana/kit";
+import {
+  type Account,
+  type Address,
+  isSolanaError,
+  parseBase64RpcAccount,
+  SOLANA_ERROR__ACCOUNTS__FAILED_TO_DECODE_ACCOUNT,
+} from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { decodeMint, type Mint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 import { createMintLookupCache, type MintLookupLoad } from "@/services/mint-lookup-cache";
 
 /**
- * A mint's owner program, decimals and extension set are fixed at creation, so the hour bounds
- * memory, not staleness. The one way they change, closing the mint and recreating it at the same
- * address, needs `MintCloseAuthority`, and such a mint is never kept.
+ * An initialized mint's owner program, decimals and extension set are fixed at initialization, so
+ * the hour bounds memory, not staleness. Closing the mint and recreating it at the same address
+ * needs `MintCloseAuthority`, and such a mint is never kept; an uninitialized one is refused.
  */
 const MINT_FACTS_TTL_MS = 60 * 60_000;
 
@@ -39,7 +45,7 @@ export function clearMintFactsForTests(): void {
  * @param mint - The mint to read.
  * @returns The mint's token program, decimals and whether it carries a transfer hook.
  * @throws AppError BAD_REQUEST when no account is at the address, its owner is not a token
- *   program, or its data is not a mint.
+ *   program, its data is not a mint, or the mint is not initialized.
  */
 export function readMintFacts(mint: Address): Promise<MintFacts> {
   return mintFactsCache.read(currentClusterScope().cluster, mint, () => loadMintFacts(mint));
@@ -51,7 +57,7 @@ export function readMintFacts(mint: Address): Promise<MintFacts> {
  * @param mint - The mint to read.
  * @returns Its facts, kept unless the mint can be closed.
  * @throws AppError BAD_REQUEST when no account is at the address, its owner is not a token
- *   program, or its data is not a mint.
+ *   program, its data is not a mint, or the mint is not initialized.
  */
 async function loadMintFacts(mint: Address): Promise<MintLookupLoad<MintFacts>> {
   const accountInfo = await getAccountInfo(createClusterRpc(), mint);
@@ -60,6 +66,9 @@ async function loadMintFacts(mint: Address): Promise<MintLookupLoad<MintFacts>> 
   }
   const tokenProgram = assertSupportedTokenProgram(accountInfo.owner);
   const decoded = decodeMintAccount(mint, accountInfo);
+  if (!decoded.data.isInitialized) {
+    throw badRequest("Token mint is not initialized");
+  }
   const extensions =
     decoded.data.extensions.__option === "Some" ? decoded.data.extensions.value : [];
   return {
@@ -101,7 +110,7 @@ function decodeMintAccount(
   try {
     return decodeMint(parseBase64RpcAccount(mint, accountInfo));
   } catch (error) {
-    if (isSolanaError(error)) {
+    if (isSolanaError(error, SOLANA_ERROR__ACCOUNTS__FAILED_TO_DECODE_ACCOUNT)) {
       throw badRequest("Token mint account could not be decoded");
     }
     throw error;

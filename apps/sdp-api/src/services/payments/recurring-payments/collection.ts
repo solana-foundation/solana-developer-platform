@@ -79,7 +79,6 @@ import {
 } from "@/lib/errors";
 import type { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -395,7 +394,7 @@ async function resolveDestinationTokenAccount(input: {
 }): Promise<Address> {
   const destinationOwner = assertValidAddress(input.destinationAddress, "destinationAddress");
   const mint = assertValidAddress(input.token, "token");
-  const tokenProgram = await resolveMintTokenProgram(mint);
+  const { tokenProgram } = await readMintFacts(mint);
   const [receiverAta] = await findAssociatedTokenPda({
     owner: destinationOwner,
     tokenProgram,
