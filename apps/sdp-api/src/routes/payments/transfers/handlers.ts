@@ -257,7 +257,7 @@ async function assertRampDepositFunded(
   if (isNativePaymentToken(operation.token)) return undefined;
   const rpc = createClusterRpc();
   const mint = assertValidAddress(operation.token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+  const tokenProgram = await resolveMintTokenProgram(mint);
   const source = await resolveSourceTokenAccount(
     rpc,
     address(operation.sourceWallet.publicKey),

@@ -8,6 +8,13 @@
  * price". A mint already being looked up is joined rather than asked twice.
  */
 
+/** What one `read` load answered, and whether the cache may keep it. */
+export interface MintLookupLoad<T> {
+  value: T;
+  /** False for a value that can change while an entry would live; it is returned, not kept. */
+  keep: boolean;
+}
+
 interface CacheEntry<T> {
   expiresAt: number;
   value: T;
@@ -28,6 +35,18 @@ export interface MintLookupCache<T> {
     mints: readonly string[],
     fetchMissing: (mints: string[]) => Promise<ReadonlyMap<string, T>>
   ): Promise<Map<string, T>>;
+  /**
+   * The value for one mint, from the cache, a read already in flight, or one `load` call. Unlike
+   * `lookup`, a failed load is the caller's answer: its rejection reaches every caller sharing
+   * it, and nothing is cached. A read joins only another read in flight, never a `lookup`.
+   *
+   * @param cluster - The cluster the mint lives on.
+   * @param mint - The mint to read.
+   * @param load - Reads the mint when nobody has it; `keep: false` answers without caching.
+   * @returns The mint's value.
+   * @throws Whatever `load` rejects with.
+   */
+  read(cluster: string, mint: string, load: () => Promise<MintLookupLoad<T>>): Promise<T>;
   /** @internal Test-only: forget every entry and lookup in flight. */
   clearForTests(): void;
   /** @internal Test-only: how many entries are held, expired or not. */
@@ -37,6 +56,7 @@ export interface MintLookupCache<T> {
 export function createMintLookupCache<T>(ttlMs: number): MintLookupCache<T> {
   const entries = new Map<string, CacheEntry<T>>();
   const inFlight = new Map<string, Promise<T | undefined>>();
+  const readsInFlight = new Map<string, Promise<T>>();
 
   function readEntry(key: string): CacheEntry<T> | null {
     const entry = entries.get(key);
@@ -120,9 +140,37 @@ export function createMintLookupCache<T>(ttlMs: number): MintLookupCache<T> {
       );
       return values;
     },
+    read(cluster, mint, load) {
+      const key = `${cluster}:${mint}`;
+      const entry = readEntry(key);
+      if (entry) {
+        return Promise.resolve(entry.value);
+      }
+      const running = readsInFlight.get(key);
+      if (running) {
+        return running;
+      }
+
+      sweepExpired();
+      const reading: Promise<T> = load()
+        .then((loaded) => {
+          if (loaded.keep) {
+            entries.set(key, { value: loaded.value, expiresAt: Date.now() + ttlMs });
+          }
+          return loaded.value;
+        })
+        .finally(() => {
+          if (readsInFlight.get(key) === reading) {
+            readsInFlight.delete(key);
+          }
+        });
+      readsInFlight.set(key, reading);
+      return reading;
+    },
     clearForTests() {
       entries.clear();
       inFlight.clear();
+      readsInFlight.clear();
     },
     entryCountForTests() {
       return entries.size;

@@ -71,7 +71,7 @@ async function resolveTokenContext(
   }
 
   const mintAddress = assertValidAddress(token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
+  const tokenProgram = await resolveMintTokenProgram(mintAddress);
   const sourceTokenAccount = await resolveSourceTokenAccount(
     rpc,
     sourceAddress,

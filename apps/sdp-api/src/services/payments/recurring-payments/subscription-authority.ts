@@ -4,6 +4,7 @@ import {
   type Account,
   type Address,
   createNoopSigner,
+  fetchEncodedAccounts,
   type MaybeAccount,
   type Signature,
   type TransactionSigner,
@@ -83,7 +84,7 @@ interface SubscriptionAuthorityStepInput {
   rpc: SolanaRpc;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
-  sourceTokenAccount: { tokenAccount: Address; exists: boolean };
+  sourceTokenAccount: Address;
   subscriptionAuthorityAddress: Address;
   owner: Address;
   mint: Address;
@@ -129,11 +130,11 @@ function lazySponsoredFeePayer(input: {
  * Makes sure the source wallet's subscription authority and token account exist and delegate to
  * each other before subscribe. A setup an earlier send of this attempt saved is read first, as
  * every other step is, so a pending or dropped one reads nothing else and asks Kora nothing;
- * otherwise the authority is read, a wallet that already has both skips the step, and one missing
- * either sends the setup (the token account create when it is missing, then the authority init,
- * always) through the step runner. The skip takes an existing authority and token account as set
- * up without reading the token account's delegate (the setup effect does); a revoked approval
- * there is not repaired.
+ * otherwise the authority and the token account are read in one `getMultipleAccounts`, a wallet
+ * that already has both skips the step, and one missing either sends the setup (the token account
+ * create when it is missing, then the authority init, always) through the step runner. The skip
+ * takes an existing authority and token account as set up without reading the token account's
+ * delegate (the setup effect does); a revoked approval there is not repaired.
  *
  * @param input - The setup's flow, accounts, signer, fee payer and attempt.
  * @param input.flow - The flow subscribing, which names the movement, slots and failure messages.
@@ -146,9 +147,8 @@ function lazySponsoredFeePayer(input: {
  * @param input.rpc - The cluster RPC the authority is read from.
  * @param input.sourceWallet - The wallet that subscribes and the sponsorship is scoped to.
  * @param input.sourceSigner - The run's lazy source signer, resolved only when a step is sent.
- * @param input.sourceTokenAccount - The source wallet's token account for the mint.
- * @param input.sourceTokenAccount.tokenAccount - Its address.
- * @param input.sourceTokenAccount.exists - Whether it exists; a missing one is created by setup.
+ * @param input.sourceTokenAccount - The source wallet's associated token account for the mint;
+ *   setup creates it when the unsaved branch finds it missing.
  * @param input.subscriptionAuthorityAddress - The source wallet's subscription authority.
  * @param input.owner - The source wallet's address.
  * @param input.mint - The plan's mint.
@@ -172,7 +172,7 @@ async function prepareRecurringPaymentSubscriptionAuthority(
   };
   const effect = authorizationSetupEffect({
     subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
-    sourceTokenAccount: input.sourceTokenAccount.tokenAccount,
+    sourceTokenAccount: input.sourceTokenAccount,
     owner: input.owner,
     mint: input.mint,
     tokenProgram: input.tokenProgram,
@@ -194,12 +194,13 @@ async function prepareRecurringPaymentSubscriptionAuthority(
       subscriptionsProgram.decodeSubscriptionAuthority(accounts[0])
     );
   }
-  const existingAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
+  const [authorityAccount, existingSourceTokenAccount] = await fetchEncodedAccounts(
     input.rpc,
-    input.subscriptionAuthorityAddress,
+    [input.subscriptionAuthorityAddress, input.sourceTokenAccount],
     { commitment: "confirmed" }
   );
-  if (existingAuthority.exists && input.sourceTokenAccount.exists) {
+  const existingAuthority = subscriptionsProgram.decodeSubscriptionAuthority(authorityAccount);
+  if (existingAuthority.exists && existingSourceTokenAccount.exists) {
     return existingAuthority;
   }
 
@@ -214,14 +215,14 @@ async function prepareRecurringPaymentSubscriptionAuthority(
       payer,
       tokenMint: input.mint,
       tokenProgram: input.tokenProgram,
-      userAta: input.sourceTokenAccount.tokenAccount,
+      userAta: input.sourceTokenAccount,
     });
-  const instructions = input.sourceTokenAccount.exists
+  const instructions = existingSourceTokenAccount.exists
     ? [initAuthorityInstruction]
     : [
         getCreateAssociatedTokenIdempotentInstruction({
           payer,
-          ata: input.sourceTokenAccount.tokenAccount,
+          ata: input.sourceTokenAccount,
           owner: input.owner,
           mint: input.mint,
           tokenProgram: input.tokenProgram,
@@ -298,9 +299,8 @@ function requireSubscriptionAuthority(
  * @param input.rpc - The cluster RPC the authority is read from.
  * @param input.sourceWallet - The wallet that subscribes and the sponsorship is scoped to.
  * @param input.sourceSigner - The run's lazy source signer, resolved only when a step is sent.
- * @param input.sourceTokenAccount - The source wallet's token account for the mint.
- * @param input.sourceTokenAccount.tokenAccount - Its address.
- * @param input.sourceTokenAccount.exists - Whether it exists; a missing one is created by setup.
+ * @param input.sourceTokenAccount - The source wallet's associated token account for the mint;
+ *   setup creates it when the unsaved branch finds it missing.
  * @param input.subscriptionAuthorityAddress - The source wallet's subscription authority.
  * @param input.owner - The source wallet's address.
  * @param input.mint - The plan's mint.

@@ -1,4 +1,4 @@
-import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -15,6 +15,7 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
+import { readMintFacts } from "@/services/mint-facts";
 
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
@@ -67,17 +68,6 @@ export function withIssuedTokenLabels<T extends { mint: string; token: string }>
     const issuedLabel = issuedTokenLabel(balance.mint, tokenLabelsByMint);
     return issuedLabel ? { ...balance, token: issuedLabel } : balance;
   });
-}
-
-export async function resolveMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number> {
-  const response = await rpc.getTokenSupply(mint, { commitment: "confirmed" }).send();
-  const decimals = response.value.decimals;
-
-  if (typeof decimals !== "number" || !Number.isInteger(decimals) || decimals < 0) {
-    throw badRequest("Token mint decimals could not be resolved");
-  }
-
-  return decimals;
 }
 
 function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
@@ -184,19 +174,15 @@ export async function getSplTokenAccountAddresses(
   return addresses;
 }
 
-function assertSupportedTokenProgram(program: string): Address {
-  if (program === SPL_TOKEN_PROGRAM_ID || program === SPL_TOKEN_2022_PROGRAM_ID) {
-    return address(program);
-  }
-  throw badRequest("Unsupported token program for mint");
-}
-
-export async function resolveMintTokenProgram(rpc: SolanaRpc, mint: Address): Promise<Address> {
-  const mintAccountInfo = await getAccountInfo(rpc, mint);
-  if (!mintAccountInfo) {
-    throw badRequest("Token mint account does not exist");
-  }
-  return assertSupportedTokenProgram(mintAccountInfo.owner);
+/**
+ * The token program that owns a mint, from its cached facts (`readMintFacts`).
+ *
+ * @param mint - The mint.
+ * @returns The mint's token program.
+ * @throws AppError BAD_REQUEST when the mint is missing, not a mint, or owned by another program.
+ */
+export async function resolveMintTokenProgram(mint: Address): Promise<Address> {
+  return (await readMintFacts(mint)).tokenProgram;
 }
 
 export async function resolveSourceTokenAccount(
@@ -212,29 +198,6 @@ export async function resolveSourceTokenAccount(
   }
 
   return selected;
-}
-
-export async function resolveSourceTokenAccountOrAta(
-  rpc: SolanaRpc,
-  owner: Address,
-  mint: Address,
-  tokenProgram: Address
-): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
-  const [tokenAccount] = await findAssociatedTokenPda({
-    owner,
-    tokenProgram,
-    mint,
-  });
-  const [tokenAccountInfo, decimals] = await Promise.all([
-    getAccountInfo(rpc, tokenAccount),
-    resolveMintDecimals(rpc, mint),
-  ]);
-
-  return {
-    tokenAccount,
-    decimals,
-    exists: tokenAccountInfo !== null,
-  };
 }
 
 /**
@@ -254,8 +217,7 @@ export async function buildSplTransferInstructions(
     source?: SplTransferSource;
   }
 ) {
-  const tokenProgram =
-    input.source?.tokenProgram ?? (await resolveMintTokenProgram(rpc, input.mint));
+  const tokenProgram = input.source?.tokenProgram ?? (await resolveMintTokenProgram(input.mint));
   const sourceTokenAccount =
     input.source ??
     (await resolveSourceTokenAccount(rpc, input.authority.address, input.mint, tokenProgram));

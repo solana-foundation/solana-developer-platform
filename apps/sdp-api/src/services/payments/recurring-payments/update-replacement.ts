@@ -5,6 +5,7 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import { RECURRING_PAYMENT_UPDATE_TRANSITION } from "@sdp/types/payments";
 import type { Address, MaybeEncodedAccount, Signature } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { getDb } from "@/db/client";
 import type {
   PaymentRecurringPaymentRow,
@@ -22,11 +23,8 @@ import {
 } from "@/db/repositories/repository-factory";
 import { badRequest, conflict, notFound, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import {
-  resolveMintTokenProgram,
-  resolveSourceTokenAccountOrAta,
-} from "@/routes/payments/token-accounts";
 import { describeError, logEvent } from "@/runtime/money-path-events";
+import { readMintFacts } from "@/services/mint-facts";
 import { parseU64String } from "@/services/payment-operation.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { SponsoredSendRefusedError } from "@/services/sponsorship-submission";
@@ -360,9 +358,9 @@ export async function runReplacementUpdate(input: {
 
     const owner = assertValidAddress(input.resolved.sourceWallet.publicKey, "sourceAddress");
     const mint = assertValidAddress(input.resolved.token, "token");
-    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
-    const amountBaseUnits = parseDecimalAmount(input.resolved.amount, sourceTokenAccount.decimals);
+    const { tokenProgram, decimals } = await readMintFacts(mint);
+    const [sourceTokenAccount] = await findAssociatedTokenPda({ owner, tokenProgram, mint });
+    const amountBaseUnits = parseDecimalAmount(input.resolved.amount, decimals);
     if (amountBaseUnits <= 0n) {
       throw badRequest("Subscription amount must be greater than zero");
     }
@@ -503,7 +501,7 @@ export async function runReplacementUpdate(input: {
         subscriptionId: subscription.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        subscriberTokenAccount: sourceTokenAccount.tokenAccount,
+        subscriberTokenAccount: sourceTokenAccount,
         subscriptionPda,
         subscriptionAuthorityAddress,
         updatedAt: new Date().toISOString(),

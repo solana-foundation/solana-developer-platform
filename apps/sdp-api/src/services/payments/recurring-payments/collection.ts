@@ -79,14 +79,11 @@ import {
 } from "@/lib/errors";
 import type { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
-import {
-  resolveMintDecimals,
-  resolveMintTokenProgram,
-  resolveSourceTokenAccountOrAta,
-} from "@/routes/payments/token-accounts";
+import { resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
+import { type MintFacts, readMintFacts } from "@/services/mint-facts";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -396,16 +393,52 @@ async function resolveDestinationTokenAccount(input: {
   destinationAddress: string;
   token: string;
 }): Promise<Address> {
-  const rpc = createClusterRpc();
   const destinationOwner = assertValidAddress(input.destinationAddress, "destinationAddress");
   const mint = assertValidAddress(input.token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+  const tokenProgram = await resolveMintTokenProgram(mint);
   const [receiverAta] = await findAssociatedTokenPda({
     owner: destinationOwner,
     tokenProgram,
     mint,
   });
   return receiverAta;
+}
+
+/**
+ * The extra accounts a pull of the mint carries for its transfer hook, read live, since the hook
+ * authority can change them; none for a mint without the extension, which reads nothing. The SDK
+ * resolver reads the mint again for any Token-2022 mint, so it is called only for a hook.
+ *
+ * @param input - The pull's mint and accounts.
+ * @param input.rpc - The cluster RPC the hook's accounts are read from.
+ * @param input.mintFacts - The mint's facts, which say whether it has a hook.
+ * @param input.mint - The mint.
+ * @param input.amount - The pull's amount, in base units.
+ * @param input.authority - The source wallet's subscription authority, which signs the transfer.
+ * @param input.source - The token account the pull debits.
+ * @param input.destination - The token account the pull pays.
+ * @returns The hook's accounts, in the order the pull appends them.
+ */
+async function resolveCollectionTransferHookAccounts(input: {
+  rpc: SolanaRpc;
+  mintFacts: MintFacts;
+  mint: Address;
+  amount: bigint;
+  authority: Address;
+  source: Address;
+  destination: Address;
+}): Promise<subscriptionsProgram.TransferHookAccount[]> {
+  if (!input.mintFacts.hasTransferHook) {
+    return [];
+  }
+  return subscriptionsProgram.resolveTransferHookAccounts(input.rpc, {
+    amount: input.amount,
+    authority: input.authority,
+    destination: input.destination,
+    mint: input.mint,
+    source: input.source,
+    tokenProgram: input.mintFacts.tokenProgram,
+  });
 }
 
 /**
@@ -435,7 +468,6 @@ function subscriptionsInstructionFromRpc(parsed: ParsedInstruction): Instruction
 }
 
 async function matchesRecurringTransferInstruction(input: {
-  rpc: SolanaRpc;
   instruction: Instruction;
   amountBaseUnits: bigint;
   sourceAddress: string;
@@ -447,6 +479,7 @@ async function matchesRecurringTransferInstruction(input: {
   token: string;
   tokenProgram: string;
   eventAuthority: string;
+  transferHookAccounts: readonly subscriptionsProgram.TransferHookAccount[];
 }): Promise<boolean> {
   const { instruction } = input;
   if (
@@ -462,18 +495,10 @@ async function matchesRecurringTransferInstruction(input: {
 
   try {
     const parsed = subscriptionsProgram.parseTransferSubscriptionInstruction(instruction);
-    const transferHookAccounts = await subscriptionsProgram.resolveTransferHookAccounts(input.rpc, {
-      amount: input.amountBaseUnits,
-      authority: assertValidAddress(input.subscriptionAuthorityAddress, "subscriptionAuthority"),
-      destination: assertValidAddress(input.destinationTokenAccount, "destinationTokenAccount"),
-      mint: assertValidAddress(input.token, "token"),
-      source: assertValidAddress(input.subscriberTokenAccount, "subscriberTokenAccount"),
-      tokenProgram: assertValidAddress(input.tokenProgram, "tokenProgram"),
-    });
     const trailingAccounts = instruction.accounts.slice(10);
     const hookAccountsMatch =
-      trailingAccounts.length === transferHookAccounts.length &&
-      transferHookAccounts.every((account, index) => {
+      trailingAccounts.length === input.transferHookAccounts.length &&
+      input.transferHookAccounts.every((account, index) => {
         const trailingAccount = trailingAccounts[index];
         return trailingAccount !== undefined && trailingAccount.address === account.address;
       });
@@ -510,6 +535,8 @@ async function matchesRecurringTransferInstruction(input: {
  * @param input.signature - The pull's signature.
  * @param input.dueAt - The period the pull collects.
  * @param input.destinationTokenAccount - The token account the pull pays.
+ * @param input.sentTransferHookAccounts - The hook accounts the send just built into the pull, or
+ *   null for a recovery, which resolves them again once the transaction is found.
  * @returns What the chain shows of the signature; an instruction mismatch is logged.
  * @throws AppError CONFLICT when the stored evidence does not match the due payment.
  */
@@ -521,6 +548,7 @@ async function verifyRecurringPaymentCollection(input: {
   signature: Signature;
   dueAt: string;
   destinationTokenAccount: Address;
+  sentTransferHookAccounts: subscriptionsProgram.TransferHookAccount[] | null;
 }): Promise<RecurringPaymentCollectionVerification> {
   const logProofMismatch = (
     reason:
@@ -588,11 +616,8 @@ async function verifyRecurringPaymentCollection(input: {
 
   const rpc = createClusterRpc();
   const mint = assertValidAddress(input.recurringPayment.token, "token");
-  const [tokenProgram, decimals] = await Promise.all([
-    resolveMintTokenProgram(rpc, mint),
-    resolveMintDecimals(rpc, mint),
-  ]);
-  const amountBaseUnits = parseDecimalAmount(input.recurringPayment.amount, decimals);
+  const mintFacts = await readMintFacts(mint);
+  const amountBaseUnits = parseDecimalAmount(input.recurringPayment.amount, mintFacts.decimals);
   const confirmedTransaction = await getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {
     return { kind: "not_indexed" };
@@ -601,6 +626,18 @@ async function verifyRecurringPaymentCollection(input: {
     return { kind: "failed_on_chain" };
   }
   const [eventAuthority] = await subscriptionsProgram.findEventAuthorityPda();
+  const transferHookAccounts =
+    input.sentTransferHookAccounts === null
+      ? await resolveCollectionTransferHookAccounts({
+          rpc,
+          mintFacts,
+          mint,
+          amount: amountBaseUnits,
+          authority: assertValidAddress(subscriptionAuthorityAddress, "subscriptionAuthority"),
+          source: assertValidAddress(subscriberTokenAccount, "subscriberTokenAccount"),
+          destination: input.destinationTokenAccount,
+        })
+      : input.sentTransferHookAccounts;
 
   let hasExpectedInstruction = false;
   for (const parsedInstruction of confirmedTransaction.instructions) {
@@ -608,7 +645,6 @@ async function verifyRecurringPaymentCollection(input: {
     if (instruction === null) continue;
     if (
       await matchesRecurringTransferInstruction({
-        rpc,
         instruction,
         amountBaseUnits,
         sourceAddress: input.recurringPayment.source_address,
@@ -618,8 +654,9 @@ async function verifyRecurringPaymentCollection(input: {
         planPda,
         destinationTokenAccount: input.destinationTokenAccount,
         token: input.recurringPayment.token,
-        tokenProgram,
+        tokenProgram: mintFacts.tokenProgram,
         eventAuthority,
+        transferHookAccounts,
       })
     ) {
       hasExpectedInstruction = true;
@@ -1784,6 +1821,7 @@ async function finishLandedRecurringPaymentCollection(input: {
     signature: input.signature,
     dueAt: input.dueAt,
     destinationTokenAccount,
+    sentTransferHookAccounts: null,
   });
   if (verification.kind === "proven") {
     return finalizeRecurringPaymentCollection({
@@ -2110,17 +2148,14 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Resolved signing wallet does not match source wallet");
     }
 
-    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(
-      rpc,
-      sourceOwner,
+    const mintFacts = await readMintFacts(mint);
+    const { tokenProgram } = mintFacts;
+    const [sourceTokenAccount] = await findAssociatedTokenPda({
+      owner: sourceOwner,
+      tokenProgram,
       mint,
-      tokenProgram
-    );
-    const amountBaseUnits = parseDecimalAmount(
-      input.recurringPayment.amount,
-      sourceTokenAccount.decimals
-    );
+    });
+    const amountBaseUnits = parseDecimalAmount(input.recurringPayment.amount, mintFacts.decimals);
     if (amountBaseUnits <= 0n) {
       throw badRequest("Subscription amount must be greater than zero");
     }
@@ -2139,13 +2174,14 @@ export async function collectRecurringPayment(input: {
       tokenMint: mint,
       user: sourceOwner,
     });
-    const transferHookAccounts = await subscriptionsProgram.resolveTransferHookAccounts(rpc, {
+    const transferHookAccounts = await resolveCollectionTransferHookAccounts({
+      rpc,
+      mintFacts,
+      mint,
       amount: amountBaseUnits,
       authority: subscriptionAuthority,
+      source: sourceTokenAccount,
       destination: receiverAta,
-      mint,
-      source: sourceTokenAccount.tokenAccount,
-      tokenProgram,
     });
     const feePayment = createSponsorshipFeePayment(
       input.env,
@@ -2254,6 +2290,7 @@ export async function collectRecurringPayment(input: {
       signature,
       dueAt,
       destinationTokenAccount: receiverAta,
+      sentTransferHookAccounts: transferHookAccounts,
     });
     const proof = requireProvenCollection(verification);
 

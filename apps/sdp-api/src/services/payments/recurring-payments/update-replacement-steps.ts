@@ -497,7 +497,7 @@ export async function sendReplacementAuthorization(input: {
   phase: RecurringPaymentStepPhase;
   sourceWallet: RecurringPaymentSourceWallet;
   stepSigner: () => Promise<TransactionSigner>;
-  sourceTokenAccount: { tokenAccount: Address; exists: boolean };
+  sourceTokenAccount: Address;
   subscriptionAuthorityAddress: Address;
   subscriptionPda: Address;
   owner: Address;

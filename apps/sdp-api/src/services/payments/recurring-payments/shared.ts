@@ -71,10 +71,10 @@ import {
 import { assertMovementAdmitted, decidePrincipal } from "@/lib/money-admission";
 import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
+import { readMintFacts } from "@/services/mint-facts";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -152,11 +152,7 @@ export async function resolvePlanRuntime(
   plan: PaymentSubscriptionPlanRow
 ): Promise<{ amountBaseUnits: bigint; mint: Address; tokenProgram: Address }> {
   const mint = assertSubscriptionTokenMint(plan.token);
-  const rpc = createClusterRpc();
-  const [tokenProgram, decimals] = await Promise.all([
-    resolveMintTokenProgram(rpc, mint),
-    resolveMintDecimals(rpc, mint),
-  ]);
+  const { tokenProgram, decimals } = await readMintFacts(mint);
   const amountBaseUnits = parseDecimalAmount(plan.amount, decimals);
 
   if (amountBaseUnits <= 0n) {

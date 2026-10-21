@@ -16,6 +16,7 @@ import {
 } from "@sdp/types/payments";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { getDb } from "@/db/client";
 import {
   generateRecurringPaymentActivationAttemptId,
@@ -40,13 +41,10 @@ import {
 import { badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
-import {
-  resolveMintTokenProgram,
-  resolveSourceTokenAccountOrAta,
-} from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
+import { readMintFacts } from "@/services/mint-facts";
 import { parseU64String } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import {
@@ -791,7 +789,7 @@ async function settleActivationSubscription(input: {
   rpc: SolanaRpc;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
-  sourceTokenAccount: { tokenAccount: Address; exists: boolean };
+  sourceTokenAccount: Address;
   subscriptionAuthorityAddress: Address;
   subscriptionPda: Address;
   owner: Address;
@@ -1209,9 +1207,9 @@ export async function activateRecurringPayment(input: {
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");
     const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
     const mint = assertValidAddress(claimed.token, "token");
-    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
-    const amountBaseUnits = parseDecimalAmount(claimed.amount, sourceTokenAccount.decimals);
+    const { tokenProgram, decimals } = await readMintFacts(mint);
+    const [sourceTokenAccount] = await findAssociatedTokenPda({ owner, tokenProgram, mint });
+    const amountBaseUnits = parseDecimalAmount(claimed.amount, decimals);
 
     if (amountBaseUnits <= 0n) {
       throw badRequest("Subscription amount must be greater than zero");
@@ -1282,7 +1280,7 @@ export async function activateRecurringPayment(input: {
       attemptId: attempt.id,
       planId: plan.id,
       subscriberAddress: input.sourceWallet.publicKey,
-      subscriberTokenAccount: sourceTokenAccount.tokenAccount,
+      subscriberTokenAccount: sourceTokenAccount,
       subscriptionPda,
       subscriptionAuthorityAddress,
       createdBy: input.createdBy,
