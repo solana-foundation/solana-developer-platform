@@ -1,4 +1,8 @@
-import type { PaymentTransferSummary, RampCryptoDeposit } from "@sdp/types/payments";
+import type {
+  PaymentsDashboardWallet,
+  PaymentTransferSummary,
+  RampCryptoDeposit,
+} from "@sdp/types/payments";
 import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import type { SelectedRampPair } from "@/lib/ramps";
 
@@ -8,7 +12,7 @@ export interface OfframpFinalStepWizard {
   transferStatus: PaymentTransferSummary | undefined;
   depositTarget: RampCryptoDeposit | null;
   selectedRampPair: SelectedRampPair;
-  selectedWallet: { label: string | null } | null;
+  selectedWallet: Pick<PaymentsDashboardWallet, "label" | "publicKey"> | null;
   canSendOnchain: boolean;
   onchainSendLoading: boolean;
   onchainSendResult: PaymentTransferSummary | null;

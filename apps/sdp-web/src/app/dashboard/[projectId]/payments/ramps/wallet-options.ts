@@ -104,6 +104,13 @@ export function walletBalanceAssetOptions(
   return assetOptions;
 }
 
+/** How the wallet pickers name a wallet: its label, else its public key. */
+export function walletPickerLabel(
+  wallet: Pick<PaymentsDashboardWallet, "label" | "publicKey">
+): string {
+  return wallet.label ?? wallet.publicKey;
+}
+
 export function walletComboboxOptions(
   wallets: PaymentsDashboardWallet[],
   signingUnavailableLabel?: string,
@@ -114,7 +121,7 @@ export function walletComboboxOptions(
     const total = resolveTotalBalance(wallet.balances ?? []);
     return {
       value: wallet.id,
-      label: wallet.label ?? wallet.publicKey,
+      label: walletPickerLabel(wallet),
       description: total !== null ? formatCurrencyAmount(total) : undefined,
       ...(signingUnavailableLabel && restricted
         ? { badge: signingUnavailableLabel, badgeVariant: "warning" as const }

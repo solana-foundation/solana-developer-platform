@@ -21,6 +21,7 @@ import { OfframpFooterActionButton, OfframpOutcome } from "./offramp-final-step"
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const DEPOSIT_ADDRESS = "2HWz9YwbM56YK1EazmmxFivwRs4n8KND7c1p8eYxS2Ao";
+const SOURCE_ADDRESS = "9TQRYrmLSBMu7w8Lncin22YcQTw2fFB4AU2xyp5XJcnP";
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -50,7 +51,7 @@ function finalStep(overrides: Partial<OfframpFinalStepWizard>): OfframpFinalStep
     transferStatus: sale({}),
     depositTarget: { destinationAddress: DEPOSIT_ADDRESS, amount: "25" },
     selectedRampPair: { fiatCurrency: "USD", assetRail: "usdc.solana" },
-    selectedWallet: { label: "Treasury" },
+    selectedWallet: { label: "Treasury", publicKey: SOURCE_ADDRESS },
     canSendOnchain: true,
     onchainSendLoading: false,
     onchainSendResult: null,
@@ -95,6 +96,18 @@ describe("off-ramp final step", () => {
     if (!confirm) throw new Error("Expected the dialog's send button");
     await userEvent.click(confirm);
     expect(wizard.sendCryptoToDeposit).toHaveBeenCalledTimes(1);
+  });
+
+  it("names an unlabeled wallet by its public key, as the picker does", async () => {
+    const wizard = finalStep({ selectedWallet: { label: null, publicKey: SOURCE_ADDRESS } });
+    const action = offrampFooterAction(wizard);
+    if (action === null) throw new Error("Expected a footer action");
+    render(<OfframpFooterActionButton action={action} wizard={wizard} />, { wrapper });
+
+    await userEvent.click(screen.getByRole("button", { name: /Send 25 USDC/ }));
+
+    expect(screen.getByText("From")).toBeTruthy();
+    expect(screen.getByText(SOURCE_ADDRESS)).toBeTruthy();
   });
 
   it("confirms a deposit with every digit the provider asked for", async () => {
