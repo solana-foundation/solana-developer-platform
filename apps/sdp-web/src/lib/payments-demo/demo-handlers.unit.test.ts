@@ -454,6 +454,7 @@ describe("requests", () => {
     expect(request({ walletId: "demo_cwlt_nobody" })?.status).toBe(404);
     expect(request({ expiresAt: "2026-09-01T00:00:00.000Z" })?.status).toBe(400);
     expect(request({ expiresAt: "not a date" })?.status).toBe(400);
+    expect(request({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(400);
     expect(ops).toEqual([]);
   });
 
