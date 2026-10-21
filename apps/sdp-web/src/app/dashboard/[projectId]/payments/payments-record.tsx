@@ -54,27 +54,19 @@ export function RecordStateBand({
   );
 }
 
-/**
- * The record's amount: a 13px label 7px over the 40px figure; `muted` when nothing moved.
- * `labelAccessory` sits after the label, for a caveat about the figure.
- */
+/** The record's amount: a 13px label 7px over the 40px figure; `muted` when nothing moved. */
 export function RecordAmount({
   label,
-  labelAccessory,
   muted = false,
   children,
 }: {
   label: string;
-  labelAccessory?: ReactNode;
   muted?: boolean;
   children: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1.75">
-      <span className="flex items-center gap-1 text-meta text-secondary">
-        {label}
-        {labelAccessory}
-      </span>
+      <span className="text-meta text-secondary">{label}</span>
       <p
         className={cn(
           "min-w-0 break-words text-amount font-medium tabular-nums",

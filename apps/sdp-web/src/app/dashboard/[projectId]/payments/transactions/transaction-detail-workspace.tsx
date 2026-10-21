@@ -619,7 +619,6 @@ function TransactionRecord({
         ) : null}
         <RecordAmount
           label={t("DashboardPayments.transactions.amount")}
-          labelAccessory={summary.unverifiedToken ? <UnverifiedMintWarning /> : undefined}
           muted={summary.amount === null}
         >
           {summary.amount ?? t("DashboardPayments.transactionDetail.notRecorded")}
