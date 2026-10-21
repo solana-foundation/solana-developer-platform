@@ -27,21 +27,26 @@ describe("Payments write requests", () => {
     token: address("So11111111111111111111111111111111111111112"),
     amount: "1",
   };
+  const recordedTransfer = {
+    id: "trf_1",
+    custodyWalletId: "cwlt_1",
+    status: "pending",
+    signature: null,
+  };
+  const recordedBatch = {
+    id: "batch_1",
+    sourceCustodyWalletId: "cwlt_1",
+    status: "pending",
+    recipientCount: 0,
+    transactionCount: 0,
+  };
 
   it("sends the exact custody wallet id, the tab's Project, and the caller's key or one per action", async () => {
-    const fetch = vi.fn().mockImplementation(async () =>
-      jsonResponse({
-        data: {
-          transfer: {
-            id: "trf_1",
-            custodyWalletId: "cwlt_1",
-            rampsMemo: {},
-            status: "pending",
-            signature: null,
-          },
-        },
-      })
-    );
+    const fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        jsonResponse({ data: { transfer: { ...recordedTransfer, rampsMemo: {} } } })
+      );
     vi.stubGlobal("fetch", fetch);
 
     await createTransfer({ ...transferInput, transferId: "xfr_1" }, t, {
@@ -68,12 +73,7 @@ describe("Payments write requests", () => {
   });
 
   it("accepts a recorded transfer without comparing its source or requiring ramps memo metadata", async () => {
-    const transfer = {
-      id: "trf_1",
-      custodyWalletId: "cwlt_echo",
-      status: "pending",
-      signature: null,
-    };
+    const transfer = { ...recordedTransfer, custodyWalletId: "cwlt_echo" };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ data: { transfer } })));
 
     expect(
@@ -87,7 +87,7 @@ describe("Payments write requests", () => {
       vi.fn().mockResolvedValue(
         jsonResponse({
           data: {
-            transfer: { id: "trf_1", custodyWalletId: "cwlt_1", status: 42, signature: null },
+            transfer: { ...recordedTransfer, status: 42 },
           },
         })
       )
@@ -141,20 +141,13 @@ describe("Payments write requests", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
-            batch: {
-              id: "batch_1",
-              sourceCustodyWalletId: "cwlt_batch_echo",
-              status: "pending",
-              recipientCount: 0,
-              transactionCount: 0,
-            },
+            batch: { ...recordedBatch, sourceCustodyWalletId: "cwlt_batch_echo" },
             recipients: [],
             transfers: [
               {
+                ...recordedTransfer,
                 id: "trf_chunk",
                 custodyWalletId: "cwlt_chunk_echo",
-                status: "pending",
-                signature: null,
               },
             ],
           },
@@ -190,8 +183,7 @@ describe("Payments write requests", () => {
         jsonResponse({
           data: {
             batch: {
-              id: "batch_1",
-              sourceCustodyWalletId: "cwlt_1",
+              ...recordedBatch,
               status: "confirmed",
               recipientCount: 1,
               transactionCount: 1,
@@ -208,8 +200,8 @@ describe("Payments write requests", () => {
             ],
             transfers: [
               {
+                ...recordedTransfer,
                 id: "trf_chunk",
-                custodyWalletId: "cwlt_1",
                 status: "confirmed",
                 signature: "sig_1",
               },

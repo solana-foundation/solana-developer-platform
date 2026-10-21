@@ -405,33 +405,6 @@ describe("ramp pay-ins and cancels", () => {
 });
 
 describe("transfers and batches", () => {
-  it("returns the created transfer with custody identity and no provider wallet field", () => {
-    const result = write("POST", "/v1/payments/transfers", {
-      sourceCustodyWalletId: TREASURY,
-      destination: ADDRESS,
-      token: USDC,
-      amount: "1",
-    });
-    expect(result?.status).toBe(201);
-    expect(result?.body).toHaveProperty("data.transfer.custodyWalletId", TREASURY);
-    expect(result?.body).not.toHaveProperty("data.transfer.providerWalletId");
-  });
-
-  it("returns the created batch and chunks without provider wallet fields", () => {
-    const result = write("POST", "/v1/payments/transfer-batches", {
-      sourceCustodyWalletId: TREASURY,
-      token: USDC,
-      recipients: [
-        { counterpartyId: "demo_cpty_jane", counterpartyAccountId: "demo_cpa_jane", amount: "1" },
-      ],
-    });
-    expect(result?.status).toBe(201);
-    expect(result?.body).toHaveProperty("data.batch.sourceCustodyWalletId", TREASURY);
-    expect(result?.body).not.toHaveProperty("data.batch.sourceProviderWalletId");
-    expect(result?.body).toHaveProperty("data.transfers.0.custodyWalletId", TREASURY);
-    expect(result?.body).not.toHaveProperty("data.transfers.0.providerWalletId");
-  });
-
   const exactWalletWrites = [
     {
       path: "payments/transfers",

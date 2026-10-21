@@ -60,18 +60,14 @@ describe("sendTransferUnderKey", () => {
   });
 
   it.each([
-    {
-      label: "missing transfer fields",
-      response: () =>
-        Response.json({ data: { transfer: { id: "xfr_1", custodyWalletId: "cwlt_1" } } }),
-    },
-    {
-      label: "invalid JSON",
-      response: () => new Response("{", { status: 200 }),
-    },
-    {
-      label: "an unreadable body",
-      response: () =>
+    [
+      "missing transfer fields",
+      () => Response.json({ data: { transfer: { id: "xfr_1", custodyWalletId: "cwlt_1" } } }),
+    ],
+    ["invalid JSON", () => new Response("{", { status: 200 })],
+    [
+      "an unreadable body",
+      () =>
         new Response(
           new ReadableStream({
             start(controller) {
@@ -80,8 +76,8 @@ describe("sendTransferUnderKey", () => {
           }),
           { status: 200 }
         ),
-    },
-  ])("keeps the key for $label and reuses it for the corrected retry", async ({ response }) => {
+    ],
+  ])("keeps the key for '%s' and reuses it for the corrected retry", async (_label, response) => {
     const fetchMock = vi
       .fn<typeof fetch>(async () => Response.json({ data: { transfer: RECORDED_TRANSFER } }))
       .mockResolvedValueOnce(response());

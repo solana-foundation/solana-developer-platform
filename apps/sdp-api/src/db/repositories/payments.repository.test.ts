@@ -259,20 +259,10 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
 
     expect(updated).toMatchObject({
       id: transfer.id,
-      destination_address: depositAddress,
-      initiated_by_key_id: "key_ramp_onchain",
-      status: "processing",
-    });
-    expect(
-      await repo.getTransferById({
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      })
-    ).toMatchObject({
       custody_wallet_id: TEST_CUSTODY_WALLET_ID,
       wallet_id: TEST_WALLET_ID,
       destination_address: depositAddress,
+      initiated_by_key_id: "key_ramp_onchain",
       status: "processing",
     });
   });

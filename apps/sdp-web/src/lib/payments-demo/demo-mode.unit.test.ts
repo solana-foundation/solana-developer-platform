@@ -300,6 +300,8 @@ describe("pay", () => {
       amount: "250.00",
     });
     expect(sent.status).toBe(201);
+    expect(sent.body).toHaveProperty("data.transfer.custodyWalletId", "demo_cwlt_treasury");
+    expect(sent.body).not.toHaveProperty("data.transfer.providerWalletId");
     expect(sent.body.data.transfer.status).toBe("finalized");
     expect(sent.body.data.transfer.signature).toBeTruthy();
 
@@ -342,6 +344,10 @@ describe("pay", () => {
       recipients,
     });
     expect(batch.status).toBe(201);
+    expect(batch.body).toHaveProperty("data.batch.sourceCustodyWalletId", "demo_cwlt_payroll");
+    expect(batch.body).not.toHaveProperty("data.batch.sourceProviderWalletId");
+    expect(batch.body).toHaveProperty("data.transfers.0.custodyWalletId", "demo_cwlt_payroll");
+    expect(batch.body).not.toHaveProperty("data.transfers.0.providerWalletId");
     expect(batch.body.data.batch.status).toBe("confirmed");
     expect(batch.body.data.recipients).toHaveLength(2);
     expect(batch.body.data.transfers).toHaveLength(1);
