@@ -65,9 +65,9 @@ export function testSignature(seed: number): Signature {
 }
 
 /**
- * The chain a resumed recurring step reads at `confirmed`: the tip `getEpochInfo` reports, and
- * the plan or delegation at each address SDP recorded as one (an address it never recorded
- * does not exist).
+ * The chain a resumed recurring step reads at `confirmed`: the tip `getEpochInfo` reports, the
+ * plan or delegation at each address SDP recorded as one, and any other account at an address it
+ * never recorded.
  */
 export interface RecurringChainView {
   absoluteSlot: number;
@@ -75,17 +75,21 @@ export interface RecurringChainView {
   plan: (planPda: string) => StubPlan | null;
   /** A delegation's `expiresAtTs`, or null when it does not exist. */
   delegation: (subscriptionPda: string) => bigint | null;
+  /** The account at an address recorded as neither, or null when it does not exist. */
+  unrecorded: (accountAddress: string) => StubEncodedAccount | null;
 }
 
 /**
- * Every recorded plan on chain as the fixtures create it, and every recorded delegation
- * canceled, as the codama fetch stubs answer; the tip is below the default blockhash's expiry.
+ * Every recorded plan on chain as the fixtures create it, every recorded delegation canceled, as
+ * the codama fetch stubs answer, and no other account; the tip is below the default blockhash's
+ * expiry.
  */
 export const DEFAULT_RECURRING_CHAIN: RecurringChainView = {
   absoluteSlot: 1_250,
   blockHeight: 940,
   plan: () => ({ createdAt: 1_770_000_000n, metadataUri: "" }),
   delegation: () => 1_800_000_000n,
+  unrecorded: () => null,
 };
 
 /**
@@ -134,7 +138,7 @@ async function recurringChainAccount(
       return expiresAtTs === null ? null : subscriptionDelegationAccount(expiresAtTs);
     }
     case null:
-      return null;
+      return view.unrecorded(address);
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unexpected subscription account kind ${exhaustive}`);

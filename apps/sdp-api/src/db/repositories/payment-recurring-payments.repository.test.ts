@@ -358,7 +358,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       .first<SavedActivationSlots>();
   }
 
-  it("clears a step's signature and expiry only while its slot still holds that signature and every later slot is empty", async () => {
+  it("clears a step's signature only while its slot still holds that signature and every later slot is empty, keeping the expiry until the last saved slot clears", async () => {
     const attempt = await createUnsignedActivationAttempt("prpa_repo_clear_signature");
     const sibling = await createUnsignedActivationAttempt("prpa_repo_clear_signature_sibling");
     await fillActivationSlots(attempt.id, {
@@ -436,7 +436,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     expect(await savedActivationSlots(attempt.id)).toEqual({
       plan_creation_signature: testSignature(1),
       authorization_setup_signature: null,
-      last_valid_block_height: null,
+      last_valid_block_height: "301",
     });
     expect(
       await clear({

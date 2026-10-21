@@ -29,6 +29,7 @@ import {
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   AssociatedTokenInstruction,
@@ -108,7 +109,11 @@ import {
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
-import { planAccount } from "@/test/helpers/subscription-accounts";
+import {
+  planAccount,
+  subscriptionAuthorityAccount,
+  tokenAccount,
+} from "@/test/helpers/subscription-accounts";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
@@ -7462,6 +7467,157 @@ describe("Payments routes — recurring", () => {
         });
       });
 
+      /**
+       * Shows `view` with the source wallet's subscription authority on chain beside its token
+       * account approving no delegate, so a saved setup never reads as landed.
+       */
+      async function showSetupApprovalRevoked(view: RecurringChainView) {
+        const owner = recurringExecution.sourceSigner().address;
+        const mint = address(DEVNET_USDC_MINT);
+        const [authority] = await subscriptionsProgram.findSubscriptionAuthorityPda({
+          tokenMint: mint,
+          user: owner,
+        });
+        const [sourceAta] = await findAssociatedTokenPda({
+          owner,
+          tokenProgram: TOKEN_PROGRAM_ADDRESS,
+          mint,
+        });
+        recurringExecution.showChain({
+          ...view,
+          unrecorded: (accountAddress) => {
+            if (accountAddress === authority) {
+              return subscriptionAuthorityAccount({ user: owner, tokenMint: mint });
+            }
+            if (accountAddress === sourceAta) {
+              return tokenAccount({
+                programAddress: TOKEN_PROGRAM_ADDRESS,
+                mint,
+                owner,
+                delegate: null,
+              });
+            }
+            return null;
+          },
+        });
+      }
+
+      /**
+       * Leaves an amount change crashed after its plan landed, with its setup saved and no expiry
+       * beside it: the row a cleared subscribe left before the clear kept an earlier slot's expiry.
+       */
+      async function leaveReplacementSetupSavedWithoutExpiry(input: {
+        recurringPaymentId: string;
+        oldSubscriptionPda: string;
+      }) {
+        rejectPoolSendAfter(1, new Error("RPC response lost"));
+        delegationsBesideActiveOld(input.oldSubscriptionPda, null, DEFAULT_RECURRING_CHAIN);
+        const key = crypto.randomUUID();
+        const update = () =>
+          app.request(
+            actionPath(input.recurringPaymentId),
+            { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount: "35.00" }) },
+            env
+          );
+        expect((await update()).status).toBe(409);
+        await leaveUpdateCrashedAt(input.recurringPaymentId, key);
+        const seeded = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_update_attempts
+                SET authorization_setup_signature = ?, authorization_signature = NULL,
+                    last_valid_block_height = NULL
+              WHERE recurring_payment_id = ? AND status = 'processing'`
+          )
+          .bind(testSignature(8), input.recurringPaymentId)
+          .run();
+        expect(seeded).toBe(1);
+        return update;
+      }
+
+      it("finishes a resumed replacement whose setup reads pending with no expiry through the old cancel once the new delegation shows", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const update = await leaveReplacementSetupSavedWithoutExpiry({
+          recurringPaymentId: activated.id,
+          oldSubscriptionPda: required(activated.subscriptionPda),
+        });
+        await showSetupApprovalRevoked({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
+        const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+        onTestFinished(() => warnLog.mockRestore());
+        const sent = sends();
+
+        const retry = await update();
+
+        expect(retry.status).toBe(200);
+        expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+          status: "active",
+          amount: "35.00",
+          authorizationSignature: null,
+        });
+        expect(sent).toHaveBeenCalledTimes(1);
+        expect(required(sent.mock.calls[0])[0].slot).toEqual({
+          row: "update_attempt",
+          column: "old_cancel_signature",
+        });
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          authorization_signature: null,
+          old_cancel_signature: poolSentSignatures()[4],
+        });
+        const newSubscription = required(
+          await getDb(env)
+            .prepare(
+              `SELECT s.subscription_pda FROM payment_subscriptions s
+                 JOIN payment_recurring_payment_update_attempts a ON a.new_subscription_id = s.id
+                WHERE a.recurring_payment_id = ?`
+            )
+            .bind(activated.id)
+            .first<{ subscription_pda: string | null }>()
+        );
+        const landed = warnLog.mock.calls.filter(([payload]) => {
+          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+          return (
+            parsed.success &&
+            parsed.data.event === "sdp_api_recurring_payment_unwind_found_step_landed"
+          );
+        });
+        expect(landed).toHaveLength(1);
+        expect(required(landed[0])[0]).toEqual(
+          expect.objectContaining({
+            recurring_payment_id: activated.id,
+            step: "authorize_subscription",
+            subscription_pda: required(newSubscription.subscription_pda),
+          })
+        );
+      });
+
+      it("keeps a resumed replacement whose setup reads pending with no expiry in flight while no new delegation shows", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const oldSubscriptionPda = required(activated.subscriptionPda);
+        const update = await leaveReplacementSetupSavedWithoutExpiry({
+          recurringPaymentId: activated.id,
+          oldSubscriptionPda,
+        });
+        await showSetupApprovalRevoked({
+          ...DEFAULT_RECURRING_CHAIN,
+          delegation: (subscriptionPda) => (subscriptionPda === oldSubscriptionPda ? 0n : null),
+        });
+        const sent = sends();
+
+        const retry = await update();
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyUpdateAttempt(activated.id)).toMatchObject({
+          status: "processing",
+          stage: "authorize_subscription",
+          authorization_setup_signature: testSignature(8),
+          authorization_signature: null,
+        });
+        expect((await recurringPaymentDueAt(activated.id)).status).toBe("updating");
+      });
+
       it("keeps a resumed replacement in flight when it fails before reading its saved authorization", async () => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         rejectPoolSendAfter(1, new Error("RPC response lost"));
@@ -8050,6 +8206,90 @@ describe("Payments routes — recurring", () => {
         });
         expect((await recurringPaymentDueAt(created.id)).status).toBe("pending_activation");
         expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+      });
+
+      /**
+       * Leaves an activation crashed after its plan landed, with its setup saved and no expiry
+       * beside it: the row a cleared subscribe left before the clear kept an earlier slot's expiry.
+       */
+      async function leaveSetupSavedWithoutExpiry() {
+        const { created, planSignature } = await leaveSubscribeInFlight();
+        const seeded = await getDb(env)
+          .prepare(
+            `UPDATE payment_recurring_payment_activation_attempts
+                SET authorization_setup_signature = ?, authorization_signature = NULL,
+                    last_valid_block_height = NULL
+              WHERE recurring_payment_id = ? AND status = 'processing'`
+          )
+          .bind(testSignature(8), created.id)
+          .run();
+        expect(seeded).toBe(1);
+        return { created, planSignature };
+      }
+
+      it("finishes a resumed activation whose setup reads pending with no expiry once the delegation shows, sending nothing", async () => {
+        const { created, planSignature } = await leaveSetupSavedWithoutExpiry();
+        await showSetupApprovalRevoked({ ...DEFAULT_RECURRING_CHAIN, delegation: () => 0n });
+        const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+        onTestFinished(() => warnLog.mockRestore());
+        const sent = sends();
+
+        const retry = await activate(created.id, crypto.randomUUID());
+
+        expect(retry.status).toBe(200);
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyActivationAttempt(created.id)).toMatchObject({
+          status: "confirmed",
+          stage: "finalize",
+          authorization_signature: null,
+        });
+        expect(await scheduleSignatures(created.id)).toEqual({
+          status: "active",
+          plan_creation_signature: planSignature,
+          authorization_signature: null,
+        });
+        const recorded = required(
+          await getDb(env)
+            .prepare("SELECT subscription_pda FROM payment_recurring_payments WHERE id = ?")
+            .bind(created.id)
+            .first<{ subscription_pda: string | null }>()
+        );
+        const landed = warnLog.mock.calls.filter(([payload]) => {
+          const parsed = recurringPaymentLogEventSchema.safeParse(payload);
+          return (
+            parsed.success &&
+            parsed.data.event === "sdp_api_recurring_payment_unwind_found_step_landed"
+          );
+        });
+        expect(landed).toHaveLength(1);
+        expect(required(landed[0])[0]).toEqual(
+          expect.objectContaining({
+            recurring_payment_id: created.id,
+            step: "authorize_subscription",
+            subscription_pda: required(recorded.subscription_pda),
+          })
+        );
+      });
+
+      it("keeps a resumed activation whose setup reads pending with no expiry in flight while no delegation shows", async () => {
+        const { created, planSignature } = await leaveSetupSavedWithoutExpiry();
+        await showSetupApprovalRevoked({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
+        const sent = sends();
+
+        const retry = await activate(created.id, crypto.randomUUID());
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("CONFLICT");
+        expect(sent).not.toHaveBeenCalled();
+        expect(await onlyActivationAttempt(created.id)).toEqual({
+          status: "processing",
+          stage: "authorize_subscription",
+          plan_creation_signature: planSignature,
+          authorization_setup_signature: testSignature(8),
+          authorization_signature: null,
+          last_valid_block_height: null,
+        });
+        expect((await recurringPaymentDueAt(created.id)).status).toBe("activating");
       });
 
       it("finishes an activation whose subscribe is refused as already subscribed once the chain shows the delegation", async () => {
