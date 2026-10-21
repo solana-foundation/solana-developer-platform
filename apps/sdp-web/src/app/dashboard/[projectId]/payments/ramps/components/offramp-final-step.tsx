@@ -13,6 +13,7 @@ import type {
   OfframpFinalStepWizard,
   OfframpFooterAction,
 } from "@/app/dashboard/[projectId]/payments/ramps/offramp-footer-action";
+import { walletPickerLabel } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { transactionHref } from "@/lib/payments-routes";
 import { getRampProviderLabel } from "@/lib/ramps";
@@ -154,7 +155,7 @@ export function OfframpFooterActionButton({
             provider={wizard.transferStatus?.provider}
             depositTarget={action.depositTarget}
             token={token}
-            walletLabel={wizard.selectedWallet?.label ?? null}
+            walletLabel={wizard.selectedWallet ? walletPickerLabel(wizard.selectedWallet) : null}
             onClose={() => setConfirming(false)}
             onSend={() => {
               setConfirming(false);
