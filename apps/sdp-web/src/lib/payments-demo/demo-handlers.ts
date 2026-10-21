@@ -730,7 +730,7 @@ function createBatch({ body, world, now }: WriteContext): DemoWriteResult {
 
 // ─── Requests ────────────────────────────────────────────────────────────────
 
-const requestSchema = z.object({
+const requestSchema = z.strictObject({
   walletId: z.string().min(1),
   token: z.string().min(1),
   amount: amountSchema,
