@@ -4,12 +4,12 @@
  * Shared data access for API key operations.
  */
 
+// biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
 import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
-// biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashApiKey } from "@/lib/api-key-hash";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
