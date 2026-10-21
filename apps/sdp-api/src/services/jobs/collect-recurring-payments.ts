@@ -183,6 +183,27 @@ function shouldSkipCollectionError(error: Error): boolean {
   return error instanceof AppError && error.code === "CONFLICT";
 }
 
+/**
+ * Records a conflict the cron leaves for the next tick. A conflict is expected when a request holds
+ * the attempt, but a landed pull whose finalize keeps refusing would otherwise sit in-flight with no
+ * trace, so every skip names the row and the refusal.
+ *
+ * @param row - The schedule the cron skipped.
+ * @param error - The conflict that stopped the collection or recovery.
+ */
+function logCronSkip(row: PaymentRecurringPaymentRow, error: Error): void {
+  getLogger().warn(
+    {
+      error: error.message,
+      environment: currentClusterScope().environment,
+      organization_id: row.organization_id,
+      project_id: row.project_id,
+      recurring_payment_id: row.id,
+    },
+    "collectDueRecurringPayments: skipped recurring payment on conflict"
+  );
+}
+
 function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error: Error): void {
   getLogger().error(
     {
@@ -242,6 +263,7 @@ async function collectRow(
       return skipRefusedPeriod(env, row, error);
     }
     if (shouldSkipCollectionError(error)) {
+      logCronSkip(row, error);
       return "skipped";
     }
     logCronFailure("collectDueRecurringPayments: failed to collect recurring payment", row, error);
@@ -334,6 +356,7 @@ async function recoverLifecycleRow(
       return "refused";
     }
     if (shouldSkipCollectionError(error)) {
+      logCronSkip(row, error);
       return "skipped";
     }
     logCronFailure(
