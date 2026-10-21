@@ -104,6 +104,19 @@ export interface RecurringPaymentUpdateIdempotency {
   fingerprint: string;
 }
 
+async function sendRecurringPaymentUpdateInstructions(
+  input: Parameters<typeof sendSubscriptionInstructions>[0] & { mint: Address }
+): Promise<Signature> {
+  const { mint, ...submission } = input;
+  await assertRecurringPaymentTokenAdmitted({
+    env: submission.env,
+    organizationId: submission.organizationId,
+    projectId: submission.projectId,
+    mint,
+  });
+  return sendSubscriptionInstructions(submission);
+}
+
 const recurringPaymentUpdateSnapshotSchema = z.object({
   sourceCustodyWalletId: z.string().nullable(),
   counterpartyId: z.string(),
@@ -980,13 +993,8 @@ async function runMetadataScheduleUpdate(input: {
         pullers: onChainPlan.data.data.pullers,
         status: parsePlanStatus(onChainPlan.data.status),
       });
-      await assertRecurringPaymentTokenAdmitted({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+      planUpdateSignature = await sendRecurringPaymentUpdateInstructions({
         mint: resolveRecurringPaymentTokenMint(input.resolved.token),
-      });
-      planUpdateSignature = await sendSubscriptionInstructions({
         movement: "recurring.update",
         env: input.env,
         organizationId: input.organizationId,
@@ -1077,13 +1085,8 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
         mint: input.mint,
         tokenProgram: input.tokenProgram,
       });
-  await assertRecurringPaymentTokenAdmitted({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+  const initSignature = await sendRecurringPaymentUpdateInstructions({
     mint: input.mint,
-  });
-  const initSignature = await sendSubscriptionInstructions({
     movement: "recurring.update",
     env: input.env,
     organizationId: input.organizationId,
@@ -1548,13 +1551,8 @@ async function runReplacementUpdate(input: {
       pullers: [owner],
       tokenProgram,
     });
-    await assertRecurringPaymentTokenAdmitted({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+    planCreationSignature = await sendRecurringPaymentUpdateInstructions({
       mint,
-    });
-    planCreationSignature = await sendSubscriptionInstructions({
       movement: "recurring.update",
       env: input.env,
       organizationId: input.organizationId,
@@ -1709,13 +1707,8 @@ async function runReplacementUpdate(input: {
       subscriber: sourceSigner,
       tokenMint: mint,
     });
-    await assertRecurringPaymentTokenAdmitted({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+    authorizationSignature = await sendRecurringPaymentUpdateInstructions({
       mint,
-    });
-    authorizationSignature = await sendSubscriptionInstructions({
       movement: "recurring.update",
       env: input.env,
       organizationId: input.organizationId,
