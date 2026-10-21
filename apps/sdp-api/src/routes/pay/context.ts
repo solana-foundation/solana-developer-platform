@@ -35,7 +35,10 @@ export async function findPaymentRequest(env: Env, token: string): Promise<Payme
  * @returns Resolves when the chain has run.
  * @throws AppError `NOT_FOUND` when no request has that token, or the request has no Project.
  */
-export async function paymentRequestScope(c: Context<{ Bindings: Env }, "/:token">, next: Next) {
+export async function paymentRequestScope(
+  c: Context<{ Bindings: Env }, "/:token" | "/:token/tx">,
+  next: Next
+) {
   const { id: paymentRequestId, project_id: projectId } = await findPaymentRequest(
     c.env,
     c.req.param("token")
