@@ -21,7 +21,7 @@
 # ── Base: pin Node + pnpm to the repo's packageManager ─────────────────────
 # Digest pinned so rebuilds don't silently float onto a new node:24-slim.
 # Refresh with: docker pull node:24-slim && docker inspect --format='{{index .RepoDigests 0}}' node:24-slim
-FROM node:24.22.1-slim@sha256:1681862882da07ee5476fee047bcf34138833f1df42633bb25bcb0f438d5bf3d AS base
+FROM node:24-slim@sha256:8cabefbd444809cf0e319b5831c65da1ea202200ca552a5e75fd7938a6f86658 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -132,7 +132,7 @@ RUN --mount=type=secret,id=sentry_auth_token \
     pnpm --filter sdp-web build
 
 # ── Runtime: slim image with only the standalone output ────────────────────
-FROM node:24.22.1-slim@sha256:1681862882da07ee5476fee047bcf34138833f1df42633bb25bcb0f438d5bf3d AS runner
+FROM node:24-slim@sha256:8cabefbd444809cf0e319b5831c65da1ea202200ca552a5e75fd7938a6f86658 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
