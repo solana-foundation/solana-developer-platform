@@ -12,6 +12,7 @@ import "@sdp/env-config/tls-trust";
 import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 import { assertKoraConfigured } from "@sdp/fee-payment";
+import { assertManagedRpcConfigured } from "@sdp/rpc/factory";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 
 import { createApp } from "@/app";
@@ -118,6 +119,7 @@ export function assertRequiredEnv(env: Env): void {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
   assertKoraConfigured(env);
+  assertManagedRpcConfigured();
 }
 
 async function main(): Promise<void> {
