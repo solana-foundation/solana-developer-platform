@@ -207,35 +207,51 @@ export async function runLive(rawConfig, mode, options = {}) {
   };
   const project = (await api(`/v1/projects/${encodeURIComponent(config.projectId)}`)).project;
   assert.equal(project.environment, "production", "The SDP project must be production");
-  const query = new URLSearchParams({
-    provider: "fireblocks",
-    view: "summary",
-    includeBalances: "false",
-  });
-  const wallets = (await api(`/v1/wallets?${query}`)).wallets;
-  const wallet = wallets.find((item) => item.id === config.custodyWalletId);
-  assert(
-    wallet && wallet.provider === "fireblocks" && wallet.custodyConnectionId,
-    "Select a Fireblocks BYOK wallet in this project"
-  );
-  assert(
-    wallet.status === "active" && wallet.isRuntimeExecutionAllowed === true,
-    "The Fireblocks connection must be active and enabled"
-  );
+  let wallet;
+  let result;
+  if (mode === "status") {
+    // The operational wallet list omits deactivated connections. Recover the
+    // existing transfer directly, then verify its receipt and exact intent below.
+    const saved = JSON.parse(await readFile(`${options.receiptPath}.result.json`, "utf8"));
+    assert(
+      typeof saved.transferId === "string" && /^xfr_[a-zA-Z0-9_-]{1,100}$/.test(saved.transferId),
+      "Receipt has an invalid transfer ID"
+    );
+    result = await api(`/v1/payments/transfers/${encodeURIComponent(saved.transferId)}`);
+    assert(result?.transfer, "SDP did not return the recorded transfer");
+    assert.equal(result.transfer.id, saved.transferId, "Transfer does not match the receipt");
+    wallet = { id: config.custodyWalletId, publicKey: result.transfer.source };
+  } else {
+    const query = new URLSearchParams({
+      provider: "fireblocks",
+      view: "summary",
+      includeBalances: "false",
+    });
+    const wallets = (await api(`/v1/wallets?${query}`)).wallets;
+    wallet = wallets.find((item) => item.id === config.custodyWalletId);
+    assert(
+      wallet && wallet.provider === "fireblocks" && wallet.custodyConnectionId,
+      "Select a Fireblocks BYOK wallet in this project"
+    );
+    assert(
+      wallet.status === "active" && wallet.isRuntimeExecutionAllowed === true,
+      "The Fireblocks connection must be active and enabled"
+    );
+  }
   assert(ADDRESS.test(wallet.publicKey), "Invalid source address");
-  const [genesis, accounts] = await rpc([
-    ["getGenesisHash", []],
-    [
+  const preflightReads = [["getGenesisHash", []]];
+  if (mode !== "status")
+    preflightReads.push([
       "getMultipleAccounts",
       [
         [wallet.publicKey, ...(mode === "signer" ? [config.feePayer] : [])],
         { encoding: "base64", commitment: "confirmed" },
       ],
-    ],
-  ]);
+    ]);
+  const [genesis, accounts] = await rpc(preflightReads);
   assert.equal(genesis, MAINNET_GENESIS, "RPC is not Solana mainnet-beta");
   const payerLamports = mode === "signer" ? (accounts.value[1]?.lamports ?? 0) : null;
-  const sourceLamports = accounts.value[0]?.lamports ?? 0;
+  const sourceLamports = mode === "status" ? null : (accounts.value[0]?.lamports ?? 0);
   log(
     JSON.stringify({
       check: "preflight",
@@ -292,15 +308,7 @@ export async function runLive(rawConfig, mode, options = {}) {
       idempotencyKey: attempt.idempotencyKey,
     })
   );
-  let result;
-  if (mode === "status") {
-    const saved = JSON.parse(await readFile(`${options.receiptPath}.result.json`, "utf8"));
-    assert(
-      typeof saved.transferId === "string" && /^xfr_[a-zA-Z0-9_-]{1,100}$/.test(saved.transferId),
-      "Receipt has an invalid transfer ID"
-    );
-    result = await api(`/v1/payments/transfers/${encodeURIComponent(saved.transferId)}`);
-  } else {
+  if (mode !== "status") {
     log(
       "Approve the payment in Fireblocks. Fireblocks builds, signs and broadcasts; the source vault pays fees."
     );

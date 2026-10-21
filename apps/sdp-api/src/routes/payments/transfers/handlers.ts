@@ -928,7 +928,6 @@ function compareTransferRows(
 async function executeFireblocksTransfer(
   c: AppContext,
   transfer: TransferRow,
-  fireblocks: NonNullable<Awaited<ReturnType<typeof prepareFireblocksTransfer>>>,
   auditService: AuditService,
   auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>
 ) {
@@ -936,7 +935,7 @@ async function executeFireblocksTransfer(
   // transaction failure/rebroadcast path. The durable provider intent owns recovery.
   let updated: TransferRow;
   try {
-    updated = await submitFireblocksTransfer(c.env, getPaymentsRepository(c), transfer, fireblocks);
+    updated = await submitFireblocksTransfer(c.env, getPaymentsRepository(c), transfer);
   } catch (error) {
     await auditService.completeCritical(c, auditIntent, {
       status: "failure",
@@ -1044,8 +1043,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
     });
     throw error;
   }
-  if (fireblocks)
-    return executeFireblocksTransfer(c, transfer, fireblocks, auditService, auditIntent);
+  if (fireblocks) return executeFireblocksTransfer(c, transfer, auditService, auditIntent);
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(

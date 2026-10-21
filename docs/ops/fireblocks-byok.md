@@ -122,6 +122,11 @@ Before submission, SDP durably stores the intent and atomically claims a single 
 The SDP transfer ID is Fireblocks' permanent `externalTxId`; transaction creation does not
 send Fireblocks' time-limited `Idempotency-Key` header. SDP separately deduplicates the caller's
 request using its own idempotency key.
+Immediately before the provider POST, SDP resolves custody access again and checks the current
+connection, account, vault, source address and network against the stored intent, then rechecks
+the caller's live money authorization. A local refusal marks the intent failed without a POST;
+previously decrypted credentials are never carried from preparation into submission. This adds
+no Fireblocks or Solana RPC requests.
 The request returns `processing` while approval is pending. Dashboard transfer reads and the
 pending-transfer job reconcile with GET by external ID; they never POST. Unknown outcomes,
 including a timeout, missing proposal, or unavailable credentials, stay processing. Do not
@@ -303,6 +308,12 @@ source vault and destination, and inspect `fireblocks_transfer_submission_outcom
 Repair expired credentials or connection access to resume reconciliation. Settlement mismatches
 remain processing for investigation; never replace a payment while its outcome is unknown.
 A newly initiated payment needs explicit user intent and a new SDP idempotency key.
+
+The live runner's `status` mode reads the existing transfer directly from its receipt, including
+when the source wallet is no longer in the operational wallet list. Receipt/key and exact intent
+checks still apply. It skips execution eligibility and funding checks; `preflight`, `signer` and
+`payment` retain them. Compared with the previous status command, this removes one SDP wallet-list
+GET and one Solana `getMultipleAccounts` request; mainnet and confirmed-signature checks remain.
 
 Native transfers can execute in Fireblocks after SDP access is revoked. Cancel or reject pending
 transfers in Fireblocks as part of revocation/incident response; cancellation can race execution.

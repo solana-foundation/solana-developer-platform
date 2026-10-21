@@ -775,6 +775,98 @@ describe("native Fireblocks BYOK payment routes", () => {
     }
   );
 
+  it.each([
+    "inactive wallet",
+    "deactivated connection",
+    "failed health check",
+    "retired credential",
+    "changed connection intent",
+    "changed account",
+    "changed vault",
+    "changed source",
+  ] as const)("refuses %s changed during preparation without a provider POST", async (change) => {
+    const mock = await ready();
+    const db = getDb(env);
+    const original = AuditService.prototype.beginCritical;
+    vi.spyOn(AuditService.prototype, "beginCritical").mockImplementation(async function (
+      this: AuditService,
+      ...args
+    ) {
+      const audit = await original.apply(this, args);
+      switch (change) {
+        case "inactive wallet":
+          await db.execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
+            walletId,
+          ]);
+          break;
+        case "deactivated connection":
+          await db.execute(
+            "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE organization_id = ?",
+            [ORGANIZATION_ID]
+          );
+          break;
+        case "failed health check":
+          await db.execute(
+            "UPDATE custody_connections SET status = 'failed', activated_at = NULL, last_check_status = 'failed' WHERE organization_id = ?",
+            [ORGANIZATION_ID]
+          );
+          break;
+        case "retired credential":
+          await db.execute(
+            "UPDATE provider_credentials SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE organization_id = ?",
+            [ORGANIZATION_ID]
+          );
+          break;
+        case "changed connection intent":
+          await db.execute(
+            `UPDATE payment_transfers SET provider_data = jsonb_set(provider_data,
+             '{fireblocksTransfer,connectionId}', '"another-connection"'::jsonb)
+             WHERE organization_id = ?`,
+            [ORGANIZATION_ID]
+          );
+          break;
+        case "changed account":
+          await db.execute(
+            "UPDATE custody_connections SET provider_account_fingerprint = 'another-account' WHERE organization_id = ?",
+            [ORGANIZATION_ID]
+          );
+          break;
+        case "changed vault":
+          await db.execute("UPDATE custody_wallets SET wallet_id = 'fb_1' WHERE id = ?", [
+            walletId,
+          ]);
+          break;
+        case "changed source":
+          await db.execute("UPDATE custody_wallets SET public_key = ? WHERE id = ?", [
+            OTHER_ADDRESS,
+            walletId,
+          ]);
+          break;
+        default: {
+          const exhaustive: never = change;
+          throw new Error(`Unexpected custody change: ${exhaustive}`);
+        }
+      }
+      return audit;
+    });
+    const response = await send();
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    const row = await db.queryOne<{
+      id: string;
+      status: string;
+      provider_reference: string | null;
+    }>("SELECT id, status, provider_reference FROM payment_transfers WHERE organization_id = ?", [
+      ORGANIZATION_ID,
+    ]);
+    expect(row).toMatchObject({ status: "failed", provider_reference: null });
+    if (!row) throw new Error("Expected failed payment intent");
+    mock.mockClear();
+    expect(await refresh(row.id)).toMatchObject({ status: "failed" });
+    await send();
+    expect(mock).not.toHaveBeenCalled();
+  });
+
   it("refuses a disabled connection before contacting Fireblocks", async () => {
     const mock = await ready();
     await getDb(env).execute(

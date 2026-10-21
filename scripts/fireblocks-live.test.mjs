@@ -65,7 +65,9 @@ function transport(overrides = {}) {
         data: { project: { environment: overrides.environment ?? "production" } },
       });
     if (url.includes("/v1/wallets?"))
-      return Response.json({ data: { wallets: [{ ...wallet, ...overrides.wallet }] } });
+      return Response.json({
+        data: { wallets: overrides.walletMissing ? [] : [{ ...wallet, ...overrides.wallet }] },
+      });
     if (url.endsWith("/signer-check"))
       return Response.json({
         data: {
@@ -95,7 +97,7 @@ function transport(overrides = {}) {
       });
     }
     if (url.endsWith(`/v1/payments/transfers/${transfer.id}`))
-      return Response.json({ data: { transfer } });
+      return Response.json({ data: { transfer: { ...transfer, ...overrides.transfer } } });
     throw new Error("Unexpected request");
   };
   return { calls, fetchImpl, apiKey: "sk_test_runner", log: () => {} };
@@ -144,6 +146,92 @@ test("signer test invokes only the no-broadcast SDP signer check", async () => {
   assert.equal(writes.length, 1);
   assert(writes[0].url.endsWith("/v1/wallets/signer-check"));
   assert.deepEqual(JSON.parse(writes[0].body), { walletId: "fb_0" });
+});
+
+test("payment and signer modes still refuse disabled wallets before starting work", async () => {
+  for (const mode of ["payment", "signer"]) {
+    const t = transport({ wallet: { isRuntimeExecutionAllowed: false } });
+    await assert.rejects(
+      runLive(config, mode, { ...t, sendMainnet: true, receiptPath: "unused-receipt.json" }),
+      /must be active and enabled/
+    );
+    assert.equal(t.calls.filter((call) => call.method === "POST").length, 0);
+  }
+});
+
+test("status recovers an accepted transfer without requiring an operational wallet or funds", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fireblocks-disabled-status-"));
+  try {
+    const receiptPath = join(dir, "payment.json");
+    await runLive(config, "payment", {
+      ...transport({ pending: true }),
+      receiptPath,
+      sendMainnet: true,
+    });
+    for (const overrides of [
+      { wallet: { isRuntimeExecutionAllowed: false }, source: 0 },
+      { walletMissing: true, source: 0 },
+    ]) {
+      const t = transport(overrides);
+      const result = await runLive(config, "status", { ...t, receiptPath });
+      assert.equal(result.status, "confirmed");
+      assert.equal(
+        t.calls.some((call) => call.url.includes("/v1/wallets")),
+        false
+      );
+      assert.equal(
+        t.calls.filter((call) => call.method === "POST" && call.url !== config.rpcUrl).length,
+        0
+      );
+      const rpcMethods = t.calls
+        .filter((call) => call.url === config.rpcUrl)
+        .flatMap((call) => JSON.parse(call.body).map((request) => request.method));
+      assert.deepEqual(rpcMethods, ["getGenesisHash", "getSignatureStatuses"]);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("status still binds the recovered transfer to the receipt, key, project, wallet and payment", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fireblocks-status-intent-"));
+  try {
+    const receiptPath = join(dir, "payment.json");
+    await runLive(config, "payment", {
+      ...transport({ pending: true }),
+      receiptPath,
+      sendMainnet: true,
+    });
+    for (const patch of [
+      { id: "xfr_other" },
+      { custodyWalletId: "cwlt_other" },
+      { projectId: "prj_other" },
+      { source: recipient },
+      { destination: source },
+      { amount: "1" },
+      { token: source },
+    ]) {
+      const t = transport({ walletMissing: true, transfer: patch });
+      await assert.rejects(runLive(config, "status", { ...t, receiptPath }));
+      assert.equal(
+        t.calls.filter((call) => call.method === "POST" && call.url !== config.rpcUrl).length,
+        0
+      );
+      assert.deepEqual(JSON.parse(await readFile(`${receiptPath}.result.json`, "utf8")), {
+        transferId: transfer.id,
+      });
+    }
+    await assert.rejects(
+      runLive(config, "status", {
+        ...transport({ walletMissing: true }),
+        apiKey: "sk_other",
+        receiptPath,
+      }),
+      /different SDP API key/
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("unknown payment outcome preserves the exact intent and key on retry", async () => {

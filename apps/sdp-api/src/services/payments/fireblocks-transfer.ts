@@ -13,8 +13,8 @@ import { assertIsSignature } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { badRequest, conflict } from "@/lib/errors";
-import { assertMoneyStartAdmitted, MoneyMovementRefusedError } from "@/lib/money-admission";
+import { AppError, badRequest, conflict } from "@/lib/errors";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -31,11 +31,7 @@ const intentSchema = z.object({
   assetId: z.string(),
 });
 type Intent = z.infer<typeof intentSchema>;
-type Access = NonNullable<
-  Awaited<ReturnType<CustodyRuntimeTargets["getFireblocksTransferAccess"]>>
->;
 export interface PreparedFireblocksTransfer {
-  access: Access;
   intent: Intent;
 }
 const runtime: CustodyProvisioningRuntime = {
@@ -94,7 +90,6 @@ export async function prepareFireblocksTransfer(
     throw badRequest("Payment amount is outside the supported range");
   if (!access.accountFingerprint) throw conflict("Fireblocks connection is unverified");
   return {
-    access,
     intent: {
       connectionId: access.connectionId,
       accountFingerprint: access.accountFingerprint,
@@ -205,8 +200,7 @@ async function currentRow(repo: PaymentsRepository, row: PaymentTransferRow) {
 export async function submitFireblocksTransfer(
   env: Env,
   repo: PaymentsRepository,
-  row: PaymentTransferRow,
-  prepared: PreparedFireblocksTransfer
+  row: PaymentTransferRow
 ): Promise<PaymentTransferRow> {
   if (!row.destination_address || !row.amount || !row.project_id || !row.custody_wallet_id)
     throw badRequest("Incomplete payment intent");
@@ -218,18 +212,43 @@ export async function submitFireblocksTransfer(
     now: startedAt,
   });
   if (!claimed) return currentRow(repo, row);
+  let submissionAttempted = false;
   try {
+    const intent = intentSchema.parse(claimed.provider_data.fireblocksTransfer);
+    // Preparation can precede asset discovery and durable payment/audit writes.
+    // Resolve fresh custody state after those awaits; never submit captured credentials.
+    const access = await new CustodyRuntimeTargets(
+      getDb(env),
+      env,
+      new Map()
+    ).getFireblocksTransferAccess({
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      custodyWalletId: row.custody_wallet_id,
+      forSubmission: true,
+    });
+    const expectedAsset = currentClusterScope().cluster === "mainnet-beta" ? "SOL" : "SOL_TEST";
+    if (
+      !access ||
+      access.connectionId !== intent.connectionId ||
+      access.accountFingerprint !== intent.accountFingerprint ||
+      access.vaultAccountId !== intent.vaultAccountId ||
+      access.publicKey !== claimed.source_address ||
+      access.assetId !== expectedAsset
+    )
+      throw conflict("Fireblocks connection does not match the payment intent");
     await assertMoneyStartAdmitted(
       env,
       { organizationId: row.organization_id, projectId: row.project_id },
       { surface: "http", movement: "payments.transfer", subjectId: row.id },
       { custodyWalletId: row.custody_wallet_id }
     );
-    const result = await createFireblocksTransfer(runtime, prepared.access, {
+    submissionAttempted = true;
+    const result = await createFireblocksTransfer(runtime, access, {
       operation: "TRANSFER",
       externalTxId: row.id,
-      assetId: prepared.intent.assetId,
-      source: { type: "VAULT_ACCOUNT", id: prepared.intent.vaultAccountId },
+      assetId: intent.assetId,
+      source: { type: "VAULT_ACCOUNT", id: intent.vaultAccountId },
       destination: {
         type: "ONE_TIME_ADDRESS",
         oneTimeAddress: { address: row.destination_address },
@@ -241,15 +260,21 @@ export async function submitFireblocksTransfer(
     });
     return await persistResult(repo, claimed, result, false);
   } catch (error) {
-    if (error instanceof MoneyMovementRefusedError) {
+    if (!submissionAttempted) {
+      // A local refusal is definitely unsent, unlike an ambiguous provider outcome.
       await repo.updateTransfer({
         transferId: row.id,
         organizationId: row.organization_id,
         projectId: row.project_id,
         expectedStatus: "processing",
         status: "failed",
-        error: error.message,
-        providerData: { executionFailure: { code: error.code } },
+        error:
+          error instanceof AppError
+            ? error.toResponse().error.message
+            : "Fireblocks admission failed before submission",
+        providerData: {
+          executionFailure: { code: error instanceof AppError ? error.code : "INTERNAL_ERROR" },
+        },
         updatedAt: new Date().toISOString(),
       });
       throw error;
