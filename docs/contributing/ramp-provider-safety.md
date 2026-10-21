@@ -24,6 +24,48 @@ contract; this document defines the money movement acceptance gate.
    and direction. Store observations separately; compare crypto to crypto and
    fiat to fiat. Never infer delivery from a price or fiat amount.
 
+## Managed keys
+
+SDP keeps one account per provider and mode, each key under
+`<PROVIDER>_<MODE>_<ROLE>`. `MODE` is `SANDBOX` or `PRODUCTION`. The public
+key keeps the provider's own term (MoonPay `API_KEY`, Stripe
+`PUBLISHABLE_KEY`); the others are `SECRET_KEY` and `WEBHOOK_SECRET`, which
+only a provider that just polls goes without.
+`apps/sdp-api/src/services/ramps/runtime.ts` derives the names from the
+provider's `keyFormats` and resolves every key, so availability, provider
+calls, discovery and webhook verification never disagree.
+
+1. **Code.** Declare `keyFormats` for both modes: the same keys in each,
+   formats strict enough to refuse the other mode's key and the
+   `placeholder` sdp-infra mounts for an unsynced secret. A key that doesn't
+   fit never makes a request, and the provider reports configured only while
+   every key fits. Add the public-key term to `PUBLIC_KEY_TERMS` and the
+   names to `env.d.ts`, `scripts/secret-keys.mjs`, `turbo.json` and
+   `apps/sdp-api/.env.local.example`: `provider-availability.drift.test.ts`
+   fails until the four match.
+2. **Provider dashboard.** Create a sandbox webhook endpoint at
+   `/webhooks/payments/ramps/sandbox/<id>` on each deployment whose release
+   channel runs the provider, and one production endpoint at
+   `https://api.solana.com/webhooks/payments/ramps/production/<id>`.
+   Subscribe each only to the events the parser reads. Create it through the
+   provider's CLI or API with the secret written to a private file, and never
+   paste the secret anywhere.
+3. **Doppler** (`solana-developer-platform`): the `SANDBOX` keys in `dev`,
+   `stg` and `prd`, the `PRODUCTION` (live) keys in `prd` only (SDLC §10),
+   so a production project anywhere else answers `PROVIDER_NOT_CONFIGURED`.
+   A per-endpoint webhook secret goes in the config of the deployment it
+   serves.
+4. **sdp-infra.** List each name a config holds in that environment's
+   `app_secret_keys`, and in stage and prod also in
+   `sdp_api_runtime_app_secret_keys`, then apply and run `doppler-sync`. The
+   hourly sync copies only listed names and never deletes.
+5. **Order.** Dashboard, Doppler, infra, then merge the code: main deploys
+   to stage and prod on merge, and dev only on dispatch. Removing a name runs
+   the other way: the code stops reading it everywhere, infra drops it, then
+   Doppler deletes it.
+6. **Retiring a provider** removes all its names in that order, then revokes
+   its keys and deletes its webhook endpoints at the provider.
+
 ## Settlement and recovery
 
 - Verify webhook signatures over the raw body, including provider-signed time

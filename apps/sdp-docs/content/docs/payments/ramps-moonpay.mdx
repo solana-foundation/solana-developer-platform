@@ -6,7 +6,7 @@ description: Configure MoonPay as an SDP ramp provider — credentials, capabili
 
 MoonPay is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "moonpay"`.
 
-SDP holds MoonPay test-mode keys only, so MoonPay runs for sandbox projects. Production projects will bring their own MoonPay account; until then, MoonPay answers `PROVIDER_NOT_CONFIGURED` for them.
+A Sandbox project uses the `MOONPAY_SANDBOX_*` keys and a Production project the `MOONPAY_PRODUCTION_*` keys. MoonPay runs in a mode only while all three of its keys are set and fit that mode; otherwise it answers `PROVIDER_NOT_CONFIGURED`.
 
 ## Configuration
 
@@ -14,6 +14,9 @@ SDP holds MoonPay test-mode keys only, so MoonPay runs for sandbox projects. Pro
 | --- | --- | --- |
 | `MOONPAY_SANDBOX_API_KEY` | conditional | Test-mode publishable key (`pk_test_…`). A live key is refused before any request. |
 | `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Test-mode secret (`sk_test_…`) used to sign onramp and offramp URLs. Paired with `MOONPAY_SANDBOX_API_KEY`. |
-| `MOONPAY_SANDBOX_WEBHOOK_KEY` | conditional | Signing key of the endpoint MoonPay calls at `/webhooks/payments/ramps/sandbox/moonpay`. |
+| `MOONPAY_SANDBOX_WEBHOOK_SECRET` | conditional | Test-mode webhook key (`wk_test_…`) that signs MoonPay's calls to `/webhooks/payments/ramps/sandbox/moonpay`. |
+| `MOONPAY_PRODUCTION_API_KEY` | conditional | Live publishable key (`pk_live_…`). A test-mode key is refused before any request. |
+| `MOONPAY_PRODUCTION_SECRET_KEY` | conditional | Live secret (`sk_live_…`). Paired with `MOONPAY_PRODUCTION_API_KEY`. |
+| `MOONPAY_PRODUCTION_WEBHOOK_SECRET` | conditional | Live webhook key (`wk_live_…`) that signs MoonPay's calls to `/webhooks/payments/ramps/production/moonpay`. |
 
 MoonPay normalizes provider currency codes internally — SDP accepts the canonical asset rails such as `usdc.solana` and maps them to MoonPay's `usdc_sol` code.

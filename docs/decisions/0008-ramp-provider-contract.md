@@ -42,10 +42,13 @@ stateful providers fit the model at all.
   - `RampRuntimeContext` is `{ mode, cluster, credentials }`. Adapters never see
     the process environment. Credentials are the account's public and secret
     keys, resolved by the API for the project's mode
-    (`apps/sdp-api/src/services/ramps/runtime.ts`: SDP's managed sandbox keys
-    until projects bring their own, HOO-2032). Each adapter's
-    `checkCredentials` refuses keys whose format names the other mode. The
-    cluster is the one the mode picks, as the cluster scope derives it (ADR 0007).
+    (`apps/sdp-api/src/services/ramps/runtime.ts`). Until a project brings
+    its own account (HOO-2032), they are SDP's managed keys, named
+    `<PROVIDER>_<MODE>_<ROLE>`: sandbox keys in every deployment, live keys
+    in `prd` only (`docs/contributing/ramp-provider-safety.md`, "Managed
+    keys"). Each adapter declares its `keyFormats` per mode, and a key whose
+    format names the other mode is refused before any request. The cluster
+    is the one the mode picks, as the cluster scope derives it (ADR 0007).
   - `RampQuoteRequest` and `RampQuoteResult` are provider-neutral and build on
     PRO-2065's `quoteDetails` and `paymentInstructions`. Core types import no
     provider module and name no provider field.

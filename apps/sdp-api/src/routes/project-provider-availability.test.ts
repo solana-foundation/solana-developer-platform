@@ -107,6 +107,7 @@ const DEPLOYMENT_CREDENTIALS = {
   RANGE_API_KEY: "range_project_provider_availability_key",
   MOONPAY_SANDBOX_API_KEY: "pk_test_project_provider_availability",
   MOONPAY_SANDBOX_SECRET_KEY: "sk_test_project_provider_availability",
+  MOONPAY_SANDBOX_WEBHOOK_SECRET: "wk_test_project_provider_availability",
   STRIPE_SANDBOX_SECRET_KEY: "sk_test_project_provider_availability",
   STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_project_provider_availability",
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_project_provider_availability",
@@ -605,11 +606,19 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     });
   });
 
-  it("reports MoonPay unavailable in a Production project, since SDP holds sandbox keys only", async () => {
+  it("reports MoonPay in a Production project only once its production keys are mounted", async () => {
     const deployment = deploymentEnv({});
 
     const production = await readAvailability("production", deployment);
     const sandbox = await readAvailability("sandbox", deployment);
+    const withProductionKeys = await readAvailability(
+      "production",
+      deploymentEnv({
+        MOONPAY_PRODUCTION_API_KEY: "pk_live_project_provider_availability",
+        MOONPAY_PRODUCTION_SECRET_KEY: "sk_live_project_provider_availability",
+        MOONPAY_PRODUCTION_WEBHOOK_SECRET: "wk_live_project_provider_availability",
+      })
+    );
 
     expect(production.providers).toContainEqual({
       family: "ramps",
@@ -621,6 +630,25 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       family: "ramps",
       provider: "moonpay",
       available: true,
+    });
+    expect(withProductionKeys.providers).toContainEqual({
+      family: "ramps",
+      provider: "moonpay",
+      available: true,
+    });
+  });
+
+  it.each([
+    ["moonpay", "MOONPAY_SANDBOX_WEBHOOK_SECRET"],
+    ["stripe", "STRIPE_SANDBOX_WEBHOOK_SECRET"],
+  ] as const)("reports %s unavailable while %s is missing", async (provider, name) => {
+    const sandbox = await readAvailability("sandbox", deploymentEnv({ [name]: undefined }));
+
+    expect(sandbox.providers).toContainEqual({
+      family: "ramps",
+      provider,
+      available: false,
+      reason: "provider_not_configured",
     });
   });
 

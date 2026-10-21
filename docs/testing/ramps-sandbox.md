@@ -16,16 +16,13 @@ Stripe below).
 2. Ramps are an `experimental` module. For the run, set
    `SDP_RELEASE_CHANNEL=experimental` in `apps/sdp-api/.env.local` and
    `apps/sdp-web/.env.local`, and put it back afterwards.
-3. Provider keys:
-   - MoonPay: `pnpm dev:api` loads `MOONPAY_SANDBOX_API_KEY`,
-     `MOONPAY_SANDBOX_SECRET_KEY` and `MOONPAY_SANDBOX_WEBHOOK_KEY` from
-     Doppler `dev`.
-   - Stripe: Doppler `dev` has no `STRIPE_SANDBOX_*` keys yet. Before
-     `pnpm dev:api`, export `STRIPE_SANDBOX_SECRET_KEY` and
-     `STRIPE_SANDBOX_PUBLISHABLE_KEY` from its test-mode `STRIPE_SECRET_KEY`
-     and `STRIPE_PUBLISHABLE_KEY`, and `STRIPE_SANDBOX_WEBHOOK_SECRET` from
-     `stripe listen --print-secret` (Stripe CLI, logged in with that key).
-     During the run keep
+3. Provider keys: `pnpm dev:api` loads the `MOONPAY_SANDBOX_*` and
+   `STRIPE_SANDBOX_*` keys from Doppler `dev`.
+   - Stripe: Doppler's `STRIPE_SANDBOX_WEBHOOK_SECRET` belongs to the dev
+     deployment's endpoint. For a local run, put the secret
+     `stripe listen --print-secret` prints (Stripe CLI, logged in to the
+     sandbox) in `apps/sdp-api/.env.local`, which beats Doppler (a shell
+     export doesn't), and take it out afterwards. During the run keep
      `stripe listen --events crypto.onramp_session.updated --forward-to http://localhost:8787/webhooks/payments/ramps/sandbox/stripe`
      open. CLI 1.53 warns the event type is unknown but forwards it.
 4. Restart `pnpm dev:api` after every branch switch. `tsx watch` can miss a
@@ -86,7 +83,7 @@ only, so a USDC buy may never deliver.
 
 `scripts/forward-ramp-sandbox-webhook.mjs` fetches the provider's own
 record, wraps it as the webhook the provider sends, signs it with the
-sandbox webhook key, and posts it to
+sandbox webhook secret, and posts it to
 `/webhooks/payments/ramps/sandbox/<provider>` on `SDP_API_URL` (default
 `http://127.0.0.1:8787`). It never invents provider data and never prints a
 key. It exits non-zero when its environment or a provider record doesn't
@@ -95,12 +92,12 @@ parse, or when the API refuses a webhook.
 ```bash
 # MoonPay: every buy or sale MoonPay holds for the transfer, oldest first.
 MOONPAY_SANDBOX_API_KEY="$(doppler secrets get MOONPAY_SANDBOX_API_KEY --plain --project solana-developer-platform --config dev)" \
-MOONPAY_SANDBOX_WEBHOOK_KEY="$(doppler secrets get MOONPAY_SANDBOX_WEBHOOK_KEY --plain --project solana-developer-platform --config dev)" \
+MOONPAY_SANDBOX_WEBHOOK_SECRET="$(doppler secrets get MOONPAY_SANDBOX_WEBHOOK_SECRET --plain --project solana-developer-platform --config dev)" \
   node scripts/forward-ramp-sandbox-webhook.mjs moonpay xfr_...
 
 # Stripe: the session's current state. The webhook secret must be the one
 # the running API verifies with.
-STRIPE_SANDBOX_SECRET_KEY="$(doppler secrets get STRIPE_SECRET_KEY --plain --project solana-developer-platform --config dev)" \
+STRIPE_SANDBOX_SECRET_KEY="$(doppler secrets get STRIPE_SANDBOX_SECRET_KEY --plain --project solana-developer-platform --config dev)" \
 STRIPE_SANDBOX_WEBHOOK_SECRET="$(stripe listen --print-secret)" \
   node scripts/forward-ramp-sandbox-webhook.mjs stripe cos_...
 ```

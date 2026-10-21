@@ -19,8 +19,7 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
-import { isProviderConfigured } from "@/services/provider-availability.service";
-import { rampRuntimeFor } from "@/services/ramps/runtime";
+import { rampRuntimeFor, resolveManagedRampCredentials } from "@/services/ramps/runtime";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
 import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/services/ramps/webhooks/registry";
 import type { Env } from "@/types/env";
@@ -290,10 +289,10 @@ async function sweepProvider(
     refused: 0,
     unmapped: 0,
   };
-  // SDP holds sandbox keys only: production rows wait for project credentials
-  // (HOO-1942, HOO-1943) and are neither pulled nor expired until then.
-  const environments = SDP_ENVIRONMENTS.filter((environment) =>
-    isProviderConfigured(env, "ramps", provider, environment === "sandbox")
+  // A mode's rows are pulled and expired only while SDP holds that mode's keys.
+  // A pull needs no webhook secret, so it keeps settling while webhooks can't verify.
+  const environments = SDP_ENVIRONMENTS.filter(
+    (environment) => resolveManagedRampCredentials(env, provider, environment).ok
   );
   if (environments.length === 0) {
     return result;
