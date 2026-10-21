@@ -8,10 +8,17 @@ import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { createKoraAdapter, KORA_ENV_KEYS, resolveKoraEndpoint } from "@sdp/fee-payment";
 import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import { hashString } from "@sdp/payments/hash";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
+import { type Address, unwrapOption } from "@solana/kit";
 import { KoraClient } from "@solana/kora";
-import { findSubscriptionAuthorityPda } from "@solana/subscriptions";
 import {
+  fetchMaybeSubscriptionAuthority,
+  findSubscriptionAuthorityPda,
+} from "@solana/subscriptions";
+import {
+  fetchMaybeToken,
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
   TOKEN_PROGRAM_ADDRESS,
@@ -74,7 +81,6 @@ export const apiTestSupport = {
   DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
-  findSubscriptionAuthorityPda,
   getCreateAssociatedTokenIdempotentInstruction,
   getDb,
   hashString,
@@ -112,6 +118,27 @@ export const apiTestSupport = {
       { revoked: 0, recovered: 0, failed: 0, skipped: 0 }
     );
   },
+  /**
+   * A Sandbox wallet's Subscriptions authority for a Token-program mint, and the delegate its token
+   * account names, read through the cluster RPC.
+   */
+  readSubscriptionDelegation: (owner: Address, mint: Address) =>
+    runInClusterScope({ projectId: null, environment: "sandbox" }, async () => {
+      const rpc = createClusterRpc();
+      const [[authority], [tokenAccount]] = await Promise.all([
+        findSubscriptionAuthorityPda({ user: owner, tokenMint: mint }),
+        findAssociatedTokenPda({ owner, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
+      ]);
+      const [authorityAccount, token] = await Promise.all([
+        fetchMaybeSubscriptionAuthority(rpc, authority, { commitment: "confirmed" }),
+        fetchMaybeToken(rpc, tokenAccount, { commitment: "confirmed" }),
+      ]);
+      return {
+        authority,
+        authorityOpen: authorityAccount.exists,
+        delegate: token.exists ? unwrapOption(token.data.delegate) : null,
+      };
+    }),
   trackPendingTransfers: (env: Env) => runInEachClusterScope(() => trackPendingTransfers(env)),
   withdrawFromVault,
 };

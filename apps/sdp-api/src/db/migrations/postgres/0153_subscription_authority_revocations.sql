@@ -17,6 +17,10 @@
 --
 -- `environment` is the project's, copied so the one-in-flight index can be
 -- per cluster: the same wallet address has a separate authority on each.
+--
+-- `lease_id` names the run that holds a `processing` revoke. A run that takes
+-- over a stale one issues a new lease, and every save and finish requires the
+-- caller's, so a slow run that wakes after a takeover can change nothing.
 CREATE TABLE payment_subscription_authority_revocations (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL REFERENCES organizations(id),
@@ -27,6 +31,7 @@ CREATE TABLE payment_subscription_authority_revocations (
     token_mint TEXT NOT NULL,
     subscription_authority_address TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('processing', 'confirmed', 'failed')),
+    lease_id TEXT NOT NULL,
     signature TEXT,
     last_valid_block_height sdp_u64,
     error TEXT,

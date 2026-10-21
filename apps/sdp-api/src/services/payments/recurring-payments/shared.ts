@@ -749,7 +749,7 @@ export async function refuseWhileSubscriptionAuthorityRevokes(
   for (const wallet of wallets) {
     await revocations.lockWalletAuthorities(wallet.public_key);
     if (
-      await revocations.hasRevocationInFlight({
+      await revocations.hasRevocationHolding({
         environment: wallet.environment,
         walletAddress: wallet.public_key,
       })
