@@ -33,6 +33,7 @@ import {
   delegationCanceledEffect,
   delegationCreatedEffect,
   insideRecurringPaymentStepPhase,
+  lazyRecurringPaymentSponsor,
   parseNullableStoredSignature,
   planCreatedEffect,
   type RecurringPaymentSourceWallet,
@@ -43,6 +44,7 @@ import {
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
+  resolveRecurringPaymentSponsor,
   sendRecurringPaymentStep,
 } from "./shared";
 import { SUBSCRIPTION_AUTHORITY_SETUP_FLOWS } from "./subscription-authority";
@@ -313,6 +315,12 @@ export async function runReplacementUpdate(input: {
     startsAllowed: input.starts.allowed,
     logContext: { recurring_payment_id: input.claimed.id, attempt_id: attempt.id },
   });
+  const sponsor = lazyRecurringPaymentSponsor({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    sourceWallet: input.resolved.sourceWallet,
+  });
 
   const resolveOldMandate = async () => {
     if (
@@ -444,6 +452,7 @@ export async function runReplacementUpdate(input: {
         attempt,
         sourceWallet: input.resolved.sourceWallet,
         sourceSigner: await stepSigner(),
+        sponsor: await sponsor(),
         resolved: input.resolved,
         owner,
         destination: replacementPlanCreationDestination(input.starts, planLogContext),
@@ -538,6 +547,7 @@ export async function runReplacementUpdate(input: {
         phase,
         sourceWallet: input.resolved.sourceWallet,
         stepSigner,
+        sponsor,
         sourceTokenAccount,
         subscriptionAuthorityAddress,
         subscriptionPda,
@@ -646,6 +656,12 @@ export async function runReplacementUpdate(input: {
         movement: "recurring.update_cancel_old",
         sourceWallet: input.oldSourceWallet,
         sourceSigner: oldSourceSigner,
+        sponsor: await resolveRecurringPaymentSponsor({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.oldSourceWallet,
+        }),
         instructions: [cancelInstruction],
         slot: { row: "update_attempt", column: "old_cancel_signature" },
         effect: delegationCanceledEffect(replacement.oldSubscriptionPda),

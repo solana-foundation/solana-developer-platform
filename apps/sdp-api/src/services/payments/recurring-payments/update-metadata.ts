@@ -27,6 +27,7 @@ import {
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
+  resolveRecurringPaymentSponsor,
   sendRecurringPaymentStep,
   subscriptionProgramMetadataUri,
 } from "./shared";
@@ -347,6 +348,12 @@ export async function runMetadataScheduleUpdate(input: {
       movement: "recurring.update",
       sourceWallet: input.sourceWallet,
       sourceSigner,
+      sponsor: await resolveRecurringPaymentSponsor({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.sourceWallet,
+      }),
       instructions: [instruction],
       slot,
       effect,

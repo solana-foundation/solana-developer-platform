@@ -35,6 +35,7 @@ import {
   parseNullableStoredSignature,
   planCreatedEffect,
   type RecurringPaymentSourceWallet,
+  type RecurringPaymentSponsor,
   RecurringPaymentStepFailedError,
   type RecurringPaymentStepLogContext,
   type RecurringPaymentStepPhase,
@@ -411,6 +412,7 @@ export async function sendReplacementPlanCreation(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: TransactionSigner;
+  sponsor: RecurringPaymentSponsor;
   resolved: RecurringPaymentUpdateTerms;
   owner: Address;
   destination: Address;
@@ -453,6 +455,7 @@ export async function sendReplacementPlanCreation(input: {
     movement: "recurring.update",
     sourceWallet: input.sourceWallet,
     sourceSigner: input.sourceSigner,
+    sponsor: input.sponsor,
     instructions: [createPlanInstruction],
     slot: input.slot,
     effect: planCreatedEffect(input.planPda),
@@ -497,6 +500,7 @@ export async function sendReplacementAuthorization(input: {
   phase: RecurringPaymentStepPhase;
   sourceWallet: RecurringPaymentSourceWallet;
   stepSigner: () => Promise<TransactionSigner>;
+  sponsor: () => Promise<RecurringPaymentSponsor>;
   sourceTokenAccount: Address;
   subscriptionAuthorityAddress: Address;
   subscriptionPda: Address;
@@ -533,6 +537,7 @@ export async function sendReplacementAuthorization(input: {
     rpc: createClusterRpc(),
     sourceWallet: input.sourceWallet,
     sourceSigner: input.stepSigner,
+    sponsor: input.sponsor,
     sourceTokenAccount: input.sourceTokenAccount,
     subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
     subscriptionPda: input.subscriptionPda,

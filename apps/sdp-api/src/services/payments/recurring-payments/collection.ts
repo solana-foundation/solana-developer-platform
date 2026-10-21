@@ -85,10 +85,6 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { type MintFacts, readMintFacts } from "@/services/mint-facts";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import {
-  createSponsorshipFeePayment,
-  resolveProjectSponsorshipScope,
-} from "@/services/sponsorship.service";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -103,6 +99,7 @@ import {
   readConfirmedAccounts,
   readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  resolveRecurringPaymentSponsor,
   sendSubscriptionInstructions,
 } from "./shared";
 
@@ -2177,17 +2174,13 @@ export async function collectRecurringPayment(input: {
       source: sourceTokenAccount,
       destination: receiverAta,
     });
-    const feePayment = createSponsorshipFeePayment(
-      input.env,
-      await resolveProjectSponsorshipScope(input.env, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        actor: { type: "wallet", id: input.sourceWallet.walletId },
-      }),
-      "recurring.collect"
-    );
-    const feePayer = await feePayment.getFeePayer();
-    const payer = createNoopSigner(feePayer);
+    const sponsor = await resolveRecurringPaymentSponsor({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWallet: input.sourceWallet,
+    });
+    const payer = createNoopSigner(sponsor.feePayer);
     const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
       payer,
       ata: receiverAta,
@@ -2229,12 +2222,11 @@ export async function collectRecurringPayment(input: {
     const signature = await sendSubscriptionInstructions({
       movement: "recurring.collect",
       env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
       sourceWallet: input.sourceWallet,
       sourceSigner,
       instructions: [createDestinationAtaInstruction, collectInstruction],
-      feePayer,
+      sponsorshipScope: sponsor.sponsorshipScope,
+      feePayer: sponsor.feePayer,
       submissionStore,
     });
     submittedSignature = signature;

@@ -55,11 +55,13 @@ import {
   fenceRecurringPaymentStepFailure,
   insideRecurringPaymentStepPhase,
   journalInFlightRecurringPaymentAttempt,
+  lazyRecurringPaymentSponsor,
   lazyRecurringPaymentStepSigner,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   planCreatedEffect,
   type RecurringPaymentSourceWallet,
+  type RecurringPaymentSponsor,
   RecurringPaymentStepFailedError,
   type RecurringPaymentStepLogContext,
   type RecurringPaymentStepPhase,
@@ -677,6 +679,7 @@ async function settleActivationPlan(input: {
   rpc: SolanaRpc;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
+  sponsor: () => Promise<RecurringPaymentSponsor>;
   owner: Address;
   destination: Address;
   mint: Address;
@@ -741,6 +744,7 @@ async function settleActivationPlan(input: {
     movement: "recurring.activate",
     sourceWallet: input.sourceWallet,
     sourceSigner,
+    sponsor: await input.sponsor(),
     instructions: [createPlanInstruction],
     slot,
     effect,
@@ -789,6 +793,7 @@ async function settleActivationSubscription(input: {
   rpc: SolanaRpc;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
+  sponsor: () => Promise<RecurringPaymentSponsor>;
   sourceTokenAccount: Address;
   subscriptionAuthorityAddress: Address;
   subscriptionPda: Address;
@@ -829,6 +834,7 @@ async function settleActivationSubscription(input: {
     rpc: input.rpc,
     sourceWallet: input.sourceWallet,
     sourceSigner: input.sourceSigner,
+    sponsor: input.sponsor,
     sourceTokenAccount: input.sourceTokenAccount,
     subscriptionAuthorityAddress: input.subscriptionAuthorityAddress,
     subscriptionPda: input.subscriptionPda,
@@ -1200,6 +1206,12 @@ export async function activateRecurringPayment(input: {
     admitRecovered: recoveringStaleActivation ? input.admitStart : null,
     logContext: { recurring_payment_id: claimed.id, attempt_id: attempt.id },
   });
+  const sponsor = lazyRecurringPaymentSponsor({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    sourceWallet: input.sourceWallet,
+  });
   const claimStamp: ActivationClaimStamp = { scheduleUpdatedAt: claimed.updated_at };
   let activationPlanId = claimed.plan_id;
 
@@ -1240,6 +1252,7 @@ export async function activateRecurringPayment(input: {
       rpc,
       sourceWallet: input.sourceWallet,
       sourceSigner,
+      sponsor,
       owner,
       destination,
       mint,
@@ -1298,6 +1311,7 @@ export async function activateRecurringPayment(input: {
       rpc,
       sourceWallet: input.sourceWallet,
       sourceSigner,
+      sponsor,
       sourceTokenAccount,
       subscriptionAuthorityAddress,
       subscriptionPda,

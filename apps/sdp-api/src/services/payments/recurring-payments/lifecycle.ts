@@ -56,6 +56,7 @@ import {
   readSavedRecurringPaymentStep,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
+  resolveRecurringPaymentSponsor,
   sendRecurringPaymentStep,
 } from "./shared";
 
@@ -641,6 +642,12 @@ async function runRecurringPaymentLifecycle(
       movement: LIFECYCLE_MOVEMENTS[input.operation],
       sourceWallet: input.sourceWallet,
       sourceSigner: signer,
+      sponsor: await resolveRecurringPaymentSponsor({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.sourceWallet,
+      }),
       instructions: [instruction],
       slot,
       effect,

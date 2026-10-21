@@ -17,16 +17,13 @@ import type {
   RecurringPaymentStepSignatureSlot,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { transactionFailed } from "@/lib/errors";
-import {
-  resolveProjectSponsorshipScope,
-  resolveSponsoredFeePayer,
-} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import {
   authorizationSetupEffect,
   delegationCreatedEffect,
   parseNullableStoredSignature,
   type RecurringPaymentSourceWallet,
+  type RecurringPaymentSponsor,
   type RecurringPaymentStepLogContext,
   type RecurringPaymentStepPhase,
   readSavedRecurringPaymentStep,
@@ -84,46 +81,12 @@ interface SubscriptionAuthorityStepInput {
   rpc: SolanaRpc;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: () => Promise<TransactionSigner>;
+  sponsor: () => Promise<RecurringPaymentSponsor>;
   sourceTokenAccount: Address;
   subscriptionAuthorityAddress: Address;
   owner: Address;
   mint: Address;
   tokenProgram: Address;
-}
-
-/**
- * The fee payer a run's setup and subscribe name, resolved from the project's sponsor on the first
- * call only: a run that sends neither never asks Kora.
- *
- * @param input - The schedule's tenant and source wallet.
- * @param input.env - The environment.
- * @param input.organizationId - The schedule's organization.
- * @param input.projectId - The schedule's project.
- * @param input.sourceWallet - The wallet the sponsorship is scoped to.
- * @returns A function that resolves the fee payer's address, the same promise on every call.
- */
-function lazySponsoredFeePayer(input: {
-  env: Env;
-  organizationId: string;
-  projectId: string;
-  sourceWallet: RecurringPaymentSourceWallet;
-}): () => Promise<Address> {
-  let feePayer: Promise<Address> | null = null;
-  const resolveFeePayer = async (): Promise<Address> =>
-    resolveSponsoredFeePayer(
-      input.env,
-      await resolveProjectSponsorshipScope(input.env, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        actor: { type: "wallet", id: input.sourceWallet.walletId },
-      })
-    );
-  return () => {
-    if (feePayer === null) {
-      feePayer = resolveFeePayer();
-    }
-    return feePayer;
-  };
 }
 
 /**
@@ -147,20 +110,21 @@ function lazySponsoredFeePayer(input: {
  * @param input.rpc - The cluster RPC the authority is read from.
  * @param input.sourceWallet - The wallet that subscribes and the sponsorship is scoped to.
  * @param input.sourceSigner - The run's lazy source signer, resolved only when a step is sent.
+ * @param input.sponsor - The run's lazy sponsorship (`lazyRecurringPaymentSponsor`), resolved only
+ *   when a step is sent and shared with the run's other sends.
  * @param input.sourceTokenAccount - The source wallet's associated token account for the mint;
  *   setup creates it when the unsaved branch finds it missing.
  * @param input.subscriptionAuthorityAddress - The source wallet's subscription authority.
  * @param input.owner - The source wallet's address.
  * @param input.mint - The plan's mint.
  * @param input.tokenProgram - The mint's token program.
- * @param input.feePayer - The run's lazy fee payer, resolved only when the setup is sent.
  * @returns The subscription authority as read after setup.
  * @throws ResumedStepUnsettledError when the setup is pending.
  * @throws RecurringPaymentStepFailedError when the setup is dropped or cannot land.
  * @throws AppError TRANSACTION_FAILED when the authority is not on chain after setup.
  */
 async function prepareRecurringPaymentSubscriptionAuthority(
-  input: SubscriptionAuthorityStepInput & { feePayer: () => Promise<Address> }
+  input: SubscriptionAuthorityStepInput
 ): Promise<Account<subscriptionsProgram.SubscriptionAuthority>> {
   const flow = SUBSCRIPTION_AUTHORITY_SETUP_FLOWS[input.flow];
   const slot = flow.setupSlot;
@@ -209,9 +173,9 @@ async function prepareRecurringPaymentSubscriptionAuthority(
     return existingAuthority;
   }
 
-  const feePayer = await input.feePayer();
+  const sponsor = await input.sponsor();
   const sourceSigner = await input.sourceSigner();
-  const payer = createNoopSigner(feePayer);
+  const payer = createNoopSigner(sponsor.feePayer);
   // The init always goes out: it is idempotent on an existing authority (its `initId` stays) and
   // re-runs the token account's Approve, which the setup effect requires.
   const initAuthorityInstruction =
@@ -243,7 +207,7 @@ async function prepareRecurringPaymentSubscriptionAuthority(
     movement: flow.movement,
     sourceWallet: input.sourceWallet,
     sourceSigner,
-    feePayer,
+    sponsor,
     instructions,
     slot,
     effect,
@@ -289,7 +253,7 @@ function requireSubscriptionAuthority(
 /**
  * Subscribes the source wallet to a plan: the wallet's setup when it needs one
  * (`prepareRecurringPaymentSubscriptionAuthority`), then subscribe through the step runner, both
- * under the flow's movement and slots. The fee payer resolves once, only when a step is sent. A
+ * under the flow's movement and slots and the run's sponsorship, resolved only when a step is sent. A
  * confirmed subscribe is landed (D1): nothing reads the delegation after it. The caller reads a
  * subscribe it already saved before calling this.
  *
@@ -304,6 +268,8 @@ function requireSubscriptionAuthority(
  * @param input.rpc - The cluster RPC the authority is read from.
  * @param input.sourceWallet - The wallet that subscribes and the sponsorship is scoped to.
  * @param input.sourceSigner - The run's lazy source signer, resolved only when a step is sent.
+ * @param input.sponsor - The run's lazy sponsorship (`lazyRecurringPaymentSponsor`), resolved only
+ *   when a step is sent and shared with the run's other sends.
  * @param input.sourceTokenAccount - The source wallet's associated token account for the mint;
  *   setup creates it when the unsaved branch finds it missing.
  * @param input.subscriptionAuthorityAddress - The source wallet's subscription authority.
@@ -329,14 +295,10 @@ export async function authorizeRecurringPaymentSubscription(
   }
 ): Promise<Signature | null> {
   const flow = SUBSCRIPTION_AUTHORITY_SETUP_FLOWS[input.flow];
-  const feePayer = lazySponsoredFeePayer(input);
-  const subscriptionAuthority = await prepareRecurringPaymentSubscriptionAuthority({
-    ...input,
-    feePayer,
-  });
+  const subscriptionAuthority = await prepareRecurringPaymentSubscriptionAuthority(input);
   input.phase.step = flow.subscribeSlot;
 
-  const payer = await feePayer();
+  const sponsor = await input.sponsor();
   const sourceSigner = await input.sourceSigner();
   const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
     expectedAmount: input.amountBaseUnits,
@@ -344,7 +306,7 @@ export async function authorizeRecurringPaymentSubscription(
     expectedPeriodHours: BigInt(input.periodHours),
     expectedSubscriptionAuthorityInitId: subscriptionAuthority.data.initId,
     merchant: input.owner,
-    payer: createNoopSigner(payer),
+    payer: createNoopSigner(sponsor.feePayer),
     planId: input.programPlanId,
     subscriber: sourceSigner,
     tokenMint: input.mint,
@@ -358,7 +320,7 @@ export async function authorizeRecurringPaymentSubscription(
     movement: flow.movement,
     sourceWallet: input.sourceWallet,
     sourceSigner,
-    feePayer: payer,
+    sponsor,
     instructions: [subscribeInstruction],
     slot: flow.subscribeSlot,
     effect: delegationCreatedEffect(input.subscriptionPda),

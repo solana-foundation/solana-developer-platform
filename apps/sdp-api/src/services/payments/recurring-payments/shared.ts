@@ -84,6 +84,8 @@ import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
+  resolveSponsoredFeePayer,
+  type SponsorshipScope,
 } from "@/services/sponsorship.service";
 import {
   type SignedSubmissionStore,
@@ -256,50 +258,93 @@ export function assertRecurringPaymentSourceWallet(
   }
 }
 
+/** A run's sponsorship: the project scope its sends are sponsored under and the fee payer they name. */
+export interface RecurringPaymentSponsor {
+  sponsorshipScope: SponsorshipScope;
+  feePayer: Address;
+}
+
+/**
+ * Resolves a run's sponsorship once: the schedule's project scope, which refuses an inactive or
+ * cross-environment project, and the fee payer's address, read without building a sponsor.
+ *
+ * @param input - The schedule's tenant and source wallet.
+ * @param input.env - The environment.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.sourceWallet - The wallet the sponsorship is scoped to.
+ * @returns The scope and fee payer every send of the run uses.
+ * @throws AppError FORBIDDEN when the project is not active or not the organization's.
+ */
+export async function resolveRecurringPaymentSponsor(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: RecurringPaymentSourceWallet;
+}): Promise<RecurringPaymentSponsor> {
+  const sponsorshipScope = await resolveProjectSponsorshipScope(input.env, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    actor: { type: "wallet", id: input.sourceWallet.walletId },
+  });
+  return {
+    sponsorshipScope,
+    feePayer: await resolveSponsoredFeePayer(input.env, sponsorshipScope),
+  };
+}
+
+/**
+ * A run's sponsorship, resolved on the first call only (`resolveRecurringPaymentSponsor`): a run
+ * that sends nothing never reads the project for it or asks Kora.
+ *
+ * @param input - The schedule's tenant and source wallet.
+ * @param input.env - The environment.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.sourceWallet - The wallet the sponsorship is scoped to.
+ * @returns A function that resolves the sponsorship, the same promise on every call.
+ */
+export function lazyRecurringPaymentSponsor(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: RecurringPaymentSourceWallet;
+}): () => Promise<RecurringPaymentSponsor> {
+  let sponsor: Promise<RecurringPaymentSponsor> | null = null;
+  return () => {
+    if (sponsor === null) {
+      sponsor = resolveRecurringPaymentSponsor(input);
+    }
+    return sponsor;
+  };
+}
+
 export async function sendSubscriptionInstructions(input: {
   env: Env;
   /** The movement these instructions serve; the custody signer decides on it. */
   movement: MovementId;
-  organizationId: string;
-  projectId: string;
   sourceWallet: RecurringPaymentSourceWallet;
-  sourceSigner?: TransactionSigner;
+  sourceSigner: TransactionSigner;
   instructions: Instruction[];
-  feePayer?: Address;
+  /** The run's sponsorship scope; the one sponsor that signs this send is built from it. */
+  sponsorshipScope: SponsorshipScope;
+  /** The fee payer the instructions and the message name, resolved under the same scope. */
+  feePayer: Address;
   submissionStore: SignedSubmissionStore;
 }): Promise<Signature> {
-  const signer =
-    input.sourceSigner ??
-    (await createOrgSignerForCustodyWallet(
-      input.env,
-      input.organizationId,
-      input.projectId,
-      input.sourceWallet.id,
-      input.movement
-    ));
-
-  if (signer.address !== input.sourceWallet.publicKey) {
+  if (input.sourceSigner.address !== input.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
 
   const rpc = createClusterRpc();
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const feePayment = createSponsorshipFeePayment(
-    input.env,
-    await resolveProjectSponsorshipScope(input.env, {
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actor: { type: "wallet", id: input.sourceWallet.walletId },
-    }),
-    input.movement
-  );
-  const feePayer = input.feePayer ?? (await feePayment.getFeePayer());
+  const feePayment = createSponsorshipFeePayment(input.env, input.sponsorshipScope, input.movement);
   const message = pipe(
     createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(feePayer, m),
+    (m) => setTransactionMessageFeePayer(input.feePayer, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
     (m) => appendTransactionMessageInstructions(input.instructions, m),
-    (m) => addSignersToTransactionMessage([signer], m)
+    (m) => addSignersToTransactionMessage([input.sourceSigner], m)
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
@@ -930,7 +975,8 @@ export interface RecurringPaymentStepSend {
   movement: MovementId;
   sourceWallet: RecurringPaymentSourceWallet;
   sourceSigner: TransactionSigner;
-  feePayer?: Address;
+  /** The run's sponsor (`lazyRecurringPaymentSponsor`), shared by every step it sends. */
+  sponsor: RecurringPaymentSponsor;
   instructions: Instruction[];
   slot: RecurringPaymentStepSignatureSlot;
   effect: RecurringPaymentStepEffect;
@@ -971,12 +1017,11 @@ export async function sendRecurringPaymentStep(
     const signature = await sendSubscriptionInstructions({
       movement: input.movement,
       env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
       sourceWallet: input.sourceWallet,
       sourceSigner: input.sourceSigner,
       instructions: input.instructions,
-      feePayer: input.feePayer,
+      sponsorshipScope: input.sponsor.sponsorshipScope,
+      feePayer: input.sponsor.feePayer,
       submissionStore: createSubscriptionStepStore({
         env: input.env,
         organizationId: input.organizationId,
