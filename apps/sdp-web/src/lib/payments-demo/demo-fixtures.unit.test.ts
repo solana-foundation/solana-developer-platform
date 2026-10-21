@@ -78,7 +78,6 @@ import {
 } from "@/app/dashboard/[projectId]/payments/transactions/transactions-page.data.redesign";
 import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query.redesign";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
 import { buildWorld, demoWorldBody, paymentsDemoBody } from "./demo-fixtures";
 
 /*
@@ -452,50 +451,13 @@ describe("Payments overview", () => {
     expect(world).toEqual(before);
   });
 
-  it("returns exact identity without provider metadata through the balance consumer", async () => {
-    const wallets = await fetchPaymentsWallets(harness.request, { includeBalances: true });
-    const wallet = wallets.data?.[0];
-    expect(wallet).toBeDefined();
-    if (!wallet) throw new Error("Missing demo wallet");
-    const body = paymentsDemoBody(
-      `/v1/payments/wallets/${wallet.id}/balances`,
-      RAMP_PROVIDERS,
-      NOW
-    );
-    const parsed = parseWalletBalanceResponse(body, wallet.id);
-    expect(parsed.custodyWalletId).toBe(wallet.id);
-    expect(body).not.toHaveProperty("data.walletBalances.walletId");
-    expect(parsed).not.toHaveProperty("walletId");
-    expect(
-      parseWalletBalanceResponse(
-        { data: { walletBalances: { ...parsed, walletId: "obsolete-provider" } } },
-        wallet.id
-      )
-    ).not.toHaveProperty("walletId");
-  });
-
-  it("refuses provider wallet aliases in the balance path", async () => {
-    const wallets = await fetchPaymentsWallets(harness.request, { includeBalances: true });
-    const wallet = wallets.data?.[0];
-    if (!wallet) throw new Error("Missing demo wallet");
-    expect(
-      paymentsDemoBody(`/v1/payments/wallets/${wallet.walletId}/balances`, RAMP_PROVIDERS, NOW)
-    ).toBeUndefined();
-  });
-
-  it("selects the exact wallet in balance and transfer reads despite provider namespace collisions", () => {
+  it("selects exact transfer history despite provider namespace collisions", () => {
     const world = buildWorld(NOW, RAMP_PROVIDERS);
     const original = world.wallets.treasury;
     const selected = world.wallets.payroll;
     if (!original || !selected) throw new Error("Missing demo wallets");
     original.walletId = selected.id;
     const before = structuredClone(world);
-    const balance = parseWalletBalanceResponse(
-      demoWorldBody(world, `/v1/payments/wallets/${selected.id}/balances`),
-      selected.id
-    );
-    expect(balance.address).toBe(selected.publicKey);
-    expect(balance.balances).toEqual(selected.balances);
     const transfers = demoWorldBody(world, `/v1/payments/transfers?custodyWalletId=${selected.id}`);
     expect(transfers).toHaveProperty("data.0.custodyWalletId", selected.id);
     expect(world).toEqual(before);

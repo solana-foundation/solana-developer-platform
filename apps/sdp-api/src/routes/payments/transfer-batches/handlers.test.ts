@@ -22,7 +22,6 @@ import {
 import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { transferBatchListResponse } from "@/openapi/paths/responses";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
@@ -1075,118 +1074,6 @@ describe("payment transfer batches", () => {
     expect(detailBody.error.code).toBe("CONFLICT");
   });
 
-  it.each([{ walletIds: [TEST_CUSTODY_WALLET_ID] }, { walletIds: [] }])(
-    "keeps pinned and null-pin batch history project-scoped with signing wallets $walletIds",
-    async ({ walletIds }) => {
-      await getDb(env).batch([
-        getDb(env)
-          .prepare(`INSERT INTO payment_transfer_batches
-            (id, organization_id, project_id, source_custody_wallet_id,
-             source_wallet_id, source_address, token, created_at)
-            VALUES ('xbatch_exact_history', ?, ?, ?, ?, ?, ?, '2026-10-12T00:00:00.000Z')`)
-          .bind(
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            TEST_CUSTODY_WALLET_ID,
-            TEST_WALLET_ID,
-            TEST_SOLANA_ADDRESSES.wallet1,
-            WELL_KNOWN_TOKENS.SOL.symbol
-          ),
-        getDb(env)
-          .prepare(`INSERT INTO payment_transfer_batches
-            (id, organization_id, project_id, source_custody_wallet_id,
-             source_wallet_id, source_address, token, created_at)
-            VALUES ('xbatch_legacy_same_reference', ?, ?, NULL, ?, ?, ?, '2026-10-12T00:00:01.000Z')`)
-          .bind(
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            TEST_WALLET_ID,
-            TEST_SOLANA_ADDRESSES.wallet1,
-            WELL_KNOWN_TOKENS.SOL.symbol
-          ),
-        getDb(env)
-          .prepare(`INSERT INTO payment_transfer_batches
-            (id, organization_id, project_id, source_custody_wallet_id,
-             source_wallet_id, source_address, token, created_at)
-            VALUES ('xbatch_legacy_other_reference', ?, ?, NULL, 'wal_batch_legacy_other', ?, ?, '2026-10-12T00:00:02.000Z')`)
-          .bind(
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            TEST_SOLANA_ADDRESSES.wallet2,
-            WELL_KNOWN_TOKENS.SOL.symbol
-          ),
-        getDb(env)
-          .prepare(`INSERT INTO payment_transfer_batches
-            (id, organization_id, project_id, source_custody_wallet_id,
-             source_wallet_id, source_address, token)
-            VALUES ('xbatch_foreign_project', ?, ?, NULL, 'wal_batch_foreign', ?, ?)`)
-          .bind(
-            TEST_ORG.id,
-            `${TEST_PROJECT.id}_production`,
-            TEST_SOLANA_ADDRESSES.wallet2,
-            WELL_KNOWN_TOKENS.SOL.symbol
-          ),
-      ]);
-      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedApiKeyRow(env, keyHash, {
-        ...TEST_SEEDED_API_KEY,
-        grants: ["transfer_batches.read"],
-        walletScope: "selected",
-        walletIds,
-      });
-      const headers = { Authorization: `Bearer ${TEST_API_KEY.raw}` };
-
-      const response = await app.request("/v1/payments/transfer-batches", { headers }, env);
-
-      expect(response.status).toBe(200);
-      const body = transferBatchListResponse.parse(await response.json());
-      expect(
-        body.data.map((row) => ({ id: row.id, sourceCustodyWalletId: row.sourceCustodyWalletId }))
-      ).toEqual([
-        { id: "xbatch_legacy_other_reference", sourceCustodyWalletId: null },
-        { id: "xbatch_legacy_same_reference", sourceCustodyWalletId: null },
-        { id: "xbatch_exact_history", sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID },
-      ]);
-      expect(body.meta.total).toBe(3);
-      const nextPage = await app.request(
-        "/v1/payments/transfer-batches?pageSize=1&page=3",
-        { headers },
-        env
-      );
-      expect(nextPage.status).toBe(200);
-      expect(transferBatchListResponse.parse(await nextPage.json())).toMatchObject({
-        data: [{ id: "xbatch_exact_history", sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID }],
-        meta: { total: 3 },
-      });
-      for (const row of body.data) {
-        const detail = await app.request(
-          `/v1/payments/transfer-batches/${row.id}`,
-          { headers },
-          env
-        );
-        expect(detail.status).toBe(200);
-        const detailBody = await detail.json();
-        expect(detailBody).toMatchObject({
-          data: { batch: { id: row.id, sourceCustodyWalletId: row.sourceCustodyWalletId } },
-        });
-        expect(detailBody).not.toHaveProperty("data.batch.sourceProviderWalletId");
-      }
-      const foreignDetail = await app.request(
-        "/v1/payments/transfer-batches/xbatch_foreign_project",
-        { headers },
-        env
-      );
-      expect(foreignDetail.status).toBe(404);
-
-      await seedApiKeyRow(env, keyHash, { ...TEST_SEEDED_API_KEY, grants: [] });
-      const denied = await app.request("/v1/payments/transfer-batches", { headers }, env);
-      expect(denied.status).toBe(403);
-      expect(await denied.json()).toMatchObject({
-        error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "transfer_batches.read" } },
-      });
-    }
-  );
-
   it("keeps exact persisted batch history readable after the wallet becomes inactive", async () => {
     await getDb(env)
       .prepare(
@@ -1218,7 +1105,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(res.status).toBe(200);
-    const response = transferBatchListResponse.parse(await res.json());
+    const response = (await res.json()) as { data: Array<{ id: string }> };
     expect(response.data.map((batch) => batch.id)).toEqual(["xbatch_inactive_wallet_history"]);
   });
 

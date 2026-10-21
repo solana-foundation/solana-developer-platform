@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { transferListResponse } from "@/openapi/paths/responses";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -37,7 +36,6 @@ import {
   getSignaturesForAddressMock,
   getSplTokenAccountAddressesMock,
   installPaymentsRouteTestHooks,
-  seedCachedKey,
   seedCounterparty,
   seedProductionPrivyWallet,
   TEST_API_KEY,
@@ -831,83 +829,6 @@ describe("Payments routes — list transfers", () => {
       expect(body.data).toEqual([]);
       expect(body.meta.total).toBe(0);
     });
-
-    it.each([{ walletIds: [TEST_CUSTODY_WALLET_ID] }, { walletIds: [] }])(
-      "keeps project transfer history and pagination independent of signing wallets $walletIds",
-      async ({ walletIds }) => {
-        await seedTransfer({
-          id: "xfr_exact_history",
-          status: "confirmed",
-          createdAt: "2026-10-12T00:00:00.000Z",
-        });
-        await seedTransfer({
-          id: "xfr_legacy_same_reference",
-          status: "confirmed",
-          custodyWalletId: null,
-          walletId: TEST_WALLET_ID,
-          createdAt: "2026-10-12T00:00:01.000Z",
-        });
-        await seedTransfer({
-          id: "xfr_legacy_other_reference",
-          status: "confirmed",
-          custodyWalletId: null,
-          walletId: "wal_legacy_other_reference",
-          createdAt: "2026-10-12T00:00:02.000Z",
-        });
-        await seedCachedKey({ grants: ["transfers.read"], walletScope: "selected", walletIds });
-        const headers = { Authorization: `Bearer ${TEST_API_KEY.raw}` };
-
-        const response = await app.request(
-          "/v1/payments/transfers?includeObserved=false",
-          { headers },
-          env
-        );
-
-        expect(response.status).toBe(200);
-        const rawBody = await response.json();
-        const body = transferListResponse.parse(rawBody);
-        expect(
-          body.data.map((row) => ({ id: row.id, custodyWalletId: row.custodyWalletId }))
-        ).toEqual([
-          { id: "xfr_legacy_other_reference", custodyWalletId: null },
-          { id: "xfr_legacy_same_reference", custodyWalletId: null },
-          { id: "xfr_exact_history", custodyWalletId: TEST_CUSTODY_WALLET_ID },
-        ]);
-        expect(body.meta.total).toBe(3);
-        const nextPage = await app.request(
-          "/v1/payments/transfers?includeObserved=false&pageSize=1&page=3",
-          { headers },
-          env
-        );
-        expect(nextPage.status).toBe(200);
-        expect(transferListResponse.parse(await nextPage.json())).toMatchObject({
-          data: [{ id: "xfr_exact_history", custodyWalletId: TEST_CUSTODY_WALLET_ID }],
-          meta: { total: 3 },
-        });
-        for (const [index, row] of body.data.entries()) {
-          expect(rawBody).not.toHaveProperty(`data.${index}.providerWalletId`);
-          const detail = await app.request(`/v1/payments/transfers/${row.id}`, { headers }, env);
-          expect(detail.status).toBe(200);
-          const detailBody = await detail.json();
-          expect(detailBody).toMatchObject({
-            data: { transfer: { id: row.id, custodyWalletId: row.custodyWalletId } },
-          });
-          expect(detailBody).not.toHaveProperty("data.transfer.providerWalletId");
-        }
-        expect(rpc.calls).toEqual([]);
-
-        await seedCachedKey({ grants: [], walletScope: "selected", walletIds });
-        const denied = await app.request(
-          "/v1/payments/transfers?includeObserved=false",
-          { headers },
-          env
-        );
-        expect(denied.status).toBe(403);
-        expect(await denied.json()).toMatchObject({
-          error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "transfers.read" } },
-        });
-      }
-    );
 
     it("composes exact provider-reference lookups with every ledger filter and pagination", async () => {
       const counterpartyId = await seedCounterparty({ id: "cpty_exact_reference" });

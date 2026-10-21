@@ -3,16 +3,25 @@ import { expect, type Page, test } from "@playwright/test";
 import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types/payments";
 import { Client } from "pg";
 import { z } from "zod";
+import { paymentsWalletsResponseSchema } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { getClerkBearerToken } from "../support/auth-session";
+import { getE2EEnv } from "../env";
 import {
+  getClerkBearerToken,
+  getPlaywrightAdminSession,
+  type PlaywrightAdminSession,
+} from "../support/auth-session";
+import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
+import {
+  bootstrapLocalWalletFixtures,
   createExternalSolanaAddress,
-  getPlaywrightDatabaseUrl,
+  getBootstrapApiBaseUrl,
   gotoProjectPage,
+  type PlaywrightWalletFixture,
   type SeededCounterparty,
   seedCounterpartyWithSolanaAccount,
+  type WalletBootstrapResult,
 } from "../support/local-dashboard-bootstrap";
-import { bootstrapWalletIdentityFixtures } from "../support/payments-wallet-identity";
 
 const TIMEOUT = 120_000;
 const sourceWalletSelectorSchema = z.object({ sourceCustodyWalletId: z.string() });
@@ -33,22 +42,109 @@ const batchResultSchema = z.object({
 
 test.describe
   .serial("Payments exact custody identity through browser and local API", () => {
-    let fixture: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>;
-    let api: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>["api"];
+    let admin: PlaywrightAdminSession;
+    let fixture: WalletBootstrapResult;
+    let api: LocalApiClient;
     let db: Client;
     let projectId: string;
-    let wallet: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>["walletA"];
-    let alias: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>["walletB"];
+    let wallet: PlaywrightWalletFixture;
+    let alias: PlaywrightWalletFixture;
     let contact: SeededCounterparty;
     let destinationAddress: string;
     const transferIds = new Set<string>();
     const batchIds = new Set<string>();
+    const suffix = crypto.randomUUID();
+    const aliasRecord = {
+      credentialId: `pcred_pr2_${suffix}`,
+      connectionId: `cconn_pr2_${suffix}`,
+      walletId: `cwlt_pr2_${suffix}`,
+    };
 
     test.beforeAll(async ({ browser }) => {
-      fixture = await bootstrapWalletIdentityFixtures(browser);
-      ({ api, projectId, walletA: wallet, walletB: alias } = fixture);
-      db = new Client({ connectionString: getPlaywrightDatabaseUrl() });
+      const databaseUrl = process.env.DATABASE_URL;
+      if (!databaseUrl) throw new Error("Payments E2E requires an explicit local DATABASE_URL");
+      const database = new URL(databaseUrl);
+      const apiUrl = new URL(getBootstrapApiBaseUrl());
+      const rpcUrl = new URL(process.env.SOLANA_RPC_URL ?? "");
+      if (
+        getE2EEnv().useExternalApi ||
+        !["http:", "https:"].includes(apiUrl.protocol) ||
+        !["postgres:", "postgresql:"].includes(database.protocol) ||
+        !["127.0.0.1", "localhost"].includes(apiUrl.hostname) ||
+        !["127.0.0.1", "localhost"].includes(database.hostname) ||
+        !["http:", "https:"].includes(rpcUrl.protocol) ||
+        !["127.0.0.1", "localhost"].includes(rpcUrl.hostname) ||
+        process.env.KORA_SURFPOOL_SHIM !== "true"
+      ) {
+        throw new Error("Payments E2E requires loopback API, Postgres and Surfpool");
+      }
+      admin = await getPlaywrightAdminSession(browser);
+      fixture = await bootstrapLocalWalletFixtures({
+        identity: admin.identity,
+        bearerToken: admin.getBearerToken,
+        provider: "local",
+        walletLabel: "Wallet Identity A",
+        walletCount: 1,
+        fundSourceWallet: true,
+        fundSourceAmountSol: 0.05,
+        tier: "enterprise",
+      });
+      const source = fixture.wallets[0];
+      if (!source) throw new Error("Local payment source wallet was not created");
+      wallet = source;
+      projectId = fixture.projectId;
+      api = createLocalApiClient(getBootstrapApiBaseUrl(), admin.getBearerToken, projectId);
+      db = new Client({ connectionString: databaseUrl });
       await db.connect();
+      await db.query("BEGIN");
+      try {
+        // A metadata-only Connection shares the source reference; no provider signing is used.
+        await db.query(
+          `INSERT INTO provider_credentials
+            (id, organization_id, project_id, provider, label, scope, source, storage_backend, status)
+           VALUES ($1, $2, $3, 'privy', 'Wallet Identity B', 'project', 'runtime', 'runtime_env', 'active')`,
+          [aliasRecord.credentialId, fixture.organization.localOrgId, projectId]
+        );
+        await db.query(
+          `INSERT INTO custody_connections
+            (id, organization_id, project_id, provider, scope, provider_credential_id,
+             provider_credential_scope_key, status)
+           VALUES ($1, $2, $3, 'privy', 'project', $4, $3, 'pending')`,
+          [
+            aliasRecord.connectionId,
+            fixture.organization.localOrgId,
+            projectId,
+            aliasRecord.credentialId,
+          ]
+        );
+        await db.query(
+          `INSERT INTO custody_wallets
+            (id, custody_connection_id, wallet_id, public_key, label, purpose, status)
+           VALUES ($1, $2, $3, $4, 'Wallet Identity B', 'transfer', 'active')`,
+          [aliasRecord.walletId, aliasRecord.connectionId, wallet.walletId, wallet.publicKey]
+        );
+        await db.query(
+          `UPDATE custody_connections
+           SET default_custody_wallet_id = $2, provider_account_fingerprint = $3,
+               status = 'active', last_check_status = 'success', last_check_at = sdp_iso_now(),
+               activated_at = sdp_iso_now(), updated_at = sdp_iso_now()
+           WHERE id = $1`,
+          [aliasRecord.connectionId, aliasRecord.walletId, `sha256:pr2-${suffix}`]
+        );
+        await db.query("COMMIT");
+      } catch (error) {
+        await db.query("ROLLBACK");
+        throw error;
+      }
+      const listed = paymentsWalletsResponseSchema.shape.data.parse(await api.get("/v1/wallets"));
+      const matchedAlias = listed.wallets.find(
+        (candidate) => candidate.id === aliasRecord.walletId
+      );
+      if (!matchedAlias) throw new Error("Project-owned payment alias was not listed");
+      alias = matchedAlias;
+      expect(matchedAlias.isRuntimeExecutionAllowed).toBe(true);
+      expect(alias.walletId).toBe(wallet.walletId);
+      expect(alias.publicKey).toBe(wallet.publicKey);
       destinationAddress = await createExternalSolanaAddress();
       contact = await seedCounterpartyWithSolanaAccount(api, {
         displayName: `Exact Payments Recipient ${crypto.randomUUID().slice(0, 8)}`,
@@ -60,20 +156,48 @@ test.describe
     test.afterAll(async () => {
       try {
         if (db && fixture) {
-          const scope = [fixture.organizationId, projectId];
-          await db.query(
-            "DELETE FROM payment_transfer_batches WHERE organization_id = $1 AND project_id = $2 AND id = ANY($3::text[])",
-            [...scope, [...batchIds]]
-          );
-          await db.query(
-            "DELETE FROM payment_transfers WHERE organization_id = $1 AND project_id = $2 AND (id = ANY($3::text[]) OR custody_wallet_id = $4)",
-            [...scope, [...transferIds], alias.id]
-          );
+          const scope = [fixture.organization.localOrgId, projectId];
+          await db.query("BEGIN");
+          try {
+            await db.query(
+              "DELETE FROM payment_transfer_batches WHERE organization_id = $1 AND project_id = $2 AND id = ANY($3::text[])",
+              [...scope, [...batchIds]]
+            );
+            await db.query(
+              "DELETE FROM payment_transfers WHERE organization_id = $1 AND project_id = $2 AND (id = ANY($3::text[]) OR custody_wallet_id = $4)",
+              [...scope, [...transferIds], aliasRecord.walletId]
+            );
+            await db.query(
+              "UPDATE custody_connections SET default_custody_wallet_id = NULL WHERE organization_id = $1 AND project_id = $2 AND id = $3",
+              [...scope, aliasRecord.connectionId]
+            );
+            await db.query(
+              `DELETE FROM custody_wallets WHERE id = $1 AND custody_connection_id IN (
+                   SELECT id FROM custody_connections WHERE organization_id = $2 AND project_id = $3 AND id = $4
+                 )`,
+              [aliasRecord.walletId, ...scope, aliasRecord.connectionId]
+            );
+            await db.query(
+              "DELETE FROM custody_connections WHERE organization_id = $1 AND project_id = $2 AND id = $3",
+              [...scope, aliasRecord.connectionId]
+            );
+            await db.query(
+              "DELETE FROM provider_credentials WHERE organization_id = $1 AND project_id = $2 AND id = $3",
+              [...scope, aliasRecord.credentialId]
+            );
+            await db.query("COMMIT");
+          } catch (error) {
+            await db.query("ROLLBACK");
+            throw error;
+          }
           if (contact) await api.delete(`/v1/counterparties/${contact.counterpartyId}`);
         }
       } finally {
-        await db?.end();
-        await fixture?.cleanup();
+        try {
+          await db?.end();
+        } finally {
+          await admin?.page.close();
+        }
       }
     });
 
@@ -408,7 +532,7 @@ test.describe
         rows: [storedQuote],
       } = await db.query(
         "SELECT custody_wallet_id, wallet_id, provider_reference, source_address FROM payment_transfers WHERE id = $1 AND organization_id = $2 AND project_id = $3",
-        [transferId, fixture.organizationId, projectId]
+        [transferId, fixture.organization.localOrgId, projectId]
       );
       expect(storedQuote).toMatchObject({
         custody_wallet_id: alias.id,
@@ -453,7 +577,7 @@ test.describe
           rows: [afterCancellation],
         } = await db.query(
           "SELECT custody_wallet_id, wallet_id, provider_reference, source_address FROM payment_transfers WHERE id = $1 AND organization_id = $2 AND project_id = $3",
-          [transferId, fixture.organizationId, projectId]
+          [transferId, fixture.organization.localOrgId, projectId]
         );
         expect(afterCancellation).toEqual(storedQuote);
       } finally {
@@ -481,7 +605,7 @@ test.describe
             status,
             destinationAddress,
             transferId,
-            fixture.organizationId,
+            fixture.organization.localOrgId,
             projectId,
             signature,
           ]

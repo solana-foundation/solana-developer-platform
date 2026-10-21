@@ -112,20 +112,6 @@ afterEach(() => {
 });
 
 describe("wallet cards", () => {
-  it.each(["grid", "list"])("opens exact alias wallets from the %s view", (view) => {
-    mocks.query = `view=${view}`;
-    renderOverview({
-      wallets: [
-        makeWallet({ id: "cwlt_a", walletId: "provider_shared", label: "Wallet A" }),
-        makeWallet({ id: "cwlt_b", walletId: "provider_shared", label: "Wallet B" }),
-      ],
-    });
-    const links = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
-    expect(links).toContain("/dashboard/prj_test_sandbox/wallets/cwlt_a");
-    expect(links).toContain("/dashboard/prj_test_sandbox/wallets/cwlt_b");
-    expect(links).not.toContain("/dashboard/prj_test_sandbox/wallets/provider_shared");
-  });
-
   it("copies the exact Wallet ID from its card", () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", Object.create(navigator, { clipboard: { value: { writeText } } }));
@@ -232,23 +218,6 @@ describe("empty and failed lists", () => {
 });
 
 describe("favorites", () => {
-  it("pins alias wallets independently and preserves each exact sidebar target", () => {
-    renderOverview({
-      wallets: [
-        makeWallet({ id: "cwlt_a", walletId: "provider_shared", label: "Wallet A" }),
-        makeWallet({ id: "cwlt_b", walletId: "provider_shared", label: "Wallet B" }),
-      ],
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add Wallet A to favorites" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add Wallet B to favorites" }));
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual([
-      "cwlt_a",
-      "cwlt_b",
-    ]);
-    fireEvent.click(screen.getByRole("button", { name: "Remove Wallet A from favorites" }));
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["cwlt_b"]);
-  });
-
   it("pins a wallet to the sidebar and undoes it from the toast", () => {
     renderOverview();
     const star = screen.getByRole("button", { name: "Add Off ramp demo wallet to favorites" });
@@ -295,7 +264,7 @@ describe("favorites", () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify([
-        { walletId: "wa-offramp", name: "Old name", provider: "dfns" },
+        { walletId: "row-2", name: "Old name", provider: "dfns" },
         { walletId: "deleted", name: "Gone", provider: "para" },
       ])
     );

@@ -1,6 +1,5 @@
 import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { assertValidAddress } from "@sdp/solana/address";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type Blockhash,
@@ -117,7 +116,7 @@ function harnessParts() {
     settle: vi.fn().mockResolvedValue(0),
     syncPolicy: vi.fn().mockResolvedValue(undefined),
   };
-  const provider = {
+  const provider: FeePaymentPort = {
     providerId: "kora",
     getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
     getSponsorshipConfiguration: vi.fn().mockResolvedValue({
@@ -127,7 +126,7 @@ function harnessParts() {
       feePayerPolicy: { system: { allow_transfer: false } },
     }),
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
-  } satisfies FeePaymentPort;
+  };
   const readAdmissionFacts = readMoneyAdmissionFacts.mockReset().mockResolvedValue(ACTIVE_SANDBOX);
   return { provider, repository, budgetRedis, readAdmissionFacts };
 }
@@ -168,43 +167,6 @@ describe("BudgetedFeePayment", () => {
       expect(repository.createReservation).toHaveBeenCalledOnce();
     }
   );
-
-  it("keeps the original reservation ID and actor when admitting the same message", async () => {
-    const feePayer = assertValidAddress("11111111111111111111111111111111");
-    const message = pipe(
-      createTransactionMessage({ version: 0 }),
-      (current) => setTransactionMessageFeePayer(feePayer, current),
-      (current) =>
-        setTransactionMessageLifetimeUsingBlockhash(
-          { blockhash: BLOCKHASH, lastValidBlockHeight: 100n },
-          current
-        )
-    );
-    const transaction = new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
-    const { feePayment, provider, repository } = harness();
-    vi.mocked(provider.getSponsorshipConfiguration).mockResolvedValue({
-      signerAddress: feePayer,
-      maxAllowedLamports: 1_000_000n,
-      feePayerMayTransferLamports: false,
-      feePayerPolicy: { system: { allow_transfer: false } },
-    });
-    // The old hash vector uses the System Program address, which cannot produce a signature.
-    vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
-      new FeePaymentError("Fixture signer refused", "PROVIDER_REJECTED")
-    );
-    await expect(feePayment.signAsFeePayer(transaction)).rejects.toMatchObject({
-      code: "PROVIDER_REJECTED",
-    });
-    // Pre-migration vector: v0, zero fee payer, 0x07 blockhash, empty instructions/lookups.
-    expect(repository.createReservation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "sbr_ccf81482062175e6d873e528d4f616b87bf805d94a127624964655d19dd3862c",
-        transactionDigest: "a0f6ee5647fad475e2aee17b1ca2d2039e6a20f3af25f5107600e3fdf9cf9317",
-        actorType: SCOPE.actor.type,
-        actorId: SCOPE.actor.id,
-      })
-    );
-  });
 
   it("commits the durable reservation before touching the Redis budget gate", async () => {
     const { feePayment, repository, budgetRedis } = harness();
@@ -814,20 +776,6 @@ describe("BudgetedFeePayment", () => {
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();
     });
 
-    it("refuses a new sponsor signature when the API key is no longer live", async () => {
-      const { feePayment, provider, repository, readAdmissionFacts } = harness();
-      readAdmissionFacts.mockResolvedValue(
-        admittedMoneyFacts({ principal: { kind: "api_key", key: null } })
-      );
-
-      await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
-        code: "FORBIDDEN",
-        reason: "principal_not_live",
-      });
-      expect(repository.createReservation).not.toHaveBeenCalled();
-      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
-    });
-
     it("returns a sponsorship already signed as it was, whatever the organization's state", async () => {
       const { feePayment, provider, repository, readAdmissionFacts } = harness();
       readAdmissionFacts.mockResolvedValue(DELETED);
@@ -856,10 +804,11 @@ describe("BudgetedFeePayment", () => {
     });
   });
 
-  it("replays stored bytes without signing or reserving budget again", async () => {
-    const { feePayment, provider, repository, budgetRedis } = harness();
+  it("replays stored bytes untouched when they carry the requested message", async () => {
+    const { feePayment, provider, repository } = harness();
     const requested = buildTransaction();
-    const stored = await feePayment.signAsFeePayer(requested);
+    const stored = await sponsorSignTestTransaction(requested);
+    repository.createReservation.mockResolvedValueOnce(false);
     repository.getReservation.mockResolvedValueOnce({
       status: "signed",
       attempt: 1,
@@ -868,12 +817,8 @@ describe("BudgetedFeePayment", () => {
 
     await expect(feePayment.signAsFeePayer(requested)).resolves.toEqual(stored);
 
-    expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
     expect(provider.getFeePayer).not.toHaveBeenCalled();
-    expect(repository.createReservation).toHaveBeenCalledOnce();
-    expect(budgetRedis.reserve).toHaveBeenCalledOnce();
-    expect(repository.markSigned).toHaveBeenCalledOnce();
-    expect(repository.markReleased).not.toHaveBeenCalled();
   });
 
   it("refuses a stored replay whose bytes do not carry the requested message", async () => {

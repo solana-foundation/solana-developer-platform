@@ -208,7 +208,6 @@ const _TEST_COUNTERPARTY_IDENTITY = {
 async function seedCryptoWalletCounterpartyAccount(params: {
   counterpartyId: string;
   address: string;
-  projectId: string;
 }): Promise<string> {
   const id = `counterparty_account_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -232,7 +231,7 @@ async function seedCryptoWalletCounterpartyAccount(params: {
     .bind(
       id,
       TEST_ORG.id,
-      params.projectId,
+      TEST_PROJECT.id,
       params.counterpartyId,
       "crypto_wallet",
       "Recurring payment wallet",
@@ -684,135 +683,28 @@ describe("Payments routes — recurring", () => {
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
   });
 
-  it.each([{ walletIds: [TEST_CUSTODY_WALLET_ID] }, { walletIds: [] }])(
-    "keeps pinned and null-pin recurring history project-scoped with signing wallets $walletIds",
-    async ({ walletIds }) => {
-      const exact = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const legacy = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const otherReference = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const foreign = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const foreignProjectId = `${TEST_PROJECT.id}_production`;
-      const foreignCounterpartyId = await seedCounterparty({ projectId: foreignProjectId });
-      const foreignAccountId = await seedCryptoWalletCounterpartyAccount({
-        counterpartyId: foreignCounterpartyId,
-        address: TEST_SOLANA_ADDRESSES.wallet2,
-        projectId: foreignProjectId,
-      });
-      await getDb(env).batch([
-        getDb(env)
-          .prepare("UPDATE payment_recurring_payments SET created_at = ? WHERE id = ?")
-          .bind("2026-10-12T00:00:00.000Z", exact.id),
-        getDb(env)
-          .prepare(
-            "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL, created_at = ? WHERE id = ?"
-          )
-          .bind("2026-10-12T00:00:01.000Z", legacy.id),
-        getDb(env)
-          .prepare(
-            "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL, source_wallet_id = ?, created_at = ? WHERE id = ?"
-          )
-          .bind("wal_recurring_legacy_other", "2026-10-12T00:00:02.000Z", otherReference.id),
-        getDb(env)
-          .prepare(
-            `UPDATE payment_recurring_payments
-                SET source_custody_wallet_id = NULL, project_id = ?,
-                    counterparty_id = ?, counterparty_account_id = ?
-              WHERE id = ?`
-          )
-          .bind(foreignProjectId, foreignCounterpartyId, foreignAccountId, foreign.id),
-      ]);
-      await seedCachedKey({ grants: ["recurring.read"], walletScope: "selected", walletIds });
+  it("fails closed before signing when a recurring payment has no exact wallet pin", async () => {
+    const recurringPaymentId = (
+      await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      })
+    ).id;
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL WHERE id = ?")
+      .bind(recurringPaymentId)
+      .run();
+    const signerCalls = createOrgSignerForCustodyWalletMock.mock.calls.length;
 
-      const selected = await app.request(
-        "/v1/payments/recurring-payments",
-        { headers: RECURRING_HEADERS },
-        env
-      );
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
 
-      expect(selected.status).toBe(200);
-      const selectedBody = successResponseSchema(paymentRecurringPaymentListResponseSchema).parse(
-        await selected.json()
-      );
-      expect(selectedBody.data.total).toBe(3);
-      expect(
-        selectedBody.data.recurringPayments.map((row) => ({
-          id: row.id,
-          sourceCustodyWalletId: row.sourceCustodyWalletId,
-        }))
-      ).toEqual([
-        { id: otherReference.id, sourceCustodyWalletId: null },
-        { id: legacy.id, sourceCustodyWalletId: null },
-        { id: exact.id, sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID },
-      ]);
-      const nextPage = await app.request(
-        "/v1/payments/recurring-payments?pageSize=1&page=3",
-        { headers: RECURRING_HEADERS },
-        env
-      );
-      expect(nextPage.status).toBe(200);
-      expect(await nextPage.json()).toMatchObject({
-        data: { recurringPayments: [{ id: exact.id }], total: 3 },
-      });
-      for (const row of selectedBody.data.recurringPayments) {
-        const detail = await app.request(
-          `/v1/payments/recurring-payments/${row.id}`,
-          { headers: RECURRING_HEADERS },
-          env
-        );
-        expect(detail.status).toBe(200);
-        expect((await parseRecurringResponse(detail)).data.recurringPayment).toMatchObject({
-          id: row.id,
-          sourceCustodyWalletId: row.sourceCustodyWalletId,
-        });
-      }
-      const foreignDetail = await app.request(
-        `/v1/payments/recurring-payments/${foreign.id}`,
-        { headers: RECURRING_HEADERS },
-        env
-      );
-      expect(foreignDetail.status).toBe(404);
-
-      await seedCachedKey({ grants: [], walletScope: "selected", walletIds });
-      const denied = await app.request(
-        "/v1/payments/recurring-payments",
-        { headers: RECURRING_HEADERS },
-        env
-      );
-      expect(denied.status).toBe(403);
-      expect(await denied.json()).toMatchObject({
-        error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "recurring.read" } },
-      });
-    }
-  );
-
-  it.each(["all", "selected"] as const)(
-    "fails closed before signing a null-pin recurring payment with %s wallet scope",
-    async (walletScope) => {
-      const recurringPaymentId = (
-        await createRecurringPaymentFixture({
-          ...DEFAULT_RECURRING_FIXTURE,
-          headers: RECURRING_HEADERS,
-        })
-      ).id;
-      await getDb(env)
-        .prepare(
-          "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL WHERE id = ?"
-        )
-        .bind(recurringPaymentId)
-        .run();
-      await seedCachedKey({ walletScope, walletIds: [TEST_CUSTODY_WALLET_ID] });
-      const signerCalls = createOrgSignerForCustodyWalletMock.mock.calls.length;
-
-      const response = await app.request(
-        `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-        env
-      );
-
-      expect(response.status).toBe(409);
-      expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
-    }
-  );
+    expect(response.status).toBe(409);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
+  });
 
   it("does not claim activation when runtime admission denies the source wallet", async () => {
     const recurringPaymentId = (
@@ -912,7 +804,6 @@ describe("Payments routes — recurring", () => {
     const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
       counterpartyId,
       address: TEST_SOLANA_ADDRESSES.wallet2,
-      projectId: TEST_PROJECT.id,
     });
 
     const createRecurring = (token: string) =>

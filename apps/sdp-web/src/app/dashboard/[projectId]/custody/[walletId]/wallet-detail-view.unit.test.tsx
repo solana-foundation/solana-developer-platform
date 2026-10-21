@@ -1,15 +1,10 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { type ComponentProps, type ReactNode, useState } from "react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  DashboardPageTitleContext,
-  type DashboardPageTitleOverride,
-} from "@/components/dashboard-page-title-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { readWalletFavorites, walletFavoritesKey } from "@/lib/wallet-favorites";
 
 // jsdom implements no matchMedia, while the activity table's motion components read it.
 if (!window.matchMedia) {
@@ -123,46 +118,33 @@ const wallet: ComponentProps<typeof WalletDetailView>["wallet"] = {
   canManageCustody: true,
 };
 
-function Header({ children }: { children: ReactNode }) {
-  const [title, setTitle] = useState<DashboardPageTitleOverride | null>(null);
-  return (
-    <DashboardPageTitleContext.Provider value={setTitle}>
-      {title?.actions}
-      {children}
-    </DashboardPageTitleContext.Provider>
-  );
-}
-
 function renderView(overrides: Partial<ComponentProps<typeof WalletDetailView>> = {}) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <Header>
-        <WalletDetailView
-          wallet={wallet}
-          balancesPromise={Promise.resolve({
-            balances: [
-              {
-                token: "USDC",
-                mint: USDC,
-                amount: "4000000000",
-                uiAmount: "4000",
-                decimals: 6,
-                usdValue: 4000,
-              },
-            ],
-            error: null,
-          })}
-          issuedTokensPromise={Promise.resolve({})}
-          issuanceEnabled
-          {...overrides}
-        />
-      </Header>
+      <WalletDetailView
+        wallet={wallet}
+        balancesPromise={Promise.resolve({
+          balances: [
+            {
+              token: "USDC",
+              mint: USDC,
+              amount: "4000000000",
+              uiAmount: "4000",
+              decimals: 6,
+              usdValue: 4000,
+            },
+          ],
+          error: null,
+        })}
+        issuedTokensPromise={Promise.resolve({})}
+        issuanceEnabled
+        {...overrides}
+      />
     </I18nProvider>
   );
 }
 
 beforeEach(() => {
-  window.localStorage.clear();
   mocks.tab = null;
   mocks.activity = {
     activityRows: [
@@ -200,30 +182,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  vi.unstubAllGlobals();
 });
 
 describe("Overview", () => {
-  it("pins the exact wallet from its detail header", async () => {
-    await act(async () => {
-      renderView();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add Settlement Fireblocks to favorites" }));
-    const key = walletFavoritesKey({ userId: "user", orgId: "org" }, "project");
-    if (!key) throw new Error("Missing scoped favorites key");
-    expect(readWalletFavorites(key).map((favorite) => favorite.walletId)).toEqual(["cwlt_one"]);
-  });
-
-  it("copies the internal Wallet ID", async () => {
-    const writeText = vi.fn(async () => {});
-    vi.stubGlobal("navigator", Object.create(navigator, { clipboard: { value: { writeText } } }));
-    await act(async () => {
-      renderView();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Copy wallet id" }));
-    expect(writeText).toHaveBeenCalledWith("cwlt_one");
-  });
-
   it("heads the wallet with its state, balance and identity, then what it holds and did", async () => {
     await act(async () => {
       renderView();

@@ -1,19 +1,5 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-/** The exact wallet URL, preserving the bookmarked tab and repeated query parameters. */
-export function walletDetailHref(
-  custodyWalletId: string,
-  searchParams: Record<string, string | string[] | undefined>
-): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(searchParams)) {
-    if (value === undefined) continue;
-    for (const entry of Array.isArray(value) ? value : [value]) query.append(key, entry);
-  }
-  const pathname = `/dashboard/wallets/${encodeURIComponent(custodyWalletId)}`;
-  return query.size ? `${pathname}?${query}` : pathname;
-}
-
 /** The Transactions ledger narrowed to one wallet, where its whole history pages. */
 export function walletTransactionsHref(custodyWalletId: string): string {
   return `/dashboard/payments/transactions?${new URLSearchParams({ custodyWalletId })}`;

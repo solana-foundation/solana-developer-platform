@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { SponsorshipReservationStatus } from "@sdp/types/sponsorship";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 
 export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
@@ -13,6 +12,13 @@ export function sponsorshipNetworkForCluster(
   return cluster === "mainnet-beta" ? "mainnet" : "devnet";
 }
 export type SponsorshipBudgetScopeType = "global" | "organization" | "project";
+export type SponsorshipReservationStatus =
+  | "reserved"
+  | "signed"
+  | "submitted"
+  | "committed"
+  | "released"
+  | "charged_unknown";
 
 export interface SponsorshipBudgetPolicy {
   id: string;

@@ -45,7 +45,7 @@ describe("buildPaymentsPlaygroundEndpointConfigs (NEW DESIGN)", () => {
     expect(field?.options).toBeUndefined();
     expect(field?.required).toBe(true);
   });
-  it("selects exact wallet IDs without provider metadata in the balance DTO", () => {
+  it("selects exact wallet IDs without exposing provider references in balances", () => {
     const configs = buildPaymentsPlaygroundEndpointConfigs(
       {
         transfers: [],

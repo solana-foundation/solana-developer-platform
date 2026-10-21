@@ -104,7 +104,10 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
-/** Resolve an exact SDP wallet, enforcing the key's internal wallet scope for balance reads. */
+/**
+ * Resolve the exact SDP wallet addressed by the balance route.
+ * A selected API key sees only the internal IDs in its wallet scope.
+ */
 export async function resolveWalletFromParams(c: AppContext) {
   const auth = getAuth(c);
   const walletId = c.req.param("walletId");

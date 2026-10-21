@@ -34,11 +34,7 @@ function stubWalletReads() {
     return Response.json({
       data: {
         ...(minimumSlot ? { balanceReadContext: { minimumSlot: Number(minimumSlot) } } : {}),
-        walletBalances: {
-          custodyWalletId: url.pathname.split("/wallets/")[1]?.split("/")[0],
-          address: "address",
-          balances: [],
-        },
+        walletBalances: { balances: [] },
       },
     });
   });
