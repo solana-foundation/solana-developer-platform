@@ -1994,6 +1994,46 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
   });
 
+  it("cancels an active recurring payment whose issued token was paused after activation", async () => {
+    const issuedMint = (await generateKeyPairSigner()).address;
+    const issuedTokenId = await seedIssuedTokenMint({
+      projectId: TEST_PROJECT.id,
+      mintAddress: issuedMint,
+      status: "active",
+    });
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: issuedMint,
+    });
+    await getDb(env)
+      .prepare("UPDATE issued_tokens SET status = 'paused' WHERE id = ?")
+      .bind(issuedTokenId)
+      .run();
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    expect((await parseRecurringResponse(cancelRes)).data.recurringPayment).toMatchObject({
+      id: activated.id,
+      status: "canceled",
+    });
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT status, signature
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ? AND operation = 'cancel'`
+        )
+        .bind(activated.id)
+        .first<{ status: string; signature: string | null }>()
+    ).toEqual({ status: "confirmed", signature: poolSentSignatures()[2] });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps a cancel whose send outcome is unknown in flight with its signature saved", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
