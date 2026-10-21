@@ -32,6 +32,7 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     expires_at: row.expires_at as string | null,
     fulfilled_by_transfer_id: row.fulfilled_by_transfer_id as string | null,
     canceled_by: row.canceled_by as string | null,
+    last_checked_at: row.last_checked_at as string | null,
     lifecycle: row.lifecycle as PaymentRequestLifecycleEvent[],
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
@@ -160,7 +161,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row ? mapPaymentRequestRow(row) : null;
     },
 
-    async listPaymentRequestsToReconcile({ environment, expiredAfter, limit }) {
+    async listPaymentRequestsToReconcile({ environment, finalCheckAfterMs, limit }) {
       const rows = await db
         .prepare(
           `SELECT pr.*
@@ -169,11 +170,16 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
             WHERE p.environment = ?
               AND pr.status = 'awaiting_payment'
               AND pr.custody_wallet_id IS NOT NULL
-              AND (pr.expires_at IS NULL OR pr.expires_at::timestamptz > ?::timestamptz)
+              AND (
+                pr.expires_at IS NULL
+                OR pr.last_checked_at IS NULL
+                OR pr.last_checked_at::timestamptz
+                  <= pr.expires_at::timestamptz + make_interval(secs => ?::double precision / 1000)
+              )
             ORDER BY COALESCE(pr.last_checked_at, pr.created_at) ASC, pr.id ASC
             LIMIT ?`
         )
-        .bind(environment, expiredAfter, limit)
+        .bind(environment, finalCheckAfterMs, limit)
         .all<Record<string, unknown>>();
       return rows.results.map(mapPaymentRequestRow);
     },

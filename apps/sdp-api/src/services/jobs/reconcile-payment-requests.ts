@@ -18,7 +18,7 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import {
-  PAYMENT_REQUEST_SETTLEMENT_GRACE_MS,
+  PAYMENT_REQUEST_FINAL_CHECK_AFTER_MS,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
@@ -44,7 +44,7 @@ export async function reconcilePaymentRequests(env: Env): Promise<void> {
   const repository = createSystemPaymentRequestsRepository(env);
   const rows = await repository.listPaymentRequestsToReconcile({
     environment,
-    expiredAfter: new Date(Date.now() - PAYMENT_REQUEST_SETTLEMENT_GRACE_MS).toISOString(),
+    finalCheckAfterMs: PAYMENT_REQUEST_FINAL_CHECK_AFTER_MS,
     limit: RECONCILE_BATCH_SIZE,
   });
   const outcomes = await mapSettledWithConcurrency(rows, RECONCILE_CONCURRENCY, (row) =>

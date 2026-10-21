@@ -35,6 +35,7 @@ export interface PaymentRequestRow {
   expires_at: string | null;
   fulfilled_by_transfer_id: string | null;
   canceled_by: string | null;
+  last_checked_at: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   created_by: string | null;
   created_at: string;
@@ -87,11 +88,12 @@ export interface PaymentRequestsRepository {
   /**
    * The open requests one environment's reconciler checks next, least recently checked first,
    * a never-checked one queued by its creation time: awaiting payment with a custody wallet,
-   * and unexpired or expired after `expiredAfter`. System-only: it reads across tenants.
+   * and either unexpired or not yet checked `finalCheckAfterMs` past expiry.
+   * System-only: it reads across tenants.
    */
   listPaymentRequestsToReconcile(params: {
     environment: SdpEnvironment;
-    expiredAfter: string;
+    finalCheckAfterMs: number;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   /**

@@ -28,6 +28,12 @@ import type { Env } from "@/types/env";
  */
 export const PAYMENT_REQUEST_SETTLEMENT_GRACE_MS = 5 * 60 * 1000;
 
+/**
+ * How long past expiry the final check must run: a payment that lands at the settlement
+ * deadline has finalized well within one more grace window, so a check after this sees it.
+ */
+export const PAYMENT_REQUEST_FINAL_CHECK_AFTER_MS = 2 * PAYMENT_REQUEST_SETTLEMENT_GRACE_MS;
+
 /** Signatures read per reference; a reference carries its payment and little else. */
 const REFERENCE_SIGNATURE_LIMIT = 25;
 
@@ -40,23 +46,41 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
 }
 
 /**
- * Whether an expired request is past the window in which a payment built before expiry can
- * still settle it.
+ * The instant after which a payment no longer settles the request: expiry plus
+ * {@link PAYMENT_REQUEST_SETTLEMENT_GRACE_MS}, or null for a request that never expires.
  *
- * @param expiresAt - The request's expiry, or null when it never expires.
- * @returns `true` once expiry plus {@link PAYMENT_REQUEST_SETTLEMENT_GRACE_MS} has passed.
+ * @param row - The payment request.
+ * @returns The settlement deadline in epoch milliseconds, or null.
  */
-function isPastSettlementGrace(expiresAt: string | null): boolean {
+function settlementDeadlineMs(row: PaymentRequestRow): number | null {
+  return row.expires_at === null
+    ? null
+    : Date.parse(row.expires_at) + PAYMENT_REQUEST_SETTLEMENT_GRACE_MS;
+}
+
+/**
+ * Whether the reconciler has already made the final check, {@link PAYMENT_REQUEST_FINAL_CHECK_AFTER_MS}
+ * past expiry, so nothing further can settle the request: a payment that landed in time had
+ * finalized and was visible to that check.
+ *
+ * @param row - The payment request.
+ * @returns `true` once the final check has run.
+ */
+function isSettlementWindowClosed(row: PaymentRequestRow): boolean {
   return (
-    expiresAt !== null && Date.parse(expiresAt) + PAYMENT_REQUEST_SETTLEMENT_GRACE_MS <= Date.now()
+    row.expires_at !== null &&
+    row.last_checked_at !== null &&
+    Date.parse(row.last_checked_at) >
+      Date.parse(row.expires_at) + PAYMENT_REQUEST_FINAL_CHECK_AFTER_MS
   );
 }
 
 /**
  * Checks the chain for a finalized transaction referencing this payment
  * request and, when a valid payment is found, records the inbound transfer and
- * marks the request paid. An expired request still settles for
- * {@link PAYMENT_REQUEST_SETTLEMENT_GRACE_MS} past its expiry.
+ * marks the request paid. An expired request still settles on a payment that
+ * landed within {@link PAYMENT_REQUEST_SETTLEMENT_GRACE_MS} of its expiry,
+ * however late it is checked.
  *
  * Reads the chain on the open cluster scope's cluster (the row's Project).
  *
@@ -83,7 +107,7 @@ export async function reconcilePaymentRequest(
   if (row.status !== "awaiting_payment") {
     return row;
   }
-  if (isPastSettlementGrace(row.expires_at)) {
+  if (isSettlementWindowClosed(row)) {
     return row;
   }
   if (row.custody_wallet_id === null) {
@@ -168,9 +192,10 @@ async function settlePaymentRequestIfPaid(
 }
 
 /**
- * The oldest finalized transaction on the request's reference that landed and pays the request:
- * the right recipient, amount and mint. The reference is public, so anyone can name it in a
- * transaction of their own; a failed or non-paying one is skipped, never taken as the payment.
+ * The oldest finalized transaction on the request's reference that landed, before the settlement
+ * deadline when the request expires, and pays the request: the right recipient, amount and mint.
+ * The reference is public, so anyone can name it in a transaction of their own; a failed,
+ * late or non-paying one is skipped, never taken as the payment.
  *
  * @param rpc - Solana RPC on the request's cluster.
  * @param row - The payment request.
@@ -190,8 +215,15 @@ async function findFirstValidPayment(
       limit: REFERENCE_SIGNATURE_LIMIT,
     })
     .send();
+  const deadline = settlementDeadlineMs(row);
   for (const candidate of [...signatures].reverse()) {
     if (candidate.err !== null) {
+      continue;
+    }
+    if (
+      deadline !== null &&
+      (candidate.blockTime === null || Number(candidate.blockTime) * 1000 > deadline)
+    ) {
       continue;
     }
     const verified = await verifyTransactionLanded(rpc, candidate.signature);
@@ -286,7 +318,6 @@ async function recordInboundTransfer(
     if (
       existing.custody_wallet_id !== row.custody_wallet_id ||
       existing.wallet_id !== row.wallet_id ||
-      existing.counterparty_id !== null ||
       existing.destination_address !== row.destination_address ||
       existing.token !== row.token ||
       existing.amount !== row.amount ||
