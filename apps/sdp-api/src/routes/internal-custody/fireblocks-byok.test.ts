@@ -708,6 +708,186 @@ describe("Fireblocks vault discovery and selection", () => {
     };
   }
 
+  async function connectSelectedVaults() {
+    const submitted = await request("/provider-credentials", selectedPayload());
+    expect(submitted.status).toBe(201);
+    const data = z
+      .object({
+        connectionId: z.string(),
+        providerCredential: z.object({ id: z.string() }),
+      })
+      .parse((await submitted.json()).data);
+    const completed = await request(`/connections/${data.connectionId}/complete`, {});
+    expect((await completed.json()).data.completion.status).toBe("success");
+    return data;
+  }
+
+  async function attachedState(connectionId: string) {
+    return getDb(env).queryMany(
+      `SELECT c.provider_credential_id, w.wallet_id, w.public_key, w.status
+       FROM custody_connections c JOIN custody_wallets w ON w.custody_connection_id = c.id
+       WHERE c.id = ? ORDER BY w.wallet_id`,
+      [connectionId]
+    );
+  }
+
+  const secondaryFailures = [
+    { name: "forbidden", httpStatus: 403, code: "invalid_credentials" },
+    { name: "missing", httpStatus: 404, code: "invalid_credentials" },
+    { name: "changed address", httpStatus: 200, code: "provider_account_mismatch" },
+    { name: "unavailable", httpStatus: 500, code: "provider_response_unknown" },
+  ] as const;
+
+  it.each(secondaryFailures)(
+    "keeps all wallets on the current credential when rotation's secondary vault is $name",
+    async ({ httpStatus, code }) => {
+      const fetch = selectedVaultResponses();
+      const connected = await connectSelectedVaults();
+      // Inactive wallets retain the connection and can be reactivated later.
+      await getDb(env).execute(
+        "UPDATE custody_wallets SET status = 'inactive' WHERE custody_connection_id = ? AND wallet_id = 'fb_7'",
+        [connected.connectionId]
+      );
+      const before = await attachedState(connected.connectionId);
+      const registration = await newRegistration();
+      fetch.mockClear().mockImplementation(async (input) => {
+        if (String(input).includes("/7/")) {
+          if (httpStatus !== 200) return new Response(null, { status: httpStatus });
+          return Response.json({ addresses: [{ address: ADDRESS }] });
+        }
+        return Response.json({ addresses: [{ address: ADDRESS }] });
+      });
+      const response = await request(
+        `/provider-credentials/${connected.providerCredential.id}/rotate`,
+        {
+          provider: "fireblocks",
+          fields: { ...registration, apiKey: "replacement-key" },
+        }
+      );
+      expect(response.status).toBe(200);
+      const result = (await response.json()).data;
+      expect(result.rotation).toEqual({
+        status: httpStatus === 500 ? "retry_unknown" : "failed",
+        code,
+      });
+      expect(await attachedState(connected.connectionId)).toEqual(before);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      if (httpStatus === 500) {
+        fetch.mockImplementation(async (input) =>
+          Response.json({
+            addresses: [{ address: String(input).includes("/7/") ? OTHER_ADDRESS : ADDRESS }],
+          })
+        );
+        const retry = await request(
+          `/provider-credentials/${result.providerCredential.id}/complete-rotation`,
+          {}
+        );
+        expect((await retry.json()).data.rotation.status).toBe("success");
+        expect(fetch).toHaveBeenCalledTimes(4);
+      }
+    }
+  );
+
+  it.each(secondaryFailures)(
+    "keeps all wallets on the current credential when rollback's secondary vault is $name",
+    async ({ httpStatus }) => {
+      const fetch = selectedVaultResponses();
+      const connected = await connectSelectedVaults();
+      const response = await request(
+        `/provider-credentials/${connected.providerCredential.id}/rotate`,
+        {
+          provider: "fireblocks",
+          fields: { ...(await newRegistration()), apiKey: "replacement-key" },
+        }
+      );
+      const rotated = (await response.json()).data;
+      expect(rotated.rotation.status).toBe("success");
+      const before = await attachedState(connected.connectionId);
+      fetch.mockClear().mockImplementation(async (input, init) => {
+        expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
+        if (String(input).includes("/7/") && httpStatus !== 200)
+          return new Response(null, { status: httpStatus });
+        return Response.json({ addresses: [{ address: ADDRESS }] });
+      });
+      const failed = await request(
+        `/provider-credentials/${rotated.providerCredential.id}/rollback`,
+        {}
+      );
+      expect(failed.status).toBe(httpStatus === 500 ? 503 : 409);
+      expect(await attachedState(connected.connectionId)).toEqual(before);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      fetch.mockClear().mockImplementation(async (input) =>
+        Response.json({
+          addresses: [{ address: String(input).includes("/7/") ? OTHER_ADDRESS : ADDRESS }],
+        })
+      );
+      const retry = await request(
+        `/provider-credentials/${rotated.providerCredential.id}/rollback`,
+        {}
+      );
+      expect(retry.status).toBe(200);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(await attachedState(connected.connectionId)).toEqual(
+        before.map((row) => ({
+          ...row,
+          provider_credential_id: connected.providerCredential.id,
+        }))
+      );
+    }
+  );
+
+  it.each([
+    { action: "rotate", mutation: "address" },
+    { action: "rollback", mutation: "address" },
+    { action: "rotate", mutation: "new wallet" },
+    { action: "rollback", mutation: "new wallet" },
+  ])(
+    "rejects $action when an attached $mutation changes during verification",
+    async ({ action, mutation }) => {
+      const fetch = selectedVaultResponses();
+      const connected = await connectSelectedVaults();
+      const registration = await newRegistration();
+      const replacement = {
+        provider: "fireblocks",
+        fields: { ...registration, apiKey: "replacement-key" },
+      };
+      let currentId = connected.providerCredential.id;
+      if (action === "rollback") {
+        const rotated = await request(`/provider-credentials/${currentId}/rotate`, replacement);
+        const data = (await rotated.json()).data;
+        expect(data.rotation.status).toBe("success");
+        currentId = data.providerCredential.id;
+      }
+      fetch.mockClear().mockImplementation(async (input) => {
+        if (String(input).includes("/7/")) {
+          if (mutation === "address") {
+            await getDb(env).execute(
+              "UPDATE custody_wallets SET public_key = ? WHERE custody_connection_id = ? AND wallet_id = 'fb_7'",
+              [ADDRESS, connected.connectionId]
+            );
+          } else {
+            await getDb(env).execute(
+              `INSERT INTO custody_wallets (id, custody_connection_id, wallet_id, public_key)
+             VALUES (?, ?, 'fb_8', ?)`,
+              [`cwlt_${crypto.randomUUID()}`, connected.connectionId, OTHER_ADDRESS]
+            );
+          }
+          return Response.json({ addresses: [{ address: OTHER_ADDRESS }] });
+        }
+        return Response.json({ addresses: [{ address: ADDRESS }] });
+      });
+      const response = await request(
+        `/provider-credentials/${currentId}/${action}`,
+        action === "rotate" ? replacement : {}
+      );
+      expect(response.status).toBe(409);
+      const rows = await attachedState(connected.connectionId);
+      expect(rows).toHaveLength(mutation === "address" ? 2 : 3);
+      expect(rows.every((row) => row.provider_credential_id === currentId)).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it("imports selected vaults atomically with provider names and replays without extra provider reads", async () => {
     const fetch = selectedVaultResponses();
     const idempotencyKey = crypto.randomUUID();

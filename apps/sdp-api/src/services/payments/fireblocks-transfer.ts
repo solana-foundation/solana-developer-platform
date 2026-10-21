@@ -8,8 +8,7 @@ import {
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
-import { fireblocksPaymentStatus } from "@sdp/types/fireblocks";
-import { wellKnownMint } from "@sdp/types/well-known-tokens";
+import { fireblocksPaymentStatus, isFireblocksPaymentMint } from "@sdp/types/fireblocks";
 import { assertIsSignature } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -77,7 +76,7 @@ export async function prepareFireblocksTransfer(
   if (access.assetId !== expectedAsset)
     throw badRequest("Fireblocks connection does not match the Solana network");
   const native = isNativePaymentToken(operation.token);
-  if (!native && operation.token !== wellKnownMint("USDC", network))
+  if (!native && !isFireblocksPaymentMint(operation.token, network))
     throw badRequest("Fireblocks payments currently support SOL and USDC only");
   const asset = await resolveFireblocksTransferAsset(
     runtime,

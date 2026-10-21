@@ -1,3 +1,4 @@
+import { denormalizeFireblocksWalletId } from "@sdp/custody/provider-wallet-ids";
 import { hashString } from "@sdp/payments/hash";
 import { isProviderCredentialCreationInProgress } from "@sdp/types/custody";
 import type { Context } from "hono";
@@ -48,6 +49,7 @@ import {
 } from "@/services/provider-credential-submission.service";
 import {
   type CredentialReferenceRow,
+  type CredentialWalletReferenceRow,
   type LifecycleCredentialRow,
   type LifecycleCredentialWithSecretRow,
   type ProviderCredentialRow,
@@ -511,7 +513,19 @@ export async function completeRotationCandidate(
   } catch (error) {
     return reconcileCandidateSecretReadFailure(c, context, loaded.candidate.id, error, auditIntent);
   }
-  const checked = await checkByokCredential(c.env, authentication);
+  const wallets =
+    authentication.provider === "fireblocks"
+      ? await context.store.listCredentialWalletReferences(
+          context.organizationId,
+          loaded.predecessor.id
+        )
+      : [];
+  const checked = await checkCredentialReplacement(
+    c.env,
+    authentication,
+    loaded.references,
+    wallets
+  );
   const check = checked.status;
   if (check === "retry_unknown") {
     const race = await settleCandidateOutcome(context, loaded, "retry_unknown", auditIntent);
@@ -519,12 +533,8 @@ export async function completeRotationCandidate(
     return rotationResult(loaded.candidate, "retry_unknown", "provider_response_unknown");
   }
 
-  const accountMatches =
-    checked.status === "success" &&
-    checked.fingerprint === uniqueReferenceFingerprint(loaded.references);
-  if (check === "failed" || !accountMatches) {
-    const code: RotationFailureCode =
-      check === "failed" ? "invalid_credentials" : "provider_account_mismatch";
+  if (checked.status === "failed") {
+    const code = checked.code;
     const race = await settleCandidateOutcome(context, loaded, code, auditIntent);
     if (race?.rotation.status === "success") return race;
     await cleanupTerminalCredential(c, candidateSecret);
@@ -559,6 +569,13 @@ export async function completeRotationCandidate(
       );
       assertCandidateSnapshot(lockedCandidate, lockedPredecessor, lockedReferences, loaded);
       if (lockedCandidateReferences.length > 0) throw conflict(ROTATION_UNAVAILABLE);
+      await assertCredentialWalletSnapshot(
+        context,
+        store,
+        loaded.predecessor,
+        wallets,
+        ROTATION_UNAVAILABLE
+      );
       const changed = await store.cutOverRotation({
         organizationId: context.organizationId,
         predecessorId: loaded.predecessor.id,
@@ -633,6 +650,7 @@ export async function rollbackProviderCredential(
     },
   });
   let failureCode = "credential_storage_unavailable";
+  let wallets: CredentialWalletReferenceRow[] = [];
   try {
     let authentication: ByokCredentialAuthentication;
     try {
@@ -659,17 +677,24 @@ export async function rollbackProviderCredential(
       throw error;
     }
     failureCode = "provider_response_unknown";
-    const checked = await checkByokCredential(c.env, authentication);
+    if (authentication.provider === "fireblocks") {
+      wallets = await context.store.listCredentialWalletReferences(
+        context.organizationId,
+        current.credential.id
+      );
+    }
+    const checked = await checkCredentialReplacement(
+      c.env,
+      authentication,
+      current.references,
+      wallets
+    );
     const check = checked.status;
     if (check === "retry_unknown") {
       throw providerUnavailable("Credential provider is temporarily unavailable");
     }
-    failureCode = check === "failed" ? "invalid_credentials" : "provider_account_mismatch";
-    if (
-      check === "failed" ||
-      (checked.status === "success" ? checked.fingerprint : null) !==
-        uniqueReferenceFingerprint(current.references)
-    ) {
+    if (checked.status === "failed") {
+      failureCode = checked.code;
       throw conflict(ROLLBACK_UNAVAILABLE);
     }
   } catch (error) {
@@ -700,6 +725,13 @@ export async function rollbackProviderCredential(
         { lock: true }
       );
       assertRollbackSnapshot(lockedCurrent, lockedPredecessor, lockedReferences, current);
+      await assertCredentialWalletSnapshot(
+        context,
+        store,
+        current.credential,
+        wallets,
+        ROLLBACK_UNAVAILABLE
+      );
       if (
         await store.findUnfinishedDirectChild(context.organizationId, current.credential.id, {
           lock: true,
@@ -1547,6 +1579,62 @@ async function deactivationCommitIsVisible(
     logLifecycleFailure(context.c, "deactivation_outcome_read", expected.credential.id, error);
     return null;
   }
+}
+
+/** One live keychain address read per distinct vault, including the primary vault. */
+async function checkCredentialReplacement(
+  env: Env,
+  authentication: ByokCredentialAuthentication,
+  references: readonly CredentialReferenceRow[],
+  wallets: readonly CredentialWalletReferenceRow[]
+): Promise<ProviderCredentialRotationResult["rotation"]> {
+  const primary = await checkByokCredential(env, authentication);
+  if (primary.status !== "success")
+    return primary.status === "failed"
+      ? { status: "failed", code: "invalid_credentials" }
+      : { status: "retry_unknown", code: "provider_response_unknown" };
+  if (primary.fingerprint !== uniqueReferenceFingerprint(references))
+    return { status: "failed", code: "provider_account_mismatch" };
+  if (authentication.provider !== "fireblocks") return { status: "success" };
+  if (!primary.wallet) return { status: "retry_unknown", code: "provider_response_unknown" };
+  const addresses = new Map([[authentication.vaultAccountId, primary.wallet.address]]);
+  for (const wallet of wallets) {
+    const vaultId = denormalizeFireblocksWalletId(wallet.wallet_id);
+    if (!/^\d{1,100}$/.test(vaultId))
+      return { status: "failed", code: "provider_account_mismatch" };
+    let address = addresses.get(vaultId);
+    if (address === undefined) {
+      const checked = await checkByokCredential(env, {
+        ...authentication,
+        vaultAccountId: vaultId,
+      });
+      if (checked.status === "failed") return { status: "failed", code: "invalid_credentials" };
+      if (checked.status !== "success" || !checked.wallet)
+        return { status: "retry_unknown", code: "provider_response_unknown" };
+      address = checked.wallet.address;
+      addresses.set(vaultId, address);
+    }
+    if (address !== wallet.public_key)
+      return { status: "failed", code: "provider_account_mismatch" };
+  }
+  return { status: "success" };
+}
+
+async function assertCredentialWalletSnapshot(
+  context: LifecycleContext,
+  store: ProviderCredentialStore,
+  credential: LifecycleCredentialRow,
+  expected: readonly CredentialWalletReferenceRow[],
+  message: string
+): Promise<void> {
+  if (credential.provider !== "fireblocks") return;
+  // Connection rows are already locked, so imports cannot add wallets during cutover.
+  const current = await store.listCredentialWalletReferences(
+    context.organizationId,
+    credential.id,
+    { lock: true }
+  );
+  if (JSON.stringify(current) !== JSON.stringify(expected)) throw conflict(message);
 }
 
 function uniqueReferenceFingerprint(references: readonly CredentialReferenceRow[]): string | null {

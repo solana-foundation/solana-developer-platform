@@ -56,6 +56,13 @@ export interface CredentialReferenceRow {
   provider_account_fingerprint: string | null;
 }
 
+export interface CredentialWalletReferenceRow {
+  id: string;
+  custody_connection_id: string;
+  wallet_id: string;
+  public_key: string;
+}
+
 export interface CustodyConnectionRow {
   id: string;
   organization_id: string;
@@ -312,6 +319,24 @@ export class ProviderCredentialStore {
          AND c.status <> 'deactivated'
        ORDER BY c.project_id, c.id`,
       [providerCredentialId, organizationId, organizationId, organizationId]
+    );
+  }
+
+  /** Include inactive wallets: they retain this credential and can be reactivated. */
+  async listCredentialWalletReferences(
+    organizationId: string,
+    providerCredentialId: string,
+    options: { lock?: boolean } = {}
+  ): Promise<CredentialWalletReferenceRow[]> {
+    return this.db.queryMany<CredentialWalletReferenceRow>(
+      `SELECT w.id, w.custody_connection_id, w.wallet_id, w.public_key
+       FROM custody_connections c
+       JOIN custody_wallets w ON w.custody_connection_id = c.id
+       WHERE c.organization_id = ? AND c.provider = 'fireblocks'
+         AND c.provider_credential_id = ? AND c.status <> 'deactivated'
+       ORDER BY w.id
+       ${options.lock ? "FOR UPDATE OF w" : ""}`,
+      [organizationId, providerCredentialId]
     );
   }
 

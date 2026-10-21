@@ -73,10 +73,15 @@ Verification reads each vault address using `FireblocksSigner` from
 propose a transaction, or transfer funds. Later wallet creation uses the same connection's
 credentials to create another vault and Solana asset wallet.
 
-Rotation requires access to the original vault, network, and Solana address. API user keys
-may change, but a credential cannot silently redirect the connection to another vault or
-workspace. Each signing request also checks the requested wallet's ownership and the signer
-address. Deactivation in SDP does not revoke the API user in Fireblocks.
+Rotation and rollback verify the pinned primary vault, network, and every attached wallet's
+Solana address, including inactive wallets. Each distinct vault is read once through
+solana-keychain using the replacement credential. Missing permissions or changed addresses
+leave the current credential in place; temporary provider failures remain retryable. Before
+committing, SDP locks and rechecks the wallet set so a concurrent import or address change
+cannot bypass verification. API user keys may change, but a credential cannot silently
+redirect the connection to another vault or workspace. Each signing request also checks the
+requested wallet's ownership and signer address. Deactivation in SDP does not revoke the
+API user in Fireblocks.
 
 ## Transaction approval
 
@@ -88,8 +93,9 @@ SOL for fees (also when sending USDC); SDP's local/Kora fee sponsor is not invol
 No RAW-signing permission or SDP Signer check is required for these payments.
 
 USDC is resolved by its exact Solana mint (`issuerAddress`) and `nativeAsset` in Fireblocks'
-asset catalogue, never by symbol alone. Other tokens and ramp-deposit reuse are rejected
-by this direct-payment path. Managed Fireblocks wallets retain their existing sponsored
+asset catalogue, never by symbol alone. The Pay token picker offers only native SOL and the
+current network's canonical USDC mint for Fireblocks BYOK. Other tokens and ramp-deposit
+reuse are rejected by this direct-payment path. Managed Fireblocks wallets retain their existing sponsored
 signing path. Batch and custom-program signing still use
 the existing solana-keychain adapter; they have not been converted to native transfers.
 
@@ -129,7 +135,8 @@ All operations below make **zero Solana RPC calls** in the custody adapter:
 | CSR generation / download | Unsupported | Zero Fireblocks requests |
 | Named vault discovery | Manual vault-ID entry | One Fireblocks GET per page of up to 50 vaults |
 | Initial BYOK verification | One address GET for a manually entered vault | Two Fireblocks GETs per selected vault: current metadata and address; no duplicate primary-address read. Legacy single-ID submissions retain one address GET |
-| Credential check or rotation check | Unsupported | One Fireblocks address GET |
+| Credential check | Unsupported | One Fireblocks address GET |
+| Rotation or rollback verification | One primary-vault address GET | One Fireblocks address GET per distinct vault across the primary and attached wallets; reuse the primary result |
 | New vault provisioning | Three Fireblocks requests for managed wallets | Same three requests for managed and BYOK: vault POST, asset POST, address GET; reuse the returned address |
 | Native SOL payment | Address GET, RAW POST, approval polls, local blockhash/sponsorship/submission/confirmation RPC | One TRANSFER POST, zero Solana RPC at send; one GET per status poll, throttled to once per 15 seconds per transfer |
 | Native USDC payment | Same RAW path plus live mint/token-account reads | Same as SOL plus one static catalogue GET on a five-minute cache miss; concurrent reads shared, failures not cached |

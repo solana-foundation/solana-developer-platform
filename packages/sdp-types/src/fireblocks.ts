@@ -1,3 +1,10 @@
+import { SOL_MINT, type SolanaCluster, wellKnownMint } from "./well-known-tokens";
+
+/** The native TRANSFER path supports only SOL and this cluster's canonical USDC mint. */
+export function isFireblocksPaymentMint(mint: string, cluster: SolanaCluster): boolean {
+  return mint === SOL_MINT || mint === wellKnownMint("USDC", cluster);
+}
+
 /** Provider states shared by parsing, persistence and presentation. */
 export const FIREBLOCKS_FAILED_TRANSACTION_STATUSES = [
   "FAILED",
