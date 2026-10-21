@@ -42,14 +42,18 @@ function openPaymentRequestRow(id: string): PaymentRequestRow {
 
 describe("reconcilePaymentRequests", () => {
   const listToReconcile = vi.fn<PaymentRequestsRepository["listPaymentRequestsToReconcile"]>();
+  const markReconciled = vi.fn<PaymentRequestsRepository["markPaymentRequestsReconciled"]>();
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(NOW_ISO));
     listToReconcile.mockReset();
+    markReconciled.mockReset();
+    markReconciled.mockResolvedValue(undefined);
     vi.spyOn(repositoryFactory, "createSystemPaymentRequestsRepository").mockReturnValue({
       ...createPostgresPaymentRequestsRepository(getDb(env)),
       listPaymentRequestsToReconcile: listToReconcile,
+      markPaymentRequestsReconciled: markReconciled,
     });
   });
 
@@ -64,7 +68,7 @@ describe("reconcilePaymentRequests", () => {
     );
   }
 
-  it("lists the scope's environment inside cutoffs from now and reconciles each row best effort", async () => {
+  it("lists the scope's environment inside the expiry cutoff from now and reconciles each row best effort", async () => {
     const first = openPaymentRequestRow("preq_sweep_first");
     const second = openPaymentRequestRow("preq_sweep_second");
     listToReconcile.mockResolvedValue([first, second]);
@@ -77,25 +81,29 @@ describe("reconcilePaymentRequests", () => {
     expect(listToReconcile).toHaveBeenCalledTimes(1);
     expect(listToReconcile).toHaveBeenCalledWith({
       environment: "production",
-      createdAfter: "2026-06-08T12:00:00.000Z",
       expiredAfter: "2026-06-15T11:55:00.000Z",
-      limit: 100,
+      limit: 200,
     });
     expect(reconcile.mock.calls).toEqual([
       [env, first, { bestEffort: true }],
       [env, second, { bestEffort: true }],
     ]);
+    expect(markReconciled.mock.calls).toEqual([[[first.id, second.id]]]);
   });
 
-  it("keeps sweeping past a row that throws and reports it in the run summary", async () => {
+  it("keeps sweeping past a row that throws, stamps it with the rest, and reports it in the run summary", async () => {
     const failing = openPaymentRequestRow("preq_sweep_failing");
     const settling = openPaymentRequestRow("preq_sweep_settling");
     listToReconcile.mockResolvedValue([failing, settling]);
     const failure = new AppError("CONFLICT", "Recorded transfer does not match payment request");
     const reconcile = vi
       .spyOn(paymentRequests, "reconcilePaymentRequest")
-      .mockRejectedValueOnce(failure)
-      .mockImplementationOnce(async (_env, row) => ({ ...row, status: "paid" }));
+      .mockImplementation(async (_env, row) => {
+        if (row.id === failing.id) {
+          throw failure;
+        }
+        return { ...row, status: "paid" };
+      });
     const logEvent = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
 
     await runOnProduction();
@@ -104,6 +112,10 @@ describe("reconcilePaymentRequests", () => {
       [env, failing, { bestEffort: true }],
       [env, settling, { bestEffort: true }],
     ]);
+    expect(markReconciled.mock.calls).toEqual([[[failing.id, settling.id]]]);
+    expect(markReconciled.mock.invocationCallOrder[0]).toBeGreaterThan(
+      Math.max(...reconcile.mock.invocationCallOrder)
+    );
     expect(logEvent.mock.calls).toEqual([
       [
         "warn",
