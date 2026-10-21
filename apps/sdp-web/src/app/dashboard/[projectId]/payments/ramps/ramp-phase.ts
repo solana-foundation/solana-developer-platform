@@ -100,10 +100,35 @@ export function rampPhase(transfer: PaymentTransferSummary, hosted = false): Ram
       return phase("expired");
     case "canceled":
       return phase("canceled");
-    default:
+    // Wallet-send statuses: no writer puts a ramp row in either.
+    case "confirmed":
+    case "finalized":
       return phase("unknown");
+    default: {
+      const unhandled: never = transfer.status;
+      throw new Error(`Unhandled ramp transfer status: ${String(unhandled)}`);
+    }
   }
 }
+
+/** How long to wait between reads in each phase; a final transfer is never read again. */
+const PHASE_POLL_INTERVAL_MS = {
+  checkout: 3_000,
+  awaiting_funds: 3_000,
+  ready_to_send: 3_000,
+  awaiting_instruction: 3_000,
+  sending_deposit: 3_000,
+  provider_delivering: 3_000,
+  confirming_delivery: 3_000,
+  paying_out: 15_000,
+  payout_reported: 3_000,
+  needs_review: 30_000,
+  completed: 0,
+  failed: 0,
+  expired: 0,
+  canceled: 0,
+  unknown: 3_000,
+} as const satisfies Record<RampPhaseKind, number>;
 
 /**
  * How often to read a ramp transfer while it can still change: quickly while
@@ -113,14 +138,7 @@ export function rampPhase(transfer: PaymentTransferSummary, hosted = false): Ram
 export function rampTransferPollInterval(transfer: PaymentTransferSummary | undefined): number {
   if (!transfer) return 3_000;
   if (getRampTransferState(transfer.status).terminal) return 0;
-  switch (rampPhase(transfer).kind) {
-    case "needs_review":
-      return 30_000;
-    case "paying_out":
-      return 15_000;
-    default:
-      return 3_000;
-  }
+  return PHASE_POLL_INTERVAL_MS[rampPhase(transfer).kind];
 }
 
 type PhaseCopyKeys = { title: MessageKey; description: MessageKey };

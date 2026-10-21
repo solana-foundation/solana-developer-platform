@@ -33,6 +33,11 @@ describe("rampPhase", () => {
     expect(rampPhase(transfer({ type: "offramp", status: "pending" })).kind).toBe("checkout");
   });
 
+  it("names no ramp phase for the wallet-send statuses no ramp row holds", () => {
+    expect(rampPhase(transfer({ status: "confirmed" })).kind).toBe("unknown");
+    expect(rampPhase(transfer({ status: "finalized" })).kind).toBe("unknown");
+  });
+
   it("reads an off-ramp with a deposit instruction as ready to send", () => {
     const ready = transfer({
       type: "offramp",
