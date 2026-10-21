@@ -24,7 +24,6 @@ export interface PaymentRequestRow {
   public_token: string;
   organization_id: string;
   project_id: string | null;
-  counterparty_id: string | null;
   custody_wallet_id: string | null;
   wallet_id: string;
   destination_address: string;
@@ -44,7 +43,6 @@ export interface PaymentRequestRow {
 export interface CreatePaymentRequestInput {
   organizationId: string;
   projectId: string;
-  counterpartyId: string | null;
   custodyWalletId: string;
   walletId: string;
   destinationAddress: string;
@@ -76,13 +74,6 @@ export interface ListPaymentRequestsResult {
   total: number;
 }
 
-export interface SponsoredTransactionClaim {
-  account: string;
-  unsignedTransaction: string;
-  signedTransaction: string | null;
-  lastValidBlockHeight: bigint;
-}
-
 export interface PaymentRequestsRepository {
   createPaymentRequest(input: CreatePaymentRequestInput): Promise<PaymentRequestRow>;
   markPaymentRequest(input: MarkPaymentRequestInput): Promise<PaymentRequestRow | null>;
@@ -92,19 +83,5 @@ export interface PaymentRequestsRepository {
     projectId: string;
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
-  claimSponsoredTransactionWindow(params: {
-    requestId: string;
-    account: string;
-    unsignedTransaction: string;
-    lastValidBlockHeight: bigint;
-    currentBlockHeight: bigint;
-  }): Promise<boolean>;
-  getSponsoredTransactionClaim(requestId: string): Promise<SponsoredTransactionClaim | null>;
-  storeSponsoredTransactionSignature(params: {
-    requestId: string;
-    account: string;
-    unsignedTransaction: string;
-    signedTransaction: string;
-  }): Promise<boolean>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
 }

@@ -22,7 +22,6 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     public_token: row.public_token as string,
     organization_id: row.organization_id as string,
     project_id: row.project_id as string | null,
-    counterparty_id: row.counterparty_id as string | null,
     custody_wallet_id: parseNullableCustodyWalletId(row.custody_wallet_id),
     wallet_id: row.wallet_id as string,
     destination_address: row.destination_address as string,
@@ -80,7 +79,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              public_token,
              organization_id,
              project_id,
-             counterparty_id,
              custody_wallet_id,
              wallet_id,
              destination_address,
@@ -91,7 +89,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              created_by,
              lifecycle
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
              jsonb_build_array(jsonb_build_object('status', 'awaiting_payment', 'at', sdp_iso_now()))
            )
            RETURNING *`
@@ -101,7 +99,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           publicToken,
           input.organizationId,
           input.projectId,
-          input.counterpartyId,
           input.custodyWalletId,
           input.walletId,
           input.destinationAddress,
@@ -161,83 +158,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         .bind(params.requestId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();
       return row ? mapPaymentRequestRow(row) : null;
-    },
-
-    async claimSponsoredTransactionWindow(params) {
-      const row = await db
-        .prepare(
-          `UPDATE payment_requests
-             SET sponsored_tx_account = ?,
-                 sponsored_tx_unsigned = ?,
-                 sponsored_tx_signed = NULL,
-                 sponsored_tx_last_valid_block_height = ?,
-                 updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND status = 'awaiting_payment'
-             AND (
-               sponsored_tx_last_valid_block_height IS NULL
-               OR sponsored_tx_last_valid_block_height < ?
-             )
-           RETURNING id`
-        )
-        .bind(
-          params.account,
-          params.unsignedTransaction,
-          params.lastValidBlockHeight.toString(),
-          params.requestId,
-          params.currentBlockHeight.toString()
-        )
-        .first<{ id: string }>();
-      return row !== null;
-    },
-
-    async getSponsoredTransactionClaim(requestId) {
-      const row = await db
-        .prepare(
-          `SELECT sponsored_tx_account, sponsored_tx_unsigned, sponsored_tx_signed,
-                  sponsored_tx_last_valid_block_height
-             FROM payment_requests
-            WHERE id = ?`
-        )
-        .bind(requestId)
-        .first<{
-          sponsored_tx_account: string | null;
-          sponsored_tx_unsigned: string | null;
-          sponsored_tx_signed: string | null;
-          sponsored_tx_last_valid_block_height: string | number | null;
-        }>();
-      if (!row || row.sponsored_tx_account === null) {
-        return null;
-      }
-      if (row.sponsored_tx_unsigned === null || row.sponsored_tx_last_valid_block_height === null) {
-        throw internalError("payment_requests sponsored claim row is missing claim fields");
-      }
-      return {
-        account: row.sponsored_tx_account,
-        unsignedTransaction: row.sponsored_tx_unsigned,
-        signedTransaction: row.sponsored_tx_signed,
-        lastValidBlockHeight: BigInt(row.sponsored_tx_last_valid_block_height),
-      };
-    },
-
-    async storeSponsoredTransactionSignature(params) {
-      const changed = await db
-        .prepare(
-          `UPDATE payment_requests
-             SET sponsored_tx_signed = ?, updated_at = sdp_iso_now()
-           WHERE id = ?
-             AND sponsored_tx_account = ?
-             AND sponsored_tx_unsigned = ?
-             AND sponsored_tx_signed IS NULL`
-        )
-        .bind(
-          params.signedTransaction,
-          params.requestId,
-          params.account,
-          params.unsignedTransaction
-        )
-        .run();
-      return changed > 0;
     },
 
     async getPaymentRequestByPublicToken(publicToken) {

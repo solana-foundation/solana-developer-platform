@@ -49,7 +49,7 @@ export const MOVEMENTS = {
     kind: "start",
     actions: ["transfer_batches.execute"],
   },
-  /** `/pay`: SDP sponsors the payer's transaction for the organization's request. */
+  /** `/pay`: the organization's open payment request takes payment through its link. */
   "payments.pay_request": {
     module: "payments",
     kind: "start",
@@ -221,8 +221,8 @@ export const MANDATE_MOVEMENT_STATUSES = {
 } as const satisfies Partial<Record<StartMovementId, readonly PaymentRecurringPaymentStatus[]>>;
 
 /**
- * A `/pay` link signs only its own sponsored payment, and only while the
- * payment request is still open.
+ * A `/pay` link advertises a payable transfer only while its payment request
+ * is still open.
  */
 export const PAYMENT_REQUEST_MOVEMENT_STATUSES = {
   "payments.pay_request": ["awaiting_payment"],

@@ -82,8 +82,6 @@ export const paymentsQueryKeys = {
     ["batch-recipients", page, search] as const,
   batchEstimate: ({ serializedRequest }: { serializedRequest: string }) =>
     ["batch-estimate", serializedRequest] as const,
-  paymentRequestCounterpartyAccounts: ({ counterpartyId }: { counterpartyId: string }) =>
-    ["payment-request-counterparty-accounts", counterpartyId] as const,
   transactionFilterOptions: ({ projectId }: { projectId: string }) =>
     ["payments-transaction-filter-options", projectId] as const,
   counterpartyFieldOptions: () => "counterparty-field-options",

@@ -1,11 +1,10 @@
 import { z } from "zod";
 import { paymentAmountSchema, solanaAddressSchema } from "@/routes/payments/schemas";
 
-export const createPaymentRequestSchema = z.object({
+export const createPaymentRequestSchema = z.strictObject({
   walletId: z.string().min(1),
   token: solanaAddressSchema("token"),
   amount: paymentAmountSchema,
-  counterpartyId: z.string().min(1).nullable().default(null),
   expiresAt: z.iso.datetime().nullable().default(null),
 });
 

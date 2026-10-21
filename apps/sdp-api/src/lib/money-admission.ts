@@ -308,7 +308,7 @@ export function decidePrincipal(
       ) {
         return refuse("principal_not_live");
       }
-      // A `/pay` link holds no custody signer; it only ever has SDP sponsor.
+      // A `/pay` link holds no custody signer.
       return subject.custodyWalletId === null ? ADMITTED : refuse("wallet_out_of_scope");
     }
     default: {

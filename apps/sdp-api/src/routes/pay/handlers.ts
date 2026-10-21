@@ -1,27 +1,69 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
-import { getSdpDocsOrigin } from "@sdp/types/site";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
-import { badRequest, rateLimited } from "@/lib/errors";
-import { assertMoneyStartAdmitted } from "@/lib/money-admission";
-import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import { internalError } from "@/lib/errors";
+import { checkMoneyStart } from "@/lib/money-admission";
 import { resolveTokenLabel } from "@/routes/payments/token-accounts";
-import { issuePaymentRequestTransaction } from "@/services/payments/payment-request-sponsorship";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 import { findPaymentRequest } from "./context";
-import type { transactionRequestBodySchema } from "./schemas";
 
 const REQUEST_LABEL = "Solana Developer Platform";
-const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
 
 /**
- * The public view of a payment request, with the Solana Pay transaction-request link while it
- * can still be paid.
+ * The Solana Pay transfer-request URL for an open payment request. The payer's wallet builds,
+ * signs, and pays the fees for the transfer itself; SDP signs nothing.
+ *
+ * @param request - The payment request, open and admitted.
+ * @param tokenSymbol - The token's display label for the wallet's message.
+ * @returns The `solana:` URL.
+ */
+function transferRequestUrl(request: PaymentRequestRow, tokenSymbol: string): string {
+  const url = encodeURL({
+    recipient: assertValidAddress(request.destination_address, "destinationAddress"),
+    reference: assertValidAddress(request.reference, "reference"),
+    label: REQUEST_LABEL,
+    message: `Pay ${request.amount} ${tokenSymbol} to ${REQUEST_LABEL}`,
+    splToken: request.token === SOL_MINT ? undefined : assertValidAddress(request.token, "token"),
+  });
+  // The stored decimal string, not encodeURL's float `amount`, so the link asks for exactly the
+  // requested amount.
+  url.searchParams.set("amount", request.amount);
+  return url.toString();
+}
+
+/**
+ * Whether the request's organization may still take payment against it: a deleted organization,
+ * or a production request whose organization lost the production entitlement, stops advertising a
+ * payable link (HOO-1955, APE-351).
+ *
+ * @param env - Worker bindings.
+ * @param request - The payment request.
+ * @returns Whether the money start is admitted.
+ * @throws AppError `INTERNAL_ERROR` when the request has no Project.
+ */
+async function isPaymentAdmitted(env: Env, request: PaymentRequestRow): Promise<boolean> {
+  if (request.project_id === null) {
+    throw internalError("payment_requests row is missing project_id");
+  }
+  const decision = await checkMoneyStart(
+    env,
+    { organizationId: request.organization_id, projectId: request.project_id },
+    { surface: "http", movement: "payments.pay_request", subjectId: request.id },
+    { custodyWalletId: null }
+  );
+  return decision.admitted;
+}
+
+/**
+ * The public view of a payment request, with the Solana Pay transfer-request link while it can
+ * still be paid.
  *
  * @param c - The request context, under `paymentRequestScope`.
  * @returns The request's amount, token, recipient, status, and Solana Pay URL.
@@ -32,81 +74,21 @@ export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
-  const payable = status === "awaiting_payment" && request.custody_wallet_id !== null;
-
-  let solanaPayUrl: string | null = null;
-  if (payable) {
-    const link = new URL(`/pay/${c.req.param("token")}/tx`, c.req.url);
-    link.protocol = "https:";
-    solanaPayUrl = encodeURL({ link }).toString();
-  }
+  const tokenSymbol = resolveTokenLabel(request.token);
+  const payable =
+    status === "awaiting_payment" &&
+    request.custody_wallet_id !== null &&
+    (await isPaymentAdmitted(c.env, request));
 
   return c.json({
     amount: request.amount,
     token: request.token,
-    tokenSymbol: resolveTokenLabel(request.token),
+    tokenSymbol,
     recipient: request.destination_address,
     reference: request.reference,
     status,
     expiresAt: request.expires_at,
     network: currentClusterScope().cluster,
-    solanaPayUrl,
-  });
-}
-
-/**
- * The Solana Pay transaction-request metadata a wallet shows before it posts its account.
- *
- * @param c - The request context.
- * @returns The label and icon.
- */
-export function getTransactionMetadata(c: Context<{ Bindings: Env }, "/:token/tx">) {
-  return c.json({ label: REQUEST_LABEL, icon: REQUEST_ICON });
-}
-
-/**
- * The Solana Pay transaction request: the fee-sponsored transfer the posting wallet signs.
- *
- * @param c - The request context, under `paymentRequestScope` with a validated body.
- * @returns The partially signed transaction and the message the wallet shows.
- * @throws AppError `BAD_REQUEST` when the request is no longer payable.
- * @throws AppError `RATE_LIMITED`, with `Retry-After`, while another payer's claim is live.
- */
-export async function createSponsoredTransaction(
-  c: ValidatedBodyContext<typeof transactionRequestBodySchema>
-) {
-  const { token } = c.req.param();
-  const existing = await findPaymentRequest(c.env, token);
-  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: false });
-  if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
-    throw badRequest("Payment request is no longer payable");
-  }
-  if (!request.project_id) {
-    throw badRequest("Payment request is not eligible for sponsored fees");
-  }
-  // `/pay` sponsors without an authenticated actor, so it admits the money
-  // movement itself: a production request stops being sponsored once its
-  // organization loses the production entitlement (APE-351), and a deleted
-  // organization's requests stop being sponsored at all (HOO-1955).
-  await assertMoneyStartAdmitted(
-    c.env,
-    { organizationId: request.organization_id, projectId: request.project_id },
-    { surface: "http", movement: "payments.pay_request", subjectId: request.id },
-    { custodyWalletId: null }
-  );
-
-  const sponsored = await issuePaymentRequestTransaction(c, {
-    request: { ...request, project_id: request.project_id },
-    payer: assertValidAddress(c.req.valid("json").account, "account"),
-    recipient: assertValidAddress(request.destination_address, "destinationAddress"),
-    reference: assertValidAddress(request.reference, "reference"),
-  });
-  if (sponsored.kind === "held") {
-    c.header("Retry-After", String(sponsored.retryAfterSeconds));
-    throw rateLimited("Another payer holds this payment request's sponsored transaction");
-  }
-  return c.json({
-    transaction: sponsored.transaction,
-    message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
+    solanaPayUrl: payable ? transferRequestUrl(request, tokenSymbol) : null,
   });
 }
