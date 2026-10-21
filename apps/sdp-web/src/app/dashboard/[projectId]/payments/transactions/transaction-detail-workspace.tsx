@@ -282,6 +282,13 @@ function NetworkFee({ fee }: { fee: number | null | undefined }) {
 }
 
 /** The record's two columns: how it moved (direction, fee, source, memo) and between whom. */
+/** The wallet a transaction moved through: its label, else its shortened id. */
+function walletLabelOf(transaction: UnifiedTransaction): string | null {
+  return transaction.custodyWalletId === null
+    ? null
+    : (transaction.custodyWalletLabel ?? shortenAddress(transaction.custodyWalletId));
+}
+
 function TransactionParties({
   transaction,
   transfer,
@@ -294,10 +301,7 @@ function TransactionParties({
   contact: string | null;
 }) {
   const t = useTranslations();
-  const wallet =
-    transaction.custodyWalletId === null
-      ? null
-      : (transaction.custodyWalletLabel ?? shortenAddress(transaction.custodyWalletId));
+  const wallet = walletLabelOf(transaction);
   const memo = memoText(transfer);
   return (
     <RecordColumns>
@@ -517,7 +521,9 @@ function TransactionRecord({
             ) : undefined
           }
         />
-        {transfer ? <RampOpenSale transfer={transfer} /> : null}
+        {transfer ? (
+          <RampOpenSale transfer={transfer} walletLabel={walletLabelOf(transaction)} />
+        ) : null}
         <RecordAmount
           label={t("DashboardPayments.transactions.amount")}
           muted={summary.amount === null}

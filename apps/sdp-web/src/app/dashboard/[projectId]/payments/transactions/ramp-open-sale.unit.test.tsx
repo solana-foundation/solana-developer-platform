@@ -48,13 +48,15 @@ afterEach(() => {
 describe("RampOpenSale", () => {
   it("lets an open sale be funded or canceled from its page, confirming first", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    render(<RampOpenSale transfer={sale({})} />, { wrapper });
+    render(<RampOpenSale transfer={sale({})} walletLabel="Treasury" />, { wrapper });
 
     expect(screen.getByText(DEPOSIT_ADDRESS)).toBeTruthy();
     expect(screen.getByText("25 USDC")).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "Send 25 USDC" }));
     expect(screen.getByText("Send 25.00 USDC?")).toBeTruthy();
+    // The confirmation names the wallet that pays, not only where the deposit goes.
+    expect(screen.getByText("Treasury")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Not yet" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel payout" }));
@@ -66,7 +68,7 @@ describe("RampOpenSale", () => {
 
   it("holds Send while the sale is being canceled", async () => {
     vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>(() => undefined));
-    render(<RampOpenSale transfer={sale({})} />, { wrapper });
+    render(<RampOpenSale transfer={sale({})} walletLabel="Treasury" />, { wrapper });
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel payout" }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel transaction" }));
@@ -76,18 +78,27 @@ describe("RampOpenSale", () => {
   });
 
   it("offers only Cancel while the provider has not named a deposit address", () => {
-    render(<RampOpenSale transfer={sale({ status: "pending", cryptoDeposit: undefined })} />, {
-      wrapper,
-    });
+    render(
+      <RampOpenSale
+        transfer={sale({ status: "pending", cryptoDeposit: undefined })}
+        walletLabel="Treasury"
+      />,
+      {
+        wrapper,
+      }
+    );
 
     expect(screen.queryByRole("button", { name: /Send/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Cancel payout" })).toBeTruthy();
   });
 
   it("shows nothing once the sale can no longer be funded", () => {
-    const { container } = render(<RampOpenSale transfer={sale({ status: "settling" })} />, {
-      wrapper,
-    });
+    const { container } = render(
+      <RampOpenSale transfer={sale({ status: "settling" })} walletLabel="Treasury" />,
+      {
+        wrapper,
+      }
+    );
 
     expect(container.textContent).toBe("");
   });
