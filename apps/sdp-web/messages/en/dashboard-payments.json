@@ -396,7 +396,7 @@
       "recipientReceives": "Recipient receives",
       "scaledAmount": "Scaled amount",
       "scaledAmountValue": "{amount} × {multiplier}",
-      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. {amount} of base units moved, shown multiplied by {multiplier}.",
+      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. {amount} of base units moved, shown multiplied by {multiplier}. SDP rounds the base units up so the recipient sees at least the amount sent.",
       "counterparty": "counterparty",
       "toCounterparty": "to {counterparty}",
       "transferSubmitted": "Transfer submitted",
@@ -1533,7 +1533,7 @@
       "recipientReceived": "Recipient received",
       "scaledAmount": "Scaled amount",
       "scaledAmountValue": "{amount} × {multiplier}",
-      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. {amount} of base units moved, shown multiplied by {multiplier}."
+      "scaledAmountHint": "This token's issuer scales displayed amounts with the Token-2022 scaled UI amount extension. {amount} of base units moved, shown multiplied by {multiplier}. SDP rounds the base units up so the recipient sees at least the amount sent."
     },
     "requestDetail": {
       "paymentLink": "Payment link",
