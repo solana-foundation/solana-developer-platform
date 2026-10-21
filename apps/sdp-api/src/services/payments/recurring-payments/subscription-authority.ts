@@ -136,6 +136,23 @@ function lazySponsoredFeePayer(input: {
  * there is not repaired.
  *
  * @param input - The setup's flow, accounts, signer, fee payer and attempt.
+ * @param input.flow - The flow subscribing, which names the movement, slots and failure messages.
+ * @param input.env - The environment.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.recurringPaymentId - The schedule.
+ * @param input.attempt - The run's attempt: its id, saved setup signature and stored expiry.
+ * @param input.phase - The run's unwinding steps; the current step moves to setup, then subscribe.
+ * @param input.rpc - The cluster RPC the authority is read from.
+ * @param input.sourceWallet - The wallet that subscribes and the sponsorship is scoped to.
+ * @param input.sourceSigner - The run's lazy source signer, resolved only when a step is sent.
+ * @param input.sourceTokenAccount - The source wallet's token account for the mint.
+ * @param input.sourceTokenAccount.tokenAccount - Its address.
+ * @param input.sourceTokenAccount.exists - Whether it exists; a missing one is created by setup.
+ * @param input.subscriptionAuthorityAddress - The source wallet's subscription authority.
+ * @param input.owner - The source wallet's address.
+ * @param input.mint - The plan's mint.
+ * @param input.tokenProgram - The mint's token program.
  * @param input.feePayer - The run's lazy fee payer, resolved only when the setup is sent.
  * @returns The subscription authority as read after setup.
  * @throws ResumedStepUnsettledError when the setup is pending.
@@ -271,6 +288,23 @@ function requireSubscriptionAuthority(
  * subscribe it already saved before calling this.
  *
  * @param input - The flow, the setup's accounts, signer and attempt, and the subscribe's terms.
+ * @param input.flow - The flow subscribing, which names the movement, slots and failure messages.
+ * @param input.env - The environment.
+ * @param input.organizationId - The schedule's organization.
+ * @param input.projectId - The schedule's project.
+ * @param input.recurringPaymentId - The schedule.
+ * @param input.attempt - The run's attempt: its id, saved setup signature and stored expiry.
+ * @param input.phase - The run's unwinding steps; the current step moves to setup, then subscribe.
+ * @param input.rpc - The cluster RPC the authority is read from.
+ * @param input.sourceWallet - The wallet that subscribes and the sponsorship is scoped to.
+ * @param input.sourceSigner - The run's lazy source signer, resolved only when a step is sent.
+ * @param input.sourceTokenAccount - The source wallet's token account for the mint.
+ * @param input.sourceTokenAccount.tokenAccount - Its address.
+ * @param input.sourceTokenAccount.exists - Whether it exists; a missing one is created by setup.
+ * @param input.subscriptionAuthorityAddress - The source wallet's subscription authority.
+ * @param input.owner - The source wallet's address.
+ * @param input.mint - The plan's mint.
+ * @param input.tokenProgram - The mint's token program.
  * @param input.subscriptionPda - The delegation subscribe creates.
  * @param input.amountBaseUnits - The plan's amount, in base units.
  * @param input.planCreatedAt - The plan's on-chain creation time, which subscribe expects.
