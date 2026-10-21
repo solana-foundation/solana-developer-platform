@@ -280,6 +280,60 @@ export async function readTransferMint(mint: Address): Promise<TransferMint> {
   return { account, tokenProgram: assertSupportedTokenProgram(account.programAddress) };
 }
 
+type ScaledUiAmountConfig = Extract<Extension, { __kind: "ScaledUiAmountConfig" }>;
+
+/**
+ * The Token-2022 extensions that change what a transfer of a mint moves or delivers.
+ *
+ * @param transferMint - The mint, as `readTransferMint` read it.
+ * @returns Its scaled UI amount and transfer fee configs; both undefined on a classic mint.
+ * @throws AppError `BAD_REQUEST` when a Token-2022 account does not decode as a mint.
+ */
+function readAmountExtensions(transferMint: TransferMint): {
+  scaledUiAmount: ScaledUiAmountConfig | undefined;
+  transferFeeConfig: TransferFeeConfig | undefined;
+} {
+  if (transferMint.tokenProgram !== SPL_TOKEN_2022_PROGRAM_ID) {
+    return { scaledUiAmount: undefined, transferFeeConfig: undefined };
+  }
+  let mint: Account<Mint>;
+  try {
+    mint = decodeMint(transferMint.account);
+  } catch {
+    throw badRequest("Token mint account is not a mint");
+  }
+  const extensions = isSome(mint.data.extensions) ? mint.data.extensions.value : [];
+  return {
+    scaledUiAmount: extensions.find((extension) =>
+      // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
+      isExtension("ScaledUiAmountConfig", extension)
+    ),
+    transferFeeConfig: extensions.find((extension) => isExtension("TransferFeeConfig", extension)),
+  };
+}
+
+/**
+ * Refuses a mint with a Token-2022 scaled UI amount or transfer fee, for a flow that builds or
+ * settles against the unscaled amount it was given. A mint's extensions are fixed when it is
+ * created, so checking once when the flow starts holds for its lifetime.
+ *
+ * @param mint - The mint address.
+ * @param flow - The flow's name, as the refusal says it.
+ * @throws AppError `BAD_REQUEST` when the mint has either extension, does not exist, or no SPL
+ *   token program owns it.
+ */
+export async function assertMintMovesUnscaled(
+  mint: Address,
+  flow: "Payment requests" | "Batch transfers"
+): Promise<void> {
+  const { scaledUiAmount, transferFeeConfig } = readAmountExtensions(await readTransferMint(mint));
+  if (scaledUiAmount || transferFeeConfig) {
+    throw badRequest(
+      `${flow} don't support tokens with a Token-2022 transfer fee or scaled UI amount yet`
+    );
+  }
+}
+
 /** What a transfer signs: the base units it moves and the fee it states. */
 interface TransferTerms {
   baseUnits: bigint;
@@ -318,7 +372,8 @@ function calculateEpochTransferFee(
  * truncates both ways (`ScaledUiAmountConfig::try_ui_amount_into_amount` and
  * `amount_to_ui_amount`), so the truncated conversion can show one UI unit short of what the
  * caller asked to send; one more base unit always covers it. The shown amount mirrors the
- * program's `trunc(base units × multiplier)` in f64.
+ * program's `trunc(base units × multiplier)` in f64. Above a multiplier of 1 the extra base unit
+ * can show as up to `multiplier` UI units, so a tiny amount may arrive larger than requested.
  *
  * @param truncatedBaseUnits - The program's truncated UI-to-base-units conversion.
  * @param requestedUiUnits - The requested UI amount at the mint's decimals, exact.
@@ -350,7 +405,8 @@ function roundUpScaledBaseUnits(
  * @param amount - The decimal amount the caller asked to send.
  * @param decimals - The mint's decimals.
  * @returns The base units moved and the fee stated.
- * @throws AppError `BAD_REQUEST` when a Token-2022 account does not decode as a mint.
+ * @throws AppError `BAD_REQUEST` when a Token-2022 account does not decode as a mint, or a
+ *   scaled amount is out of the u64 range.
  */
 export async function resolveTransferTerms(
   transferMint: TransferMint,
@@ -358,24 +414,7 @@ export async function resolveTransferTerms(
   decimals: number
 ): Promise<TransferTerms> {
   const exactBaseUnits = parseDecimalAmount(amount, decimals);
-  if (transferMint.tokenProgram !== SPL_TOKEN_2022_PROGRAM_ID) {
-    return { baseUnits: exactBaseUnits, transferFee: null };
-  }
-
-  let mint: Account<Mint>;
-  try {
-    mint = decodeMint(transferMint.account);
-  } catch {
-    throw badRequest("Token mint account is not a mint");
-  }
-  const extensions = isSome(mint.data.extensions) ? mint.data.extensions.value : [];
-  const scaledUiAmount = extensions.find((extension) =>
-    // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
-    isExtension("ScaledUiAmountConfig", extension)
-  );
-  const transferFeeConfig = extensions.find((extension) =>
-    isExtension("TransferFeeConfig", extension)
-  );
+  const { scaledUiAmount, transferFeeConfig } = readAmountExtensions(transferMint);
   if (!scaledUiAmount && !transferFeeConfig) {
     return { baseUnits: exactBaseUnits, transferFee: null };
   }
@@ -387,11 +426,17 @@ export async function resolveTransferTerms(
       clock.unixTimestamp >= scaledUiAmount.newMultiplierEffectiveTimestamp
         ? scaledUiAmount.newMultiplier
         : scaledUiAmount.multiplier;
-    baseUnits = roundUpScaledBaseUnits(
-      uiAmountToAmountForScaledUiAmountMintWithoutSimulation(amount, decimals, multiplier),
-      exactBaseUnits,
-      multiplier
-    );
+    let truncatedBaseUnits: bigint;
+    try {
+      truncatedBaseUnits = uiAmountToAmountForScaledUiAmountMintWithoutSimulation(
+        amount,
+        decimals,
+        multiplier
+      );
+    } catch {
+      throw badRequest("Amount is out of range for this token's scaled UI amount");
+    }
+    baseUnits = roundUpScaledBaseUnits(truncatedBaseUnits, exactBaseUnits, multiplier);
   }
   return {
     baseUnits,

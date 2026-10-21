@@ -533,9 +533,9 @@ export interface PaymentTransferSummary {
   destination?: string;
   token?: string;
   amount?: string;
-  /** Token-2022 transfer fee withheld from the recipient, in UI units; present when the transaction states one. */
+  /** Token-2022 transfer fee withheld from the recipient; present when the transaction states one. An underlying amount when `unscaledAmount` is present. */
   transferFee?: string;
-  /** `amount` minus `transferFee`: what the recipient receives; present with `transferFee`. */
+  /** What the recipient receives after `transferFee`; present with it. An underlying amount when `unscaledAmount` is present. */
   receivedAmount?: string;
   /** Base units moved at the mint's decimals, before a Token-2022 scaled UI amount multiplier; present only when `amount` was scaled. */
   unscaledAmount?: string;

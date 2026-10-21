@@ -5,6 +5,7 @@ import {
   type PaymentTransactionKind,
   UNIFIED_TRANSACTION_SDP_MODULES,
 } from "@sdp/types/unified-transactions";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -20,6 +21,7 @@ import {
 } from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
 import { lookupTokenSymbols } from "@/services/helius-das.service";
+import { isNativePaymentToken } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import {
   PAYMENT_TRANSACTION_KIND_ACTIONS,
@@ -74,7 +76,13 @@ export async function listUnifiedTransactions(
     projectId: auth.projectId,
   });
   const symbolsByMint = await lookupTokenSymbols(
-    result.rows.flatMap((row) => (row.token === null ? [] : [row.token]))
+    result.rows.flatMap((row) =>
+      row.token === null ||
+      isNativePaymentToken(row.token) ||
+      WELL_KNOWN_TOKEN_BY_MINT.has(row.token)
+        ? []
+        : [row.token]
+    )
   );
   const transactions = result.rows.map((row) => ({
     ...row,

@@ -9,6 +9,7 @@ import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { type AppContext, getCounterpartyAccountsRepository } from "@/routes/payments/context";
 import {
+  assertMintMovesUnscaled,
   resolveMintTokenProgram,
   resolveSourceTokenAccount,
 } from "@/routes/payments/token-accounts";
@@ -71,6 +72,7 @@ async function resolveTokenContext(
   }
 
   const mintAddress = assertValidAddress(token, "token");
+  await assertMintMovesUnscaled(mintAddress, "Batch transfers");
   const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
   const sourceTokenAccount = await resolveSourceTokenAccount(
     rpc,

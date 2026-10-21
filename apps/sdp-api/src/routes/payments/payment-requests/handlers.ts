@@ -1,9 +1,11 @@
+import { assertValidAddress } from "@sdp/solana/address";
 import type {
   CreatedPaymentRequest,
   ListPaymentRequestsResponse,
   PaymentRequest,
   PaymentRequestLink,
 } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -13,6 +15,7 @@ import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
+import { assertMintMovesUnscaled } from "@/routes/payments/token-accounts";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
@@ -129,6 +132,10 @@ export async function createPaymentRequest(
   // wallet is operational is state, checked here.
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
+  const token = normalizePaymentToken(body.token);
+  if (token !== SOL_MINT) {
+    await assertMintMovesUnscaled(assertValidAddress(token, "token"), "Payment requests");
+  }
 
   const row = await createPaymentRequestsRepository(
     c.env,
@@ -139,7 +146,7 @@ export async function createPaymentRequest(
     custodyWalletId: wallet.id,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
-    token: normalizePaymentToken(body.token),
+    token,
     amount: body.amount,
     expiresAt: body.expiresAt,
     createdBy: await resolveCreatorUserId(c),

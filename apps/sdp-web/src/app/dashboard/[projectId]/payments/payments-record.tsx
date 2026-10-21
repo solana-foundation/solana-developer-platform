@@ -54,19 +54,27 @@ export function RecordStateBand({
   );
 }
 
-/** The record's amount: a 13px label 7px over the 40px figure; `muted` when nothing moved. */
+/**
+ * The record's amount: a 13px label 7px over the 40px figure; `muted` when nothing moved.
+ * `labelAccessory` sits after the label, for a caveat about the figure.
+ */
 export function RecordAmount({
   label,
+  labelAccessory,
   muted = false,
   children,
 }: {
   label: string;
+  labelAccessory?: ReactNode;
   muted?: boolean;
   children: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1.75">
-      <span className="text-meta text-secondary">{label}</span>
+      <span className="flex items-center gap-1 text-meta text-secondary">
+        {label}
+        {labelAccessory}
+      </span>
       <p
         className={cn(
           "min-w-0 break-words text-amount font-medium tabular-nums",
@@ -99,17 +107,19 @@ export function RecordList({ children }: { children: ReactNode }) {
 /**
  * A label and its value on one 41px rule: 13px, then 14px. `copy` puts a copy button after the
  * value for the full text a shortened value stands for; `hint` puts an info icon after the label
- * that explains it on hover and focus.
+ * that explains it on hover and focus; `valueAccessory` sits after the value, for a caveat about it.
  */
 export function RecordRow({
   label,
   copy,
   hint,
+  valueAccessory,
   children,
 }: {
   label: string;
   copy?: string;
   hint?: string;
+  valueAccessory?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -123,6 +133,7 @@ export function RecordRow({
       </dt>
       <dd className="flex min-w-0 items-center gap-1 text-right text-body text-primary">
         <span className="min-w-0 truncate">{children}</span>
+        {valueAccessory}
         {copy ? <RecordCopyButton value={copy} label={label} /> : null}
       </dd>
     </div>

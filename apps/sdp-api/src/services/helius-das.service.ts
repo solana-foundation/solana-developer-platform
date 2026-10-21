@@ -13,6 +13,9 @@ const TOKEN_SYMBOL_CACHE_TTL_MS = 60 * 60_000;
 
 const tokenSymbolCache = createMintLookupCache<string>(TOKEN_SYMBOL_CACHE_TTL_MS);
 
+/** DAS only decorates reads, so a slow Helius answer gives up instead of holding the request. */
+const HELIUS_DAS_TIMEOUT_MS = 3_000;
+
 /** @internal Test-only: forget cached symbols so specs are order-independent. */
 export function clearHeliusDasCachesForTests(): void {
   tokenSymbolCache.clearForTests();
@@ -76,7 +79,10 @@ async function dasRequest(init: RequestInit): Promise<unknown> {
   };
   let response: Response;
   try {
-    response = await fetchHeliusDas(init);
+    response = await fetchHeliusDas({
+      ...init,
+      signal: AbortSignal.timeout(HELIUS_DAS_TIMEOUT_MS),
+    });
   } catch (error) {
     return fail(error);
   }

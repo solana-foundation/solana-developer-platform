@@ -419,7 +419,9 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
             icon={<ReceiptIcon className="size-3.5" />}
             label={
               <span className="flex items-center gap-1.5">
-                {t("DashboardPayments.onchainSend.transferFee")}
+                {scaled === null
+                  ? t("DashboardPayments.onchainSend.transferFee")
+                  : t("DashboardPayments.onchainSend.transferFeeUnderlying")}
                 <InfoHint
                   text={t("DashboardPayments.onchainSend.transferFeeHint")}
                   className="[&_svg]:size-3.5"
@@ -436,7 +438,11 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
         {receivedAmount === undefined ? null : (
           <DetailRow
             icon={<ArrowDownLeftIcon className="size-3.5" />}
-            label={t("DashboardPayments.onchainSend.recipientReceives")}
+            label={
+              scaled === null
+                ? t("DashboardPayments.onchainSend.recipientReceives")
+                : t("DashboardPayments.onchainSend.recipientReceivesUnderlying")
+            }
           >
             {formatTokenAmount(receivedAmount, locale)} {assetLabel}
           </DetailRow>

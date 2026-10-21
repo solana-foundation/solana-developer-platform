@@ -381,12 +381,12 @@ export const transferSchema = z
     amount: tokenAmountSchema.optional(),
     transferFee: z.string().optional().openapi({
       description:
-        "Token-2022 transfer fee withheld from the recipient, in UI units at the mint's decimals. The recipient receives `amount` minus this fee. Present when the transfer's transaction states a fee.",
+        "Token-2022 transfer fee withheld from the recipient, at the mint's decimals. Present when the transfer's transaction states a fee. On a scaled mint (when `unscaledAmount` is present) it is an underlying amount, before the scaled UI amount multiplier.",
       example: "0.25",
     }),
     receivedAmount: z.string().optional().openapi({
       description:
-        "What the recipient receives: `amount` minus `transferFee`, in UI units. Present with `transferFee`.",
+        "What the recipient receives after `transferFee`, at the mint's decimals. Present with `transferFee`; an underlying amount when `unscaledAmount` is present.",
       example: "99.75",
     }),
     unscaledAmount: z.string().optional().openapi({

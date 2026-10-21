@@ -28,6 +28,10 @@ import {
   RecordStateBand,
 } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { rampPhaseCopy } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
+import {
+  isUnverifiedMintName,
+  UnverifiedMintWarning,
+} from "@/app/dashboard/[projectId]/payments/transactions/unverified-mint-warning";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
@@ -128,17 +132,19 @@ function transactionAmountLabel(
   transaction: UnifiedTransaction,
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>,
   locale: string
-): { amount: string | null; token: string | null } {
-  const token =
+): { amount: string | null; token: string | null; unverifiedToken: boolean } {
+  const resolved =
     transaction.token === null
       ? null
-      : resolveTokenByMint(transaction.token, issuedTokensByMint, transaction.tokenSymbol)
-          .tokenName;
+      : resolveTokenByMint(transaction.token, issuedTokensByMint, transaction.tokenSymbol);
+  const token = resolved === null ? null : resolved.tokenName;
   const amount =
     transaction.amount === null
       ? null
       : `${formatDecimalAmount(transaction.amount, locale)}${token ? ` ${token}` : ""}`;
-  return { amount, token };
+  const unverifiedToken =
+    resolved !== null && isUnverifiedMintName(resolved, transaction.tokenSymbol);
+  return { amount, token, unverifiedToken };
 }
 
 /**
@@ -206,11 +212,11 @@ function useTransactionSummary(
   const t = useTranslations();
   const locale = useLocale();
   const ledgerStatus = useTransactionStatus()(transaction);
-  const { amount: cryptoAmount, token } = transactionAmountLabel(
-    transaction,
-    issuedTokensByMint,
-    locale
-  );
+  const {
+    amount: cryptoAmount,
+    token,
+    unverifiedToken,
+  } = transactionAmountLabel(transaction, issuedTokensByMint, locale);
   // A sale moves crypto to the provider, but the contact gets fiat: name what they get.
   const saleFiat = transfer?.type === "offramp" ? saleFiatLabel(transfer, locale) : null;
   const amount = saleFiat ?? cryptoAmount;
@@ -240,7 +246,18 @@ function useTransactionSummary(
     (paymentStatus === null ? undefined : paymentWhy(paymentStatus, transfer, t));
   const soldCrypto = saleFiat ? cryptoAmount : null;
   const { receivedAfterFee, scaled } = tokenTransferLabels(transfer, token, locale);
-  return { status, amount, soldCrypto, receivedAfterFee, scaled, direction, contact, title, why };
+  return {
+    status,
+    amount,
+    soldCrypto,
+    unverifiedToken: saleFiat === null && unverifiedToken,
+    receivedAfterFee,
+    scaled,
+    direction,
+    contact,
+    title,
+    why,
+  };
 }
 
 /** A payment request's deposit waits on its payer; a ramp waits on its provider instead. */
@@ -334,6 +351,7 @@ function TransactionParties({
   contact,
   receivedAfterFee,
   scaled,
+  unverifiedToken,
 }: {
   transaction: UnifiedTransaction;
   transfer: PaymentTransferDetail | null;
@@ -341,6 +359,7 @@ function TransactionParties({
   contact: string | null;
   receivedAfterFee: { received: string; fee: string } | null;
   scaled: { amount: string; shown: string } | null;
+  unverifiedToken: boolean;
 }) {
   const t = useTranslations();
   const wallet = walletLabelOf(transaction);
@@ -367,12 +386,22 @@ function TransactionParties({
         {receivedAfterFee ? (
           <>
             <RecordRow
-              label={t("DashboardPayments.transactionDetail.transferFee")}
+              label={
+                scaled === null
+                  ? t("DashboardPayments.transactionDetail.transferFee")
+                  : t("DashboardPayments.transactionDetail.transferFeeUnderlying")
+              }
               hint={t("DashboardPayments.transactionDetail.transferFeeHint")}
             >
               {receivedAfterFee.fee}
             </RecordRow>
-            <RecordRow label={t("DashboardPayments.transactionDetail.recipientReceived")}>
+            <RecordRow
+              label={
+                scaled === null
+                  ? t("DashboardPayments.transactionDetail.recipientReceived")
+                  : t("DashboardPayments.transactionDetail.recipientReceivedUnderlying")
+              }
+            >
               {receivedAfterFee.received}
             </RecordRow>
           </>
@@ -381,6 +410,7 @@ function TransactionParties({
           <RecordRow
             label={t("DashboardPayments.transactionDetail.scaledAmount")}
             hint={t("DashboardPayments.transactionDetail.scaledAmountHint", scaled)}
+            valueAccessory={unverifiedToken ? <UnverifiedMintWarning /> : undefined}
           >
             {scaled.amount}
           </RecordRow>
@@ -589,6 +619,7 @@ function TransactionRecord({
         ) : null}
         <RecordAmount
           label={t("DashboardPayments.transactions.amount")}
+          labelAccessory={summary.unverifiedToken ? <UnverifiedMintWarning /> : undefined}
           muted={summary.amount === null}
         >
           {summary.amount ?? t("DashboardPayments.transactionDetail.notRecorded")}
@@ -605,6 +636,7 @@ function TransactionRecord({
           contact={summary.contact}
           receivedAfterFee={summary.receivedAfterFee}
           scaled={summary.scaled}
+          unverifiedToken={summary.unverifiedToken}
         />
         {transfer?.provider ? (
           <ProviderSection provider={transfer.provider} reference={transfer.providerReference} />

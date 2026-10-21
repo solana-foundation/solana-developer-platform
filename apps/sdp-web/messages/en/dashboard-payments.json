@@ -394,6 +394,8 @@
       "transferFeeValue": "{amount} {asset}, paid by the recipient",
       "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
       "recipientReceives": "Recipient receives",
+      "transferFeeUnderlying": "Transfer fee (underlying)",
+      "recipientReceivesUnderlying": "Recipient receives (underlying)",
       "scaledAmount": "Underlying amount",
       "scaledAmountHint": "Shown as {shown} due to the scaled UI amount multiplier.",
       "counterparty": "counterparty",
@@ -1164,6 +1166,7 @@
       "paymentsAppearHere": "Created recurring payment records will appear here."
     },
     "transactions": {
+      "unverifiedMint": "Not a well-known mint. This name comes from the token's own metadata, which anyone can set.",
       "searchPlaceholder": "Search ID, signature, address, reference, or counterparty (3+ characters)",
       "clearSearch": "Clear transaction search",
       "filters": "Filters",
@@ -1530,6 +1533,8 @@
       "transferFee": "Transfer fee",
       "transferFeeHint": "Set by the token's issuer through the Token-2022 transfer fee extension. It is withheld from what the recipient receives; SDP does not charge or collect it.",
       "recipientReceived": "Recipient received",
+      "transferFeeUnderlying": "Transfer fee (underlying)",
+      "recipientReceivedUnderlying": "Recipient received (underlying)",
       "scaledAmount": "Underlying amount",
       "scaledAmountHint": "Shown as {shown} due to the scaled UI amount multiplier."
     },
