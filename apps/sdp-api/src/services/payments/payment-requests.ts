@@ -231,7 +231,7 @@ async function findFirstValidPayment(
         recipient: assertValidAddress(row.destination_address, "destinationAddress"),
         amount: toNumberAmount(row.amount),
         reference,
-        ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
+        splToken: row.token === SOL_MINT ? undefined : assertValidAddress(row.token, "token"),
       }),
       ValidateTransferError
     );
