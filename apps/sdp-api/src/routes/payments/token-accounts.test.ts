@@ -3,7 +3,11 @@ import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { type Address, address, createNoopSigner, unixTimestamp } from "@solana/kit";
 import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
-import { extension, type MintArgs } from "@solana-program/token-2022";
+import {
+  extension,
+  getTransferCheckedInstruction,
+  type MintArgs,
+} from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 import {
   installClusterRpcResponder,
@@ -83,10 +87,10 @@ const TEST_MINT = syntheticAddress(10);
 const TEST_AUTHORITY = createNoopSigner(syntheticAddress(11));
 const TEST_CLOCK_TIMESTAMP = 1_800_000_000n;
 
-function scaledUiAmount(newMultiplierEffectiveTimestamp: bigint) {
+function scaledUiAmount(newMultiplierEffectiveTimestamp: bigint, multiplier: number) {
   return extension("ScaledUiAmountConfig", {
     authority: syntheticAddress(12),
-    multiplier: 2,
+    multiplier,
     newMultiplierEffectiveTimestamp,
     newMultiplier: 4,
   });
@@ -167,14 +171,20 @@ describe("Token-2022 transfer terms", () => {
   );
 
   it.each([
-    { effectiveAt: TEST_CLOCK_TIMESTAMP + 1n, baseUnits: 500_000n },
-    { effectiveAt: TEST_CLOCK_TIMESTAMP, baseUnits: 250_000n },
+    { effectiveAt: TEST_CLOCK_TIMESTAMP + 1n, multiplier: 2, amount: "1", baseUnits: 500_000n },
+    { effectiveAt: TEST_CLOCK_TIMESTAMP, multiplier: 2, amount: "1", baseUnits: 250_000n },
+    {
+      effectiveAt: TEST_CLOCK_TIMESTAMP + 1n,
+      multiplier: 1.5,
+      amount: "10",
+      baseUnits: 6_666_667n,
+    },
   ])(
-    "divides a scaled amount by the multiplier in effect at the Clock: $baseUnits",
-    async ({ effectiveAt, baseUnits }) => {
-      serveChain(SPL_TOKEN_PROGRAMS["token-2022"], [scaledUiAmount(effectiveAt)], 0n);
+    "divides $amount by the multiplier in effect at the Clock, rounded up: $baseUnits",
+    async ({ effectiveAt, multiplier, amount, baseUnits }) => {
+      serveChain(SPL_TOKEN_PROGRAMS["token-2022"], [scaledUiAmount(effectiveAt, multiplier)], 0n);
 
-      expect(await termsFor("1")).toEqual({ baseUnits, transferFee: null });
+      expect(await termsFor(amount)).toEqual({ baseUnits, transferFee: null });
       expect(clockReads()).toBe(1);
     }
   );
@@ -201,17 +211,6 @@ describe("Token-2022 transfer terms", () => {
       code: "BAD_REQUEST",
       message: "Token mint account is not a mint",
     });
-  });
-
-  it("refuses a scaled amount that moves no base units", async () => {
-    serveChain(SPL_TOKEN_PROGRAMS["token-2022"], [scaledUiAmount(TEST_CLOCK_TIMESTAMP + 1n)], 0n);
-
-    await expect(buildTransfer(SPL_TOKEN_PROGRAMS["token-2022"], "0.000001")).rejects.toMatchObject(
-      {
-        code: "BAD_REQUEST",
-        message: "Transfer amount must be greater than zero",
-      }
-    );
   });
 
   it.each([
@@ -245,4 +244,22 @@ describe("Token-2022 transfer terms", () => {
       ).toEqual(signed);
     }
   );
+
+  it("reads no transfer from a transaction carrying several Token-2022 transfers", () => {
+    const toRecipient = (index: number) =>
+      getTransferCheckedInstruction({
+        source: syntheticAddress(17),
+        mint: TEST_MINT,
+        destination: syntheticAddress(index),
+        authority: TEST_AUTHORITY,
+        amount: 5_000_000n,
+        decimals: 6,
+      });
+
+    expect(
+      readSignedTokenTransfer(
+        syntheticWireTransaction(TEST_AUTHORITY.address, [toRecipient(18), toRecipient(19)])
+      )
+    ).toBeNull();
+  });
 });

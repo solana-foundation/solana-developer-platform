@@ -137,7 +137,7 @@ describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
     decimals: 6,
   };
 
-  function singleTransferRow(signedTransfer: Instruction | null): PaymentTransferRow {
+  function transferRow(signedTransfers: readonly Instruction[] | null): PaymentTransferRow {
     return offrampRow({
       id: "xfr_mapper_token_2022",
       type: "transfer",
@@ -154,9 +154,9 @@ describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
       amount: "1",
       fee: 5000,
       signed_transaction:
-        signedTransfer === null
+        signedTransfers === null
           ? null
-          : syntheticWireTransaction(authority.address, [signedTransfer]),
+          : syntheticWireTransaction(authority.address, signedTransfers),
     });
   }
 
@@ -188,7 +188,7 @@ describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
   };
 
   it("adds no Token-2022 fields when the row saved no signed transaction", () => {
-    expect(onTheWire(singleTransferRow(null))).toEqual(unsignedWire);
+    expect(onTheWire(transferRow(null))).toEqual(unsignedWire);
   });
 
   it("states the fee the transfer withheld and what the recipient received", () => {
@@ -198,7 +198,7 @@ describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
       fee: 2_500n,
     });
 
-    expect(onTheWire(singleTransferRow(withFee))).toEqual({
+    expect(onTheWire(transferRow([withFee]))).toEqual({
       ...unsignedWire,
       transferFee: "0.0025",
       receivedAmount: "0.9975",
@@ -208,10 +208,25 @@ describe("mapTransferRow Token-2022 amounts from the signed transfer", () => {
   it("states the base units a scaled mint moved and the multiplier the amount was scaled by", () => {
     const scaled = getTransferCheckedInstruction({ ...transferAccounts, amount: 500_000n });
 
-    expect(onTheWire(singleTransferRow(scaled))).toEqual({
+    expect(onTheWire(transferRow([scaled]))).toEqual({
       ...unsignedWire,
       unscaledAmount: "0.5",
       uiAmountMultiplier: "2",
+    });
+  });
+
+  it("adds no Token-2022 fields to a batch chunk, whose transfers do not each move its amount", () => {
+    const half = getTransferCheckedInstruction({ ...transferAccounts, amount: 500_000n });
+    const chunk: PaymentTransferRow = {
+      ...transferRow([half, half]),
+      type: "transfer_batch",
+      kind: "batch_pay",
+    };
+
+    expect(onTheWire(chunk)).toEqual({
+      ...unsignedWire,
+      type: "transfer_batch",
+      kind: "batch_pay",
     });
   });
 });
