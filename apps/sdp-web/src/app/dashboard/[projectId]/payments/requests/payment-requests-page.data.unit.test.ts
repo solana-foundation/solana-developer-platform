@@ -188,7 +188,6 @@ describe("loadPaymentRequestsList", () => {
       ok: true,
       data: rows,
       total: 60,
-      totalIsExact: true,
       hasNextPage: false,
     });
     expect(api.calls).toEqual([{ page: "2", pageSize: "50", status: "canceled" }]);
@@ -196,21 +195,6 @@ describe("loadPaymentRequestsList", () => {
     const unfiltered = pageApi(rows, 2);
     await loadPaymentRequestsList(unfiltered.request, listState());
     expect(unfiltered.calls).toEqual([{ page: "1", pageSize: "25", status: null }]);
-  });
-
-  it("leaves out of Awaiting payment a row the API returns as paid, and marks its total inexact", async () => {
-    const api = pageApi(
-      [rowWithStatus("preq_open", "awaiting_payment"), rowWithStatus("preq_landed", "paid")],
-      40
-    );
-    const result = await loadPaymentRequestsList(
-      api.request,
-      listState({ status: "awaiting_payment" })
-    );
-    expect(result.data).toEqual([rowWithStatus("preq_open", "awaiting_payment")]);
-    expect(result.total).toBe(40);
-    expect(result.totalIsExact).toBe(false);
-    expect(result.hasNextPage).toBe(true);
   });
 
   it("offers a next page while the API's total reaches past this one", async () => {
@@ -237,7 +221,6 @@ describe("loadPaymentRequestsList", () => {
       ok: true,
       data: rows,
       total: 2,
-      totalIsExact: true,
       hasNextPage: false,
     });
   });
@@ -255,7 +238,6 @@ describe("loadPaymentRequestsList", () => {
       data: [],
       total: 0,
       error: "boom",
-      totalIsExact: true,
       hasNextPage: false,
     });
   });

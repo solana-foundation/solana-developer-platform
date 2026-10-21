@@ -60,7 +60,6 @@ function renderWorkspace(props: Partial<ComponentProps<typeof PaymentRequestsWor
     <PaymentRequestsWorkspace
       initialPaymentRequests={[paymentRequest]}
       total={1}
-      totalIsExact
       hasNextPage={false}
       listState={{ page: 1, pageSize: 25, status: null, search: null }}
       {...props}
@@ -133,19 +132,18 @@ describe("PaymentRequestsWorkspace search", () => {
 });
 
 describe("PaymentRequestsWorkspace pager", () => {
-  it("shows which rows of how many when the total is exact", () => {
+  it("shows which rows of how many without a search", () => {
     renderWorkspace({ total: 40, hasNextPage: true });
 
     expect(screen.getByText("1-25 of 40 requests")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty("disabled", false);
   });
 
-  it("names the page alone when the total is not exact, and offers the next while there is one", () => {
+  it("names the page alone under a search, and offers the next while there is one", () => {
     renderWorkspace({
       total: 40,
-      totalIsExact: false,
       hasNextPage: true,
-      listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: null },
+      listState: { page: 2, pageSize: 25, status: null, search: "ref_1" },
     });
 
     expect(screen.getByText("Page 2")).toBeTruthy();
@@ -155,9 +153,8 @@ describe("PaymentRequestsWorkspace pager", () => {
 
     renderWorkspace({
       total: 40,
-      totalIsExact: false,
       hasNextPage: false,
-      listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: null },
+      listState: { page: 2, pageSize: 25, status: null, search: "ref_1" },
     });
     expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty("disabled", true);
   });
