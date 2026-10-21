@@ -6833,6 +6833,75 @@ describe("Payments routes — recurring", () => {
         expect(attempt?.status).toBe("processing");
       });
 
+      it.each([
+        { metadataUri: "https://example.com/recurring/paused-before-send.json" },
+        { amount: "35.00" },
+      ])(
+        "refuses a claimed update before sending when its issued token pauses: %j",
+        async (update) => {
+          const { activated, issuedMint, pauseToken } = await activateOnIssuedToken();
+          const key = crypto.randomUUID();
+          const request = () =>
+            app.request(
+              actionPath(activated.id),
+              {
+                method: "PATCH",
+                headers: keyed(key),
+                body: JSON.stringify({ token: issuedMint, ...update }),
+              },
+              env
+            );
+          const sent = sends();
+          sent.mockRejectedValueOnce(new Error("process died before signing"));
+          expect((await request()).status).toBe(500);
+          await leaveUpdateCrashedAt(activated.id, key);
+          await getDb(env)
+            .prepare(
+              `UPDATE payment_recurring_payment_update_attempts SET stage = 'claim'
+              WHERE recurring_payment_id = ?`
+            )
+            .bind(activated.id)
+            .run();
+          await pauseToken();
+          sent.mockClear();
+
+          const retry = await request();
+
+          expect(retry.status).toBe(400);
+          expect(sent).not.toHaveBeenCalled();
+        }
+      );
+
+      it("settles a landed replacement plan but refuses new authorization when its token pauses", async () => {
+        const { activated, issuedMint, pauseToken } = await activateOnIssuedToken();
+        const key = crypto.randomUUID();
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            {
+              method: "PATCH",
+              headers: keyed(key),
+              body: JSON.stringify({ token: issuedMint, amount: "35.00" }),
+            },
+            env
+          );
+        sendTransactionMock.mockRejectedValueOnce(new Error("process died after broadcast"));
+        expect((await request()).status).toBe(500);
+        await leaveUpdateCrashedAt(activated.id, key);
+        await pauseToken();
+        delegationsBesideActiveOld(required(activated.subscriptionPda), {
+          exists: false,
+          address: address(TEST_SOLANA_ADDRESSES.wallet2),
+        });
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(400);
+        expect(sent).not.toHaveBeenCalled();
+        expect(finalizedReads(vi.mocked(subscriptionsProgram.fetchMaybePlan).mock.calls)).toBe(1);
+      });
+
       it("finishes a landed update naming its issued token after the token pauses, without sending it again", async () => {
         const { activated, issuedMint, pauseToken } = await activateOnIssuedToken();
         const key = crypto.randomUUID();

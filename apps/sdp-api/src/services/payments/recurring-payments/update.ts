@@ -332,7 +332,7 @@ async function resolveRecurringPaymentUpdate(input: {
   const token = resolveRecurringPaymentTokenMint(
     input.request.token === undefined ? input.recurringPayment.token : input.request.token
   );
-  // Token admission gates a fresh update; a recovered stale update settles work its claim admitted.
+  // Recovery settles saved work first; each remaining new send checks token admission below.
   const admitsToken = !input.recoveringStaleUpdate;
   const [destination] = await Promise.all([
     accountChanged
@@ -980,6 +980,12 @@ async function runMetadataScheduleUpdate(input: {
         pullers: onChainPlan.data.data.pullers,
         status: parsePlanStatus(onChainPlan.data.status),
       });
+      await assertRecurringPaymentTokenAdmitted({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        mint: resolveRecurringPaymentTokenMint(input.resolved.token),
+      });
       planUpdateSignature = await sendSubscriptionInstructions({
         movement: "recurring.update",
         env: input.env,
@@ -1071,6 +1077,12 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
         mint: input.mint,
         tokenProgram: input.tokenProgram,
       });
+  await assertRecurringPaymentTokenAdmitted({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    mint: input.mint,
+  });
   const initSignature = await sendSubscriptionInstructions({
     movement: "recurring.update",
     env: input.env,
@@ -1536,6 +1548,12 @@ async function runReplacementUpdate(input: {
       pullers: [owner],
       tokenProgram,
     });
+    await assertRecurringPaymentTokenAdmitted({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      mint,
+    });
     planCreationSignature = await sendSubscriptionInstructions({
       movement: "recurring.update",
       env: input.env,
@@ -1690,6 +1708,12 @@ async function runReplacementUpdate(input: {
       planId: programPlanId,
       subscriber: sourceSigner,
       tokenMint: mint,
+    });
+    await assertRecurringPaymentTokenAdmitted({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      mint,
     });
     authorizationSignature = await sendSubscriptionInstructions({
       movement: "recurring.update",
