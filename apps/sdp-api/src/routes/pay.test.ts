@@ -1,10 +1,28 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import {
+  address,
+  appendTransactionMessageInstruction,
+  blockhash,
+  compileTransaction,
+  createNoopSigner,
+  createTransactionMessage,
+  getBase58Decoder,
+  getBase64EncodedWireTransaction,
+  partiallySignTransaction,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+} from "@solana/kit";
+import { getTransferSolInstruction } from "@solana-program/system";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import {
+  createPaymentRequestsRepository,
+  createSystemPaymentRequestsRepository,
+} from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
@@ -28,7 +46,11 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
-import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import {
+  sponsorSignTestTransaction,
+  TEST_MOCK_FEE_PAYER,
+  TEST_MOCK_FEE_PAYER_KEY_PAIR,
+} from "@/test/helpers/sponsor-signing";
 
 interface RequestWallet {
   projectId: string;
@@ -184,6 +206,114 @@ describe("Public payment request routes", () => {
   });
 
   describe("sponsored transaction window", () => {
+    it.for(ENVIRONMENT_CLUSTER_CASES)(
+      "refuses the sponsor as payer for a $environment request before claiming or signing",
+      async ({ environment }) => {
+        const sign = vi.fn(sponsorSignTestTransaction);
+        stubSponsorship().mockImplementation(() => ({
+          providerId: "test",
+          getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+          signAsFeePayer: sign,
+          getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+          prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+        }));
+        const request = await createAwaitingPaymentRequest(
+          await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
+        );
+
+        const response = await app.request(
+          `/pay/${request.public_token}/tx`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account: TEST_MOCK_FEE_PAYER }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          error: { code: "BAD_REQUEST", message: "Payment payer cannot be the fee sponsor" },
+        });
+        expect(sign).not.toHaveBeenCalled();
+        expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+        expect(
+          await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+        ).toBeNull();
+        expect((await postTransaction(request.public_token)).status).toBe(200);
+      }
+    );
+
+    it.for(["unsigned", "signed"] as const)(
+      "refuses a stored $0 claim whose payer is its original sponsor",
+      async (state) => {
+        const sponsorship = stubSponsorship();
+        const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+        const transaction = compileTransaction(
+          pipe(
+            createTransactionMessage({ version: 0 }),
+            (message) => setTransactionMessageFeePayer(TEST_MOCK_FEE_PAYER, message),
+            (message) =>
+              setTransactionMessageLifetimeUsingBlockhash(
+                {
+                  blockhash: blockhash(getBase58Decoder().decode(new Uint8Array(32).fill(7))),
+                  lastValidBlockHeight: 1_000n,
+                },
+                message
+              ),
+            (message) =>
+              appendTransactionMessageInstruction(
+                getTransferSolInstruction({
+                  source: createNoopSigner(TEST_MOCK_FEE_PAYER),
+                  destination: address(SANDBOX_REQUEST_WALLET.publicKey),
+                  amount: 1_500_000_000n,
+                }),
+                message
+              )
+          )
+        );
+        const unsignedTransaction = getBase64EncodedWireTransaction(transaction);
+        const repository = createSystemPaymentRequestsRepository(env);
+        expect(
+          await repository.claimSponsoredTransactionWindow({
+            requestId: request.id,
+            account: TEST_MOCK_FEE_PAYER,
+            unsignedTransaction,
+            lastValidBlockHeight: 1_000n,
+            currentBlockHeight: 900n,
+          })
+        ).toBe(true);
+        if (state === "signed") {
+          expect(
+            await repository.storeSponsoredTransactionSignature({
+              requestId: request.id,
+              account: TEST_MOCK_FEE_PAYER,
+              unsignedTransaction,
+              signedTransaction: getBase64EncodedWireTransaction(
+                await partiallySignTransaction([TEST_MOCK_FEE_PAYER_KEY_PAIR], transaction)
+              ),
+            })
+          ).toBe(true);
+        }
+
+        const response = await app.request(
+          `/pay/${request.public_token}/tx`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account: TEST_MOCK_FEE_PAYER }),
+          },
+          env
+        );
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          error: { code: "BAD_REQUEST", message: "Payment payer cannot be the fee sponsor" },
+        });
+        expect(sponsorship).not.toHaveBeenCalled();
+      }
+    );
+
     it.for(ENVIRONMENT_CLUSTER_CASES)(
       "builds a $environment request's sponsored transaction on $cluster only",
       async ({ environment, cluster }) => {
