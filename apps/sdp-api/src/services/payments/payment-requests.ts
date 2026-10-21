@@ -26,14 +26,52 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
+/**
+ * How long past its expiry a payment request still settles. `/pay` stops building transactions
+ * at expiry, and every transaction it built lands within ~150 blocks of its blockhash or never, so
+ * a payment from one built just before expiry still finalizes inside this window.
+ */
+export const PAYMENT_REQUEST_SETTLEMENT_GRACE_MS = 5 * 60 * 1000;
+
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
 }
 
 /**
- * Checks the chain for a transaction referencing this payment request and,
- * when a valid payment is found, records the inbound transfer and marks the
- * request paid.
+ * Whether an expired request is past the window in which a payment built before expiry can
+ * still settle it.
+ *
+ * @param expiresAt - The request's expiry, or null when it never expires.
+ * @returns `true` once expiry plus {@link PAYMENT_REQUEST_SETTLEMENT_GRACE_MS} has passed.
+ */
+function isPastSettlementGrace(expiresAt: string | null): boolean {
+  return (
+    expiresAt !== null && Date.parse(expiresAt) + PAYMENT_REQUEST_SETTLEMENT_GRACE_MS <= Date.now()
+  );
+}
+
+/**
+ * Whether any transaction naming the request's reference has reached `confirmed`, so a payment
+ * may be on its way to finalizing. Reads the open cluster scope's cluster.
+ *
+ * @param row - The payment request.
+ * @returns `true` when the reference has at least one confirmed signature.
+ */
+export async function hasPaymentInFlight(row: PaymentRequestRow): Promise<boolean> {
+  const signatures = await createClusterRpc()
+    .getSignaturesForAddress(assertValidAddress(row.reference, "reference"), {
+      commitment: "confirmed",
+      limit: 1,
+    })
+    .send();
+  return signatures.length > 0;
+}
+
+/**
+ * Checks the chain for a finalized transaction referencing this payment
+ * request and, when a valid payment is found, records the inbound transfer and
+ * marks the request paid. An expired request still settles for
+ * {@link PAYMENT_REQUEST_SETTLEMENT_GRACE_MS} past its expiry.
  *
  * Reads the chain on the open cluster scope's cluster (the row's Project).
  *
@@ -60,7 +98,7 @@ export async function reconcilePaymentRequest(
   if (row.status !== "awaiting_payment") {
     return row;
   }
-  if (isPaymentRequestExpired(row.expires_at)) {
+  if (isPastSettlementGrace(row.expires_at)) {
     return row;
   }
   if (row.custody_wallet_id === null) {
@@ -111,7 +149,7 @@ async function settlePaymentRequestIfPaid(
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(
-    findReference(rpc, reference, { commitment: "confirmed" }),
+    findReference(rpc, reference, { commitment: "finalized" }),
     FindReferenceError
   );
   if (found === null) {

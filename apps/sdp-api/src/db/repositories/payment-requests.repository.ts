@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
 import { generateKeyPairSigner } from "@solana/kit";
 import { customAlphabet } from "nanoid";
@@ -83,5 +84,16 @@ export interface PaymentRequestsRepository {
     projectId: string;
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
+  /**
+   * The open requests one environment's reconciler checks, oldest first: awaiting payment with a
+   * custody wallet, created after `createdAfter`, and unexpired or expired after `expiredAfter`.
+   * System-only: it reads across tenants.
+   */
+  listPaymentRequestsToReconcile(params: {
+    environment: SdpEnvironment;
+    createdAfter: string;
+    expiredAfter: string;
+    limit: number;
+  }): Promise<PaymentRequestRow[]>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
 }

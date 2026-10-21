@@ -160,6 +160,25 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row ? mapPaymentRequestRow(row) : null;
     },
 
+    async listPaymentRequestsToReconcile({ environment, createdAfter, expiredAfter, limit }) {
+      const rows = await db
+        .prepare(
+          `SELECT pr.*
+             FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND pr.created_at::timestamptz > ?::timestamptz
+              AND (pr.expires_at IS NULL OR pr.expires_at::timestamptz > ?::timestamptz)
+            ORDER BY pr.created_at ASC, pr.id ASC
+            LIMIT ?`
+        )
+        .bind(environment, createdAfter, expiredAfter, limit)
+        .all<Record<string, unknown>>();
+      return rows.results.map(mapPaymentRequestRow);
+    },
+
     async getPaymentRequestByPublicToken(publicToken) {
       const row = await db
         .prepare(`SELECT * FROM payment_requests WHERE public_token = ?`)
