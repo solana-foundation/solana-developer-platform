@@ -171,54 +171,54 @@ describe("PaymentRequestsRepository (postgres)", () => {
       projectId: string;
       expiresAt: string | null;
       createdAt: string;
-      reconciledAt: string | null;
+      lastCheckedAt: string | null;
     }) {
       const row = await repo.createPaymentRequest(
         createInput({ projectId: params.projectId, expiresAt: params.expiresAt })
       );
       await getDb(env)
-        .prepare("UPDATE payment_requests SET created_at = ?, reconciled_at = ? WHERE id = ?")
-        .bind(params.createdAt, params.reconciledAt, row.id)
+        .prepare("UPDATE payment_requests SET created_at = ?, last_checked_at = ? WHERE id = ?")
+        .bind(params.createdAt, params.lastCheckedAt, row.id)
         .run();
       return row;
     }
 
-    it("selects the environment's open requests inside the expiry cutoff, queued by last reconcile or creation", async () => {
-      const reconciledRecently = await seedCandidate({
+    it("selects the environment's open requests until their final check, queued by last check or creation", async () => {
+      const checkedRecently = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
         createdAt: "2026-05-02T00:00:00.000Z",
-        reconciledAt: "2026-05-12T00:00:00.000Z",
+        lastCheckedAt: "2026-05-12T00:00:00.000Z",
       });
-      const createdAfterOlderReconcile = await seedCandidate({
+      const createdAfterEarlierCheck = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
         createdAt: "2026-05-11T06:00:00.000Z",
-        reconciledAt: null,
+        lastCheckedAt: null,
       });
-      const reconciledEarlier = await seedCandidate({
+      const checkedAtFinalCheck = await seedCandidate({
         projectId: TEST_PROJECT_ID,
-        expiresAt: "2026-05-10T00:01:00.000Z",
+        expiresAt: "2026-05-10T23:50:00.000Z",
         createdAt: "2026-05-01T00:00:00.000Z",
-        reconciledAt: "2026-05-11T00:00:00.000Z",
+        lastCheckedAt: "2026-05-11T00:00:00.000Z",
       });
-      const neverReconciledEarly = await seedCandidate({
+      const neverCheckedExpired = await seedCandidate({
         projectId: TEST_PROJECT_ID,
-        expiresAt: null,
-        createdAt: "2026-05-03T00:00:00.000Z",
-        reconciledAt: null,
+        expiresAt: "2026-05-02T00:00:00.000Z",
+        createdAt: "2026-05-01T12:00:00.000Z",
+        lastCheckedAt: null,
       });
       await seedCandidate({
         projectId: `${TEST_PROJECT_ID}_production`,
         expiresAt: null,
         createdAt: "2026-04-01T00:00:00.000Z",
-        reconciledAt: null,
+        lastCheckedAt: null,
       });
       const paid = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
         createdAt: "2026-04-01T00:00:00.000Z",
-        reconciledAt: null,
+        lastCheckedAt: null,
       });
       await seedTransfer("xfr_reconcile_paid");
       await repo.markPaymentRequest({
@@ -233,7 +233,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
         expiresAt: null,
         createdAt: "2026-04-01T00:00:00.000Z",
-        reconciledAt: null,
+        lastCheckedAt: null,
       });
       await getDb(env)
         .prepare("UPDATE payment_requests SET custody_wallet_id = NULL WHERE id = ?")
@@ -241,22 +241,22 @@ describe("PaymentRequestsRepository (postgres)", () => {
         .run();
       await seedCandidate({
         projectId: TEST_PROJECT_ID,
-        expiresAt: "2026-05-09T00:00:00.000Z",
-        createdAt: "2026-04-01T00:00:00.000Z",
-        reconciledAt: null,
+        expiresAt: "2026-04-01T00:00:00.000Z",
+        createdAt: "2026-03-31T00:00:00.000Z",
+        lastCheckedAt: "2026-04-01T00:10:00.001Z",
       });
 
       const rows = await repo.listPaymentRequestsToReconcile({
         environment: "sandbox",
-        expiredAfter: "2026-05-10T00:00:00.000Z",
+        finalCheckAfterMs: 600_000,
         limit: 50,
       });
 
       expect(rows.map((row) => row.id)).toEqual([
-        neverReconciledEarly.id,
-        reconciledEarlier.id,
-        createdAfterOlderReconcile.id,
-        reconciledRecently.id,
+        neverCheckedExpired.id,
+        checkedAtFinalCheck.id,
+        createdAfterEarlierCheck.id,
+        checkedRecently.id,
       ]);
     });
 
@@ -269,14 +269,14 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(() =>
         tenantRepo.listPaymentRequestsToReconcile({
           environment: "sandbox",
-          expiredAfter: "2026-05-10T00:00:00.000Z",
+          finalCheckAfterMs: 600_000,
           limit: 50,
         })
       ).toThrow(TenantScopeViolationError);
     });
   });
 
-  describe("markPaymentRequestsReconciled", () => {
+  describe("markPaymentRequestsChecked", () => {
     it("stamps exactly the given requests and leaves their status and updated_at alone", async () => {
       const first = await repo.createPaymentRequest(createInput());
       const second = await repo.createPaymentRequest(createInput());
@@ -286,29 +286,29 @@ describe("PaymentRequestsRepository (postgres)", () => {
         .bind("2026-05-01T00:00:00.000Z")
         .run();
 
-      await repo.markPaymentRequestsReconciled([first.id, second.id]);
+      await repo.markPaymentRequestsChecked([first.id, second.id]);
 
       const rows = await getDb(env)
-        .prepare("SELECT id, status, updated_at, reconciled_at FROM payment_requests")
-        .all<{ id: string; status: string; updated_at: string; reconciled_at: string | null }>();
+        .prepare("SELECT id, status, updated_at, last_checked_at FROM payment_requests")
+        .all<{ id: string; status: string; updated_at: string; last_checked_at: string | null }>();
       expect(Object.fromEntries(rows.results.map((row) => [row.id, row]))).toEqual({
         [first.id]: {
           id: first.id,
           status: "awaiting_payment",
           updated_at: "2026-05-01T00:00:00.000Z",
-          reconciled_at: expect.any(String),
+          last_checked_at: expect.any(String),
         },
         [second.id]: {
           id: second.id,
           status: "awaiting_payment",
           updated_at: "2026-05-01T00:00:00.000Z",
-          reconciled_at: expect.any(String),
+          last_checked_at: expect.any(String),
         },
         [untouched.id]: {
           id: untouched.id,
           status: "awaiting_payment",
           updated_at: "2026-05-01T00:00:00.000Z",
-          reconciled_at: null,
+          last_checked_at: null,
         },
       });
     });
@@ -319,7 +319,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
       );
 
-      expect(() => tenantRepo.markPaymentRequestsReconciled(["preq_tenant_mark"])).toThrow(
+      expect(() => tenantRepo.markPaymentRequestsChecked(["preq_tenant_mark"])).toThrow(
         TenantScopeViolationError
       );
     });
