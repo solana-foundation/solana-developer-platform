@@ -2,7 +2,8 @@
  * Background Job: Reconcile Payment Requests
  *
  * Settles open payment requests against the chain so a paid request turns `paid` without anyone
- * opening it. Each row goes through `reconcilePaymentRequest`, the same settlement the list, the
+ * opening it. The list reads stored rows and never touches the chain, so this sweep is what keeps
+ * its statuses current. Each row goes through `reconcilePaymentRequest`, the same settlement the
  * request read and `/pay` run, so a swept settlement and a read one cannot diverge.
  *
  * Runs inside one cluster scope per environment (a `cluster` Cron Definition): each run selects
