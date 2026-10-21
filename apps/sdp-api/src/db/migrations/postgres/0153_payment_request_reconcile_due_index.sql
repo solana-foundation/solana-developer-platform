@@ -1,6 +1,7 @@
 -- sdp:migration-mode: non-transactional
--- Serve the reconciler's least-recently-checked-first read of open payment
--- requests from one ordered range over open rows only.
+-- Serve the reconciler's read of open payment requests in rotation order: least
+-- recently reconciled first, a never-reconciled request queued by when it was
+-- created. Both columns are sdp_iso_now() text, so text order is time order.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_payment_requests_reconcile_due
-  ON payment_requests (reconciled_at ASC NULLS FIRST, id ASC)
+  ON payment_requests ((COALESCE(reconciled_at, created_at)), id)
   WHERE status = 'awaiting_payment';
