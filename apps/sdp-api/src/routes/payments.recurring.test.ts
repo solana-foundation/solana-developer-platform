@@ -61,6 +61,7 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import { clearMintFactsForTests } from "@/services/mint-facts";
 import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recurring-payments/cancel-activated-by-key";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
@@ -1876,14 +1877,11 @@ describe("Payments routes — recurring", () => {
       tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
       mint: address(DEVNET_USDC_MINT),
     });
-    getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-      accountAddress === expectedSourceAta
-        ? null
-        : ({
-            lamports: 4200000000n,
-            owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-          } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
-    );
+    const [expectedAuthority] = await subscriptionsProgram.findSubscriptionAuthorityPda({
+      tokenMint: address(DEVNET_USDC_MINT),
+      user: sourceSigner.address,
+    });
+    recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, sourceTokenAccount: () => null });
     const sent = vi.spyOn(recurringShared, "sendRecurringPaymentStep");
     onTestFinished(() => sent.mockRestore());
 
@@ -1901,6 +1899,19 @@ describe("Payments routes — recurring", () => {
     const activateBody = await parseRecurringResponse(activateRes);
     expect(activateBody.data.recurringPayment.status).toBe("active");
     expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+    expect(
+      recurringExecution.rpc.requests
+        .filter(({ method }) => method === "getMultipleAccounts")
+        .map(multipleAccountsRead)
+        .filter(({ minContextSlot }) => minContextSlot === null)
+    ).toEqual([
+      {
+        addresses: [expectedAuthority, expectedSourceAta],
+        commitment: "confirmed",
+        minContextSlot: null,
+        encoding: "base64",
+      },
+    ]);
     const sentInstructions = sent.mock.calls.map(([input]) => input.instructions);
     expect(
       sentInstructions.map((instructions) =>
@@ -4805,10 +4816,11 @@ describe("Payments routes — recurring", () => {
       const activated = await activateProductionUsdcSchedule();
 
       expect(activated.token).toBe(MAINNET_USDC_MINT);
-      expect(recurringExecution.rpc.calls).toContainEqual({
-        cluster: "mainnet-beta",
-        method: "getTokenSupply",
-      });
+      expect(
+        getAccountInfoMock.mock.calls
+          .filter(([, accountAddress]) => accountAddress === MAINNET_USDC_MINT)
+          .map(([client]) => clusterOfRpcClient(client))
+      ).toEqual(["mainnet-beta"]);
       expect(new Set(recurringExecution.rpc.calls.map((call) => call.cluster))).toEqual(
         new Set(["mainnet-beta"])
       );
@@ -4836,23 +4848,21 @@ describe("Payments routes — recurring", () => {
           dueAt: new Date(now.getTime() - 60 * 1000).toISOString(),
         });
       }
-      const requestsBefore = recurringExecution.rpc.requests.length;
+      // Cold, so the tick reads each schedule's mint itself rather than its activation's facts.
+      clearMintFactsForTests();
+      const mintReadsBefore = getAccountInfoMock.mock.calls.length;
 
       await runInEachClusterScope(async () => {
         await collectDueRecurringPayments(env, now);
       });
 
-      const tokenSupplyReads = recurringExecution.rpc.requests
-        .slice(requestsBefore)
-        .filter((request) => request.method === "getTokenSupply");
       const clustersReadingMint = (mint: string) =>
-        new Set(
-          tokenSupplyReads
-            .filter((request) => request.params[0] === mint)
-            .map((request) => request.cluster)
-        );
-      expect(clustersReadingMint(DEVNET_USDC_MINT)).toEqual(new Set(["devnet"]));
-      expect(clustersReadingMint(MAINNET_USDC_MINT)).toEqual(new Set(["mainnet-beta"]));
+        getAccountInfoMock.mock.calls
+          .slice(mintReadsBefore)
+          .filter(([, accountAddress]) => accountAddress === mint)
+          .map(([client]) => clusterOfRpcClient(client));
+      expect(clustersReadingMint(DEVNET_USDC_MINT)).toEqual(["devnet"]);
+      expect(clustersReadingMint(MAINNET_USDC_MINT)).toEqual(["mainnet-beta"]);
       const clustersConfirming = (collectionSignature: string) =>
         new Set(
           confirmTransactionMock.mock.calls
@@ -7497,6 +7507,7 @@ describe("Payments routes — recurring", () => {
           delegation: () => unpulledDelegation(1_800_000_000n),
         });
         const sent = sends();
+        const readsBefore = stepReads().length;
 
         const cancel = await app.request(
           actionPath(activated.id, "cancel"),
@@ -7509,11 +7520,9 @@ describe("Payments routes — recurring", () => {
           "canceled"
         );
         expect(sent).toHaveBeenCalledTimes(1);
-        expect(stepReads().map(({ method }) => method)).toEqual([
-          "getEpochInfo",
-          "getMultipleAccounts",
-        ]);
-        expect(multipleAccountsRead(required(stepReads()[1]))).toEqual({
+        const reads = stepReads().slice(readsBefore);
+        expect(reads.map(({ method }) => method)).toEqual(["getEpochInfo", "getMultipleAccounts"]);
+        expect(multipleAccountsRead(required(reads[1]))).toEqual({
           addresses: [activated.subscriptionPda],
           commitment: "confirmed",
           minContextSlot: DEFAULT_RECURRING_CHAIN.absoluteSlot,
@@ -7699,6 +7708,7 @@ describe("Payments routes — recurring", () => {
       it("sends a resumed cancel that saved no signature without reading the chain first", async () => {
         mockDistinctRecentBlockhashes();
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const readsBefore = stepReads().length;
         const key = crypto.randomUUID();
         expect(
           (
@@ -7720,7 +7730,7 @@ describe("Payments routes — recurring", () => {
 
         expect(retry.status).toBe(200);
         expect(sent).toHaveBeenCalledTimes(1);
-        expect(stepReads()).toEqual([]);
+        expect(stepReads()).toHaveLength(readsBefore);
         expect((await lifecycleAttempts(activated.id, "cancel")).results).toEqual([
           { status: "confirmed", stage: "finalize", signature: poolSentSignatures()[3] },
         ]);
@@ -8285,10 +8295,10 @@ describe("Payments routes — recurring", () => {
           mint: address(DEVNET_USDC_MINT),
         });
         // The subscription authority still exists; the token account was closed after activation.
-        const accountInfo = required(getAccountInfoMock.getMockImplementation());
-        getAccountInfoMock.mockImplementation(async (...args) =>
-          args[1] === sourceAta ? null : accountInfo(...args)
-        );
+        recurringExecution.showChain({
+          ...DEFAULT_RECURRING_CHAIN,
+          sourceTokenAccount: () => null,
+        });
         const sent = sends();
 
         const update = await app.request(
@@ -8359,7 +8369,7 @@ describe("Payments routes — recurring", () => {
           .bind(testSignature(8), SAVED_SEND_EXPIRY, activated.id)
           .run();
         expect(setupSaved).toBe(1);
-        // Neither the subscription authority nor a delegating token account shows.
+        // No token account delegates to the subscription authority, so the setup never landed.
         delegationsBesideActiveOld(oldSubscriptionPda, null, PAST_SAVED_EXPIRY);
         const sent = sends();
 
@@ -8392,34 +8402,13 @@ describe("Payments routes — recurring", () => {
        * Shows `view` with the source wallet's subscription authority on chain beside its token
        * account approving no delegate, so a saved setup never reads as landed.
        */
-      async function showSetupApprovalRevoked(view: RecurringChainView) {
-        const owner = recurringExecution.sourceSigner().address;
-        const mint = address(DEVNET_USDC_MINT);
-        const [authority] = await subscriptionsProgram.findSubscriptionAuthorityPda({
-          tokenMint: mint,
-          user: owner,
-        });
-        const [sourceAta] = await findAssociatedTokenPda({
-          owner,
-          tokenProgram: TOKEN_PROGRAM_ADDRESS,
-          mint,
-        });
+      function showSetupApprovalRevoked(view: RecurringChainView) {
         recurringExecution.showChain({
           ...view,
-          unrecorded: (accountAddress) => {
-            if (accountAddress === authority) {
-              return subscriptionAuthorityAccount({ user: owner, tokenMint: mint });
-            }
-            if (accountAddress === sourceAta) {
-              return tokenAccount({
-                programAddress: TOKEN_PROGRAM_ADDRESS,
-                mint,
-                owner,
-                delegate: null,
-              });
-            }
-            return null;
-          },
+          subscriptionAuthority: ({ owner, mint }) =>
+            subscriptionAuthorityAccount({ user: owner, tokenMint: mint }),
+          sourceTokenAccount: ({ owner, mint }) =>
+            tokenAccount({ programAddress: TOKEN_PROGRAM_ADDRESS, mint, owner, delegate: null }),
         });
       }
 
@@ -8461,7 +8450,7 @@ describe("Payments routes — recurring", () => {
           recurringPaymentId: activated.id,
           oldSubscriptionPda: required(activated.subscriptionPda),
         });
-        await showSetupApprovalRevoked({
+        showSetupApprovalRevoked({
           ...DEFAULT_RECURRING_CHAIN,
           delegation: () => unpulledDelegation(0n),
         });
@@ -8522,7 +8511,7 @@ describe("Payments routes — recurring", () => {
           recurringPaymentId: activated.id,
           oldSubscriptionPda,
         });
-        await showSetupApprovalRevoked({
+        showSetupApprovalRevoked({
           ...DEFAULT_RECURRING_CHAIN,
           delegation: (subscriptionPda) =>
             subscriptionPda === oldSubscriptionPda ? unpulledDelegation(0n) : null,
@@ -8614,13 +8603,24 @@ describe("Payments routes — recurring", () => {
         vi.spyOn(subscriptionsProgram, "fetchMaybeSubscriptionAuthority").mockRejectedValue(
           new Error("subscription authority read failed")
         );
+        const [authority] = await subscriptionsProgram.findSubscriptionAuthorityPda({
+          tokenMint: address(DEVNET_USDC_MINT),
+          user: recurringExecution.sourceSigner().address,
+        });
         const warnLog = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
         onTestFinished(() => warnLog.mockRestore());
         const sent = sends();
+        const requestsBefore = recurringExecution.rpc.requests.length;
 
         const retry = await update();
 
         expect(retry.status).toBe(200);
+        expect(
+          recurringExecution.rpc.requests
+            .slice(requestsBefore)
+            .filter(({ method }) => method === "getMultipleAccounts")
+            .flatMap((request) => multipleAccountsRead(request).addresses)
+        ).not.toContain(authority);
         const newSubscription = required(
           await getDb(env)
             .prepare(
@@ -9997,17 +9997,14 @@ describe("Payments routes — recurring", () => {
 
       it("fails an activation whose setup send expired without landing back to pending_activation, clearing its setup signature", async () => {
         const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-        // No subscription authority yet, so the setup goes out between the plan and subscribe.
-        vi.spyOn(subscriptionsProgram, "fetchMaybeSubscriptionAuthority").mockResolvedValueOnce({
-          exists: false,
-          address: address(TEST_SOLANA_ADDRESSES.wallet3),
-        });
         rejectPoolSendAfter(1, new Error("RPC response lost"));
+        // No subscription authority yet, so the setup goes out between the plan and subscribe.
         recurringExecution.showChain({
           ...DEFAULT_RECURRING_CHAIN,
           absoluteSlot: 2_900,
           blockHeight: 1_001,
           delegation: () => null,
+          subscriptionAuthority: () => null,
         });
 
         const activation = await activate(created.id, crypto.randomUUID());
@@ -10046,7 +10043,7 @@ describe("Payments routes — recurring", () => {
 
       it("finishes a resumed activation whose setup reads pending with no expiry once the delegation shows, sending nothing", async () => {
         const { created, planSignature } = await leaveSetupSavedWithoutExpiry();
-        await showSetupApprovalRevoked({
+        showSetupApprovalRevoked({
           ...DEFAULT_RECURRING_CHAIN,
           delegation: () => unpulledDelegation(0n),
         });
@@ -10093,7 +10090,7 @@ describe("Payments routes — recurring", () => {
 
       it("keeps a resumed activation whose setup reads pending with no expiry in flight while no delegation shows", async () => {
         const { created, planSignature } = await leaveSetupSavedWithoutExpiry();
-        await showSetupApprovalRevoked({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
+        showSetupApprovalRevoked({ ...DEFAULT_RECURRING_CHAIN, delegation: () => null });
         const sent = sends();
 
         const retry = await activate(created.id, crypto.randomUUID());

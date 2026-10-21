@@ -145,9 +145,9 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
       status: "settling",
     });
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
-    // The send reuses the source the check read: one read of each, as before the check.
+    // The send reuses the source the check read, and the mint's facts the refusal already read.
     expect(tokenAccountReads() - tokenAccountReadsBefore).toBe(1);
-    expect(getAccountInfoMock.mock.calls.length - mintReadsBefore).toBe(1);
+    expect(getAccountInfoMock.mock.calls.length - mintReadsBefore).toBe(0);
   });
 
   it("refuses a deposit from a frozen token account before claiming it", async () => {
