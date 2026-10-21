@@ -85,9 +85,9 @@ export interface PaymentRequestsRepository {
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
   /**
-   * The open requests one environment's reconciler checks next, least recently reconciled first
-   * and never reconciled before all: awaiting payment with a custody wallet, and unexpired or
-   * expired after `expiredAfter`. System-only: it reads across tenants.
+   * The open requests one environment's reconciler checks next, least recently reconciled first,
+   * a never-reconciled one queued by its creation time: awaiting payment with a custody wallet,
+   * and unexpired or expired after `expiredAfter`. System-only: it reads across tenants.
    */
   listPaymentRequestsToReconcile(params: {
     environment: SdpEnvironment;

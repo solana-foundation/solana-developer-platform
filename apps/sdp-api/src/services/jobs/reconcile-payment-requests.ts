@@ -7,8 +7,8 @@
  *
  * Runs inside one cluster scope per environment (a `cluster` Cron Definition): each run selects
  * only requests whose project is in the scope's environment and reads them through that cluster.
- * Each run takes the least recently reconciled open requests and stamps every one it tried, so
- * the sweep rotates through all of them. Settlement is idempotent (unique transfer signature,
+ * Each run takes the least recently reconciled open requests, a never-reconciled one queued by its
+ * creation time, and stamps every one it tried, so the sweep rotates fairly through all of them. Settlement is idempotent (unique transfer signature,
  * status compare-and-set), so overlapping runs or a concurrent read converge on one settlement.
  */
 
