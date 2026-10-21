@@ -4200,6 +4200,7 @@ describe("Payments routes — recurring", () => {
            project_id,
            owner_wallet_id,
            owner_address,
+           destination_address,
            token,
            amount,
            period_hours,
@@ -4208,7 +4209,7 @@ describe("Payments routes — recurring", () => {
            created_by,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         planId,
@@ -4216,6 +4217,7 @@ describe("Payments routes — recurring", () => {
         TEST_PROJECT.id,
         TEST_WALLET_ID,
         sourceSigner.address,
+        DEFAULT_RECURRING_FIXTURE.destinationAddress,
         DEVNET_USDC_MINT,
         "25.00",
         24,
@@ -4360,6 +4362,7 @@ describe("Payments routes — recurring", () => {
            project_id,
            owner_wallet_id,
            owner_address,
+           destination_address,
            token,
            amount,
            period_hours,
@@ -4368,7 +4371,7 @@ describe("Payments routes — recurring", () => {
            created_by,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           planId,
@@ -4376,6 +4379,7 @@ describe("Payments routes — recurring", () => {
           TEST_PROJECT.id,
           TEST_WALLET_ID,
           sourceSigner.address,
+          DEFAULT_RECURRING_FIXTURE.destinationAddress,
           DEVNET_USDC_MINT,
           "25.00",
           24,
@@ -6496,9 +6500,10 @@ describe("Payments routes — recurring", () => {
         await getDb(env)
           .prepare(
             `INSERT INTO payment_subscription_plans (
-               id, organization_id, project_id, owner_wallet_id, owner_address, token,
-               amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, '25.00', 24, '1001', ?, ?, ?, ?)`
+               id, organization_id, project_id, owner_wallet_id, owner_address, destination_address,
+               token, amount, period_hours, program_plan_id, status, created_by, created_at,
+               updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, '25.00', 24, '1001', ?, ?, ?, ?)`
           )
           .bind(
             planId,
@@ -6506,6 +6511,7 @@ describe("Payments routes — recurring", () => {
             TEST_PROJECT.id,
             TEST_WALLET_ID,
             recurringExecution.sourceSigner().address,
+            DEFAULT_RECURRING_FIXTURE.destinationAddress,
             DEVNET_USDC_MINT,
             status,
             TEST_USER.id,
