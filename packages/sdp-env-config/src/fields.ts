@@ -195,8 +195,10 @@ export const FIELDS: EnvField[] = [
     section: "rpc",
     kind: "url",
     label: "Mainnet RPC URL",
+    defaultValue: "https://api.mainnet-beta.solana.com",
+    required: true,
     pattern: /^https:\/\//,
-    help: "Production projects read and send on mainnet through this endpoint; unset refuses them.",
+    help: "Production projects read and send on mainnet through this endpoint.",
   },
   {
     key: "SOLANA_RPC_HELIUS_API_KEY",
