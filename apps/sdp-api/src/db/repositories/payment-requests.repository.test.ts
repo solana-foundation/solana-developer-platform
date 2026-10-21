@@ -182,7 +182,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       return row;
     }
 
-    it("selects the environment's open requests inside both cutoffs, oldest first", async () => {
+    it("selects the environment's open requests inside both cutoffs, newest first", async () => {
       const openLater = await seedCandidate({
         projectId: TEST_PROJECT_ID,
         createdAt: "2026-05-03T00:00:00.000Z",
@@ -239,7 +239,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         limit: 50,
       });
 
-      expect(rows.map((row) => row.id)).toEqual([expiredInsideWindow.id, openLater.id]);
+      expect(rows.map((row) => row.id)).toEqual([openLater.id, expiredInsideWindow.id]);
     });
 
     it("is unavailable to a tenant-bound repository", () => {

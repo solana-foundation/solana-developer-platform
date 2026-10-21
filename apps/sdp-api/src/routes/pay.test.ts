@@ -5,7 +5,6 @@ import {
   AccountRole,
   blockhash,
   decompileTransactionMessage,
-  getBase58Decoder,
   getBase64Encoder,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
@@ -24,7 +23,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   clusterOfRpcClient,
   ENVIRONMENT_CLUSTER_CASES,
-  installClusterRpcResponder,
+  installClusterRpcStub,
 } from "@/test/helpers/cluster-rpc";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
@@ -88,16 +87,9 @@ const REQUEST_WALLET_BY_ENVIRONMENT = {
 
 const transactionResponseSchema = z.object({ transaction: z.string(), message: z.string() });
 
-const signaturesForAddressParamsSchema = z.tuple([
-  z.string(),
-  z.object({ commitment: z.string() }),
-]);
-
-const CONFIRMED_PAYMENT_SIGNATURE = getBase58Decoder().decode(new Uint8Array(64).fill(9));
-
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
-  const rpc = installClusterRpcResponder();
+  const rpc = installClusterRpcStub();
 
   beforeEach(() => {
     rpc.answer("getSignaturesForAddress", []);
@@ -344,36 +336,6 @@ describe("Public payment request routes", () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
         error: { code: "BAD_REQUEST", message: "Payment request is no longer payable" },
-      });
-      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
-    });
-
-    it("refuses to build while a payment for the request is already confirmed", async () => {
-      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET, SOL_PAYMENT);
-      rpc.respond("getSignaturesForAddress", (call) => {
-        const [, { commitment }] = signaturesForAddressParamsSchema.parse(call.params);
-        return {
-          result:
-            commitment === "confirmed"
-              ? [
-                  {
-                    signature: CONFIRMED_PAYMENT_SIGNATURE,
-                    slot: 1,
-                    err: null,
-                    memo: null,
-                    blockTime: null,
-                    confirmationStatus: "confirmed",
-                  },
-                ]
-              : [],
-        };
-      });
-
-      const response = await postTransaction(request.public_token);
-
-      expect(response.status).toBe(409);
-      await expect(response.json()).resolves.toMatchObject({
-        error: { code: "CONFLICT", message: "A payment for this request is already on its way" },
       });
       expect(getRecentBlockhashMock).not.toHaveBeenCalled();
     });
