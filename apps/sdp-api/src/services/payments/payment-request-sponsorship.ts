@@ -113,7 +113,8 @@ export async function issuePaymentRequestTransaction(
       await resolveProjectSponsorshipScope(c.env, {
         organizationId: request.organization_id,
         projectId: request.project_id,
-        actor: { type: "wallet", id: request.wallet_id },
+        // Drain legacy unsigned claims before switching this accounting identity.
+        actor: { type: "wallet", id: request.custody_wallet_id },
       }),
       "payments.pay_request"
     );

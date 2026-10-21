@@ -4,7 +4,11 @@ import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import {
+  createPaymentRequestsRepository,
+  createSystemPaymentRequestsRepository,
+} from "@/db/repositories/repository-factory";
+import type { SponsorshipReservationStatus } from "@/db/repositories/sponsorship-budget.repository";
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
@@ -25,8 +29,10 @@ import {
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
+  testKoraAdapter,
 } from "@/test/helpers/payments-routes";
 import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
@@ -132,6 +138,30 @@ describe("Public payment request routes", () => {
     }));
   }
 
+  function budgetedSponsorship() {
+    vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockRestore();
+    const provider = testKoraAdapter({
+      getFeePayer: vi.fn(async () => TEST_MOCK_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn(async () => TEST_SPONSORSHIP_PROVIDER_CONFIG),
+      signAsFeePayer: vi.fn(sponsorSignTestTransaction),
+    });
+    createKoraAdapterMock.mockReturnValue(provider);
+    return provider;
+  }
+
+  function reservations() {
+    return getDb(env).queryMany<{
+      id: string;
+      actor_id: string;
+      status: SponsorshipReservationStatus;
+      signed_transaction: string | null;
+    }>(
+      `SELECT id, actor_id, status, signed_transaction FROM sponsorship_budget_reservations
+       WHERE organization_id = ? AND project_id = ? ORDER BY actor_id`,
+      [TEST_ORG.id, TEST_PROJECT.id]
+    );
+  }
+
   it.for(ENVIRONMENT_CLUSTER_CASES)(
     "reports and reads a $environment request on $cluster only",
     async ({ environment, cluster }) => {
@@ -185,6 +215,89 @@ describe("Public payment request routes", () => {
   });
 
   describe("sponsored transaction window", () => {
+    it("recovers a pre-reservation failure under the internal actor and replays one signed grant", async () => {
+      const provider = budgetedSponsorship();
+      vi.mocked(provider.getSponsorshipConfiguration).mockRejectedValueOnce(
+        new Error("preflight temporarily unavailable")
+      );
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const repository = createSystemPaymentRequestsRepository(env);
+
+      expect((await postTransaction(request.public_token)).status).toBe(503);
+      const claim = await repository.getSponsoredTransactionClaim(request.id);
+      expect(claim).toMatchObject({ signedTransaction: null });
+      expect(await reservations()).toEqual([]);
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+
+      const retried = await postTransaction(request.public_token);
+      expect(retried.status).toBe(200);
+      const { transaction } = sponsoredTransactionResponseSchema.parse(await retried.json());
+      expect((await repository.getSponsoredTransactionClaim(request.id))?.unsignedTransaction).toBe(
+        claim?.unsignedTransaction
+      );
+      const recorded = await reservations();
+      expect(recorded).toMatchObject([
+        { actor_id: TEST_CUSTODY_WALLET_ID, status: "signed", signed_transaction: transaction },
+      ]);
+
+      const replay = await postTransaction(request.public_token);
+      expect(replay.status).toBe(200);
+      expect(sponsoredTransactionResponseSchema.parse(await replay.json()).transaction).toBe(
+        transaction
+      );
+      expect(await reservations()).toEqual(recorded);
+      expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    });
+
+    it("keeps an ambiguous internal-actor reservation and refuses another sponsor call", async () => {
+      const provider = budgetedSponsorship();
+      vi.mocked(provider.signAsFeePayer).mockRejectedValueOnce(
+        new Error("Kora response lost after signing")
+      );
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      expect((await postTransaction(request.public_token)).status).toBe(500);
+      const recorded = await reservations();
+      expect(recorded).toMatchObject([
+        {
+          actor_id: TEST_CUSTODY_WALLET_ID,
+          status: "charged_unknown",
+          signed_transaction: null,
+        },
+      ]);
+
+      expect((await postTransaction(request.public_token)).status).toBe(503);
+      expect(await reservations()).toEqual(recorded);
+      expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    });
+
+    it("uses distinct Kora and reservation actors for wallets sharing a provider reference", async () => {
+      budgetedSponsorship();
+      const otherWallet = {
+        ...SANDBOX_REQUEST_WALLET,
+        custodyWalletId: `${TEST_CUSTODY_WALLET_ID}_other`,
+      };
+      await seedUnreadPrivyWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        createdBy: TEST_USER.id,
+        ...otherWallet,
+      });
+
+      for (const wallet of [SANDBOX_REQUEST_WALLET, otherWallet]) {
+        const request = await createAwaitingPaymentRequest(wallet);
+        expect((await postTransaction(request.public_token)).status).toBe(200);
+      }
+
+      expect((await reservations()).map((row) => row.actor_id)).toEqual([
+        TEST_CUSTODY_WALLET_ID,
+        otherWallet.custodyWalletId,
+      ]);
+      expect(createKoraAdapterMock.mock.calls.map(([, userId]) => userId)).toEqual([
+        `sdp:v1:sandbox:${TEST_ORG.id}:project:${TEST_PROJECT.id}:wallet:${TEST_CUSTODY_WALLET_ID}`,
+        `sdp:v1:sandbox:${TEST_ORG.id}:project:${TEST_PROJECT.id}:wallet:${otherWallet.custodyWalletId}`,
+      ]);
+    });
+
     it.for(ENVIRONMENT_CLUSTER_CASES)(
       "builds a $environment request's sponsored transaction on $cluster only",
       async ({ environment, cluster }) => {
@@ -195,7 +308,10 @@ describe("Public payment request routes", () => {
         expect((await postTransaction(request.public_token)).status).toBe(200);
         expect(sponsorship).toHaveBeenCalledWith(
           env,
-          expect.objectContaining({ projectId: wallet.projectId }),
+          expect.objectContaining({
+            projectId: wallet.projectId,
+            actor: { type: "wallet", id: wallet.custodyWalletId },
+          }),
           "payments.pay_request"
         );
         expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
@@ -346,7 +462,7 @@ describe("Public payment request routes", () => {
     });
 
     it("refuses and does not store the grant when its audit entry cannot be persisted", async () => {
-      stubSponsorship();
+      const provider = budgetedSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       const failure = vi
         .spyOn(AuditService.prototype, "log")
@@ -361,9 +477,20 @@ describe("Public payment request routes", () => {
         .bind(request.id)
         .first<{ sponsored_tx_signed: string | null }>();
       expect(claim).toEqual({ sponsored_tx_signed: null });
+      const recorded = await reservations();
+      expect(recorded).toMatchObject([{ actor_id: TEST_CUSTODY_WALLET_ID, status: "signed" }]);
 
       const retried = await postTransaction(request.public_token);
       expect(retried.status).toBe(200);
+      const { transaction } = sponsoredTransactionResponseSchema.parse(await retried.json());
+      expect(transaction).toBe(recorded[0]?.signed_transaction);
+      const replay = await postTransaction(request.public_token);
+      expect(replay.status).toBe(200);
+      expect(sponsoredTransactionResponseSchema.parse(await replay.json()).transaction).toBe(
+        transaction
+      );
+      expect(await reservations()).toEqual(recorded);
+      expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
       const rows = await getDb(env)
         .prepare(
           "SELECT id FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ?"
