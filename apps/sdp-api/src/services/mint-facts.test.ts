@@ -2,7 +2,10 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, getBase64Decoder } from "@solana/kit";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
-import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import {
+  getMintEncoder as getLegacyMintEncoder,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 import {
   type ExtensionArgs,
   extension,
@@ -23,6 +26,18 @@ const MINT = address(TEST_SOLANA_ADDRESSES.mint);
 const MINT_AUTHORITY = address(TEST_SOLANA_ADDRESSES.wallet1);
 const HOOK_PROGRAM = address(TEST_SOLANA_ADDRESSES.wallet3);
 const LEGACY_MINT = tokenMintAccount({ programAddress: TOKEN_PROGRAM_ADDRESS, decimals: 6 });
+const UNINITIALIZED_LEGACY_MINT: StubEncodedAccount = {
+  owner: TOKEN_PROGRAM_ADDRESS,
+  data: new Uint8Array(
+    getLegacyMintEncoder().encode({
+      mintAuthority: null,
+      supply: 0n,
+      decimals: 0,
+      isInitialized: false,
+      freezeAuthority: null,
+    })
+  ),
+};
 
 /**
  * A Token-2022 mint carrying `extensions`, encoded with the program's own layout.
@@ -165,6 +180,25 @@ describe("readMintFacts", () => {
       statusCode: 400,
     });
     await expect(readIn("sandbox")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(mintReads()).toHaveLength(2);
+  });
+
+  it("refuses an allocated but uninitialized mint with a 400 it does not keep", async () => {
+    showAccount(UNINITIALIZED_LEGACY_MINT);
+
+    await expect(readIn("sandbox")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message: "Token mint is not initialized",
+    });
+    showAccount(LEGACY_MINT);
+    const facts = await readIn("sandbox");
+
+    expect(facts).toEqual({
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      decimals: 6,
+      hasTransferHook: false,
+    });
     expect(mintReads()).toHaveLength(2);
   });
 

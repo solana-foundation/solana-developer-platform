@@ -34,6 +34,7 @@ import {
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
@@ -71,6 +72,7 @@ import {
   clusterOfRpcClient,
   epochInfoResult,
   multipleAccountsRead,
+  type StubEncodedAccount,
 } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { deferred } from "@/test/helpers/deferred";
@@ -1864,81 +1866,93 @@ describe("Payments routes — recurring", () => {
     expect(event?.after_values.nextCollectionDueAt).toBe(expectedClampedDueAt);
   });
 
-  it("creates the source token account beside the authority init during recurring payment activation when it is missing", async () => {
-    const sourceSigner = recurringExecution.sourceSigner();
-    const recurringPaymentId = (
-      await createRecurringPaymentFixture({
-        ...DEFAULT_RECURRING_FIXTURE,
-        headers: RECURRING_HEADERS,
-      })
-    ).id;
-    const [expectedSourceAta] = await findAssociatedTokenPda({
-      owner: sourceSigner.address,
-      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      mint: address(DEVNET_USDC_MINT),
-    });
-    const [expectedAuthority] = await subscriptionsProgram.findSubscriptionAuthorityPda({
-      tokenMint: address(DEVNET_USDC_MINT),
-      user: sourceSigner.address,
-    });
-    recurringExecution.showChain({ ...DEFAULT_RECURRING_CHAIN, sourceTokenAccount: () => null });
-    const sent = vi.spyOn(recurringShared, "sendRecurringPaymentStep");
-    onTestFinished(() => sent.mockRestore());
+  it.each([
+    { atAta: "no account", sourceTokenAccount: null },
+    {
+      atAta: "a system-owned account",
+      sourceTokenAccount: { owner: SYSTEM_PROGRAM_ADDRESS, data: new Uint8Array(0) },
+    },
+  ] satisfies { atAta: string; sourceTokenAccount: StubEncodedAccount | null }[])(
+    "creates the source token account beside the authority init during recurring payment activation over $atAta at its address",
+    async ({ sourceTokenAccount }) => {
+      const sourceSigner = recurringExecution.sourceSigner();
+      const recurringPaymentId = (
+        await createRecurringPaymentFixture({
+          ...DEFAULT_RECURRING_FIXTURE,
+          headers: RECURRING_HEADERS,
+        })
+      ).id;
+      const [expectedSourceAta] = await findAssociatedTokenPda({
+        owner: sourceSigner.address,
+        tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+        mint: address(DEVNET_USDC_MINT),
+      });
+      const [expectedAuthority] = await subscriptionsProgram.findSubscriptionAuthorityPda({
+        tokenMint: address(DEVNET_USDC_MINT),
+        user: sourceSigner.address,
+      });
+      recurringExecution.showChain({
+        ...DEFAULT_RECURRING_CHAIN,
+        sourceTokenAccount: () => sourceTokenAccount,
+      });
+      const sent = vi.spyOn(recurringShared, "sendRecurringPaymentStep");
+      onTestFinished(() => sent.mockRestore());
 
-    const activateRes = await app.request(
-      `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
-      {
-        method: "POST",
-        headers: RECURRING_HEADERS,
-        body: "{}",
-      },
-      env
-    );
+      const activateRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: "{}",
+        },
+        env
+      );
 
-    expect(activateRes.status).toBe(200);
-    const activateBody = await parseRecurringResponse(activateRes);
-    expect(activateBody.data.recurringPayment.status).toBe("active");
-    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
-    expect(
-      recurringExecution.rpc.requests
-        .filter(({ method }) => method === "getMultipleAccounts")
-        .map(multipleAccountsRead)
-        .filter(({ minContextSlot }) => minContextSlot === null)
-    ).toEqual([
-      {
-        addresses: [expectedAuthority, expectedSourceAta],
-        commitment: "confirmed",
-        minContextSlot: null,
-        encoding: "base64",
-      },
-    ]);
-    const sentInstructions = sent.mock.calls.map(([input]) => input.instructions);
-    expect(
-      sentInstructions.map((instructions) =>
-        instructions.map(({ programAddress }) => programAddress)
-      )
-    ).toEqual([
-      [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
-      [ASSOCIATED_TOKEN_PROGRAM_ADDRESS, subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
-      [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
-    ]);
-    const init = required(required(sentInstructions[1])[1]);
-    expect(
-      subscriptionsProgram.parseSubscriptionsInstruction({ ...init, data: required(init.data) })
-    ).toMatchObject({
-      instructionType: subscriptionsProgram.SubscriptionsInstruction.InitSubscriptionAuthority,
-      accounts: {
-        owner: { address: sourceSigner.address },
-        tokenMint: { address: DEVNET_USDC_MINT },
-        userAta: { address: expectedSourceAta },
-      },
-    });
-    const subscriptionRow = await getDb(env)
-      .prepare("SELECT subscriber_token_account FROM payment_subscriptions WHERE id = ?")
-      .bind(activateBody.data.recurringPayment.subscriptionId)
-      .first<{ subscriber_token_account: string | null }>();
-    expect(subscriptionRow?.subscriber_token_account).toBe(expectedSourceAta);
-  });
+      expect(activateRes.status).toBe(200);
+      const activateBody = await parseRecurringResponse(activateRes);
+      expect(activateBody.data.recurringPayment.status).toBe("active");
+      expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+      expect(
+        recurringExecution.rpc.requests
+          .filter(({ method }) => method === "getMultipleAccounts")
+          .map(multipleAccountsRead)
+          .filter(({ minContextSlot }) => minContextSlot === null)
+      ).toEqual([
+        {
+          addresses: [expectedAuthority, expectedSourceAta],
+          commitment: "confirmed",
+          minContextSlot: null,
+          encoding: "base64",
+        },
+      ]);
+      const sentInstructions = sent.mock.calls.map(([input]) => input.instructions);
+      expect(
+        sentInstructions.map((instructions) =>
+          instructions.map(({ programAddress }) => programAddress)
+        )
+      ).toEqual([
+        [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+        [ASSOCIATED_TOKEN_PROGRAM_ADDRESS, subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+        [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+      ]);
+      const init = required(required(sentInstructions[1])[1]);
+      expect(
+        subscriptionsProgram.parseSubscriptionsInstruction({ ...init, data: required(init.data) })
+      ).toMatchObject({
+        instructionType: subscriptionsProgram.SubscriptionsInstruction.InitSubscriptionAuthority,
+        accounts: {
+          owner: { address: sourceSigner.address },
+          tokenMint: { address: DEVNET_USDC_MINT },
+          userAta: { address: expectedSourceAta },
+        },
+      });
+      const subscriptionRow = await getDb(env)
+        .prepare("SELECT subscriber_token_account FROM payment_subscriptions WHERE id = ?")
+        .bind(activateBody.data.recurringPayment.subscriptionId)
+        .first<{ subscriber_token_account: string | null }>();
+      expect(subscriptionRow?.subscriber_token_account).toBe(expectedSourceAta);
+    }
+  );
 
   it("cancels active recurring payments through SDP API routes", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
