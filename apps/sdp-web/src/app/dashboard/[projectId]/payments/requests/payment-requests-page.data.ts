@@ -209,27 +209,19 @@ export function paymentRequestsListHref(state: PaymentRequestsListState): string
 }
 
 export type PaymentRequestsListResult = PaymentRequestsResult & {
-  /**
-   * Whether `total` is exactly how many requests the status filter matches. Under Awaiting
-   * payment it is the API's count by stored status, an upper bound the list does not show (see
-   * {@link loadPaymentRequestsList}).
-   */
-  totalIsExact: boolean;
   /** Whether the API has a page after this one. */
   hasNextPage: boolean;
 };
 
 /**
  * One page of the Requests list as its URL names it, read straight from the API's page: its
- * page, its size and its status filter. Under Awaiting payment, the rows the API returns as paid
- * are left out (see below).
+ * page, its size and its status filter.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param state - The list's page, size and status. Its search is not sent, since the API has
  *   none: the list matches it against the page's rows (see PaymentRequestsWorkspace).
- * @returns The page's rows, how many requests the API counts in all, whether that count is exact
- *   and whether a page follows; on any failure `{ ok: false, data: [], total: 0, error, … }`.
- *   Never throws.
+ * @returns The page's rows, how many requests the API counts in all and whether a page follows;
+ *   on any failure `{ ok: false, data: [], total: 0, error, … }`. Never throws.
  */
 export async function loadPaymentRequestsList(
   request: SdpApiClient["request"],
@@ -241,24 +233,7 @@ export async function loadPaymentRequestsList(
     pageSize,
     ...(status ? { status } : {}),
   });
-  const hasNextPage = result.ok && page * pageSize < result.total;
-  if (!result.ok || status !== "awaiting_payment") {
-    return { ...result, totalIsExact: true, hasNextPage };
-  }
-  // The API filters by the stored status, and listing then reconciles each open request on chain:
-  // one paid since it was last read comes back paid (and is saved so). Awaiting payment leaves
-  // those rows out, so no row shows the wrong status. Only this page is reconciled, so the API's
-  // total still counts requests paid on other, unread pages: it is an upper bound, which the
-  // list uses for its pages but does not show as a count (`totalIsExact: false`).
-  // TODO(api): filter and count by the reconciled status, so Awaiting payment can show its count
-  // again and Paid stops missing a request paid since its last read until something reads it
-  // again. Known limitation of the API, not of this list.
-  return {
-    ...result,
-    data: result.data.filter((row) => row.status === "awaiting_payment"),
-    totalIsExact: false,
-    hasNextPage,
-  };
+  return { ...result, hasNextPage: result.ok && page * pageSize < result.total };
 }
 
 export type PaymentRequestDetailResult =

@@ -65,8 +65,6 @@ interface PaymentRequestsWorkspaceProps {
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   /** How many requests the API counts for the status filter, across every page. */
   total: number;
-  /** Whether `total` is exact; when it is not, the pager shows the page without a count. */
-  totalIsExact: boolean;
   /** Whether the API has a page after this one. */
   hasNextPage: boolean;
   listState: PaymentRequestsListState;
@@ -298,20 +296,17 @@ function PaymentRequestsStatusFilter({
 }
 
 /**
- * The pager under the list, with which rows of how many it shows. With a count the list cannot
- * stand behind (an inexact total, or a search, which the API cannot count), it names the page
- * alone and offers the next while the API has one.
+ * The pager under the list, with which rows of how many it shows. Under a search, which the API
+ * cannot count, it names the page alone and offers the next while the API has one.
  */
 function PaymentRequestsPagination({
   total,
-  totalIsExact,
   hasNextPage,
   listState,
   pending,
   onPageChange,
 }: {
   total: number;
-  totalIsExact: boolean;
   hasNextPage: boolean;
   listState: PaymentRequestsListState;
   pending: boolean;
@@ -320,7 +315,7 @@ function PaymentRequestsPagination({
   const t = useTranslations();
   const { page, pageSize, search } = listState;
   // One page needs no pager, as the design's lists show none.
-  if (!totalIsExact || search !== null) {
+  if (search !== null) {
     if (page === 1 && !hasNextPage) return null;
     return (
       <ArrowPagination
@@ -382,7 +377,6 @@ export function PaymentRequestsWorkspace({
   initialError,
   initialLocalErrorCode,
   total,
-  totalIsExact,
   hasNextPage,
   listState,
 }: PaymentRequestsWorkspaceProps) {
@@ -495,7 +489,6 @@ export function PaymentRequestsWorkspace({
           )}
           <PaymentRequestsPagination
             total={total}
-            totalIsExact={totalIsExact}
             hasNextPage={hasNextPage}
             listState={listState}
             pending={isPending}

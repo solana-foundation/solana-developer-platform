@@ -47,8 +47,6 @@ export async function PaymentRequestsPage({
   const listState = parsePaymentRequestsListParams(params);
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
-    // One page, as the URL names it: listing reconciles each open request on chain, so the
-    // list reads no more than it shows (see loadPaymentRequestsList).
     const result = await trace.step("fetch_payment_requests", () =>
       loadPaymentRequestsList(apiClient.request, listState)
     );
@@ -59,8 +57,6 @@ export async function PaymentRequestsPage({
       total: result.total,
     });
 
-    // Under Awaiting payment the total is the API's upper bound (see loadPaymentRequestsList),
-    // so a page past it is past the end all the more.
     const lastPage = Math.max(1, Math.ceil(result.total / listState.pageSize));
     if (result.ok && listState.page > lastPage) {
       // A page past the end (an old link, or requests gone since) lands on the last one.
@@ -71,7 +67,6 @@ export async function PaymentRequestsPage({
       <PaymentRequestsWorkspace
         initialPaymentRequests={result.data}
         total={result.total}
-        totalIsExact={result.totalIsExact}
         hasNextPage={result.hasNextPage}
         listState={listState}
         initialError={result.error}
