@@ -197,7 +197,7 @@ async function recordInboundTransfer(
       projectId,
       custodyWalletId,
       walletId: row.wallet_id,
-      counterpartyId: row.counterparty_id,
+      counterpartyId: null,
       sourceAddress: null,
       destinationAddress: row.destination_address,
       token: row.token,
@@ -237,7 +237,6 @@ async function recordInboundTransfer(
     if (
       existing.custody_wallet_id !== row.custody_wallet_id ||
       existing.wallet_id !== row.wallet_id ||
-      existing.counterparty_id !== row.counterparty_id ||
       existing.destination_address !== row.destination_address ||
       existing.token !== row.token ||
       existing.amount !== row.amount ||

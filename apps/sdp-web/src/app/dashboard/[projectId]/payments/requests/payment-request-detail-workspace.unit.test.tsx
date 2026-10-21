@@ -19,7 +19,6 @@ const paymentRequest: PaymentRequest = {
   id: "preq_1",
   organizationId: "org_1",
   projectId: "prj_1",
-  counterpartyId: null,
   walletId: "wallet_1",
   destinationAddress: "11111111111111111111111111111111",
   token: SOL_MINT,
@@ -47,7 +46,6 @@ function renderDetail(demo: boolean, publicToken: string | null = "tok_1") {
     <PaymentRequestDetailWorkspace
       request={paymentRequest}
       publicToken={publicToken}
-      contactName={null}
       walletName={null}
     />,
     { wrapper }

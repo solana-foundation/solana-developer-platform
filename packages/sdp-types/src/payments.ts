@@ -1157,7 +1157,6 @@ export interface PaymentRequest {
   id: string;
   organizationId: string;
   projectId: string | null;
-  counterpartyId: string | null;
   walletId: string;
   destinationAddress: string;
   token: string;

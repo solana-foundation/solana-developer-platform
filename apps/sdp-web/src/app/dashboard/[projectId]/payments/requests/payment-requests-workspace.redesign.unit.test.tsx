@@ -39,7 +39,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const paymentRequest = {
   id: "preq_1",
-  counterpartyId: null,
   destinationAddress: "11111111111111111111111111111111",
   token: "So11111111111111111111111111111111111111112",
   amount: "5",
@@ -60,7 +59,6 @@ function renderWorkspace(props: Partial<ComponentProps<typeof PaymentRequestsWor
   return render(
     <PaymentRequestsWorkspace
       initialPaymentRequests={[paymentRequest]}
-      counterparties={[]}
       total={1}
       totalIsExact
       hasNextPage={false}
@@ -80,7 +78,6 @@ afterEach(() => {
 const otherRequest = {
   ...paymentRequest,
   id: "preq_2",
-  counterpartyId: "cp_jane",
   amount: "80",
   reference: "ref_2",
 } as PaymentRequest;
@@ -110,16 +107,15 @@ describe("PaymentRequestsWorkspace search", () => {
     expect(dashboardRouter.replace).not.toHaveBeenCalled();
   });
 
-  it("shows the page's rows that match the search, by payer, with no pager on one page", () => {
+  it("shows the page's rows that match the search, with no pager on one page", () => {
     renderWorkspace({
       initialPaymentRequests: [paymentRequest, otherRequest],
-      counterparties: [{ id: "cp_jane", displayName: "Jane Doe" } as never],
       total: 2,
-      listState: { page: 1, pageSize: 25, status: null, search: "jane" },
+      listState: { page: 1, pageSize: 25, status: null, search: "80" },
     });
 
-    expect(screen.getByText("Jane Doe")).toBeTruthy();
-    expect(screen.queryByText("anyone")).toBeNull();
+    expect(screen.getByText("80.00 SOL")).toBeTruthy();
+    expect(screen.queryByText("5.00 SOL")).toBeNull();
     expect(screen.queryByText("Page 1")).toBeNull();
     expect(screen.queryByText(/of 2 requests/)).toBeNull();
   });
