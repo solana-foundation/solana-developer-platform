@@ -1,6 +1,6 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { getRecentBlockhash } from "@sdp/rpc/solana";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { canonicalJson } from "@sdp/types/idempotency";
+import { describe, expect, it } from "vitest";
 import { canonicalDecimalAmount, canonicalizeAmounts } from "./idempotency";
 
 describe("canonicalDecimalAmount", () => {

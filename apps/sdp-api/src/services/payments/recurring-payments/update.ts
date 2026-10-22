@@ -7,6 +7,7 @@ import {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { normalizeDecimalString } from "@sdp/types/idempotency";
 import {
   assertNever,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
@@ -58,7 +59,6 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
-import { normalizeDecimalString } from "@sdp/types/idempotency";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";

@@ -280,4 +280,3 @@ export function canonicalizeAmounts(value: JsonValue): JsonValue {
 export function parseJsonValue(text: string): JsonValue {
   return jsonValueSchema.parse(JSON.parse(text));
 }
-

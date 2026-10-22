@@ -1,7 +1,12 @@
+import { canonicalJson } from "@sdp/types/idempotency";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import { canonicalJson } from "@sdp/types/idempotency";
-import { buildEarnVaultDepositFingerprint, buildEarnVaultParRedemptionFingerprint, normalizeForFingerprint, resolveIdempotencyReplay } from "./idempotency";
+import {
+  buildEarnVaultDepositFingerprint,
+  buildEarnVaultParRedemptionFingerprint,
+  normalizeForFingerprint,
+  resolveIdempotencyReplay,
+} from "./idempotency";
 
 describe("canonicalJson", () => {
   it("orders keys by UTF-16 code unit at every depth, whatever their insertion order", () => {
