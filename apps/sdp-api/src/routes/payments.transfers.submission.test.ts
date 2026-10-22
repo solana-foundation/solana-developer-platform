@@ -198,15 +198,24 @@ describe("Payments routes — signed submission", () => {
       const res = await transferRequest("0.001");
 
       expect(res.status).toBe(400);
+      const failed = await latestTransferRow();
       expect(await readErrorResponse(res)).toEqual({
         error: {
           code: "TRANSACTION_FAILED",
           message:
             "Blockhash expired. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.",
-          details: { transferId: (await latestTransferRow()).id, status: "failed" },
+          details: { transferId: failed.id, status: "failed" },
         },
         meta: { requestId: expect.stringMatching(/^req_/) },
       });
+      expect(
+        await new AuditService(getDb(env)).findCriticalOutcome({
+          organizationId: TEST_ORG.id,
+          action: "transfer",
+          resourceType: "payment_transfer",
+          resourceId: failed.id,
+        })
+      ).toMatchObject({ status: "failure", metadata: { error: "confirmation timed out" } });
     });
 
     it("returns the durable processing transfer when its first broadcast is ambiguous", async () => {
