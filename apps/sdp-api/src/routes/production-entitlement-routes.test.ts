@@ -50,6 +50,12 @@ function exemption(method: string, path: string): string | undefined {
   if (method === "GET" && /^\/v1\/members(\/me)?$/.test(path)) {
     return "organization-wide membership reads, no project (ADR 0012)";
   }
+  if (
+    (method === "DELETE" && path === "/v1/members/me") ||
+    ((method === "PATCH" || method === "DELETE") && path === "/v1/members/:memberId")
+  ) {
+    return "organization-wide role changes and membership exits, no project (ADR 0012)";
+  }
   if (path.startsWith("/v1/earn/") && isEarnExitOrRead(probeMethod(method), concretePath(path))) {
     return "Earn read or exit (ADR 0002)";
   }

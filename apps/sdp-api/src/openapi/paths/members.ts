@@ -109,9 +109,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     description:
       "Ends the caller's own membership, their project memberships in the organization and their pending invitations to it. An admin cannot leave (409); another admin removes them instead.",
     security: [{ clerkBearerAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-    },
     responses: {
       204: {
         description: "Left the organization",
@@ -130,7 +127,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       "Changes another member's Organization Role. An admin cannot change their own role, and the last active admin cannot be demoted (409). Takes effect on the member's next request.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
       params: z.object({
         memberId: memberIdParamSchema,
       }),
@@ -158,7 +154,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       "Removes another member from the organization, along with their project memberships in it and their pending invitations, so an unspent invitation cannot readmit them. The last active admin cannot be removed, and nobody can remove themselves (409). Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
       params: z.object({
         memberId: memberIdParamSchema,
       }),

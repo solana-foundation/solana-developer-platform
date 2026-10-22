@@ -27,8 +27,8 @@ export const members = new Hono<{ Bindings: Env }>();
 members.use("*", unifiedAuthMiddleware());
 members.use("*", requireHumanSession());
 
-// Membership is organization-wide, so reads need no project. Mutations keep
-// project context because idempotency keys are scoped to a project.
+// Membership reads, role changes and exits act on the organization, even when
+// an existing member no longer has access to any project.
 members.get("/", requireAction("members.read"), listMembers);
 members.get("/me", requireAction("members.read"), getCurrentMember);
 members.post(
@@ -48,7 +48,6 @@ members.delete(
 );
 members.delete(
   "/me",
-  projectContextMiddleware(),
   publicRoute(
     "signed-in members only: leaving acts on the caller's own membership, which any member may end"
   ),
@@ -56,14 +55,8 @@ members.delete(
 );
 members.patch(
   "/:memberId",
-  projectContextMiddleware(),
   requireAction("members.manage"),
   validateBody(updateMemberRoleSchema),
   updateMemberRole
 );
-members.delete(
-  "/:memberId",
-  projectContextMiddleware(),
-  requireAction("members.manage"),
-  removeMember
-);
+members.delete("/:memberId", requireAction("members.manage"), removeMember);

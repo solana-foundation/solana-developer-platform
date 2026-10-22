@@ -72,6 +72,21 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
+  it("requires no project header for organization role changes and membership exits", () => {
+    const doc = createOpenApiDocument();
+    for (const [path, method] of [
+      ["/v1/members/me", "delete"],
+      ["/v1/members/{memberId}", "patch"],
+      ["/v1/members/{memberId}", "delete"],
+    ] as const) {
+      const operation = doc.paths?.[path]?.[method];
+      expect(operation).toBeDefined();
+      expect(operation?.parameters).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ in: "header", name: "x-project-id" })])
+      );
+    }
+  });
+
   it("documents API key and Clerk access for shared private-channel operations", () => {
     const doc = createOpenApiDocument();
     for (const [path, method] of [
