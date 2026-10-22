@@ -560,6 +560,38 @@ describe("Counterparties Routes", () => {
       const body = await res.json();
       expect(body.error.code).toBe("BAD_REQUEST");
     });
+
+    it("refuses account creation to a key holding counterparties.manage without execute (APE SOLA9-771)", async () => {
+      const created = await createCounterparty({ externalId: "account_parent_manage_only" });
+      const cp = (await created.json()).data.counterparty;
+      await getDb(env)
+        .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+        .bind(["counterparties.manage"], TEST_API_KEY.id)
+        .run();
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/accounts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            accountKind: "crypto_wallet",
+            details: {
+              network: "solana",
+              address: "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+            },
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const accounts = await getDb(env)
+        .prepare("SELECT id FROM counterparty_accounts WHERE counterparty_id = ?")
+        .bind(cp.id)
+        .all();
+      expect(accounts.results).toEqual([]);
+    });
   });
   describe("GET /v1/counterparties/:counterpartyId/provider-accounts", () => {
     afterEach(() => {
