@@ -56,15 +56,11 @@ export function resolveCounterpartyAccountDestination(params: {
 }): Address {
   const { account, field } = params;
   if (account.status !== "active") {
-    throw notFound(`${field} references an archived counterparty account`);
+    throw notFound(`Counterparty account ${account.id}`);
   }
   if (account.counterparty_status !== "active") {
-    throw notFound(`${field} belongs to an archived counterparty`);
+    throw notFound(`Counterparty account ${account.id}`);
   }
-  if (account.account_kind !== "crypto_wallet") {
-    throw badRequest(`${field} must be a crypto wallet account`);
-  }
-
   const { network, address } = account.details;
   if (network !== "solana") {
     throw badRequest(`${field} must be a Solana wallet account`);

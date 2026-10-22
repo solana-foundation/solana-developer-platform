@@ -421,7 +421,7 @@ export async function authorizeTransfer(
       organizationId: scope.auth.organizationId,
       projectId: requireProjectId(c),
     });
-    if (!account) throw notFound("Counterparty account");
+    if (!account) throw notFound(`Counterparty account ${body.counterpartyAccountId}`);
     counterpartyAccount = account;
   }
   return { scope, operation, rampTransfer, counterpartyAccount };
