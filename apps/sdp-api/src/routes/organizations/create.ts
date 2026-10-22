@@ -36,10 +36,13 @@ export const createOrganization = async (
   const db = getDb(c.env);
 
   const organization = await claimOrganization(db, { name, creatorUserId: signup.userId });
-  const clerkOrganizationId = await provisionClerkOrganization(c, {
-    organization,
-    clerkUserId: signup.clerkUserId,
-  });
+  // An active organization is a retry of a request that finished: nothing is
+  // written again, in Clerk above all, where it could re-add a creator whom
+  // another admin has since removed.
+  const clerkOrganizationId =
+    organization.status === "active"
+      ? await readClerkOrganizationId(db, organization.id)
+      : await provisionClerkOrganization(c, { organization, clerkUserId: signup.clerkUserId });
   await activateOrganization(c, { organizationId: organization.id, creatorUserId: signup.userId });
 
   const active = await db
@@ -101,6 +104,30 @@ async function claimOrganization(
     throw conflict("Your organization is suspended");
   }
   return existing;
+}
+
+/**
+ * The Clerk organization an active organization maps to.
+ *
+ * @param db - The database.
+ * @param organizationId - The SDP organization.
+ * @returns The Clerk organization id.
+ */
+async function readClerkOrganizationId(
+  db: DatabaseClient,
+  organizationId: string
+): Promise<string> {
+  const mapping = await db
+    .prepare(
+      `SELECT provider_org_id FROM auth_organization_identities
+        WHERE provider = 'clerk' AND organization_id = ?`
+    )
+    .bind(organizationId)
+    .first<{ provider_org_id: string }>();
+  if (!mapping) {
+    throw internalError("Active organization has no Clerk organization");
+  }
+  return mapping.provider_org_id;
 }
 
 /**
