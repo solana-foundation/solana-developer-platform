@@ -48,7 +48,7 @@ function solTransferReply(requestedSignature: string): ClusterRpcReply {
 function buildOn(environment: SdpEnvironment, signatures: SignatureInfo[]) {
   return runInClusterScope({ projectId: null, environment }, () =>
     buildObservedTransfersForSignatures(signatures, context)
-  );
+  ).then((observed) => observed.map(({ row }) => row));
 }
 
 describe("observed-transfers parsed-transaction cache", () => {

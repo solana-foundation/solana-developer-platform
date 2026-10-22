@@ -33,7 +33,11 @@ import type {
   RampTransferTransitionInput,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { type LegBinding, legVerdictStatement } from "./token-movement-legs.repository";
+import {
+  chainVerifiedLegStatement,
+  type LegBinding,
+  legVerdictStatement,
+} from "./token-movement-legs.repository";
 
 /** SQL a repository method adds to a guarded status change, each list bound in order. */
 interface StatusChangeSql {
@@ -112,6 +116,29 @@ function settledLegs(
     updatedAt,
   });
   return { cte: `, ${statement.cte}`, values: statement.values };
+}
+
+/**
+ * The leg writes a ramp transition makes in its own statement: the verdict on
+ * a built deposit's pending legs, and a chain-verified delivery's new leg.
+ */
+function transitionLegs(input: RampTransferTransitionInput): {
+  cte: string;
+  values: LegBinding[];
+} {
+  const settled = settledLegs(builtOfframpDepositVerdict(input.transition), input.updatedAt);
+  if (input.chainVerifiedLeg === undefined) {
+    return settled;
+  }
+  const chainLeg = chainVerifiedLegStatement({
+    source: "pt",
+    leg: input.chainVerifiedLeg,
+    updatedAt: input.updatedAt,
+  });
+  return {
+    cte: `${settled.cte}, ${chainLeg.cte}`,
+    values: [...settled.values, ...chainLeg.values],
+  };
 }
 
 function paymentTransferSearchExpression(alias: string): string {
@@ -433,7 +460,7 @@ export function createPostgresPaymentsRepository(
       assignments.push("provider_observed_at = ?");
       assignmentValues.push(input.providerObservation.observedAt);
     }
-    const legs = settledLegs(builtOfframpDepositVerdict(input.transition), input.updatedAt);
+    const legs = transitionLegs(input);
     const row = await db
       .prepare(
         `WITH pt AS (
@@ -794,6 +821,9 @@ export function createPostgresPaymentsRepository(
       if ((input.transition === "delivery_verified") !== (input.deliveryEvidence !== undefined)) {
         throw new Error("Ramp delivery verification requires matching chain evidence");
       }
+      if (input.chainVerifiedLeg !== undefined && input.transition !== "delivery_verified") {
+        throw new Error("Only a verified delivery records a chain-verified leg");
+      }
       return applyRampTransition(input, NO_STATUS_CHANGE_SQL);
     },
 
@@ -828,27 +858,38 @@ export function createPostgresPaymentsRepository(
       return rows.results.map(mapTransferRow);
     },
 
-    async holdRampDeliveryMismatch({ transferId, providerSettlement, mismatch, updatedAt }) {
+    async holdRampDeliveryMismatch({
+      transferId,
+      providerSettlement,
+      mismatch,
+      legVerdict,
+      updatedAt,
+    }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
           "PaymentsRepository.holdRampDeliveryMismatch is system-only"
         );
       }
+      const legs = settledLegs(legVerdict, updatedAt);
       const row = await db
         .prepare(
-          `UPDATE payment_transfers
+          `WITH pt AS (
+           UPDATE payment_transfers
            SET provider_data = provider_data || jsonb_build_object('deliveryMismatch', ?::jsonb),
                updated_at = ?
            WHERE id = ? AND status = 'settling' AND type = ANY(?)
              AND provider_data->'providerSettlement' = ?::jsonb
-           RETURNING id`
+           RETURNING *
+           )${legs.cte}
+           SELECT pt.id FROM pt`
         )
         .bind(
           JSON.stringify(mismatch),
           updatedAt,
           transferId,
           [...RAMP_TRANSFER_TYPES],
-          JSON.stringify(providerSettlement)
+          JSON.stringify(providerSettlement),
+          ...legs.values
         )
         .first<{ id: string }>();
       return row !== null;

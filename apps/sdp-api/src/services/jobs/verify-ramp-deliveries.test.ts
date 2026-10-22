@@ -1,19 +1,22 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { ParsedTransaction } from "@sdp/rpc/solana";
-import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { mintTermsAt, transferFeeExtension } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { type RampChainReader, verifyRampDeliveries } from "./verify-ramp-deliveries";
 
 const getTransactionMock = vi.fn<RampChainReader["getTransaction"]>();
 const getSignatureStatusesMock = vi.fn<RampChainReader["getSignatureStatuses"]>();
+const readTokenTermsMock = vi.fn<RampChainReader["readTokenTerms"]>();
 const chain: RampChainReader = {
   getTransaction: getTransactionMock,
   getSignatureStatuses: getSignatureStatusesMock,
+  readTokenTerms: readTokenTermsMock,
 };
 
 const ORG = "org_ramp_delivery_test";
@@ -691,6 +694,256 @@ describe("verifyRampDeliveries", () => {
         provider_data: {
           deliveryMismatch: { reason: "transaction_failed", reportedAmount: "1" },
         },
+      });
+    });
+  });
+
+  describe("token movement legs (ADR 0012)", () => {
+    const PYUSD = wellKnownMint("PYUSD", "devnet");
+    if (!PYUSD) throw new Error("PYUSD devnet mint missing");
+    const PYUSD_MINT: string = PYUSD;
+
+    async function legOf(transferId: string) {
+      return getDb(env)
+        .prepare(
+          `SELECT asset_kind, mint, token_program, decimals, basis, quoted_debit::text AS quoted_debit,
+                  quoted_fee::text AS quoted_fee, quoted_credit::text AS quoted_credit,
+                  observed_debit::text AS observed_debit, observed_fee::text AS observed_fee,
+                  observed_credit::text AS observed_credit, as_of_slot::text AS as_of_slot,
+                  verified_by, verification_state, verification_reason
+             FROM token_movement_legs WHERE payment_transfer_id = ?`
+        )
+        .bind(transferId)
+        .first<Record<string, unknown>>();
+    }
+
+    /** A fee-mint delivery: the instruction debits 1 PYUSD, the destination receives `credit`. */
+    function landedFeeMint(
+      credit: string,
+      type: "transferChecked" | "transferCheckedWithFee",
+      fee: string | null
+    ): ParsedTransaction {
+      const transfer = {
+        source: "provider-account",
+        destination: "destination-account",
+        mint: PYUSD_MINT,
+        tokenAmount: { amount: "1000000", decimals: 6, uiAmountString: "1" },
+      };
+      const info =
+        fee === null ? transfer : { ...transfer, feeAmount: { amount: fee, decimals: 6 } };
+      return {
+        slot: 43n,
+        blockTime: LANDED_AFTER_TRANSFER,
+        accountKeys: ["fee-payer", "provider-account", "destination-account"],
+        executionResultKnown: true,
+        err: null,
+        preTokenBalances: [],
+        postTokenBalances: [
+          {
+            accountIndex: 2,
+            mint: PYUSD_MINT,
+            owner: "quoted-destination",
+            amount: credit,
+            decimals: 6,
+          },
+        ],
+        instructions: [
+          {
+            programId: SPL_TOKEN_PROGRAMS["token-2022"],
+            accounts: [],
+            parsedType: type,
+            info,
+          },
+        ],
+      };
+    }
+
+    async function settleOnramp(id: string, token: string, reported: string) {
+      await seedTransfer({ id, reference: `moonpay_${id}`, token });
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: `moonpay_${id}`,
+        onchain: { signature: SIG_1, destinationAddress: "quoted-destination", amount: reported },
+        receivedAmount: reported,
+      });
+    }
+
+    it("records a verified on-ramp's leg from the raw balance change, as a receipt", async () => {
+      await settleOnramp("xfr_leg_usdc", MINT, "0.5");
+      getTransactionMock.mockResolvedValue(landedToken("500000"));
+
+      await sweep();
+
+      expect(await legOf("xfr_leg_usdc")).toEqual({
+        asset_kind: "token",
+        mint: MINT,
+        token_program: "spl-token",
+        decimals: 6,
+        basis: "credit",
+        quoted_debit: "500000",
+        quoted_fee: "0",
+        quoted_credit: "500000",
+        observed_debit: "500000",
+        observed_fee: "0",
+        observed_credit: "500000",
+        as_of_slot: "42",
+        verified_by: "chain",
+        verification_state: "verified",
+        verification_reason: "chain_delta_matched",
+      });
+      expect(readTokenTermsMock).not.toHaveBeenCalled();
+    });
+
+    it("records native SOL as the native asset", async () => {
+      await settleOnramp("xfr_leg_sol", SOL_MINT, "0.5");
+      getTransactionMock.mockResolvedValue({
+        slot: 42n,
+        blockTime: LANDED_AFTER_TRANSFER,
+        executionResultKnown: true,
+        err: null,
+        accountKeys: ["fee-payer", "quoted-destination"],
+        preBalances: [1_000_000_000n, 100_000_000n],
+        postBalances: [499_995_000n, 600_000_000n],
+        instructions: [],
+      });
+
+      await sweep();
+
+      expect(await legOf("xfr_leg_sol")).toMatchObject({
+        asset_kind: "native",
+        mint: null,
+        decimals: 9,
+        observed_credit: "500000000",
+        as_of_slot: null,
+      });
+    });
+
+    it("accepts a provider reporting the debit when the stated fee explains the credit", async () => {
+      await settleOnramp("xfr_leg_fee", PYUSD_MINT, "1");
+      getTransactionMock.mockResolvedValue(
+        landedFeeMint("995000", "transferCheckedWithFee", "5000")
+      );
+
+      await sweep();
+
+      expect((await row("xfr_leg_fee"))?.status).toBe("completed");
+      expect(await legOf("xfr_leg_fee")).toMatchObject({
+        quoted_debit: "1000000",
+        quoted_fee: "5000",
+        quoted_credit: "995000",
+        observed_credit: "995000",
+        verification_state: "verified",
+      });
+      expect(readTokenTermsMock).not.toHaveBeenCalled();
+    });
+
+    it("reads the mint's fee schedule only when a TransferChecked states no fee", async () => {
+      await settleOnramp("xfr_leg_fee_rule", PYUSD_MINT, "1");
+      getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
+      readTokenTermsMock.mockResolvedValue(
+        mintTermsAt(PYUSD_MINT, "token-2022", {
+          decimals: 6,
+          extensions: [transferFeeExtension(50, 1_000_000n)],
+        })
+      );
+
+      await sweep();
+
+      expect(readTokenTermsMock).toHaveBeenCalledTimes(1);
+      expect((await row("xfr_leg_fee_rule"))?.status).toBe("completed");
+      expect(await legOf("xfr_leg_fee_rule")).toMatchObject({
+        quoted_debit: "1000000",
+        quoted_fee: "5000",
+        quoted_credit: "995000",
+      });
+    });
+
+    it("holds amount_mismatch when no fee rule explains a debit report, and records no leg", async () => {
+      await settleOnramp("xfr_leg_unexplained", PYUSD_MINT, "1");
+      getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
+      readTokenTermsMock.mockResolvedValue(
+        mintTermsAt(PYUSD_MINT, "token-2022", {
+          decimals: 6,
+          extensions: [transferFeeExtension(0, 0n)],
+        })
+      );
+
+      await sweep();
+
+      expect(await row("xfr_leg_unexplained")).toMatchObject({
+        status: "settling",
+        provider_data: {
+          deliveryMismatch: {
+            reason: "amount_mismatch",
+            reportedAmount: "1",
+            observedAmount: "0.995",
+          },
+        },
+      });
+      expect(await legOf("xfr_leg_unexplained")).toBeNull();
+    });
+
+    /** An off-ramp deposit SDP built whose confirmation never came back: its leg is pending. */
+    async function seedPendingDeposit(id: string) {
+      await seedTransfer({
+        id,
+        reference: `moonpay_${id}`,
+        type: "offramp",
+        signature: SIG_1,
+        signed: true,
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO token_movement_legs
+             (id, organization_id, project_id, payment_transfer_id, asset_kind, mint, token_program,
+              decimals, basis, quoted_debit, quoted_fee, quoted_credit, as_of_slot, as_of_unix_timestamp)
+           VALUES (?, ?, ?, ?, 'token', ?, 'spl-token', 6, 'credit', 1000000, 0, 1000000, 40, 1792000000)`
+        )
+        .bind(`tml_${id}`, ORG, PROJECTS.sandbox, id, MINT)
+        .run();
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: `moonpay_${id}`,
+        onchain: { signature: SIG_1, destinationAddress: "quoted-deposit", amount: "1" },
+        receivedAmount: "9.5",
+      });
+    }
+
+    it("settles a timed-out off-ramp deposit's pending leg once its signature finalizes", async () => {
+      await seedPendingDeposit("xfr_timed_out_deposit");
+      expect((await legOf("xfr_timed_out_deposit"))?.verification_state).toBe("pending");
+      getSignatureStatusesMock.mockResolvedValue([
+        { slot: 50n, confirmations: null, confirmationStatus: "finalized", err: null },
+      ]);
+
+      await sweep();
+
+      expect((await row("xfr_timed_out_deposit"))?.status).toBe("completed");
+      expect(await legOf("xfr_timed_out_deposit")).toMatchObject({
+        verified_by: "construction",
+        verification_state: "verified",
+        verification_reason: "sdp_built_transfer_landed",
+      });
+    });
+
+    it("marks a failed off-ramp deposit's pending leg as not executed with its hold", async () => {
+      await seedPendingDeposit("xfr_failed_leg_deposit");
+      getSignatureStatusesMock.mockResolvedValue([
+        {
+          slot: 50n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: { InstructionError: [0, { Custom: 1 }] },
+        },
+      ]);
+
+      await sweep();
+
+      expect(await legOf("xfr_failed_leg_deposit")).toMatchObject({
+        verification_state: "not_required",
+        verification_reason: "movement_not_executed",
       });
     });
   });
