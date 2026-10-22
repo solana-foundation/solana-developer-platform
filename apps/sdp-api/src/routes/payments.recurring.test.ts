@@ -1761,6 +1761,257 @@ describe("Payments routes — recurring", () => {
     expect(attempt?.error).toContain("replacement subscription period");
   });
 
+  it("stores an offset firstCollectionAt as the same instant in UTC", async () => {
+    const created = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+      firstCollectionAt: "2099-01-01T05:30:00+05:30",
+    });
+
+    expect(created.firstCollectionAt).toBe("2099-01-01T00:00:00.000Z");
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT first_collection_at, next_collection_due_at FROM payment_recurring_payments WHERE id = ?"
+        )
+        .bind(created.id)
+        .first<{ first_collection_at: string; next_collection_due_at: string | null }>()
+    ).toMatchObject({ first_collection_at: "2099-01-01T00:00:00.000Z" });
+  });
+
+  /**
+   * Pauses the next update at its runtime admission, before its claim, runs
+   * `during` while it waits, then lets it finish.
+   */
+  async function updateAroundPausedClaim<T>(input: {
+    recurringPaymentId: string;
+    body: Record<string, unknown>;
+    during: () => Promise<T>;
+  }): Promise<{ paused: Response; during: T }> {
+    let releaseUpdate: (() => void) | undefined;
+    let signalUpdatePaused: (() => void) | undefined;
+    const updatePaused = new Promise<void>((resolve) => {
+      signalUpdatePaused = resolve;
+    });
+    const updateReleased = new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    });
+    const admission = vi
+      .spyOn(SigningService.prototype, "admitRuntimeExecution")
+      .mockImplementationOnce(async () => {
+        signalUpdatePaused?.();
+        await updateReleased;
+      });
+    const updatePromise = Promise.resolve(
+      app.request(
+        `/v1/payments/recurring-payments/${input.recurringPaymentId}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify(input.body) },
+        env
+      )
+    );
+    try {
+      await updatePaused;
+      const during = await input.during();
+      releaseUpdate?.();
+      return { paused: await updatePromise, during };
+    } finally {
+      releaseUpdate?.();
+      admission.mockRestore();
+      await Promise.allSettled([updatePromise]);
+    }
+  }
+
+  // SOLA9-703 / SOLA9-693: a same-wallet update resolves omitted fields from
+  // the row it read; one that committed in between must make it lose.
+  it("refuses a same-wallet update whose row a concurrent update changed after it was read", async () => {
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const laterMetadataUri = "https://example.com/recurring/later.json";
+
+    const { paused, during } = await updateAroundPausedClaim({
+      recurringPaymentId: activated.id,
+      body: { metadataUri: "https://example.com/recurring/earlier.json" },
+      during: async () =>
+        await app.request(
+          `/v1/payments/recurring-payments/${activated.id}`,
+          {
+            method: "PATCH",
+            headers: RECURRING_HEADERS,
+            body: JSON.stringify({ metadataUri: laterMetadataUri }),
+          },
+          env
+        ),
+    });
+
+    expect(during.status).toBe(200);
+    expect(paused.status).toBe(409);
+    expect(errorResponseSchema.parse(await paused.json()).error.message).toContain(
+      "already processing"
+    );
+    expect(
+      await getDb(env)
+        .prepare("SELECT status, metadata_uri FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ status: string; metadata_uri: string | null }>()
+    ).toEqual({ status: "active", metadata_uri: laterMetadataUri });
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+        )
+        .bind(activated.id)
+        .first<{ count: number }>()
+    ).toEqual({ count: 1 });
+  });
+
+  // SOLA9-791: moving the due date under a submitted collection would strand
+  // it, since its finalizer and recovery key on that due date.
+  it("lets a collection claim win over a concurrent same-wallet schedule change", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+
+    let releaseCollection: (() => void) | undefined;
+    let collectPromise: Promise<Response> | undefined;
+    let updateRes: Response | undefined;
+    try {
+      ({ paused: updateRes } = await updateAroundPausedClaim({
+        recurringPaymentId: activated.id,
+        body: {
+          metadataUri: "https://example.com/recurring/moved.json",
+          nextCollectionDueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        during: async () => {
+          let signalCollectionClaimed: (() => void) | undefined;
+          const collectionClaimed = new Promise<void>((resolve) => {
+            signalCollectionClaimed = resolve;
+          });
+          const collectionReleased = new Promise<void>((resolve) => {
+            releaseCollection = resolve;
+          });
+          createOrgSignerForCustodyWalletMock.mockImplementationOnce(async () => {
+            signalCollectionClaimed?.();
+            await collectionReleased;
+            return sourceSigner;
+          });
+          collectPromise = Promise.resolve(
+            app.request(
+              `/v1/payments/recurring-payments/${activated.id}/collect`,
+              { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+              env
+            )
+          );
+          await collectionClaimed;
+        },
+      }));
+    } finally {
+      releaseCollection?.();
+    }
+    const collectRes = await required(collectPromise);
+
+    expect(updateRes.status).toBe(409);
+    expect(collectRes.status).toBe(200);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT status
+             FROM payment_subscription_collection_attempts
+            WHERE subscription_id = ? AND due_at = ?`
+        )
+        .bind(activated.subscriptionId, dueAt)
+        .first<{ status: string }>()
+    ).toEqual({ status: "confirmed" });
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+        )
+        .bind(activated.id)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+  });
+
+  // SOLA9-751: a recovered source change signs on the new wallet before it
+  // cancels on the old one, so a key that cannot cancel there stops first.
+  it("refuses recovering a stale source change for a key outside the old wallet, before any new-wallet step", async () => {
+    await seedUnboundWallet();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const before = {
+      sourceCustodyWalletId: activated.sourceCustodyWalletId,
+      counterpartyId: activated.counterpartyId,
+      counterpartyAccountId: activated.counterpartyAccountId,
+      token: activated.token,
+      amount: activated.amount,
+      periodHours: activated.periodHours,
+      firstCollectionAt: activated.firstCollectionAt,
+      nextCollectionDueAt: activated.nextCollectionDueAt,
+      metadataUri: activated.metadataUri,
+    };
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_update_attempts (
+           id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+           old_plan_id, old_subscription_id, new_source_custody_wallet_id, changed_fields,
+           before_values, after_values, created_at, updated_at
+         ) VALUES (
+           'prpu_stale_source_change', ?, ?, ?, 'replacement', 'processing', 'claim', ?, ?, ?,
+           ARRAY['sourceCustodyWalletId']::text[], ?::jsonb, ?::jsonb, ?, ?
+         )`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        activated.planId,
+        activated.subscriptionId,
+        UNBOUND_CUSTODY_WALLET_ID,
+        JSON.stringify(before),
+        JSON.stringify({ ...before, sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID }),
+        staleAt,
+        staleAt
+      )
+      .run();
+    // The key may sign with the new wallet only.
+    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+    const snapshot = await recurringExecutionSnapshot(activated.id);
+    const executionCalls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID }),
+      },
+      env
+    );
+
+    await expectWalletOutOfScope(response);
+    expect(await recurringExecutionSnapshot(activated.id)).toEqual(snapshot);
+    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  });
+
   it("rejects fresh in-flight recurring payment updates", async () => {
     const recurringPaymentId = (
       await createRecurringPaymentFixture({

@@ -7,6 +7,7 @@ import {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { MovementId } from "@sdp/types/movements";
 import {
   assertNever,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
@@ -1915,7 +1916,15 @@ async function recordRecurringPaymentUpdateFailure(input: {
   });
 }
 
-async function claimSourceChangingRecurringPaymentUpdate(input: {
+/**
+ * Claims the recurring payment for an update only while it is still the row
+ * the update was resolved from: same status, `updated_at`, source, subscription
+ * and due cycle, locked `FOR UPDATE`, with no collection attempt holding that
+ * cycle. An overlapping update that committed first, or a collection that
+ * claimed the cycle (whose finalizer and recovery key on this due date), makes
+ * it lose, so omitted fields never resolve from a superseded snapshot.
+ */
+async function claimRecurringPaymentUpdateAtSnapshot(input: {
   db: DatabaseExecutor;
   organizationId: string;
   projectId: string;
@@ -1979,26 +1988,44 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
   });
 }
 
+/** The movements an update's caller is admitted for, per custody wallet. */
+export type RecurringPaymentUpdateAdmission = Extract<
+  MovementId,
+  "recurring.update" | "recurring.update_cancel_old"
+>;
+
 /**
  * Admits an update that will sign, for every wallet it signs with: the source
  * and, when the source changes, the new one, since the caller must be able to
  * sign with the wallet it moves the mandate away from as well. A fresh update
- * is admitted before its claim (`admitStart`). A recovered one passes none: it
- * may only confirm saved work or finish the old plan's cancel (an exit), and
- * any new signature it needs is decided by the signing waist (HOO-2099).
+ * is admitted for both as a start before its claim. A recovered one starts
+ * nothing: it may only confirm saved work or finish the old plan's cancel (an
+ * exit), and any new signature it needs is decided by the signing waist
+ * (HOO-2099). A recovered source change still signs on the new wallet before
+ * it cancels on the old one, so its caller is admitted for that cancel on the
+ * old wallet first: one it would refuse never reaches a new-wallet step.
  */
 async function admitUpdateExecution(input: {
   env: Env;
   organizationId: string;
   projectId: string;
-  walletIds: readonly string[];
-  admitStart: ((custodyWalletId: string) => Promise<void>) | null;
+  sourceWalletId: string;
+  newSourceWalletId: string | null;
+  recoveringStaleUpdate: boolean;
+  admitStart: (custodyWalletId: string, movement: RecurringPaymentUpdateAdmission) => Promise<void>;
 }): Promise<void> {
-  for (const walletId of input.walletIds) {
-    await input.admitStart?.(walletId);
+  const walletIds = input.newSourceWalletId
+    ? [input.sourceWalletId, input.newSourceWalletId]
+    : [input.sourceWalletId];
+  if (!input.recoveringStaleUpdate) {
+    for (const walletId of walletIds) {
+      await input.admitStart(walletId, "recurring.update");
+    }
+  } else if (input.newSourceWalletId) {
+    await input.admitStart(input.sourceWalletId, "recurring.update_cancel_old");
   }
   const signingService = createSigningService(input.env);
-  for (const walletId of input.walletIds) {
+  for (const walletId of walletIds) {
     await signingService.admitRuntimeExecution(input.organizationId, input.projectId, walletId);
   }
 }
@@ -2066,25 +2093,16 @@ async function claimActiveRecurringPaymentUpdate(input: {
           projectId: input.projectId,
         })
       : null;
-    const claimed = input.newSourceCustodyWalletId
-      ? await claimSourceChangingRecurringPaymentUpdate({
-          db: tx,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          recurringPayment: input.recurringPayment,
-          sourceWallet: input.sourceWallet,
-          updatedAt,
-          staleBefore,
-          activatedBy,
-        })
-      : await transactionRepo.claimRecurringPaymentUpdate({
-          recurringPaymentId: input.recurringPayment.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          updatedAt,
-          staleBefore,
-          activatedBy,
-        });
+    const claimed = await claimRecurringPaymentUpdateAtSnapshot({
+      db: tx,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: input.recurringPayment,
+      sourceWallet: input.sourceWallet,
+      updatedAt,
+      staleBefore,
+      activatedBy,
+    });
     if (!claimed) return null;
     const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
       recurringRepo: transactionRepo,
@@ -2118,12 +2136,13 @@ export async function updateRecurringPayment(input: {
   /** The request's Idempotency-Key and body fingerprint, written on the attempt it claims. */
   idempotency: RecurringPaymentUpdateIdempotency | null;
   /**
-   * Money admission (HOO-1955, HOO-2099) for one custody wallet a fresh
-   * update will sign with, run before the attempt is claimed and only when it
-   * signs: a refusal leaves the recurring payment untouched. A recovered
-   * stale update skips it; the signing waist decides any signature it needs.
+   * Money admission (HOO-1955, HOO-2099) for one custody wallet the update
+   * will sign with, run before the attempt is claimed and only when it signs:
+   * a refusal leaves the recurring payment untouched. A recovered stale update
+   * asks only for its old wallet's cancel when it changes the source (see
+   * `admitUpdateExecution`); the signing waist decides any other signature.
    */
-  admitStart: (custodyWalletId: string) => Promise<void>;
+  admitStart: (custodyWalletId: string, movement: RecurringPaymentUpdateAdmission) => Promise<void>;
 }): Promise<PaymentRecurringPaymentRow> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
@@ -2189,10 +2208,10 @@ export async function updateRecurringPayment(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      walletIds: sourceChanged
-        ? [input.sourceWallet.id, resolved.sourceWallet.id]
-        : [input.sourceWallet.id],
-      admitStart: recoveringStaleUpdate ? null : input.admitStart,
+      sourceWalletId: input.sourceWallet.id,
+      newSourceWalletId: sourceChanged ? resolved.sourceWallet.id : null,
+      recoveringStaleUpdate,
+      admitStart: input.admitStart,
     });
   }
 
