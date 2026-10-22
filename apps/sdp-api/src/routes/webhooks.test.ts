@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { readAuditActions } from "@/test/helpers/audit-logs";
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
@@ -148,35 +149,77 @@ describe("Clerk webhooks", () => {
     ]);
     expect(await knownOrganizationState()).toEqual(before);
   });
-  it.each([
-    "organizationMembership.created",
-    "organizationMembership.updated",
-    "organizationMembership.deleted",
-  ])("%s writes no membership", async (type) => {
-    await seedKnownOrganization();
-    const before = await knownOrganizationMemberships();
+  it.each(["organizationMembership.created", "organizationMembership.updated"])(
+    "%s writes no membership",
+    async (type) => {
+      await seedKnownOrganization();
+      const before = await knownOrganizationMemberships();
 
-    for (const [clerkUserId, role] of [
-      [`clerk_user_${KNOWN_ADMIN.userId}`, "org:member"],
-      [`clerk_user_${OUTSIDER.userId}`, "org:admin"],
-    ]) {
+      for (const [clerkUserId, role] of [
+        [`clerk_user_${KNOWN_ADMIN.userId}`, "org:member"],
+        [`clerk_user_${OUTSIDER.userId}`, "org:admin"],
+      ]) {
+        const response = await simulateClerkWebhook({
+          type,
+          data: {
+            id: `orgmem_${clerkUserId}`,
+            organization: { id: KNOWN_CLERK_ORG_ID, name: KNOWN_ORGANIZATION.slug },
+            role,
+            public_user_data: { user_id: clerkUserId },
+          },
+        });
+        expect(response.status).toBe(200);
+      }
+
+      expect(before).toEqual([{ user_id: KNOWN_ADMIN.userId, role: "admin", status: "active" }]);
+      expect(await knownOrganizationMemberships()).toEqual(before);
+    }
+  );
+  it.each([
+    { totalCount: 1, status: "active", auditActions: [] },
+    { totalCount: 0, status: "removed", auditActions: ["delete"] },
+  ])(
+    "organizationMembership.deleted leaves the membership $status when Clerk lists $totalCount",
+    async ({ totalCount, status, auditActions }) => {
+      await seedKnownOrganization();
+      const clerk = stubClerkBackend(env);
+      clerk.answer({ status: 200, body: { data: [], total_count: totalCount } });
+      const clerkUserId = `clerk_user_${KNOWN_ADMIN.userId}`;
+
       const response = await simulateClerkWebhook({
-        type,
+        type: "organizationMembership.deleted",
         data: {
           id: `orgmem_${clerkUserId}`,
           organization: { id: KNOWN_CLERK_ORG_ID, name: KNOWN_ORGANIZATION.slug },
-          role,
+          role: "org:admin",
           public_user_data: { user_id: clerkUserId },
         },
       });
-      expect(response.status).toBe(200);
-    }
 
-    expect(before).toEqual([{ user_id: KNOWN_ADMIN.userId, role: "admin", status: "active" }]);
-    expect(await knownOrganizationMemberships()).toEqual(before);
-  });
-  it("leaves the user and their memberships untouched when Clerk deletes the user", async () => {
+      expect(response.status).toBe(200);
+      expect(clerk.requests).toEqual([
+        {
+          method: "GET",
+          path: `/organizations/${KNOWN_CLERK_ORG_ID}/memberships?user_id=${clerkUserId}`,
+          body: null,
+        },
+      ]);
+      expect(await knownOrganizationMemberships()).toEqual([
+        { user_id: KNOWN_ADMIN.userId, role: "admin", status },
+      ]);
+      expect(
+        await readAuditActions(getDb(env), { type: "member", id: KNOWN_ADMIN.memberId })
+      ).toEqual(auditActions);
+    }
+  );
+  it("user.deleted removes every membership of the linked user without asking Clerk", async () => {
     await seedKnownOrganization();
+    await getDb(env).execute(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+       VALUES (?, ?, ?, 'member', 'active')`,
+      ["mem_webhook_known_admin_outsider", "org_webhook_outsider", KNOWN_ADMIN.userId]
+    );
+    const clerk = stubClerkBackend(env);
 
     const response = await simulateClerkWebhook({
       type: "user.deleted",
@@ -184,11 +227,15 @@ describe("Clerk webhooks", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(clerk.requests).toEqual([]);
     expect(
-      await getDb(env).queryOne("SELECT status FROM users WHERE id = ?", [KNOWN_ADMIN.userId])
-    ).toEqual({ status: "active" });
-    expect(await knownOrganizationMemberships()).toEqual([
-      { user_id: KNOWN_ADMIN.userId, role: "admin", status: "active" },
+      await getDb(env).queryMany(
+        "SELECT organization_id, user_id, status FROM organization_members ORDER BY organization_id, user_id"
+      )
+    ).toEqual([
+      { organization_id: KNOWN_ORGANIZATION.id, user_id: KNOWN_ADMIN.userId, status: "removed" },
+      { organization_id: "org_webhook_outsider", user_id: KNOWN_ADMIN.userId, status: "removed" },
+      { organization_id: "org_webhook_outsider", user_id: OUTSIDER.userId, status: "active" },
     ]);
   });
   it("refuses the organization's API keys once Clerk deletes it", async () => {
