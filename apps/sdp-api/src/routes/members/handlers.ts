@@ -5,7 +5,14 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createOrganizationRepository } from "@/db/repositories/repository-factory";
-import { AppError, badRequest, conflict, notFound, unauthorized } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  conflict,
+  internalError,
+  notFound,
+  unauthorized,
+} from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import { requireHumanActor } from "@/middleware/human-session";
@@ -60,14 +67,22 @@ async function getClerkUserId(db: DatabaseClient, userId: string): Promise<strin
   return row?.provider_user_id ?? null;
 }
 
-function resolveInviteRedirectUrl(env: Env): string | undefined {
-  const base = env.FRONTEND_URL?.replace(/\/$/, "");
-  if (!base) {
-    return undefined;
+/**
+ * Where Clerk's invitation link lands: the dashboard's sign-in page, whose
+ * Clerk component reads the ticket from its own URL and signs the invitee in,
+ * or sends a new person on to sign up with it. A protected page would bounce
+ * the invitee to sign-in with the ticket buried in a redirect parameter.
+ * Without a dashboard URL Clerk would fall back to its own hosted pages, so the
+ * invite is refused instead.
+ *
+ * @param env - The environment.
+ * @returns The sign-in URL on the dashboard's origin.
+ */
+function resolveInviteRedirectUrl(env: Env): string {
+  if (!env.FRONTEND_URL) {
+    throw internalError("FRONTEND_URL is required to send invitations");
   }
-  // Members live on the settings page. /members only redirects there, so
-  // pointing at it made every accepted invite take an extra hop.
-  return `${base}/dashboard/settings`;
+  return `${new URL(env.FRONTEND_URL).origin}/sign-in`;
 }
 
 /**
@@ -364,6 +379,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     throw badRequest("Organization is not linked to Clerk");
   }
 
+  const redirectUrl = resolveInviteRedirectUrl(c.env);
   const invitationId = `inv_${crypto.randomUUID()}`;
   const now = new Date();
   const expiresAt = new Date(
@@ -444,7 +460,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     organizationId: clerkOrgId,
     emailAddress: normalizedEmail,
     expiresInDays: INVITATION_TTL_DAYS,
-    redirectUrl: resolveInviteRedirectUrl(c.env),
+    redirectUrl,
   });
 
   // Clerk's invitation id is the only key that identifies exactly one pending

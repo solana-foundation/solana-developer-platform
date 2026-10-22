@@ -99,14 +99,14 @@ export class ClerkOrganizationsService {
    * @param params.organizationId - The Clerk organization id.
    * @param params.emailAddress - The address to invite.
    * @param params.expiresInDays - How long Clerk's link lives; matches the SDP invitation.
-   * @param params.redirectUrl - Where Clerk sends the person after accepting, when set.
+   * @param params.redirectUrl - Where Clerk's link lands: the dashboard's sign-in page.
    * @returns The Clerk invitation.
    */
   async createOrganizationInvitation(params: {
     organizationId: string;
     emailAddress: string;
     expiresInDays: number;
-    redirectUrl: string | undefined;
+    redirectUrl: string;
   }): Promise<ClerkOrganizationInvitation> {
     const payload = {
       email_address: params.emailAddress,
