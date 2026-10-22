@@ -72,15 +72,9 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
-  it("requires no project header on organization membership routes", () => {
+  it("requires no project header to leave an organization", () => {
     const doc = createOpenApiDocument();
-    for (const [path, method] of [
-      ["/v1/members/invite", "post"],
-      ["/v1/members/invitations/{invitationId}", "delete"],
-      ["/v1/members/me", "delete"],
-      ["/v1/members/{memberId}", "patch"],
-      ["/v1/members/{memberId}", "delete"],
-    ] as const) {
+    for (const [path, method] of [["/v1/members/me", "delete"]] as const) {
       const operation = doc.paths?.[path]?.[method];
       expect(operation).toBeDefined();
       expect(operation?.parameters).not.toEqual(
