@@ -812,7 +812,8 @@ describe("Payments routes — recurring", () => {
         { headers: RECURRING_HEADERS },
         env
       );
-      expect((await detail.json()).data.recurringPayment).toMatchObject({
+      expect(detail.status).toBe(200);
+      expect((await parseRecurringResponse(detail)).data.recurringPayment).toMatchObject({
         amount: "25.00",
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       });

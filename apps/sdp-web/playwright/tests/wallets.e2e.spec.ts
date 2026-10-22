@@ -11,6 +11,7 @@ import {
   bootstrapLocalWalletFixtures,
   enableLocalCustodyForPlaywrightOrg,
   getBootstrapApiBaseUrl,
+  getPlaywrightDatabaseUrl,
   gotoProjectPage,
   provisionLinkedOrgProjects,
   provisionWithAdminSession,
@@ -168,7 +169,7 @@ async function bootstrapWalletRouteFixture(browser: Browser, input: { labelPrefi
 test.describe
   .serial("dashboard wallets e2e", () => {
     test("preserves existing organization settings when enabling local custody", async () => {
-      const databaseUrl = new URL(z.url().parse(process.env.DATABASE_URL));
+      const databaseUrl = new URL(z.url().parse(getPlaywrightDatabaseUrl()));
       const apiUrl = new URL(getBootstrapApiBaseUrl());
       if (
         getE2EEnv().useExternalApi ||

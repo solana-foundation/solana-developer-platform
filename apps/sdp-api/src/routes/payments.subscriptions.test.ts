@@ -333,7 +333,10 @@ describe("Payments routes — subscriptions", () => {
         env
       );
       expect(retained.status).toBe(200);
-      expect((await retained.json()).data.subscriptionPlan).toMatchObject({
+      const retainedBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+        await retained.json()
+      );
+      expect(retainedBody.data.subscriptionPlan).toMatchObject({
         status: "draft",
         ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
         pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -354,9 +357,10 @@ describe("Payments routes — subscriptions", () => {
       env
     );
     expect(unchanged.status).toBe(200);
-    expect((await unchanged.json()).data.subscriptionPlan.pullerCustodyWalletId).toBe(
-      TEST_CUSTODY_WALLET_ID
+    const unchangedBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await unchanged.json()
     );
+    expect(unchangedBody.data.subscriptionPlan.pullerCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
     expect(await savedRoles()).toEqual({
       owner_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
       puller_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
@@ -371,7 +375,10 @@ describe("Payments routes — subscriptions", () => {
       env
     );
     expect(cleared.status).toBe(200);
-    expect((await cleared.json()).data.subscriptionPlan).toMatchObject({
+    const clearedBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await cleared.json()
+    );
+    expect(clearedBody.data.subscriptionPlan).toMatchObject({
       pullerCustodyWalletId: null,
       pullerAddress: null,
     });
@@ -417,7 +424,10 @@ describe("Payments routes — subscriptions", () => {
       env
     );
     expect(list.status).toBe(200);
-    expect((await list.json()).data.total).toBe(1);
+    const listBody = successResponseSchema(paymentSubscriptionPlanListResponseSchema).parse(
+      await list.json()
+    );
+    expect(listBody.data.total).toBe(1);
 
     const updateRes = await app.request(
       `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}`,
