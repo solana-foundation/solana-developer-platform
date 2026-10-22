@@ -10,6 +10,7 @@ import {
   type AmountVerificationVerdict,
   CHAIN_DELTA_MATCHED,
   CHAIN_DELTA_MISMATCH,
+  chainDeltaVerdict,
   LEG_VERIFIERS,
   type LegVerifier,
   TOKEN_MOVEMENT_BASES,
@@ -466,6 +467,72 @@ export function legVerdictStatement(params: {
       LEG_BY_CONSTRUCTION,
       params.verdict.state,
       NOT_EXECUTED_STATE,
+    ],
+  };
+}
+
+/**
+ * A movement SDP did not build (a provider's delivery), as the chain showed
+ * it: what it says it moved, and what the balance changes say it moved.
+ */
+export interface ChainVerifiedLeg {
+  /**
+   * What the movement says it moved, as a leg records a quote: the provider's
+   * report split by the observed fee, as of the transaction's slot and block
+   * time (null for native SOL, whose legs record no terms read).
+   */
+  quote: RecordedLegQuote;
+  /** What the chain's balance changes show it moved. */
+  observed: LegAmounts;
+}
+
+function sameAmounts(left: LegAmounts, right: LegAmounts): boolean {
+  return left.debit === right.debit && left.fee === right.fee && left.credit === right.credit;
+}
+
+/**
+ * A data-modifying CTE that records a chain-verified leg (`verified_by`
+ * `chain`) for the row a settling statement returns, so the movement and its
+ * leg settle in one statement. Its verdict follows `recordChainVerdict`'s
+ * rule: `chain_delta_matched` when the observed amounts are the quote's,
+ * `chain_delta_mismatch` otherwise. Bind its values after the statement's
+ * own, in text order. A movement that already has a leg keeps it.
+ *
+ * @param params.source - The CTE whose single row owns the leg (a payment transfer).
+ */
+export function chainVerifiedLegStatement(params: {
+  source: string;
+  leg: ChainVerifiedLeg;
+  updatedAt: string;
+}): { cte: string; values: LegBinding[] } {
+  const { quote, observed } = params.leg;
+  if (quote.asset.kind === "native" && quote.asOf !== null) {
+    throw new Error("A native SOL leg records no terms read");
+  }
+  const verdict = chainDeltaVerdict(sameAmounts(quote.quoted, observed));
+  return {
+    cte: `chain_verified_leg AS (
+      INSERT INTO token_movement_legs (
+        id, organization_id, project_id, payment_transfer_id, ${RECORDED_QUOTE_COLUMNS},
+        observed_debit, observed_fee, observed_credit, verified_by,
+        verification_state, verification_reason, created_at, updated_at
+      )
+      SELECT ?, owner_row.organization_id, owner_row.project_id, owner_row.id,
+             ${RECORDED_QUOTE_VALUES}, ?::numeric, ?::numeric, ?::numeric, ?, ?, ?, ?, ?
+        FROM ${params.source} owner_row
+      ON CONFLICT (payment_transfer_id) WHERE payment_transfer_id IS NOT NULL DO NOTHING
+    )`,
+    values: [
+      generateTokenMovementLegId(),
+      ...recordedQuoteValues(quote),
+      observed.debit.toString(),
+      observed.fee.toString(),
+      observed.credit.toString(),
+      LEG_FROM_CHAIN,
+      verdict.state,
+      verdict.reason,
+      params.updatedAt,
+      params.updatedAt,
     ],
   };
 }
