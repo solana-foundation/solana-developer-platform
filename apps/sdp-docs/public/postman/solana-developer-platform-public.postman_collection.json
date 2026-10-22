@@ -1537,6 +1537,39 @@
             "url": "{{baseUrl}}/v1/transactions",
             "description": "Lists the project's transactions across SDP modules with stable cursor pagination. Requires `transactions.read`. Every row also needs the `read` action of the module it comes from (which its `manage` or `execute` includes): a Payments row needs `transfers.read` for a transfer or deposit, `transfer_batches.read` for a batch item, `recurring.read` for a recurring collection, `payment_requests.read` for a payment request's fulfilment, and `onramp.read` or `offramp.read` for a ramp transfer; every other module's rows need that module's `read`. Rows the caller cannot read are left out. Requesting a module, or a Payments `kind`, without its action returns 403 INSUFFICIENT_PERMISSIONS naming it. `search` matches transaction id, module id, or signature as a prefix, not a substring. The endpoint is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable."
           }
+        },
+        {
+          "name": "Get token terms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/tokens/{{mint}}/terms",
+            "description": "Reads a mint's Token Terms live: decimals, token program, the transfer-fee schedule (the entry in force this epoch and next epoch), the display rule (plain, scaled UI amount or interest-bearing), the hook program, paused, non-transferable and default-frozen state, and whether each movement path this deployment runs can move the token now, with every reason it cannot. Nothing is cached: every field can change on chain. Requires `transfers.read`. The endpoint reads the chain once and is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable."
+          }
+        },
+        {
+          "name": "Quote a token amount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/tokens/{{mint}}/quote",
+            "description": "Prices an amount under the mint's live terms: what leaves the sender (`debit`), the transfer fee withheld in the destination (`fee`) and what the recipient receives (`credit`), in token units, with the display values of a scaled or interest-bearing mint. Send `amount` in token units, or `displayAmount` as wallets show it to get the token amount to send. It moves and stores nothing, takes no Idempotency-Key, and the movement is priced again when it is built. Requires `transfers.read`. The endpoint reads the chain once and is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"100\",\n  \"displayAmount\": \"150\",\n  \"basis\": \"debit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
       ]
     },

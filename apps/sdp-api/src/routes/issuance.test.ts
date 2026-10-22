@@ -8,12 +8,17 @@ import { MosaicService } from "@sdp/issuance/mosaic/service";
 import { MintMetadataUpdateError } from "@sdp/issuance/mosaic/types";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/addresses";
 import { address, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as TokenAclSdk from "@solana/token-acl-sdk";
 import * as Token2022 from "@solana-program/token-2022";
-import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import {
+  findAssociatedTokenPda,
+  getMintEncoder,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -47,6 +52,7 @@ import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
+import { encodedRpcAccount } from "@/test/helpers/token-movement";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 
 // Copy the immutable ESM namespace so tests can spy on SDK reads while preserving real exports.
@@ -3702,20 +3708,24 @@ describe("Issuance Routes", () => {
       activeTokenId = TEST_ACTIVE_TOKEN.id;
     });
 
-    it("refreshes cached supply from RPC", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: "1",
-            result: {
-              value: {
-                amount: "1500000000",
-              },
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        )
+    it("refreshes cached supply from the mint account", async () => {
+      const mintData = getMintEncoder().encode({
+        mintAuthority: null,
+        supply: 1_500_000_000n,
+        decimals: 9,
+        isInitialized: true,
+        freezeAuthority: null,
+        extensions: null,
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+        Response.json({
+          jsonrpc: "2.0",
+          id: "1",
+          result: {
+            context: { slot: 1 },
+            value: encodedRpcAccount(SPL_TOKEN_PROGRAMS["spl-token"], mintData),
+          },
+        })
       );
 
       const res = await app.request(

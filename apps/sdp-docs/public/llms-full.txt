@@ -1314,7 +1314,7 @@ POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
-The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
+The `amount` field is a decimal string in **token units** (base units ÷ 10^decimals; never the display value a scaled UI amount mint shows). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
 
 `signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 
@@ -2111,7 +2111,7 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 
 > Per-wallet token balances with optional USD valuation via SDP.
 
-`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
+`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, exact token amount, the amount a wallet displays, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
 
 ## Request
 
@@ -2158,14 +2158,20 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the balanc
           "token": "SOL",
           "mint": "So11111111111111111111111111111111111111112",
           "amount": "2500000000",
-          "uiAmount": "2.5",
+          "tokenAmount": "2.5",
+          "displayAmount": "2.5",
+          "displayAsOf": null,
+          "displayRule": "plain",
           "decimals": 9
         },
         {
           "token": "USDC",
           "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
           "amount": "1500000000",
-          "uiAmount": "1500.00",
+          "tokenAmount": "1500",
+          "displayAmount": "1500",
+          "displayAsOf": null,
+          "displayRule": "plain",
           "decimals": 6,
           "usdPrice": 1.0,
           "usdValue": 1500.0
@@ -2183,11 +2189,14 @@ Per-balance fields:
 | --- | --- |
 | `token` | Token symbol if known, otherwise the on-chain mint. |
 | `mint` | On-chain mint address. |
-| `amount` | Raw amount in the smallest unit (string to preserve precision). |
-| `uiAmount` | Human-readable decimal string — `amount / 10^decimals`. |
+| `amount` | Raw amount in the smallest unit (string to preserve precision), summed over every token account the wallet holds for the mint. |
+| `tokenAmount` | Token units: `amount / 10^decimals`, exact. Use it for balance checks and as the most a transfer can send: transfer amounts are token units. |
+| `displayAmount` | What a wallet shows for `amount`. Equal to `tokenAmount` for most tokens. A Token-2022 mint with a scaled UI amount multiplies it, and an interest-bearing mint adds accrued interest (approximate: it changes every second). For screens only; never send it as an amount. |
+| `displayAsOf` | The chain time `displayAmount` was computed at (ISO 8601); `null` when `displayRule` is `plain`. |
+| `displayRule` | `plain`, `scaled` or `interest`: how the mint's wallets show an amount. |
 | `decimals` | Token's decimal count. |
 | `usdPrice` | Per-token USD price; omitted when no pricing data is available. |
-| `usdValue` | Total USD value (= `usdPrice * uiAmount`); omitted when pricing is unavailable. |
+| `usdValue` | USD value of the displayed amount (= `usdPrice * displayAmount`); omitted when pricing is unavailable. |
 | `confidential` | Reserved for confidential transfer balances; absent for standard balances. |
 
 ## Use cases
@@ -2198,7 +2207,7 @@ Per-balance fields:
 
 ## Pricing freshness
 
-When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
+When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `tokenAmount` as authoritative and convert with your own price feed.
 
 If no price source is configured, the `usdPrice` and `usdValue` fields are absent rather than zero — the omission signals "unknown," not "$0.00," so downstream consumers can decide how to handle the gap.
 
@@ -2275,7 +2284,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand, and the only way to name native SOL: the wrapped SOL mint is refused with `400`. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
-**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
+**Amounts on the wire are token units** — decimal strings equal to base units ÷ 10^decimals, so `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. A token amount is never the display value a scaled UI amount or interest-bearing mint shows in wallets. Wallet-balance responses return the raw `amount` (smallest unit), the `tokenAmount` (token units, for balance checks) and the `displayAmount` (what a wallet shows, for screens).
 
 ## Transfer execution
 
@@ -2297,7 +2306,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
-| `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
+| `token`, `amount` | What moved and how much. `amount` is a token-unit decimal string (e.g. `"100.00"`). |
 | `memo` | Optional UTF-8 string, up to 256 chars. See [Payment with memo](/docs/payments/send-payment-with-memo). |
 | `signature` | Solana transaction signature once confirmed. **Unique across SDP** — the natural dedup key. |
 | `slot`, `blockTime`, `fee` | On-chain settlement details, populated as the transaction lands. |
@@ -3668,7 +3677,7 @@ Four boolean flags on token creation determine the posture you deploy with:
 - **`isFreezable`**. Set to `true`. If `false` at create time, the token deploys with no freeze authority and freezing becomes impossible afterward.
 - **`isMintable`**. Set to `true` for an active stablecoin. You will mint as new fiat reserves arrive at the custody bank.
 - **`requiresAllowlist`**. Turns on Token Access Control's allowlist mode — only listed addresses may receive the token. Leave off for a payment stablecoin: the institutional pattern is screen-before-transfer, not gate-by-allowlist. The `tokenized-security` template flips this on automatically.
-- **`maxSupply`**. Optional cap in UI units (decimal string). Useful for pilot programs with a hard ceiling. Omit for uncapped supply.
+- **`maxSupply`**. Optional cap in token units (decimal string: base units ÷ 10^decimals). Useful for pilot programs with a hard ceiling. Omit for uncapped supply.
 
 ### 3. Plan the authorities
 
@@ -3978,7 +3987,7 @@ Four field rules to keep clear:
 
 - **`signingCustodyWalletId`** is the exact SDP Wallet `id` from Section 2. SDP verifies that this wallet controls the current mint authority; the historical deployment wallet is not used as a fallback.
 - **`destination`** is a Solana base58 address. For the initial issuer-holds-supply pattern, this is your custody wallet's public key. For subsequent mints to client wallets, it's the recipient's wallet.
-- **`amount`** is a decimal string in UI units (post-decimals). Not a BigInt, not a number. `"1000000"` mints one million TPUSD because the token has 6 decimals.
+- **`amount`** is a decimal string in token units (base units ÷ 10^decimals). Not a BigInt, not a number. `"1000000"` mints one million TPUSD because the token has 6 decimals.
 - **`memo`** is up to 100 characters. SDP stores it on the transaction record. This is the institutional audit attribution: the reference your compliance officer will use months later when reconciling the mint against the reserve custodian's monthly report.
 
 ### 2. Read the response
@@ -5027,7 +5036,7 @@ jurisdiction and on how the instrument is structured.
 
 ## Amount format
 
-Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal string in UI units** — the human-readable token value (for example `"1"` or `"1.5"`). SDP converts to on-chain base units using the token's `decimals`. This differs from wallet balance responses, which return both raw `amount` and `uiAmount`.
+Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal string in token units** — base units ÷ 10^decimals (for example `"1"` or `"1.5"`), never the display value a scaled UI amount mint shows. SDP converts to on-chain base units using the token's `decimals`. Wallet balance responses return the raw `amount`, the `tokenAmount` and the `displayAmount`.
 
 ---
 
@@ -5324,6 +5333,8 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
+| `POST` | `/v1/tokens/{mint}/quote` | Quote a token amount |
+| `GET` | `/v1/tokens/{mint}/terms` | Get token terms |
 | `GET` | `/v1/transactions` | List transactions |
 
 ---

@@ -97,6 +97,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
   async function answerPyusd(options: {
     extensions: ExtensionArgs[];
     destinationExtensions: ExtensionArgs[];
+    destinationFrozen: boolean;
   }) {
     const accounts = new Map<string, JsonRpcResult>(await recurringMintAccounts([]));
     accounts.set(
@@ -117,6 +118,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
             owner === TEST_SOLANA_ADDRESSES.wallet2
               ? [{ __kind: "ImmutableOwner" }, ...options.destinationExtensions]
               : [{ __kind: "ImmutableOwner" }],
+          frozen: owner === TEST_SOLANA_ADDRESSES.wallet2 && options.destinationFrozen,
         })
       );
     }
@@ -433,7 +435,11 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
   });
 
   it("holds a pull whose transfer fee is above the mandate's tolerance, with the period still due", async () => {
-    await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
+    await answerPyusd({
+      extensions: [transferFeeExtension(0, 0n)],
+      destinationExtensions: [],
+      destinationFrozen: false,
+    });
     const activated = await activateRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
       token: PYUSD,
@@ -443,6 +449,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     await answerPyusd({
       extensions: [transferFeeExtension(50, 1_000_000n)],
       destinationExtensions: [],
+      destinationFrozen: false,
     });
     const sendsBefore = sendTransactionMock.mock.calls.length;
 
@@ -561,6 +568,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     await answerPyusd({
       extensions: [{ __kind: "PausableConfig", authority: MINT_AUTHORITY, paused: false }],
       destinationExtensions: [],
+      destinationFrozen: false,
     });
     const activated = await activateRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
@@ -570,6 +578,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     await answerPyusd({
       extensions: [{ __kind: "PausableConfig", authority: MINT_AUTHORITY, paused: true }],
       destinationExtensions: [],
+      destinationFrozen: false,
     });
 
     const response = await collect(activated.id);
@@ -589,6 +598,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     await answerPyusd({
       extensions: [],
       destinationExtensions: [{ __kind: "MemoTransfer", requireIncomingTransferMemos: true }],
+      destinationFrozen: false,
     });
     const created = await createRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
@@ -605,6 +615,27 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     expect(response.status).toBe(400);
     expect(errorResponseSchema.parse(await response.json()).error.details).toMatchObject({
       reason: "memo_required",
+    });
+    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
+  });
+
+  it("refuses to activate a mandate whose destination token account is frozen", async () => {
+    await answerPyusd({ extensions: [], destinationExtensions: [], destinationFrozen: true });
+    const created = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: PYUSD,
+    });
+    const sendsBefore = sendTransactionMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    expect(errorResponseSchema.parse(await response.json()).error.details).toMatchObject({
+      reason: "destination_frozen",
     });
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
   });

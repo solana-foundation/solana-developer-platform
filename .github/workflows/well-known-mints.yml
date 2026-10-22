@@ -1,6 +1,6 @@
-# Live gate: payments trust a catalogue mint's decimals and extensions without reading the chain,
-# so every catalogue change is checked against devnet and mainnet before it merges.
-# well-known-mints-watch.yml runs the same check daily, for a fee or hook set after an entry merged.
+# Live gate: a catalogue entry names the mint SDP takes a symbol to mean, so every catalogue change
+# is checked against devnet and mainnet before it merges. well-known-mints-watch.yml runs the same
+# check daily, for a fee or hook set after an entry merged.
 name: Well-Known Mints
 
 on:

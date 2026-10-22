@@ -12,20 +12,20 @@
 //      current epoch and under the newer entry (a fee change takes effect two
 //      epochs after it is set, so the newer entry is the early warning)
 //   5. no transfer hook program is set
-//   6. it carries none of the three Token-2022 extensions payments refuse
-//      (interest, scale or non-transferability): payment amount conversion
-//      takes a catalogue mint's decimals without reading the chain, which is
-//      exact only for a mint whose UI amount is its raw amount scaled by
-//      decimals. Extensions are fixed at mint initialization, so this holds.
+//   6. it is not non-transferable: a catalogue token that cannot move has no
+//      place in a payments catalogue. Interest-bearing and scaled mints pass:
+//      every payment path reads the mint's terms live and moves token units,
+//      so a display rule never changes what moves (ADR 0012).
 //
 // 1 to 3 are unsafe to take on trust: a spoofed token shares the real asset's
 // name and symbol, and only the mint distinguishes them; a wrong `decimals`
 // silently misscales every amount shown for that token. 4 and 5 are the mint
 // watch: PYUSD and USDG carry a transfer fee config (0 bps today) and a
-// transfer hook extension (no program today). Until the token-movement builder
-// lands, a fee would make every SDP transfer of the token underpay, and a hook
-// would make every one fail. The fee is checked as `min(ceil(probe × bps ÷
-// 10 000), maximumFee)`, not as bps alone, because `maximumFee` is 0 today.
+// transfer hook extension (no program today). The builder quotes a fee and
+// resolves a hook, but a change on a catalogue token changes what every one
+// of its transfers costs or needs, so it is worth knowing the day it happens.
+// The fee is checked as `min(ceil(probe × bps ÷ 10 000), maximumFee)`, not
+// as bps alone, because `maximumFee` is 0 today.
 // Each mint's other extension state is printed for the record.
 //
 // CI runs it on pull requests that touch the catalogue, the decoder or this
@@ -178,9 +178,6 @@ export function findProblems(
   }
   if (terms.transferHookProgram !== null) {
     problems.push(`a transfer hook program is set: ${terms.transferHookProgram}`);
-  }
-  if (terms.display.kind !== "plain") {
-    problems.push(`carries ${terms.display.kind} display, which payments do not support`);
   }
   if (terms.nonTransferable) {
     problems.push("is non-transferable, which payments do not support");
