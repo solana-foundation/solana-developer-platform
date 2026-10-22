@@ -78,6 +78,34 @@ describe("Organizations routes", () => {
       expect(body.data.name).toBe(TEST_ORG.name);
       expect(body.data.slug).toBe(TEST_ORG.slug);
     });
+    it("answers only the settings fields SDP defines, never a stored retired webhookSecret", async () => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({ defaultEnvironment: "production", webhookSecret: "whsec_synthetic" }),
+          TEST_ORG.id
+        )
+        .run();
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        data: {
+          id: TEST_ORG.id,
+          name: TEST_ORG.name,
+          slug: TEST_ORG.slug,
+          tier: TEST_ORG.tier,
+          status: TEST_ORG.status,
+          settings: { defaultEnvironment: "production" },
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+    });
     it("returns internal error when organization tier is invalid in storage", async () => {
       await getDb(env)
         .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
