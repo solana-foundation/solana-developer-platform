@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { findBrandedCastViolations, findValueMovementViolations } from "./check-value-movement.mjs";
+import {
+  findBrandedCastViolations,
+  findRpcDisplayValueViolations,
+  findValueMovementViolations,
+  RPC_DISPLAY_VALUES,
+} from "./check-value-movement.mjs";
 
 function fixture(files) {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "value-movement-"));
+  // The real path: TypeScript resolves packages through symlinks (macOS links `/var`).
+  const rootDir = realpathSync(mkdtempSync(path.join(tmpdir(), "value-movement-")));
   writeFileSync(
     path.join(rootDir, "tsconfig.json"),
     JSON.stringify({
@@ -46,9 +52,9 @@ function violations(files, capabilities = [CAPABILITY]) {
   try {
     return findValueMovementViolations({
       rootDir,
-      tsconfig: path.join(rootDir, "tsconfig.json"),
-      capabilities,
-      scanRoots: ["src/"],
+      programs: [
+        { tsconfig: path.join(rootDir, "tsconfig.json"), scanRoots: ["src/"], capabilities },
+      ],
     });
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -334,6 +340,167 @@ ns[name]();
   assert.deepEqual(lines, ["src/allowed.ts:5", "src/allowed.ts:6", "src/allowed.ts:8"]);
 });
 
+/** A third-party token program, installed only in the `src/pkg` workspace. */
+const TOKEN_PACKAGE = {
+  "src/pkg/package.json": JSON.stringify({ name: "pkg" }),
+  "src/pkg/node_modules/token/package.json": JSON.stringify({ name: "token", types: "index.d.ts" }),
+  "src/pkg/node_modules/token/index.d.ts": `export declare function transferChecked(amount: bigint): unknown;
+export declare function decode(): unknown;
+`,
+};
+
+const TRANSFER = {
+  id: "token-movement-test",
+  why: "transfer capability",
+  symbols: [{ module: "token", name: "transferChecked", resolveFrom: "src/pkg" }],
+  owners: [],
+  allow: ["src/pkg/builder.ts"],
+};
+
+test("pins a third-party builder from the workspace that declares it, however it is imported", () => {
+  const found = violations(
+    {
+      ...TOKEN_PACKAGE,
+      "src/pkg/builder.ts": `import { transferChecked } from "token";\ntransferChecked(1n);\n`,
+      "src/pkg/adapter.ts": `import { transferChecked as build } from "token";\nbuild(1n);\n`,
+      "src/pkg/decoder.ts": `import { decode } from "token";\ndecode();\n`,
+    },
+    [{ ...TRANSFER, allow: ["src/pkg/builder.ts", "src/pkg/decoder.ts"] }]
+  );
+
+  assert.deepEqual([...new Set(found.map((violation) => violation.split(": ")[0]))].sort(), [
+    "src/pkg/adapter.ts:1",
+    "src/pkg/adapter.ts:2",
+    "src/pkg/decoder.ts",
+  ]);
+  assert.match(
+    found.find((v) => v.startsWith("src/pkg/decoder.ts")),
+    /no longer references/
+  );
+});
+
+test("cannot resolve a package from a workspace that does not declare it", () => {
+  const files = {
+    ...TOKEN_PACKAGE,
+    "src/pkg/builder.ts": `import { transferChecked } from "token";\ntransferChecked(1n);\n`,
+  };
+  // Without `resolveFrom`, an unowned package resolves from the first root
+  // file, `src/lib/cap.ts`, whose workspace has no `token`.
+  const { resolveFrom: _, ...unanchored } = TRANSFER.symbols[0];
+  assert.throws(
+    () => violations(files, [{ ...TRANSFER, symbols: [unanchored] }]),
+    /cannot resolve token from src\/lib\/cap\.ts/
+  );
+  assert.throws(
+    () =>
+      violations(files, [
+        { ...TRANSFER, symbols: [{ ...TRANSFER.symbols[0], resolveFrom: "src/missing" }] },
+      ]),
+    /resolves from src\/missing, which has no package\.json/
+  );
+});
+
+test("fails a workspace that imports another copy of a pinned package", () => {
+  const found = violations(
+    {
+      ...TOKEN_PACKAGE,
+      "src/pkg/builder.ts": `import { transferChecked } from "token";\ntransferChecked(1n);\n`,
+      "src/other/package.json": JSON.stringify({ name: "other" }),
+      "src/other/node_modules/token/package.json": JSON.stringify({
+        name: "token",
+        types: "index.d.ts",
+      }),
+      "src/other/node_modules/token/index.d.ts":
+        "export declare function transferChecked(amount: bigint): unknown;\n",
+      "src/other/uses.ts": `import { transferChecked } from "token";\ntransferChecked(1n);\n`,
+    },
+    [TRANSFER]
+  );
+
+  assert.equal(found.length, 1);
+  assert.match(
+    found[0],
+    /^src\/other\/uses\.ts:1: imports a copy of token the check does not pin \(src\/other\/node_modules\/token\/index\.d\.ts\); every workspace must resolve it to src\/pkg\/node_modules\/token\/index\.d\.ts\./
+  );
+});
+
+test("fails a pinned symbol that no program loads", () => {
+  assert.throws(
+    () =>
+      violations({ ...TOKEN_PACKAGE, "src/pkg/builder.ts": "export const unrelated = 1;\n" }, [
+        TRANSFER,
+      ]),
+    /No program loads token, so token-movement-test cannot pin transferChecked/
+  );
+});
+
+test("scans the dashboard for its capabilities only, and a shared file once", () => {
+  const rootDir = fixture({
+    "src/lib/cap.ts": CAP_SOURCE,
+    "src/shared.ts": `import { mint } from "./lib/cap";\nexport const one = () => mint();\n`,
+    "src/api.ts": `import { Signer } from "./lib/cap";\nnew Signer();\n`,
+    "web/tsconfig.json": JSON.stringify({
+      compilerOptions: {
+        strict: true,
+        module: "esnext",
+        moduleResolution: "bundler",
+        noEmit: true,
+      },
+      include: ["**/*.ts"],
+    }),
+    // Allowlisted for a capability only the dashboard's program checks.
+    "web/allowed.ts": `import { mint } from "../src/lib/cap";\nmint();\n`,
+    "web/page.ts": `import { mint, Signer } from "../src/lib/cap";
+import { one } from "../src/shared";
+mint();
+new Signer();
+one();
+`,
+  });
+  const movement = {
+    id: "movement",
+    why: "movement capability",
+    symbols: [{ file: "src/lib/cap.ts", name: "mint" }],
+    owners: ["src/lib/cap.ts"],
+    allow: ["web/allowed.ts"],
+  };
+  const signing = {
+    id: "signing",
+    why: "signing capability",
+    symbols: [{ file: "src/lib/cap.ts", name: "Signer" }],
+    owners: ["src/lib/cap.ts"],
+    allow: [],
+  };
+  try {
+    const found = findValueMovementViolations({
+      rootDir,
+      programs: [
+        {
+          tsconfig: path.join(rootDir, "web/tsconfig.json"),
+          scanRoots: ["web/", "src/"],
+          capabilities: [movement],
+        },
+        {
+          tsconfig: path.join(rootDir, "tsconfig.json"),
+          scanRoots: ["src/"],
+          capabilities: [movement, signing],
+        },
+      ],
+    });
+
+    assert.deepEqual(found.map((violation) => violation.split(" (")[0]).sort(), [
+      "src/api.ts:1: references signing",
+      "src/api.ts:2: references signing",
+      "src/shared.ts:1: references movement",
+      "src/shared.ts:2: references movement",
+      "web/page.ts:1: references movement",
+      "web/page.ts:3: references movement",
+    ]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 const BRANDED_SOURCE = `declare const brand: unique symbol;
 export type Units = bigint & { readonly [brand]: true };
 export type Intent = { readonly amount: Units };
@@ -450,4 +617,85 @@ test("fails when a branded type is missing from its module or from every program
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
+});
+
+/** Kit's `TokenAmount`, at the path every installed copy of `@solana/rpc-types` has. */
+const RPC_TYPES = {
+  "node_modules/@solana/rpc-types/package.json": JSON.stringify({
+    name: "@solana/rpc-types",
+    types: "dist/types/index.d.ts",
+  }),
+  "node_modules/@solana/rpc-types/dist/types/index.d.ts":
+    'export type { TokenAmount } from "./token-amount";\n',
+  "node_modules/@solana/rpc-types/dist/types/token-amount.d.ts": `export type TokenAmount = Readonly<{
+  amount: string;
+  decimals: number;
+  uiAmount: number | null;
+  uiAmountString: string;
+}>;
+`,
+};
+
+const DISPLAY_FIELDS = { ...RPC_DISPLAY_VALUES, owner: "src/rpc/" };
+
+function displayViolations(files) {
+  const rootDir = fixture({ ...RPC_TYPES, ...files });
+  try {
+    return findRpcDisplayValueViolations({
+      rootDir,
+      tsconfigs: [path.join(rootDir, "tsconfig.json")],
+      fields: DISPLAY_FIELDS,
+      scanRoots: ["src/"],
+    });
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+test("flags every read or write of the RPC's display values outside the RPC layer", () => {
+  const found = displayViolations({
+    "src/reads.ts": `import type { TokenAmount } from "@solana/rpc-types";
+declare const balance: TokenAmount;
+declare const parsed: { uiTokenAmount: TokenAmount } | undefined;
+declare const narrowed: Omit<TokenAmount, "uiAmount" | "uiAmountString">;
+export const raw = narrowed.amount;
+export const a = balance.uiAmount;
+export const b = parsed?.uiTokenAmount.uiAmountString;
+export const c = balance["uiAmountString"];
+const { uiAmount } = balance;
+const { uiAmountString: shown } = balance;
+export const d = { ...balance }.uiAmount;
+export const e: TokenAmount = { amount: "1", decimals: 0, uiAmount: 1, uiAmountString: "1" };
+export const f = [uiAmount, shown];
+`,
+    "src/local.ts": "const own = { uiAmount: 1 };\nexport const g = own.uiAmount;\n",
+    "src/rpc/strip.ts": `import type { TokenAmount } from "@solana/rpc-types";
+export const strip = ({ amount, decimals, uiAmount }: TokenAmount) => ({ amount, decimals, uiAmount });
+`,
+    "src/reads.test.ts": `import type { TokenAmount } from "@solana/rpc-types";
+declare const balance: TokenAmount;
+export const t = balance.uiAmount;
+`,
+  });
+
+  assert.deepEqual(
+    found.map((violation) => violation.split(", ")[0]),
+    [
+      "src/reads.ts:6: references uiAmount",
+      "src/reads.ts:7: references uiAmountString",
+      "src/reads.ts:8: references uiAmountString",
+      "src/reads.ts:9: references uiAmount",
+      "src/reads.ts:10: references uiAmountString",
+      "src/reads.ts:11: references uiAmount",
+      "src/reads.ts:12: references uiAmount",
+      "src/reads.ts:12: references uiAmountString",
+    ]
+  );
+});
+
+test("fails when no program loads the RPC's token amount", () => {
+  assert.throws(
+    () => displayViolations({ "src/plain.ts": "export const one = 1;\n" }),
+    /No program loads \/node_modules\/@solana\/rpc-types\/dist\/types\/token-amount\.d\.ts/
+  );
 });
