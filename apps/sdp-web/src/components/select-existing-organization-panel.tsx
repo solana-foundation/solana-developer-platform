@@ -34,6 +34,45 @@ function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string 
   );
 }
 
+type EntryState = "no-access" | "create" | "select";
+
+function resolveEntryState(params: {
+  noAccess: boolean;
+  isLoaded: boolean;
+  hasChoices: boolean;
+}): EntryState {
+  if (params.noAccess) return "no-access";
+  if (params.isLoaded && !params.hasChoices) return "create";
+  return "select";
+}
+
+function entryCopy(
+  state: EntryState,
+  t: ReturnType<typeof useTranslations>
+): { title: string; description: string } {
+  switch (state) {
+    case "no-access":
+      return {
+        title: t("Shared.SharedComponents.noOrganizationAccessTitle"),
+        description: t("Shared.SharedComponents.noOrganizationAccessDescription"),
+      };
+    case "create":
+      return {
+        title: t("Shared.SharedComponents.createOrganizationTitle"),
+        description: t("Shared.SharedComponents.createOrganizationDescription"),
+      };
+    case "select":
+      return {
+        title: t("Shared.SharedComponents.selectOrganization"),
+        description: t("Shared.SharedComponents.selectExistingOrganizationDescription"),
+      };
+    default: {
+      const exhaustive: never = state;
+      throw new Error(`Unknown entry state: ${String(exhaustive)}`);
+    }
+  }
+}
+
 /**
  * Entry state for a signed-in person with no organization selected for the
  * session: their organizations to pick from, their pending invitations to
@@ -53,25 +92,21 @@ export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolea
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const memberships = userMemberships.data ?? [];
   const invitations = userInvitations.data ?? [];
+  const copy = entryCopy(
+    resolveEntryState({
+      noAccess,
+      isLoaded,
+      hasChoices: memberships.length > 0 || invitations.length > 0,
+    }),
+    t
+  );
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--sdp-shell-bg)] px-4 py-10 text-primary">
       <section className="w-full max-w-md rounded-3xl border border-border-subtle bg-surface-raised p-6 shadow-sm">
         <div className="space-y-2">
-          <h1 className="text-2xl font-medium tracking-tight">
-            {noAccess
-              ? t("Shared.SharedComponents.noOrganizationAccessTitle")
-              : isLoaded && memberships.length === 0 && invitations.length === 0
-                ? t("Shared.SharedComponents.createOrganizationTitle")
-                : t("Shared.SharedComponents.selectOrganization")}
-          </h1>
-          <p className="text-sm leading-6 text-tertiary">
-            {noAccess
-              ? t("Shared.SharedComponents.noOrganizationAccessDescription")
-              : isLoaded && memberships.length === 0 && invitations.length === 0
-                ? t("Shared.SharedComponents.createOrganizationDescription")
-                : t("Shared.SharedComponents.selectExistingOrganizationDescription")}
-          </p>
+          <h1 className="text-2xl font-medium tracking-tight">{copy.title}</h1>
+          <p className="text-sm leading-6 text-tertiary">{copy.description}</p>
         </div>
 
         <div

@@ -273,7 +273,6 @@ function SidebarGroup({
 }
 
 function DashboardSidebarContent({
-  canManageOrgSettings,
   navSections,
   pathname,
   onNavigate,
@@ -286,7 +285,6 @@ function DashboardSidebarContent({
   onSubnavToggle,
   onSubnavOpen,
 }: {
-  canManageOrgSettings: boolean;
   navSections: NavSection[];
   pathname: string;
   onNavigate?: () => void;
@@ -351,7 +349,6 @@ function DashboardSidebarContent({
         {showQuickStart ? <DashboardQuickStart collapsed={isCollapsed} /> : null}
         <SidebarUserMenu
           collapsed={isCollapsed}
-          canManageOrgSettings={canManageOrgSettings}
           // The mobile slide-over is a 288px column, so the popover only has
           // room above the trigger there.
           menuSide={variant === "desktop" ? "right" : "top"}
@@ -757,7 +754,6 @@ export function DashboardShell({
               >
                 <ThemeScopeProvider scope={sidebarScope}>
                   <DashboardSidebarContent
-                    canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                     navSections={navSections}
                     pathname={pathname}
                     onNavigate={undefined}
@@ -808,7 +804,6 @@ export function DashboardShell({
               {isMoreSheetOpen ? (
                 <DashboardMoreSheet
                   pathname={pathname}
-                  canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                   dvpEnabled={dvpEnabled}
                   earnEnabled={earnEnabled}
                   heliusRingsEnabled={heliusRingsEnabled}
@@ -834,7 +829,6 @@ export function DashboardShell({
                   >
                     <ThemeScopeProvider scope={sidebarScope}>
                       <DashboardSidebarContent
-                        canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                         navSections={navSections}
                         pathname={pathname}
                         onNavigate={() => setMobileSidebarOpen(false)}

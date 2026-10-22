@@ -42,7 +42,6 @@ type MoreGroup = { title: string; items: MoreItem[] };
 function getMoreGroups(
   t: ReturnType<typeof useTranslations>,
   options: {
-    canManageOrgSettings: boolean;
     dvpEnabled: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
@@ -87,15 +86,11 @@ function getMoreGroups(
     {
       title: t("Shared.dashboardShell.workspace"),
       items: [
-        ...(options.canManageOrgSettings
-          ? [
-              {
-                label: t("Shared.dashboardShell.settings"),
-                href: DASHBOARD_SIDE_NAV_HREFS.settings,
-                icon: Settings2Icon,
-              },
-            ]
-          : []),
+        {
+          label: t("Shared.dashboardShell.settings"),
+          href: DASHBOARD_SIDE_NAV_HREFS.settings,
+          icon: Settings2Icon,
+        },
         {
           label: t("Shared.dashboardShell.apiDocs"),
           href: docsHref,
@@ -148,7 +143,6 @@ function TileLink({
  */
 export function DashboardMoreSheet({
   pathname,
-  canManageOrgSettings,
   dvpEnabled,
   earnEnabled,
   heliusRingsEnabled,
@@ -156,7 +150,6 @@ export function DashboardMoreSheet({
   onClose,
 }: {
   pathname: string;
-  canManageOrgSettings: boolean;
   dvpEnabled: boolean;
   earnEnabled: boolean;
   heliusRingsEnabled: boolean;
@@ -165,7 +158,6 @@ export function DashboardMoreSheet({
 }) {
   const t = useTranslations();
   const groups = getMoreGroups(t, {
-    canManageOrgSettings,
     dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
@@ -217,11 +209,7 @@ export function DashboardMoreSheet({
             <WorkspaceSwitcher collapsed={false} onOrganizationSwitchingChange={() => {}} />
             {/* The account menu lives in the sidebar footer, which has no mobile
                 counterpart — this is where phones reach sign-out and feedback. */}
-            <SidebarUserMenu
-              collapsed={false}
-              canManageOrgSettings={canManageOrgSettings}
-              menuSide="top"
-            />
+            <SidebarUserMenu collapsed={false} menuSide="top" />
           </div>
 
           {groups.map((group) => (

@@ -1,5 +1,6 @@
 "use client";
 
+import type { OrganizationRole } from "@sdp/types/roles";
 import { Button } from "@sdp/ui/button";
 import {
   DropdownMenu,
@@ -24,7 +25,7 @@ export function MemberActions({
 }: {
   memberId: string;
   label: string;
-  role: string;
+  role: OrganizationRole;
   isSelf: boolean;
   isLastAdmin: boolean;
 }) {
@@ -38,11 +39,12 @@ export function MemberActions({
   const roleKey = useRef<string | null>(null);
   const nextRole = role === "admin" ? "member" : "admin";
 
-  const blockedRoleReason = isSelf
-    ? t("Shared.members.cannotChangeOwnRole")
-    : nextRole === "member" && isLastAdmin
-      ? t("Shared.members.cannotDemoteLastAdmin")
-      : null;
+  let blockedRoleReason: string | null = null;
+  if (isSelf) {
+    blockedRoleReason = t("Shared.members.cannotChangeOwnRole");
+  } else if (nextRole === "member" && isLastAdmin) {
+    blockedRoleReason = t("Shared.members.cannotDemoteLastAdmin");
+  }
 
   const confirmRoleChange = () => {
     roleKey.current ??= crypto.randomUUID();
@@ -61,11 +63,12 @@ export function MemberActions({
 
   // The API rejects both of these; disabling the row menu means the rule is
   // visible before someone commits to a destructive action rather than after.
-  const blockedReason = isSelf
-    ? t("Shared.members.cannotRemoveSelf")
-    : isLastAdmin
-      ? t("Shared.members.cannotRemoveLastAdmin")
-      : null;
+  let blockedReason: string | null = null;
+  if (isSelf) {
+    blockedReason = t("Shared.members.cannotRemoveSelf");
+  } else if (isLastAdmin) {
+    blockedReason = t("Shared.members.cannotRemoveLastAdmin");
+  }
 
   const confirmRemove = () => {
     removeKey.current ??= crypto.randomUUID();

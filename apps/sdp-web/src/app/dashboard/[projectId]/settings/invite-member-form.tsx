@@ -12,17 +12,28 @@ type InviteState = InviteMemberResult | null;
 
 const ROLE_LABEL_ID = "invite-role-label";
 
-async function submitInvite(_previous: InviteState, formData: FormData): Promise<InviteState> {
-  return inviteMember(formData);
-}
-
 export function InviteMemberForm() {
   const t = useTranslations();
+  // One key per invitation being sent: kept while the same address and role are
+  // retried, new once either changes or the invitation lands.
+  const keyed = useRef<{ email: FormDataEntryValue | null; role: string; key: string } | null>(
+    null
+  );
+  const submitInvite = async (_previous: InviteState, formData: FormData): Promise<InviteState> => {
+    const email = formData.get("email");
+    const submittedRole = String(formData.get("role"));
+    if (keyed.current?.email !== email || keyed.current.role !== submittedRole) {
+      keyed.current = { email, role: submittedRole, key: crypto.randomUUID() };
+    }
+    formData.set("idempotencyKey", keyed.current.key);
+    const result = await inviteMember(formData);
+    if (result.ok) {
+      keyed.current = null;
+    }
+    return result;
+  };
   const [state, formAction, isPending] = useActionState<InviteState, FormData>(submitInvite, null);
   const [role, setRole] = useState<"admin" | "member">("member");
-  // One key per invitation, kept across retries until one lands, so a
-  // repeated submit replays the first answer instead of inviting again.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const formRef = useRef<HTMLFormElement>(null);
   // useActionState keeps the last result, so react to identity changes rather
   // than value: two failures with the same message must still both surface.
@@ -39,7 +50,6 @@ export function InviteMemberForm() {
       // Clear the field only on success, so a rejected address stays editable.
       formRef.current?.reset();
       setRole("member");
-      setIdempotencyKey(crypto.randomUUID());
       return;
     }
 
@@ -74,7 +84,6 @@ export function InviteMemberForm() {
               control, so the value is mirrored into a hidden input to reach the
               server action's FormData. */}
           <input type="hidden" name="role" value={role} />
-          <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
           <Select
             ariaLabel={t("Shared.members.inviteRole")}
             value={role}

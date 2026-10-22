@@ -13,7 +13,7 @@ import { readableApiError } from "@/lib/sdp-api-error";
 
 export interface Member {
   id: string;
-  role: string;
+  role: OrganizationRole;
   status: string;
   createdAt: string;
   /** Set by the API; the client holds emails, not the actor's user id. */
