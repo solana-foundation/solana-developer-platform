@@ -59,6 +59,7 @@ import {
   signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
@@ -1865,19 +1866,13 @@ describe("Payments routes — recurring", () => {
     body: Record<string, unknown>;
     during: () => Promise<T>;
   }): Promise<{ paused: Response; during: T }> {
-    let releaseUpdate: (() => void) | undefined;
-    let signalUpdatePaused: (() => void) | undefined;
-    const updatePaused = new Promise<void>((resolve) => {
-      signalUpdatePaused = resolve;
-    });
-    const updateReleased = new Promise<void>((resolve) => {
-      releaseUpdate = resolve;
-    });
+    const updatePaused = deferred<void>();
+    const updateReleased = deferred<void>();
     const admission = vi
       .spyOn(SigningService.prototype, "admitRuntimeExecution")
       .mockImplementationOnce(async () => {
-        signalUpdatePaused?.();
-        await updateReleased;
+        updatePaused.resolve();
+        await updateReleased.promise;
       });
     const updatePromise = Promise.resolve(
       app.request(
@@ -1887,12 +1882,12 @@ describe("Payments routes — recurring", () => {
       )
     );
     try {
-      await updatePaused;
+      await updatePaused.promise;
       const during = await input.during();
-      releaseUpdate?.();
+      updateReleased.resolve();
       return { paused: await updatePromise, during };
     } finally {
-      releaseUpdate?.();
+      updateReleased.resolve();
       admission.mockRestore();
       await Promise.allSettled([updatePromise]);
     }
@@ -1958,7 +1953,8 @@ describe("Payments routes — recurring", () => {
       dueAt,
     });
 
-    let releaseCollection: (() => void) | undefined;
+    const collectionClaimed = deferred<void>();
+    const collectionReleased = deferred<void>();
     let collectPromise: Promise<Response> | undefined;
     let updateRes: Response | undefined;
     try {
@@ -1969,16 +1965,9 @@ describe("Payments routes — recurring", () => {
           nextCollectionDueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
         },
         during: async () => {
-          let signalCollectionClaimed: (() => void) | undefined;
-          const collectionClaimed = new Promise<void>((resolve) => {
-            signalCollectionClaimed = resolve;
-          });
-          const collectionReleased = new Promise<void>((resolve) => {
-            releaseCollection = resolve;
-          });
           createOrgSignerForCustodyWalletMock.mockImplementationOnce(async () => {
-            signalCollectionClaimed?.();
-            await collectionReleased;
+            collectionClaimed.resolve();
+            await collectionReleased.promise;
             return sourceSigner;
           });
           collectPromise = Promise.resolve(
@@ -1988,11 +1977,11 @@ describe("Payments routes — recurring", () => {
               env
             )
           );
-          await collectionClaimed;
+          await collectionClaimed.promise;
         },
       }));
     } finally {
-      releaseCollection?.();
+      collectionReleased.resolve();
     }
     const collectRes = await required(collectPromise);
 
