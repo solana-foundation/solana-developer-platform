@@ -62,7 +62,22 @@ END AS kind,
   pt.project_id,
   pt.custody_wallet_id,
   pt.token,
-  pt.amount,
+  CASE
+    WHEN pt.type = 'transfer_batch' THEN COALESCE((
+      SELECT trim_scale(sum(round((leg.quoted_debit)::numeric, leg.decimals) / (10::numeric ^ leg.decimals)))::text
+        FROM payment_transfer_recipients recipient
+        JOIN token_movement_legs leg ON leg.payment_transfer_recipient_id = recipient.id
+       WHERE recipient.transfer_id = pt.id
+         AND recipient.status <> 'archived'
+         AND leg.status <> 'archived'
+    ), pt.amount)
+    ELSE COALESCE((
+      SELECT trim_scale(round((CASE WHEN pt.direction = 'inbound' OR pt.type = 'offramp' THEN leg.quoted_credit ELSE leg.quoted_debit END)::numeric, leg.decimals) / (10::numeric ^ leg.decimals))::text
+        FROM token_movement_legs leg
+       WHERE leg.payment_transfer_id = pt.id
+         AND leg.status <> 'archived'
+    ), pt.amount)
+  END AS amount,
   pt.counterparty_id,
   pt.signature,
   pt.created_at

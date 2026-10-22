@@ -27,6 +27,7 @@ import {
   currentProviderSettlement,
   readDeliveryMismatch,
 } from "@/services/payments/ramp-provider-settlement";
+import { chainTimeIso } from "@/services/token-movement/chain-time";
 
 /** The stored provider reference for a ramp transfer, including retired providers. */
 function rampProviderReference(row: TransferRow): string | undefined {
@@ -200,7 +201,7 @@ export function movementAmounts(
       debit: shown("debit"),
       fee: shown("fee"),
       credit: shown("credit"),
-      asOf: new Date(Number(asOf.unixTimestamp) * 1000).toISOString(),
+      asOf: chainTimeIso(asOf.unixTimestamp),
     };
   }
   return amounts;
@@ -251,13 +252,22 @@ export function mapObservedTransfer(row: TransferRow, movement: ObservedMovement
   return transfer;
 }
 
-/** A transfer row with its legs' amounts and verification. */
+/**
+ * A transfer row with its legs' amounts and verification. An on-ramp's stored
+ * `amount` is the provider's quote; once the chain verifies its delivery (its
+ * leg), `amount` is what its wallet received, the leg's credit. The unified
+ * transactions view reports the same value.
+ */
 export function mapTransferWithLegs(row: TransferRow, legs: readonly TokenMovementLeg[]) {
   const transfer: ReturnType<typeof mapTransferRow> & MovementFields = mapTransferRow(row);
   const [first, ...rest] = legs;
   if (first !== undefined) {
-    transfer.amounts = movementAmounts([first, ...rest]);
+    const amounts = movementAmounts([first, ...rest]);
+    transfer.amounts = amounts;
     transfer.amountVerification = movementVerification([first, ...rest]);
+    if (row.type === "onramp") {
+      transfer.amount = amounts.credit;
+    }
   }
   return transfer;
 }
