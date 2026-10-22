@@ -788,8 +788,9 @@ for. Both were checked against the pinned Kora build and the deployed configs:
   it never sees. devnet already sets the flag true, CI-sanctioned via
   `validate-policy.py --allow-spend system.allow_transfer,system.allow_create_account`.
 - (b) The budget prices it, because every per-transaction reservation is
-  `networkFee + max_allowed_lamports`, whatever the policy reports. devnet reserves ~9,905,000 lamports against
-  ~2,039,280 of real ATA rent: a ~5x over-reserve, not an accounting hole.
+  `networkFee + max_allowed_lamports`, whatever the policy reports. devnet
+  reserves ~9,905,000 lamports against ~2,039,280 of real ATA rent: a ~5x
+  over-reserve, not an accounting hole.
 
 The mechanism is precedent, not invention: `routes/pay.ts` and the transfer-batch
 and recurring-payment paths already make the Kora signer both the ATA rent payer

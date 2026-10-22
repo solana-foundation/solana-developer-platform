@@ -179,6 +179,9 @@ export function sponsorshipProviderConfigFingerprint(
     .update(
       canonicalJson({
         maxAllowedLamports: configuration.maxAllowedLamports,
+        // No longer sizes the ceiling, but it stays an input: every open reservation pins a
+        // fingerprint that includes it, and the reconciler trips on any mismatch.
+        feePayerMayTransferLamports: configuration.feePayerMayTransferLamports,
         feePayerPolicy: configuration.feePayerPolicy,
       })
     )
