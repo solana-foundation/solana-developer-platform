@@ -33,6 +33,7 @@ const MAX_SIGNATURE_PAGES = 5;
 const VERIFY_BUDGET = 25;
 const PAYMENT_SEARCH_RETRY_AFTER_SECONDS = 5;
 const RETRYABLE_TRANSFER_CHECK_ERRORS: ReadonlySet<string> = new Set(["not found", "missing meta"]);
+const UNREADABLE_SIGNATURE_GIVE_UP_MS = 60 * 60 * 1000;
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
@@ -52,7 +53,7 @@ type PaymentSearchResult =
 type CandidateVerdict =
   | { kind: "paid"; found: FoundPayment }
   | { kind: "rejected" }
-  | { kind: "retry" };
+  | { kind: "retry"; reason: string };
 
 interface PaymentRequestKey {
   requestId: string;
@@ -220,6 +221,15 @@ async function evaluateOldestFirst(
       verified++;
       verdict = await judgeCandidate(rpc, row, reference, candidate);
     }
+    if (verdict.kind === "retry" && isPastUnreadableGiveUp(candidate.blockTime)) {
+      logEvent("warn", {
+        event: "payment_requests.signature_unreadable",
+        payment_request_id: row.id,
+        signature: candidate.signature,
+        reason: verdict.reason,
+      });
+      verdict = { kind: "rejected" };
+    }
     if (verdict.kind === "paid") {
       return { cursor, exhausted: false, found: verdict.found };
     }
@@ -230,6 +240,12 @@ async function evaluateOldestFirst(
     }
   }
   return { cursor, exhausted: contiguous, found: null };
+}
+
+function isPastUnreadableGiveUp(blockTime: bigint | null): boolean {
+  return (
+    blockTime !== null && Date.now() - Number(blockTime) * 1000 > UNREADABLE_SIGNATURE_GIVE_UP_MS
+  );
 }
 
 async function judgeCandidate(
@@ -244,7 +260,7 @@ async function judgeCandidate(
   if (!landed.ok) {
     return landed.reason === "failed" || landed.reason === "account_missing"
       ? { kind: "rejected" }
-      : { kind: "retry" };
+      : { kind: "retry", reason: landed.reason };
   }
   try {
     await validateTransfer(rpc, candidate.signature, {
@@ -258,7 +274,7 @@ async function judgeCandidate(
       throw err;
     }
     return RETRYABLE_TRANSFER_CHECK_ERRORS.has(err.message)
-      ? { kind: "retry" }
+      ? { kind: "retry", reason: err.message }
       : { kind: "rejected" };
   }
   return {

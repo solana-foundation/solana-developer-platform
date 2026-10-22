@@ -948,6 +948,112 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
   });
 
+  describe("when a listed signature stays unreadable", () => {
+    const secondsAgo = (seconds: number) => BigInt(Math.floor(Date.now() / 1000) - seconds);
+    const unreadableVerdicts = [
+      {
+        reason: "not_indexed",
+        setup: () =>
+          verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" }),
+      },
+      {
+        reason: "not_confirmed",
+        setup: () =>
+          verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_confirmed" }),
+      },
+      {
+        reason: "not found",
+        setup: () => {
+          verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+          validateTransferSpy.mockRejectedValue(new ValidateTransferError("not found"));
+        },
+      },
+      {
+        reason: "missing meta",
+        setup: () => {
+          verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+          validateTransferSpy.mockRejectedValue(new ValidateTransferError("missing meta"));
+        },
+      },
+    ];
+
+    it.for(unreadableVerdicts)(
+      "gives up on a $reason signature listed over an hour ago and stores expired",
+      async ({ reason, setup }) => {
+        const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
+        mockSignatures(signatureInfo(SIGNATURE, { blockTime: secondsAgo(2 * 60 * 60) }));
+        setup();
+        const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+        const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+        expect(result).toMatchObject({ status: "expired", paid_late: false });
+        expect(await readStored(request.id)).toMatchObject({
+          status: "expired",
+          signature_scan_cursor: SIGNATURE,
+        });
+        expect(logSpy).toHaveBeenCalledWith("warn", {
+          event: "payment_requests.signature_unreadable",
+          payment_request_id: request.id,
+          signature: SIGNATURE,
+          reason,
+        });
+        expect(await listInboundTransfers()).toHaveLength(0);
+      }
+    );
+
+    it.for(unreadableVerdicts)(
+      "keeps waiting on a $reason signature listed minutes ago",
+      async ({ setup }) => {
+        const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
+        mockSignatures(signatureInfo(SIGNATURE, { blockTime: secondsAgo(5 * 60) }));
+        setup();
+        const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+        const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+        expect(result.status).toBe("awaiting_payment");
+        expect(await readStored(request.id)).toMatchObject({
+          status: "awaiting_payment",
+          signature_scan_cursor: null,
+        });
+        expect(logSpy).not.toHaveBeenCalledWith(
+          "warn",
+          expect.objectContaining({ event: "payment_requests.signature_unreadable" })
+        );
+      }
+    );
+
+    it("keeps waiting on an unreadable signature listed without a block time", async () => {
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null }));
+      verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
+      const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+      const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+      expect(result.status).toBe("awaiting_payment");
+      expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: null });
+    });
+
+    it("settles a valid payment listed after an abandoned unreadable signature", async () => {
+      mockSignatures(
+        signatureInfo(LATER_SIGNATURE),
+        signatureInfo(SIGNATURE, { blockTime: secondsAgo(2 * 60 * 60) })
+      );
+      verifyTransactionLandedSpy.mockImplementation(async (_rpc, sig) =>
+        sig === SIGNATURE ? { ok: false, reason: "not_indexed" } : verifiedOk()
+      );
+      validateTransferSpy.mockResolvedValue(validatedTransfer());
+      const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+      const result = await reconcileOnSandbox(request);
+
+      expect(result.status).toBe("paid");
+      expect(await listInboundTransfers()).toMatchObject([{ signature: LATER_SIGNATURE }]);
+      expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: SIGNATURE });
+    });
+  });
+
   it("stores expired and advances the cursor past a transfer that does not match the request", async () => {
     mockSignatures(signatureInfo(SIGNATURE));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
