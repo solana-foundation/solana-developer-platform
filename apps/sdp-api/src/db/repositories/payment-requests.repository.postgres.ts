@@ -4,6 +4,7 @@ import { buildInClause } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
+  AdvanceSignatureScanInput,
   CreatePaymentRequestInput,
   ListPaymentRequestsInput,
   ListPaymentRequestsResult,
@@ -40,6 +41,8 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     updated_at: row.updated_at as string,
     last_checked_at: row.last_checked_at as string | null,
     paid_late: row.paid_late === true,
+    signature_scan_cursor: (row.signature_scan_cursor as string | null) ?? null,
+    signature_scan_before: (row.signature_scan_before as string | null) ?? null,
   };
 }
 
@@ -420,6 +423,31 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         )
         .first<Record<string, unknown>>();
       return row ? mapPaymentRequestRow(row) : null;
+    },
+
+    async advanceSignatureScan(input: AdvanceSignatureScanInput) {
+      const changed = await db
+        .prepare(
+          `UPDATE payment_requests
+             SET signature_scan_cursor = ?,
+                 signature_scan_before = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND signature_scan_cursor IS NOT DISTINCT FROM ?
+             AND signature_scan_before IS NOT DISTINCT FROM ?`
+        )
+        .bind(
+          input.to.cursor,
+          input.to.before,
+          input.requestId,
+          input.organizationId,
+          input.projectId,
+          input.from.cursor,
+          input.from.before
+        )
+        .run();
+      return changed > 0;
     },
 
     async countStaleAwaitingPaymentRequests({ environment, checkedBefore }) {

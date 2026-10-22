@@ -1,16 +1,17 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getSignaturesForAddress, type SolanaRpc } from "@sdp/rpc/solana";
+import { getSignaturesForAddress, type SignatureInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import type { Signature } from "@solana/kit";
+import { type Address, type Signature, signature } from "@solana/kit";
 import { ValidateTransferError, validateTransfer } from "@solana/pay";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentRequestRow,
   PaymentRequestsRepository,
+  SignatureScanPosition,
 } from "@/db/repositories/payment-requests.repository";
 import {
   generatePaymentTransferId,
@@ -24,10 +25,12 @@ import {
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, nullOnExpected } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
-const REFERENCE_SIGNATURE_LIMIT = 100;
-const MAX_PAYMENT_CANDIDATES = 10;
+const SIGNATURE_PAGE_SIZE = 1000;
+const MAX_SIGNATURE_PAGES = 5;
+const VERIFY_BUDGET = 25;
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
@@ -74,7 +77,7 @@ export async function checkAwaitingPaymentRequest(
   ) {
     return row;
   }
-  const result = await findValidPayment(createClusterRpc(), row);
+  const result = await findValidPayment(env, createClusterRpc(), row);
   if (result.kind !== "paid") {
     return row;
   }
@@ -89,7 +92,7 @@ export async function closeLapsedPaymentRequest(
     return row;
   }
   if (row.custody_wallet_id !== null) {
-    const result = await findValidPayment(createClusterRpc(), row);
+    const result = await findValidPayment(env, createClusterRpc(), row);
     if (result.kind === "paid") {
       return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
     }
@@ -107,7 +110,7 @@ export async function checkExpiredPaymentRequestForLatePayment(
   if (row.status !== "expired" || row.custody_wallet_id === null) {
     return row;
   }
-  const result = await findValidPayment(createClusterRpc(), row);
+  const result = await findValidPayment(env, createClusterRpc(), row);
   if (result.kind !== "paid") {
     return row;
   }
@@ -124,26 +127,97 @@ function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean
 }
 
 async function findValidPayment(
+  env: Env,
   rpc: SolanaRpc,
   row: PaymentRequestRow
 ): Promise<PaymentSearchResult> {
   const reference = assertValidAddress(row.reference, "reference");
-  const signatures = await getSignaturesForAddress(rpc, reference, {
-    commitment: "confirmed",
-    limit: REFERENCE_SIGNATURE_LIMIT,
+  const from: SignatureScanPosition = {
+    cursor: row.signature_scan_cursor,
+    before: row.signature_scan_before,
+  };
+  const fetched = await fetchUnscannedSignatures(rpc, reference, from);
+  const oldest = fetched.newestFirst.at(-1);
+  if (fetched.truncated && oldest !== undefined) {
+    logEvent("warn", {
+      event: "payment_requests.signature_scan_truncated",
+      requestId: row.id,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      fetched: fetched.newestFirst.length,
+      resumed: from.before !== null,
+    });
+    await advanceSignatureScan(env, row, from, { cursor: from.cursor, before: oldest.signature });
+    return { kind: "pending" };
+  }
+  const scan = await evaluateOldestFirst(rpc, row, reference, [...fetched.newestFirst].reverse());
+  await advanceSignatureScan(env, row, from, {
+    cursor: scan.cursor ?? from.cursor,
+    before: scan.exhausted ? null : from.before,
   });
-  const candidates = signatures
-    .filter((info) => info.err === null)
-    .reverse()
-    .slice(0, MAX_PAYMENT_CANDIDATES);
+  if (scan.found !== null) {
+    return { kind: "paid", found: scan.found };
+  }
+  return scan.exhausted && from.before === null ? { kind: "none" } : { kind: "pending" };
+}
 
-  let pending = false;
-  for (const candidate of candidates) {
-    const verified = await verifyTransactionLanded(rpc, candidate.signature, {
+async function fetchUnscannedSignatures(
+  rpc: SolanaRpc,
+  reference: Address,
+  from: SignatureScanPosition
+): Promise<{ newestFirst: SignatureInfo[]; truncated: boolean }> {
+  const until = from.cursor === null ? undefined : signature(from.cursor);
+  const newestFirst: SignatureInfo[] = [];
+  let before = from.before === null ? undefined : signature(from.before);
+  for (let pages = 0; pages < MAX_SIGNATURE_PAGES; pages++) {
+    const page = await getSignaturesForAddress(rpc, reference, {
+      commitment: "confirmed",
+      limit: SIGNATURE_PAGE_SIZE,
+      until,
+      before,
+    });
+    newestFirst.push(...page);
+    const last = page.at(-1);
+    if (page.length < SIGNATURE_PAGE_SIZE || last === undefined) {
+      return { newestFirst, truncated: false };
+    }
+    before = last.signature;
+  }
+  return { newestFirst, truncated: true };
+}
+
+async function evaluateOldestFirst(
+  rpc: SolanaRpc,
+  row: PaymentRequestRow,
+  reference: Address,
+  oldestFirst: readonly SignatureInfo[]
+): Promise<{ cursor: Signature | null; exhausted: boolean; found: FoundPayment | null }> {
+  let cursor: Signature | null = null;
+  let contiguous = true;
+  let verified = 0;
+  const markDefinitive = (candidate: SignatureInfo) => {
+    if (contiguous) {
+      cursor = candidate.signature;
+    }
+  };
+  for (const candidate of oldestFirst) {
+    if (candidate.err !== null) {
+      markDefinitive(candidate);
+      continue;
+    }
+    if (verified >= VERIFY_BUDGET) {
+      return { cursor, exhausted: false, found: null };
+    }
+    verified++;
+    const landed = await verifyTransactionLanded(rpc, candidate.signature, {
       searchTransactionHistory: true,
     });
-    if (!verified.ok) {
-      pending ||= verified.reason === "not_indexed";
+    if (!landed.ok) {
+      if (landed.reason === "not_indexed") {
+        contiguous = false;
+      } else {
+        markDefinitive(candidate);
+      }
       continue;
     }
     const validated = await nullOnExpected(
@@ -157,16 +231,34 @@ async function findValidPayment(
     );
     if (validated !== null) {
       return {
-        kind: "paid",
+        cursor,
+        exhausted: false,
         found: {
           signature: candidate.signature,
           slot: candidate.slot,
-          blockTime: candidate.blockTime ?? verified.transaction.blockTime ?? null,
+          blockTime: candidate.blockTime ?? landed.transaction.blockTime ?? null,
         },
       };
     }
+    markDefinitive(candidate);
   }
-  return pending ? { kind: "pending" } : { kind: "none" };
+  return { cursor, exhausted: contiguous, found: null };
+}
+
+async function advanceSignatureScan(
+  env: Env,
+  row: PaymentRequestRow,
+  from: SignatureScanPosition,
+  to: SignatureScanPosition
+): Promise<void> {
+  if (from.cursor === to.cursor && from.before === to.before) {
+    return;
+  }
+  const key = paymentRequestKey(row);
+  await createPaymentRequestsRepository(
+    env,
+    createTenantScope({ organizationId: key.organizationId, projectId: key.projectId })
+  ).advanceSignatureScan({ ...key, from, to });
 }
 
 async function settlePaymentRequest(

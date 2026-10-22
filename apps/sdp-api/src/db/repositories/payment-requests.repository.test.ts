@@ -1063,6 +1063,92 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
     });
 
+    describe("advanceSignatureScan", () => {
+      function scanKey(request: PaymentRequestRow) {
+        return { requestId: request.id, organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+      }
+
+      it("starts with no scan position", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+        expect(created).toMatchObject({ signature_scan_cursor: null, signature_scan_before: null });
+      });
+
+      it("moves the scan position when the expected position matches", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+
+        const advanced = await repo.advanceSignatureScan({
+          ...scanKey(created),
+          from: { cursor: null, before: null },
+          to: { cursor: "sigA", before: "sigB" },
+        });
+
+        expect(advanced).toBe(true);
+        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
+          signature_scan_cursor: "sigA",
+          signature_scan_before: "sigB",
+        });
+      });
+
+      it("does not overwrite a newer position with a stale expected one", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+        await repo.advanceSignatureScan({
+          ...scanKey(created),
+          from: { cursor: null, before: null },
+          to: { cursor: "sigNewer", before: null },
+        });
+
+        const stale = await repo.advanceSignatureScan({
+          ...scanKey(created),
+          from: { cursor: null, before: null },
+          to: { cursor: "sigOlder", before: null },
+        });
+        const staleBefore = await repo.advanceSignatureScan({
+          ...scanKey(created),
+          from: { cursor: "sigNewer", before: "sigOther" },
+          to: { cursor: "sigOlder", before: null },
+        });
+
+        expect(stale).toBe(false);
+        expect(staleBefore).toBe(false);
+        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
+          signature_scan_cursor: "sigNewer",
+          signature_scan_before: null,
+        });
+      });
+
+      it("does not move another project's scan position", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+
+        const advanced = await repo.advanceSignatureScan({
+          ...scanKey(created),
+          projectId: `${TEST_PROJECT_ID}_production`,
+          from: { cursor: null, before: null },
+          to: { cursor: "sigA", before: null },
+        });
+
+        expect(advanced).toBe(false);
+        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
+          signature_scan_cursor: null,
+        });
+      });
+
+      it("is available to tenant callers of the request's project", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+        const tenant = createPaymentRequestsRepository(
+          env,
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+        );
+
+        expect(
+          await tenant.advanceSignatureScan({
+            ...scanKey(created),
+            from: { cursor: null, before: null },
+            to: { cursor: "sigA", before: null },
+          })
+        ).toBe(true);
+      });
+    });
+
     it("denies the reconciler methods to tenant callers", () => {
       const tenant = createPaymentRequestsRepository(
         env,

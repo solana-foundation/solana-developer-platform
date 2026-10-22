@@ -41,6 +41,8 @@ export interface PaymentRequestRow {
   updated_at: string;
   last_checked_at: string | null;
   paid_late: boolean;
+  signature_scan_cursor: string | null;
+  signature_scan_before: string | null;
 }
 
 export interface CreatePaymentRequestInput {
@@ -71,6 +73,19 @@ export interface MarkExpiredPaymentRequestPaidInput {
   projectId: string;
   fulfilledByTransferId: string;
   paidLate: boolean;
+}
+
+export interface SignatureScanPosition {
+  cursor: string | null;
+  before: string | null;
+}
+
+export interface AdvanceSignatureScanInput {
+  requestId: string;
+  organizationId: string;
+  projectId: string;
+  from: SignatureScanPosition;
+  to: SignatureScanPosition;
 }
 
 export interface ListPaymentRequestsInput {
@@ -145,6 +160,7 @@ export interface PaymentRequestsRepository {
   markExpiredPaymentRequestPaid(
     input: MarkExpiredPaymentRequestPaidInput
   ): Promise<PaymentRequestRow | null>;
+  advanceSignatureScan(input: AdvanceSignatureScanInput): Promise<boolean>;
   countStaleAwaitingPaymentRequests(params: {
     environment: SdpEnvironment;
     checkedBefore: string;

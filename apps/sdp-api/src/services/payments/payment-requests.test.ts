@@ -36,6 +36,7 @@ import {
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { createTenantScope } from "@/lib/tenant-scope";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -794,7 +795,7 @@ describe("payment search", () => {
 
   it("checks a bounded number of candidate signatures", async () => {
     mockSignatures(
-      ...Array.from({ length: 15 }, (_, index) =>
+      ...Array.from({ length: 30 }, (_, index) =>
         signatureInfo(signature(getBase58Decoder().decode(new Uint8Array(64).fill(index + 10))))
       )
     );
@@ -806,7 +807,7 @@ describe("payment search", () => {
     );
 
     expect(result.status).toBe("awaiting_payment");
-    expect(validateTransferSpy).toHaveBeenCalledTimes(10);
+    expect(validateTransferSpy).toHaveBeenCalledTimes(25);
   });
 });
 
@@ -861,5 +862,249 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
     expect(result.status).toBe("expired");
+  });
+});
+
+function chainSignature(index: number): Signature {
+  const bytes = new Uint8Array(64).fill(9);
+  bytes[0] = (index >> 8) & 0xff;
+  bytes[1] = index & 0xff;
+  return signature(getBase58Decoder().decode(bytes));
+}
+
+function chainOf(count: number, offset = 0): Signature[] {
+  return Array.from({ length: count }, (_, index) => chainSignature(index + offset));
+}
+
+function mockChain(oldestFirst: readonly Signature[]) {
+  signaturesSpy.mockImplementation(async (_rpc, _reference, options) => {
+    const newestFirst = [...oldestFirst].reverse();
+    const start = options?.before ? newestFirst.indexOf(options.before) + 1 : 0;
+    const page: solanaRpc.SignatureInfo[] = [];
+    for (const sig of newestFirst.slice(start)) {
+      if (sig === options?.until || page.length >= (options?.limit ?? 100)) break;
+      page.push(signatureInfo(sig));
+    }
+    return page;
+  });
+}
+
+function mockOnlyValid(paid: Signature) {
+  verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+  validateTransferSpy.mockImplementation(async (_rpc, sig) => {
+    if (sig !== paid) throw new ValidateTransferError("wrong amount");
+    return validatedTransfer();
+  });
+}
+
+function validatedSignatures(): Signature[] {
+  return validateTransferSpy.mock.calls.map((call) => call[1] as Signature);
+}
+
+async function storeScanPosition(
+  request: PaymentRequestRow,
+  to: { cursor: string | null; before: string | null }
+) {
+  await createPaymentRequestsRepository(
+    env,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+  ).advanceSignatureScan({
+    requestId: request.id,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    from: { cursor: null, before: null },
+    to,
+  });
+  return readStored(request.id);
+}
+
+describe("signature scan cursor", () => {
+  installSettlementHooks();
+
+  const REAL = chainSignature(9999);
+
+  it("works through junk older than the payment across checks instead of hiding it", async () => {
+    const junk = chainOf(30);
+    mockChain([...junk, REAL]);
+    mockOnlyValid(REAL);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    const first = await reconcileOnSandbox(request);
+
+    expect(first.status).toBe("awaiting_payment");
+    expect(validatedSignatures()).toEqual(junk.slice(0, 25));
+    const stored = await readStored(request.id);
+    expect(stored.signature_scan_cursor).toBe(junk[24]);
+
+    validateTransferSpy.mockClear();
+    const second = await reconcileOnSandbox(stored);
+
+    expect(second.status).toBe("paid");
+    expect(validatedSignatures()).toEqual([...junk.slice(25), REAL]);
+    expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+  });
+
+  it("does not store expired while junk older than the payment is still unevaluated", async () => {
+    const junk = chainOf(30);
+    mockChain([...junk, REAL]);
+    mockOnlyValid(REAL);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const first = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(first.status).toBe("awaiting_payment");
+    expect(await readStored(request.id)).toMatchObject({
+      status: "awaiting_payment",
+      signature_scan_cursor: junk[24],
+    });
+
+    const second = await onSandbox(async () =>
+      closeLapsedPaymentRequest(env, await readStored(request.id))
+    );
+
+    expect(second.status).toBe("paid");
+  });
+
+  it("pages back past junk newer than the payment", async () => {
+    const junk = chainOf(1500);
+    mockChain([REAL, ...junk]);
+    mockOnlyValid(REAL);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    const settled = await reconcileOnSandbox(request);
+
+    expect(settled.status).toBe("paid");
+    expect(validatedSignatures()).toEqual([REAL]);
+    expect(signaturesSpy).toHaveBeenCalledTimes(2);
+    expect(signaturesSpy.mock.calls[0]?.[2]).toMatchObject({ commitment: "confirmed" });
+    expect(signaturesSpy.mock.calls[0]?.[2]?.before).toBeUndefined();
+    expect(signaturesSpy.mock.calls[1]?.[2]).toMatchObject({
+      commitment: "confirmed",
+      before: junk[500],
+    });
+  });
+
+  it("scans only signatures newer than the stored cursor", async () => {
+    const [older, cursor] = chainOf(2);
+    if (older === undefined || cursor === undefined) throw new Error("chain too short");
+    mockChain([older, cursor, REAL]);
+    mockOnlyValid(REAL);
+    const request = await storeScanPosition(
+      await createRequest({ token: SOL_MINT, expiresAt: null }),
+      { cursor, before: null }
+    );
+
+    const settled = await reconcileOnSandbox(request);
+
+    expect(settled.status).toBe("paid");
+    expect(signaturesSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      request.reference,
+      expect.objectContaining({ until: cursor })
+    );
+    expect(verifyTransactionLandedSpy.mock.calls.map((call) => call[1])).toEqual([REAL]);
+  });
+
+  it("does not advance the cursor past a signature that is not indexed yet", async () => {
+    const [rejected, indexing, later] = chainOf(3);
+    if (rejected === undefined || indexing === undefined || later === undefined) {
+      throw new Error("chain too short");
+    }
+    mockChain([rejected, indexing, later]);
+    verifyTransactionLandedSpy.mockImplementation(async (_rpc, sig) =>
+      sig === indexing ? { ok: false, reason: "not_indexed" } : verifiedOk()
+    );
+    validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(result.status).toBe("awaiting_payment");
+    expect(await readStored(request.id)).toMatchObject({
+      status: "awaiting_payment",
+      signature_scan_cursor: rejected,
+    });
+  });
+
+  it("advances the cursor over failed transactions without verifying them", async () => {
+    const [failed, rejected] = chainOf(2);
+    if (failed === undefined || rejected === undefined) throw new Error("chain too short");
+    signaturesSpy.mockResolvedValue([signatureInfo(rejected), signatureInfo(failed, { err: {} })]);
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(result.status).toBe("expired");
+    expect(verifyTransactionLandedSpy.mock.calls.map((call) => call[1])).toEqual([rejected]);
+    expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: rejected });
+  });
+
+  it("does not let a stale check move the cursor back", async () => {
+    const junk = chainOf(30);
+    mockChain(junk);
+    mockOnlyValid(REAL);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await storeScanPosition(request, { cursor: junk[27] ?? null, before: null });
+
+    await reconcileOnSandbox(request);
+
+    expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: junk[27] });
+  });
+
+  describe("when the signature history newer than the cursor exceeds the page cap", () => {
+    it("evaluates nothing, reports truncation and resumes further back on the next check", async () => {
+      const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
+      const junk = chainOf(5001);
+      mockChain([REAL, ...junk]);
+      mockOnlyValid(REAL);
+      const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+      const first = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+      expect(first.status).toBe("awaiting_payment");
+      expect(verifyTransactionLandedSpy).not.toHaveBeenCalled();
+      expect(signaturesSpy).toHaveBeenCalledTimes(5);
+      expect(logSpy).toHaveBeenCalledWith(
+        "warn",
+        expect.objectContaining({
+          event: "payment_requests.signature_scan_truncated",
+          requestId: request.id,
+        })
+      );
+      const stored = await readStored(request.id);
+      expect(stored).toMatchObject({
+        status: "awaiting_payment",
+        signature_scan_cursor: null,
+        signature_scan_before: junk[1],
+      });
+
+      const second = await onSandbox(() => closeLapsedPaymentRequest(env, stored));
+
+      expect(second.status).toBe("paid");
+      expect(signaturesSpy.mock.calls.at(-1)?.[2]).toMatchObject({ before: junk[1] });
+      expect(validatedSignatures()).toEqual([REAL]);
+    });
+
+    it("keeps the request open after a resumed range holds no payment", async () => {
+      const junk = chainOf(5002);
+      mockChain(junk);
+      mockOnlyValid(REAL);
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+        { cursor: null, before: junk[2] ?? null }
+      );
+
+      const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+      expect(result.status).toBe("awaiting_payment");
+      expect(validatedSignatures()).toEqual(junk.slice(0, 2));
+      expect(await readStored(request.id)).toMatchObject({
+        status: "awaiting_payment",
+        signature_scan_cursor: junk[1],
+        signature_scan_before: null,
+      });
+    });
   });
 });
