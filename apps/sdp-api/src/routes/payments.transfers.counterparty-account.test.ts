@@ -84,7 +84,10 @@ describe("Payments routes — transfers to a counterparty account", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({
-      error: { code: "NOT_FOUND", message: "Counterparty account not found" },
+      error: {
+        code: "NOT_FOUND",
+        message: "Counterparty account counterparty_account_xfer_other_project not found",
+      },
       meta: { requestId: expect.any(String) },
     });
   });

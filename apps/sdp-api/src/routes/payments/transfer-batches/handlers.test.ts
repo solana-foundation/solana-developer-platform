@@ -1544,7 +1544,13 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(await response.json()).toEqual({
+      error: {
+        code: "NOT_FOUND",
+        message: `Counterparty account ${counterpartyAccountId} not found`,
+      },
+      meta: { requestId: expect.any(String) },
+    });
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 

@@ -29,13 +29,21 @@ describe("resolveCounterpartyAccountDestination", () => {
 
   it("refuses an archived account as not found", () => {
     expect(resolve({ ...ACTIVE_SOLANA_ACCOUNT, status: "archived" })).toThrow(
-      expect.objectContaining({ code: "NOT_FOUND", statusCode: 404 })
+      expect.objectContaining({
+        code: "NOT_FOUND",
+        statusCode: 404,
+        message: "Counterparty account counterparty_account_resolution_test not found",
+      })
     );
   });
 
   it("refuses an active account of an archived counterparty as not found", () => {
     expect(resolve({ ...ACTIVE_SOLANA_ACCOUNT, counterparty_status: "archived" })).toThrow(
-      expect.objectContaining({ code: "NOT_FOUND", statusCode: 404 })
+      expect.objectContaining({
+        code: "NOT_FOUND",
+        statusCode: 404,
+        message: "Counterparty account counterparty_account_resolution_test not found",
+      })
     );
   });
 
