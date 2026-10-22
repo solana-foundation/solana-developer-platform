@@ -319,7 +319,6 @@ describe("Projects Routes", () => {
   // Project members are managed by a signed-in person only (HOO-2099).
   describe("Project Members", () => {
     const projectId = TEST_PROJECT.id;
-    const projectMemberId = `pm_${TEST_PROJECT.id}_${TEST_USER.id}`;
 
     it("lists project members", async () => {
       const res = await app.request(
@@ -393,26 +392,6 @@ describe("Projects Routes", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.message).toContain("not a member of this organization");
-    });
-
-    it("removes a project member", async () => {
-      const db = getDb(env);
-
-      const deleteRes = await app.request(
-        `/v1/projects/${projectId}/members/${projectMemberId}`,
-        {
-          method: "DELETE",
-          headers: clerkHeaders(clerkToken, projectId),
-        },
-        env
-      );
-      expect(deleteRes.status).toBe(204);
-
-      const removed = await db
-        .prepare("SELECT id FROM project_members WHERE id = ?")
-        .bind(`pm_${TEST_PROJECT.id}_${TEST_USER.id}`)
-        .first();
-      expect(removed).toBeNull();
     });
   });
 

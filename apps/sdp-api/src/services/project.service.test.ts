@@ -282,23 +282,6 @@ describe("ProjectService", () => {
       });
     });
 
-    describe("removeMember", () => {
-      it("removes member from project", async () => {
-        await db
-          .prepare(
-            "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_remove123', 'remove@example.com', 1, 'active')"
-          )
-          .run();
-
-        await projectService.addMember(projectId, "usr_remove123");
-
-        await projectService.removeMember(projectId, "usr_remove123");
-
-        const membership = await projectService.getMembership(projectId, "usr_remove123");
-        expect(membership).toBeNull();
-      });
-    });
-
     describe("listMembers", () => {
       it("returns all project members with user details", async () => {
         const members = await projectService.listMembers(projectId);

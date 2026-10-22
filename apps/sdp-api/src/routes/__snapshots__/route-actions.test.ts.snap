@@ -153,7 +153,6 @@ exports[`route actions > pins each route's action 1`] = `
   "issuance.read POST /v1/issuance/tokens/:tokenId/supply/refresh",
   "members.manage DELETE /v1/members/:memberId",
   "members.manage DELETE /v1/members/invitations/:invitationId",
-  "members.manage DELETE /v1/projects/:projectId/members/:memberId",
   "members.manage PATCH /v1/members/:memberId",
   "members.manage POST /v1/members/invite",
   "members.manage POST /v1/projects/:projectId/members",

@@ -58,7 +58,6 @@ describe("human-only routes", () => {
       "DELETE /v1/members/invitations/:invitationId",
       "DELETE /v1/members/me",
       "DELETE /v1/organizations/:orgId",
-      "DELETE /v1/projects/:projectId/members/:memberId",
       "GET /v1/api-keys",
       "GET /v1/api-keys/:keyId",
       "GET /v1/members",

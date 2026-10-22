@@ -655,32 +655,26 @@ export async function ensureLinkedOrg(
         [PLAYWRIGHT_LOCAL_MEMBER_ID, organization.id, userId]
       );
 
-      // Production provisions default projects via the Clerk webhook
-      // (see apps/sdp-api/src/routes/webhooks/handlers.ts). Tests don't fire
-      // the webhook, so mirror its behavior here so subsequent project-scoped
-      // API calls have a sandbox project to attach to.
-      const projectResult = await client.query<{ id: string }>(
+      // SDP creates an organization with both default Projects and its admin's
+      // memberships before anyone signs in; sign-in provisions nothing and the
+      // Clerk webhooks write nothing (ADR 0012), so the fixture seeds all of it.
+      await client.query(
         `INSERT INTO projects
            (id, organization_id, name, slug, description, environment, status, created_by)
-         VALUES (
-           'prj_' || gen_random_uuid(), $1, 'Default Sandbox Project', 'default-sandbox',
-           'Default sandbox project', 'sandbox', 'active', $2
-         )
-         ON CONFLICT (organization_id, slug) DO UPDATE
-           SET status = 'active'
-         RETURNING id`,
+         VALUES
+           ('prj_' || gen_random_uuid(), $1, 'Default Sandbox Project', 'default-sandbox',
+            'Default sandbox project', 'sandbox', 'active', $2),
+           ('prj_' || gen_random_uuid(), $1, 'Default Production Project', 'default-production',
+            'Default production project', 'production', 'active', $2)`,
         [organization.id, userId]
       );
-      const sandboxProjectId = projectResult.rows[0]?.id;
-      if (!sandboxProjectId) {
-        throw new Error("Failed to provision default sandbox project for Playwright bootstrap");
-      }
 
       await client.query(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES ('pm_' || gen_random_uuid(), $1, $2, 'admin')
-         ON CONFLICT (project_id, user_id) DO NOTHING`,
-        [sandboxProjectId, userId]
+        `INSERT INTO project_members (id, project_id, user_id)
+         SELECT 'pm_' || gen_random_uuid(), id, $2
+         FROM projects
+         WHERE organization_id = $1 AND status = 'active'`,
+        [organization.id, userId]
       );
 
       await client.query("COMMIT");

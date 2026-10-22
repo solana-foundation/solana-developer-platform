@@ -119,7 +119,6 @@ describe("OpenAPI spec", () => {
       ["/v1/projects/{projectId}/api-keys", "post"],
       ["/v1/projects/{projectId}/members", "get"],
       ["/v1/projects/{projectId}/members", "post"],
-      ["/v1/projects/{projectId}/members/{memberId}", "delete"],
       ["/v1/members", "get"],
       ["/v1/members/me", "get"],
       ["/v1/members/me", "delete"],

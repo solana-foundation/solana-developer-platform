@@ -47,6 +47,9 @@ function concretePath(path: string): string {
 function exemption(method: string, path: string): string | undefined {
   const reason = NO_PROJECT_ROUTES.find(([pattern]) => pattern.test(path))?.[1];
   if (reason) return reason;
+  if (method === "GET" && /^\/v1\/members(\/me)?$/.test(path)) {
+    return "organization-wide membership reads, no project (ADR 0012)";
+  }
   if (path.startsWith("/v1/earn/") && isEarnExitOrRead(probeMethod(method), concretePath(path))) {
     return "Earn read or exit (ADR 0002)";
   }

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { MEMBER_STATUSES, type MemberStatus } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db/client";
+import { getDb, type PreparedStatement } from "@/db/client";
 import { app } from "@/index";
 import {
   clerkHeadersWithoutProject,
@@ -103,6 +104,21 @@ async function inviteeProjectIds(): Promise<string[]> {
   return rows.map((row) => row.project_id);
 }
 
+const PENDING_INVITATION_READ =
+  /FROM invitations\s+WHERE organization_id = \? AND email = \? AND status = 'pending'/;
+
+function readAfter(settled: Promise<Response>, statement: PreparedStatement): PreparedStatement {
+  return {
+    bind: (...values) => readAfter(settled, statement.bind(...values)),
+    first: async <T>(columnName?: string) => {
+      await settled;
+      return statement.first<T>(columnName);
+    },
+    all: <T>() => statement.all<T>(),
+    run: () => statement.run(),
+  };
+}
+
 async function expectUnauthorized(response: Response, message: string): Promise<void> {
   expect(response.status).toBe(401);
   expect(await response.json()).toMatchObject({ error: { code: "UNAUTHORIZED", message } });
@@ -135,6 +151,7 @@ describe("sign-in admission", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await clearKVStores(env);
   });
 
@@ -252,6 +269,43 @@ describe("sign-in admission", () => {
 
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     expect(await inviteeMembership()).toMatchObject({ role: "member", status: "active" });
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
+    expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
+  });
+
+  it("answers the winner's role when a concurrent admission claims the invitation between its reads", async () => {
+    await setInviteeMembership(null);
+    await invite("admin", 7);
+    const db = getDb(env);
+    const prepare = db.prepare.bind(db);
+    const outsideRequest = AsyncLocalStorage.snapshot();
+    const competingSignIns: Promise<Response>[] = [];
+    vi.spyOn(db, "prepare").mockImplementation((query) => {
+      if (competingSignIns.length > 0 || !PENDING_INVITATION_READ.test(query)) {
+        return prepare(query);
+      }
+      const competingSignIn = outsideRequest(() => signIn("member", CLERK_ORG_ID));
+      competingSignIns.push(competingSignIn);
+      return readAfter(competingSignIn, prepare(query));
+    });
+
+    const response = await signIn("member", CLERK_ORG_ID);
+
+    const competing = await Promise.all(competingSignIns);
+    expect(competing.map((competingResponse) => competingResponse.status)).toEqual([200]);
+    const membership = await inviteeMembership();
+    assert(membership);
+    expect(membership).toMatchObject({ role: "admin", status: "active" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        memberId: membership.id,
+        userId: INVITEE.userId,
+        organizationId: ORGANIZATION.id,
+        role: "admin",
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
     expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
   });
