@@ -133,7 +133,8 @@ async function readClerkOrganizationId(
 /**
  * Creates the Clerk organization and the caller's `org:member` membership of
  * it, unless an earlier attempt did. The organization row stays locked across
- * the Clerk call, so concurrent attempts create one Clerk organization; a
+ * each Clerk step, so concurrent attempts create one Clerk organization and
+ * one membership; a
  * crash between Clerk's answer and the mapping insert leaves an empty Clerk
  * organization SDP never maps, which no one can sign in to.
  *
@@ -181,10 +182,19 @@ async function provisionClerkOrganization(
     return createdId;
   });
 
+  // A separate transaction under the same lock: a failed membership call must
+  // not roll back the mapping of a Clerk organization that now exists, and
+  // concurrent attempts must not both add the membership.
   const membership = { organizationId: clerkOrganizationId, userId: params.clerkUserId };
-  if (!(await clerk.hasOrganizationMembership(membership))) {
-    await clerk.createOrganizationMembership(membership);
-  }
+  await getDb(c.env).transaction(async (tx) => {
+    await tx
+      .prepare("SELECT id FROM organizations WHERE id = ? FOR UPDATE")
+      .bind(params.organization.id)
+      .first();
+    if (!(await clerk.hasOrganizationMembership(membership))) {
+      await clerk.createOrganizationMembership(membership);
+    }
+  });
   return clerkOrganizationId;
 }
 
