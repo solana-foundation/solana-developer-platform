@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import type { InvitationStatus } from "@sdp/types/organizations";
+import { INVITATION_STATUSES, type InvitationStatus } from "@sdp/types/organizations";
 import type { OrganizationRole } from "@sdp/types/roles";
+import { z } from "zod";
 import type { DatabaseClient } from "@/db/client";
 
 /** Seeds an invitation row; `invitedBy` must be a seeded user and a negative `expiresInDays` is already expired. */
@@ -25,7 +26,7 @@ export async function seedInvitation(
       input.email,
       input.role,
       input.invitedBy,
-      `hash_${input.id}`,
+      input.id,
       new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
       input.status,
     ]
@@ -36,10 +37,10 @@ export async function seedInvitation(
 export async function readInvitationStatus(
   db: DatabaseClient,
   invitationId: string
-): Promise<string> {
+): Promise<InvitationStatus> {
   const row = await db.queryOne<{ status: string }>("SELECT status FROM invitations WHERE id = ?", [
     invitationId,
   ]);
   assert(row);
-  return row.status;
+  return z.enum(INVITATION_STATUSES).parse(row.status);
 }

@@ -65,11 +65,12 @@ describe("applyMembershipChange", () => {
     "refuses the second of two admins acting on each other at once ($kind)",
     async ({ against }) => {
       const db = getDb(env);
-      const blocker = await holdTransaction(db, (tx) =>
-        tx.execute("SELECT id FROM organization_members WHERE organization_id = ? FOR UPDATE", [
-          ORGANIZATION.id,
-        ])
-      );
+      const blocker = await holdTransaction(db, async (tx) => {
+        await tx.execute(
+          "SELECT id FROM organization_members WHERE organization_id = ? FOR UPDATE",
+          [ORGANIZATION.id]
+        );
+      });
       const settling = Promise.allSettled([
         change(ADMIN_A, against(ADMIN_B.memberId)),
         change(ADMIN_B, against(ADMIN_A.memberId)),
@@ -92,13 +93,13 @@ describe("applyMembershipChange", () => {
     await db.execute("UPDATE organization_members SET role = 'admin' WHERE id = ?", [
       MEMBER_C.memberId,
     ]);
-    const firstRemoval = await holdTransaction(db, (tx) =>
-      applyMembershipChange(tx, {
+    const firstRemoval = await holdTransaction(db, async (tx) => {
+      await applyMembershipChange(tx, {
         organizationId: ORGANIZATION.id,
         actorUserId: ADMIN_A.userId,
         change: { kind: "remove", memberId: ADMIN_B.memberId },
-      })
-    );
+      });
+    });
     const staleRemoval = change(ADMIN_B, { kind: "remove", memberId: MEMBER_C.memberId });
     await untilLockWaiters(db, { fragment: "ORDER BY id", count: 1 });
     await firstRemoval.commit();

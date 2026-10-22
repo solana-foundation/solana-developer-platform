@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import type { MemberStatus } from "@sdp/types/organizations";
-import type { OrganizationRole } from "@sdp/types/roles";
+import { MEMBER_STATUSES, type MemberStatus } from "@sdp/types/organizations";
+import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import {
@@ -13,7 +14,12 @@ import {
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
-import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  archiveProject,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
+import { holdTransaction, untilLockWaiters } from "@/test/helpers/row-locks";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -63,12 +69,31 @@ async function setInviteeMembership(
   );
 }
 
-function inviteeMembership() {
-  return getDb(env).queryOne<{ id: string; role: string; status: string }>(
-    "SELECT id, role, status FROM organization_members WHERE user_id = ?",
-    [INVITEE.userId]
+const membershipRowSchema = z
+  .object({ id: z.string(), role: z.enum(ORGANIZATION_ROLES), status: z.enum(MEMBER_STATUSES) })
+  .nullable();
+
+async function inviteeMembership(): Promise<z.infer<typeof membershipRowSchema>> {
+  return membershipRowSchema.parse(
+    await getDb(env).queryOne(
+      "SELECT id, role, status FROM organization_members WHERE user_id = ?",
+      [INVITEE.userId]
+    )
   );
 }
+
+function acceptInviteAudits() {
+  return getDb(env).queryMany(
+    "SELECT resource_type, resource_id, user_id FROM audit_logs WHERE organization_id = ? AND action = 'accept_invite'",
+    [ORGANIZATION.id]
+  );
+}
+
+const ACCEPT_INVITE_AUDIT = {
+  resource_type: "invitation",
+  resource_id: INVITATION_ID,
+  user_id: INVITEE.userId,
+};
 
 async function inviteeProjectIds(): Promise<string[]> {
   const rows = await getDb(env).queryMany<{ project_id: string }>(
@@ -155,14 +180,7 @@ describe("sign-in admission", () => {
     });
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
     expect(await inviteeProjectIds()).toEqual([projects.production.id, projects.sandbox.id]);
-    expect(
-      await getDb(env).queryMany(
-        "SELECT resource_type, resource_id, user_id FROM audit_logs WHERE organization_id = ? AND action = 'accept_invite'",
-        [ORGANIZATION.id]
-      )
-    ).toEqual([
-      { resource_type: "invitation", resource_id: INVITATION_ID, user_id: INVITEE.userId },
-    ]);
+    expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
   });
 
   it("reactivates a removed membership at the new invitation's role", async () => {
@@ -201,17 +219,40 @@ describe("sign-in admission", () => {
     expect(await inviteeProjectIds()).toEqual([]);
   });
 
-  it("admits concurrent first sign-ins on one invitation once, answering both", async () => {
+  it("rolls the claim, membership and audit back together when admission fails", async () => {
+    await archiveProject(getDb(env), projects.sandbox.id);
+    await archiveProject(getDb(env), projects.production.id);
     await setInviteeMembership(null);
     await invite("member", 7);
 
-    const responses = await Promise.all([
-      signIn("member", CLERK_ORG_ID),
-      signIn("member", CLERK_ORG_ID),
-    ]);
+    const response = await signIn("member", CLERK_ORG_ID);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: { code: "INTERNAL_ERROR", message: "Organization has no active projects" },
+    });
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("pending");
+    expect(await inviteeMembership()).toBeNull();
+    expect(await inviteeProjectIds()).toEqual([]);
+    expect(await acceptInviteAudits()).toEqual([]);
+  });
+
+  it("admits concurrent first sign-ins on one invitation once, answering both", async () => {
+    await setInviteeMembership(null);
+    await invite("member", 7);
+    const blocker = await holdTransaction(getDb(env), async (tx) => {
+      await tx.execute("SELECT id FROM invitations WHERE id = ? FOR UPDATE", [INVITATION_ID]);
+    });
+
+    const signingIn = Promise.all([signIn("member", CLERK_ORG_ID), signIn("member", CLERK_ORG_ID)]);
+    await untilLockWaiters(getDb(env), { fragment: "SET status = 'accepted'", count: 1 });
+    await untilLockWaiters(getDb(env), { fragment: "pg_advisory_lock", count: 1 });
+    await blocker.commit();
+    const responses = await signingIn;
 
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     expect(await inviteeMembership()).toMatchObject({ role: "member", status: "active" });
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
+    expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
   });
 });

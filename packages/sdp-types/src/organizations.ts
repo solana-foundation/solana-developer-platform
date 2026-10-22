@@ -52,7 +52,8 @@ export function memberStatusMayMoveMoney(status: string): boolean {
   return MEMBER_STATUSES_THAT_MAY_MOVE_MONEY.some((allowed) => allowed === status);
 }
 
-export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
+export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
 export const ORGANIZATION_RPC_PROVIDERS = [
   "alchemy",
   "default",

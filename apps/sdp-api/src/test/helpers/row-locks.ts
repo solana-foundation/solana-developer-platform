@@ -5,7 +5,7 @@ import { deferred } from "@/test/helpers/deferred";
 /** Runs `work` in a transaction left open, holding its row locks, until `commit` is called. */
 export async function holdTransaction(
   db: DatabaseClient,
-  work: (tx: DatabaseExecutor) => Promise<unknown>
+  work: (tx: DatabaseExecutor) => Promise<void>
 ): Promise<{ commit: () => Promise<void> }> {
   const held = deferred<void>();
   const released = deferred<void>();
