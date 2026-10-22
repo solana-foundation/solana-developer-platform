@@ -229,16 +229,23 @@ export class ClerkOrganizationsService {
    *
    * @param params.organizationId - The Clerk organization id.
    * @param params.userId - The Clerk user id.
-   * @returns True when Clerk lists a membership for the user.
+   * @returns True when Clerk lists a membership for the user; false when it lists none or the organization no longer exists.
    */
   async hasOrganizationMembership(params: {
     organizationId: string;
     userId: string;
   }): Promise<boolean> {
-    const page = await this.request<unknown>(
-      `/organizations/${params.organizationId}/memberships?user_id=${encodeURIComponent(params.userId)}`
-    );
-    return z.object({ total_count: z.number() }).parse(page).total_count > 0;
+    try {
+      const page = await this.request<unknown>(
+        `/organizations/${params.organizationId}/memberships?user_id=${encodeURIComponent(params.userId)}`
+      );
+      return z.object({ total_count: z.number() }).parse(page).total_count > 0;
+    } catch (error) {
+      if (error instanceof AppError && error.details?.status === 404) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   /**
