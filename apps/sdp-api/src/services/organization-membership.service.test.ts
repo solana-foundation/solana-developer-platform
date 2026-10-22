@@ -240,4 +240,40 @@ describe("mirrorClerkMembershipDeletion", () => {
     });
     expect(await readInvitationStatus(db, "inv_mirror_invitee")).toBe("revoked");
   });
+
+  it("removes a member a sign-in admitted while the mirror waited on their invitation", async () => {
+    const db = getDb(env);
+    await db.execute(
+      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')",
+      ["usr_mirror_admitted", "mirror-admitted@example.com"]
+    );
+    await seedPendingInvitation("inv_mirror_admitted", "mirror-admitted@example.com");
+    const signIn = await holdTransaction(db, async (tx) => {
+      await tx.execute("SELECT id FROM invitations WHERE id = ? FOR UPDATE", [
+        "inv_mirror_admitted",
+      ]);
+      await tx.execute(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'member', 'active')`,
+        ["mem_mirror_admitted", MIRROR_ORGANIZATION.id, "usr_mirror_admitted"]
+      );
+      await tx.execute("UPDATE invitations SET status = 'accepted' WHERE id = ?", [
+        "inv_mirror_admitted",
+      ]);
+    });
+    const mirrored = mirror("usr_mirror_admitted");
+    await untilLockWaiters(db, { fragment: "UPDATE invitations SET status = 'revoked'", count: 1 });
+    await signIn.commit();
+
+    await expect(mirrored).resolves.toEqual({
+      removedMemberId: "mem_mirror_admitted",
+      revokedInvitations: 0,
+    });
+    expect(
+      await db.queryOne("SELECT status FROM organization_members WHERE id = ?", [
+        "mem_mirror_admitted",
+      ])
+    ).toEqual({ status: "removed" });
+    expect(await readInvitationStatus(db, "inv_mirror_admitted")).toBe("accepted");
+  });
 });
