@@ -33,10 +33,14 @@ const SENSITIVE_ASSIGNMENT_PATTERN =
 const PRIVATE_KEY_PATTERN =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=\s]*-----END [A-Z ]*PRIVATE KEY-----/g;
 const AUTH_HEADER_PATTERN = /\b(Bearer|Basic)\s+([A-Za-z0-9._~+/=-]+)/gi;
+// The path segment itself is the credential on /pay/:token, including /tx
+// and unmatched suffixes. Keep route context without copying the bearer token.
+const PAY_LINK_TOKEN_PATTERN = /\/pay\/[^/\s?#"'<>\\]+/g;
 
 export function redactCredentialString(value: string): string {
   const withoutHeaders = value
     .replace(PRIVATE_KEY_PATTERN, REDACTED)
+    .replace(PAY_LINK_TOKEN_PATTERN, `/pay/${REDACTED}`)
     .replace(AUTH_HEADER_PATTERN, (match, scheme: string, token: string) =>
       isLikelyAuthToken(scheme, token) ? `${scheme} ${REDACTED}` : match
     );

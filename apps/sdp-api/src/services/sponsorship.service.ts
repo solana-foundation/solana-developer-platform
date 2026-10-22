@@ -48,8 +48,11 @@ export interface PreparedOwnedSubmission extends OwnedSignedSubmission {
 
 export interface OwnedSubmissionLifecycle {
   persistSigned(submission: OwnedSignedSubmission): Promise<void>;
+  /**
+   * Records that the send may start. A throw means it never does: `prepareOwnedSubmission`
+   * releases its reservation and rethrows the error unchanged.
+   */
   markStarted(): Promise<void>;
-  hasStarted(): Promise<boolean>;
 }
 
 /** App-local extension for SDP-owned submission flows. */

@@ -19,12 +19,24 @@ import {
 
 const PAYER = syntheticAddress(1);
 const WALLET_ADDRESS = syntheticAddress(2);
+const SOURCE_TOKEN_ACCOUNT = syntheticAddress(3);
+const DESTINATION_TOKEN_ACCOUNT = syntheticAddress(4);
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 const context = {
   organizationId: "org_fanout_test",
   projectId: "prj_fanout_test",
   walletIdsByAddress: new Map([[WALLET_ADDRESS, "wal_fanout_test"]]),
 };
+
+function tokenBalance(accountIndex: number, owner: string, amount: string) {
+  return parsedTokenBalance({
+    accountIndex,
+    mint: USDC_MINT,
+    owner,
+    tokenAmount: { amount, decimals: 6, uiAmountString: formatDecimalAmount(BigInt(amount), 6) },
+  });
+}
 
 function buildOnSandbox(signatures: SignatureInfo[]) {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
@@ -66,20 +78,6 @@ describe("buildObservedTransfersForSignatures", () => {
   });
 
   it("reads the integer lamports and transferChecked decimals kit parses to bigint", async () => {
-    const usdcMint = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
-    const sourceTokenAccount = syntheticAddress(3);
-    const destinationTokenAccount = syntheticAddress(4);
-    const tokenBalance = (accountIndex: number, owner: string, amount: string) =>
-      parsedTokenBalance({
-        accountIndex,
-        mint: usdcMint,
-        owner,
-        tokenAmount: {
-          amount,
-          decimals: 6,
-          uiAmountString: formatDecimalAmount(BigInt(amount), 6),
-        },
-      });
     const observed = signatureHistoryEntry(0, "confirmed");
     rpc.answer(
       "getTransaction",
@@ -87,17 +85,18 @@ describe("buildObservedTransfersForSignatures", () => {
         signature: observed.signature,
         slot: 42,
         blockTime: 1700000000,
-        accountKeys: [PAYER, WALLET_ADDRESS, sourceTokenAccount, destinationTokenAccount],
+        accountKeys: [PAYER, WALLET_ADDRESS, SOURCE_TOKEN_ACCOUNT, DESTINATION_TOKEN_ACCOUNT],
         instructions: [
           parsedSystemTransfer({ source: PAYER, destination: WALLET_ADDRESS, lamports: 1_500_000 }),
           parsedTransferChecked({
-            source: sourceTokenAccount,
-            destination: destinationTokenAccount,
-            mint: usdcMint,
+            source: SOURCE_TOKEN_ACCOUNT,
+            destination: DESTINATION_TOKEN_ACCOUNT,
+            mint: USDC_MINT,
             authority: PAYER,
             tokenAmount: { amount: "2500000", decimals: 6, uiAmountString: "2.5" },
           }),
         ],
+        innerInstructions: [],
         preTokenBalances: [tokenBalance(2, PAYER, "2500000"), tokenBalance(3, WALLET_ADDRESS, "0")],
         postTokenBalances: [
           tokenBalance(2, PAYER, "0"),
@@ -127,13 +126,89 @@ describe("buildObservedTransfersForSignatures", () => {
         fee: 5000,
       },
       {
-        token: usdcMint,
+        token: USDC_MINT,
         amount: "2.5",
         direction: "inbound",
         source: PAYER,
         destination: WALLET_ADDRESS,
         fee: 5000,
       },
+    ]);
+  });
+
+  it("keeps two equal SOL transfers in one transaction as one row each", async () => {
+    const observed = signatureHistoryEntry(0, "confirmed");
+    const deposit = parsedSystemTransfer({
+      source: PAYER,
+      destination: WALLET_ADDRESS,
+      lamports: 1_000_000,
+    });
+    rpc.answer(
+      "getTransaction",
+      parsedTransactionResult({
+        signature: observed.signature,
+        slot: 42,
+        blockTime: 1700000000,
+        accountKeys: [PAYER, WALLET_ADDRESS],
+        instructions: [deposit, deposit],
+        innerInstructions: [],
+        preTokenBalances: [],
+        postTokenBalances: [],
+      })
+    );
+
+    const rows = await buildOnSandbox([observed]);
+
+    expect(rows.map((row) => ({ id: row.id, amount: row.amount }))).toEqual([
+      {
+        id: `xfr_observed_wal_fanout_test_${observed.signature}_0_inbound`,
+        amount: formatDecimalAmount(1_000_000n, 9),
+      },
+      {
+        id: `xfr_observed_wal_fanout_test_${observed.signature}_1_inbound`,
+        amount: formatDecimalAmount(1_000_000n, 9),
+      },
+    ]);
+  });
+
+  it("keeps an inner token transfer apart from an equal outer one", async () => {
+    const observed = signatureHistoryEntry(0, "confirmed");
+    const cpiProgram = syntheticAddress(5);
+    const deposit = parsedTransferChecked({
+      source: SOURCE_TOKEN_ACCOUNT,
+      destination: DESTINATION_TOKEN_ACCOUNT,
+      mint: USDC_MINT,
+      authority: PAYER,
+      tokenAmount: { amount: "2500000", decimals: 6, uiAmountString: "2.5" },
+    });
+    rpc.answer(
+      "getTransaction",
+      parsedTransactionResult({
+        signature: observed.signature,
+        slot: 42,
+        blockTime: 1700000000,
+        accountKeys: [
+          PAYER,
+          WALLET_ADDRESS,
+          SOURCE_TOKEN_ACCOUNT,
+          DESTINATION_TOKEN_ACCOUNT,
+          cpiProgram,
+        ],
+        instructions: [deposit, { programId: cpiProgram, accounts: [], data: "", stackHeight: 1 }],
+        innerInstructions: [{ index: 1, instructions: [deposit] }],
+        preTokenBalances: [tokenBalance(2, PAYER, "5000000"), tokenBalance(3, WALLET_ADDRESS, "0")],
+        postTokenBalances: [
+          tokenBalance(2, PAYER, "0"),
+          tokenBalance(3, WALLET_ADDRESS, "5000000"),
+        ],
+      })
+    );
+
+    const rows = await buildOnSandbox([observed]);
+
+    expect(rows.map((row) => ({ id: row.id, amount: row.amount }))).toEqual([
+      { id: `xfr_observed_wal_fanout_test_${observed.signature}_0_inbound`, amount: "2.5" },
+      { id: `xfr_observed_wal_fanout_test_${observed.signature}_1.0_inbound`, amount: "2.5" },
     ]);
   });
 });

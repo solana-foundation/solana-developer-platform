@@ -459,6 +459,7 @@ export async function recurringCollectionTransactionForSignature(options: {
     });
   return {
     slot: 100n,
+    accountKeys: [row.subscription_authority_address],
     executionResultKnown: true,
     err: null,
     instructions: [

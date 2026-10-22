@@ -324,7 +324,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Logger in development
   app.use("*", async (c, next) => {
     if (c.env.ENVIRONMENT === "development") {
-      return logger()(c, next);
+      return logger((message) => getLogger().info(message))(c, next);
     }
     return next();
   });
