@@ -11,6 +11,7 @@ import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
+import { projectOrganizationSettings } from "@/lib/organization-access";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -40,7 +41,7 @@ function parseOrganizationSettings(raw: string | null): OrganizationSettings | n
   }
 
   try {
-    return parsePostgresJson<OrganizationSettings>(raw);
+    return projectOrganizationSettings(parsePostgresJson<OrganizationSettings>(raw));
   } catch {
     return null;
   }

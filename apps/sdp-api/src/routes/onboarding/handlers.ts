@@ -1,9 +1,10 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
-import { normalizeOrganizationTier } from "@sdp/types/organizations";
+import { normalizeOrganizationTier, type OrganizationSettings } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { notFound } from "@/lib/errors";
+import { projectOrganizationSettings } from "@/lib/organization-access";
 import { success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { Env } from "@/types/env";
@@ -36,6 +37,7 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
   if (!org) {
     throw notFound("Organization");
   }
+  const storedSettings = parseOptionalPostgresJson<OrganizationSettings>(org.settings);
 
   return {
     id: org.id,
@@ -43,7 +45,7 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
     slug: org.slug,
     tier: normalizeOrganizationTier(org.tier),
     status: org.status as "active" | "suspended" | "deleted",
-    settings: parseOptionalPostgresJson(org.settings),
+    settings: storedSettings === null ? null : projectOrganizationSettings(storedSettings),
     createdAt: org.created_at,
     updatedAt: org.updated_at,
     onboardingCompletedAt: org.onboarding_completed_at,

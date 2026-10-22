@@ -4,6 +4,7 @@ import {
   type ApiKeyEnvironment,
   type RateLimitTier,
 } from "@sdp/types/api-keys";
+import type { OrganizationSettings } from "@sdp/types/organizations";
 import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
 import { projectStatusMayAuthenticate } from "@sdp/types/projects";
 import type { Context } from "hono";
@@ -225,5 +226,24 @@ export async function authorizeApiKey(
       walletScopeSchema.parse(row.wallet_scope) === "all"
         ? { scope: "all" }
         : { scope: "selected", custodyWalletIds },
+  };
+}
+
+/**
+ * The settings fields SDP defines, without any other key a stored row still
+ * carries (a retired `webhookSecret` above all), so a response never echoes
+ * one.
+ *
+ * @param settings - Settings as stored.
+ * @returns Only the defined fields.
+ */
+export function projectOrganizationSettings(settings: OrganizationSettings): OrganizationSettings {
+  return {
+    defaultEnvironment: settings.defaultEnvironment,
+    allowedIpAddresses: settings.allowedIpAddresses,
+    legacyAllowedIpAddresses: settings.legacyAllowedIpAddresses,
+    providerOverrides: settings.providerOverrides,
+    enableProductionProject: settings.enableProductionProject,
+    customRateLimits: settings.customRateLimits,
   };
 }
