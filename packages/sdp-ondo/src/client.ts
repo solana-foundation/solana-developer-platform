@@ -20,8 +20,17 @@ import type {
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
+import {
+  ONDO_DEPOSIT_TOKEN_SYMBOLS,
+  type OndoDeployment,
+  ondoDeployment,
+  ondoDepositMints,
+} from "@sdp/types/ondo-programs";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type SolanaCluster,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/kit";
 import { SdpOndoError } from "./errors";
 import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner } from "./types";
@@ -47,12 +56,29 @@ import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner }
  * returned leg as ADMITTED and adds only what it builds itself: the
  * compute-unit limit instruction below.
  *
- * USDY decimals are 6 (verified on-chain; the catalogue read refuses drift)
- * and USDC's are 6, so every decimal↔atom conversion here uses the same scale.
+ * USDY and USDC carry the same decimals (the catalogue's, which
+ * `pnpm check:well-known-mints` verifies on chain; the token-account read below
+ * refuses a balance at any other scale), so every decimal↔atom conversion here
+ * uses that one scale. A constant would hide a catalogue change.
  */
 
-/** Both sides of the pair carry 6 decimals; the catalogue read enforces USDY's. */
-const TOKEN_DECIMALS = 6;
+/**
+ * The pair's scale: USDY's and each deposit token's catalogue decimals on the
+ * one cluster Ondo deploys to. Refuses at load a pair that would need two
+ * scales, which this client does not convert between.
+ */
+function pairDecimals(): number {
+  const usdy = WELL_KNOWN_TOKENS.USDY.mints["mainnet-beta"].decimals;
+  for (const symbol of ONDO_DEPOSIT_TOKEN_SYMBOLS) {
+    const deposit = WELL_KNOWN_TOKENS[symbol].mints["mainnet-beta"].decimals;
+    if (deposit !== usdy) {
+      throw new Error(`Ondo pairs ${symbol} (${deposit} decimals) with USDY (${usdy} decimals)`);
+    }
+  }
+  return usdy;
+}
+
+const TOKEN_DECIMALS = pairDecimals();
 const MAX_TOKEN_ATOMS = (1n << 64n) - 1n;
 // biome-ignore lint/security/noSecrets: public SPL token program address.
 const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
