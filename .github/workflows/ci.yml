@@ -1195,9 +1195,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-            --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist|new design)\\)$")) | .conclusion]')
-          count=$(jq 'length' <<<"${conclusions}")
+          # The jobs API can briefly report a finished job's conclusion as null, so a
+          # missing or null conclusion is re-read (up to a minute) before it counts. Only
+          # unread conclusions are waited on: once all six read, any non-success fails.
+          for attempt in 1 2 3 4 5 6; do
+            conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist|new design)\\)$")) | .conclusion]')
+            count=$(jq 'length' <<<"${conclusions}")
+            settled=$(jq '[.[] | select(. != null)] | length' <<<"${conclusions}")
+            if [ "${count}" -eq 6 ] && [ "${settled}" -eq 6 ]; then break; fi
+            if [ "${attempt}" -lt 6 ]; then
+              echo "Read ${settled}/6 settled issuance e2e jobs (${count} listed); re-reading in 10s." >&2
+              sleep 10
+            fi
+          done
           green=$(jq '[.[] | select(. == "success")] | length' <<<"${conclusions}")
           if [ "${count}" -ne 6 ] || [ "${green}" -ne 6 ]; then
             echo "Expected 6 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
