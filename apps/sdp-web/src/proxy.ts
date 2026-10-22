@@ -71,7 +71,8 @@ function isCrossSiteWrite(req: NextRequest): boolean {
   }
   const fetchSite = req.headers.get("sec-fetch-site");
   if (fetchSite === null) {
-    return req.cookies.has("__session");
+    // Clerk also signs in from a suffixed `__session_<suffix>` cookie.
+    return req.cookies.getAll().some((cookie) => cookie.name.startsWith("__session"));
   }
   return ["cross-site", "same-site"].includes(fetchSite);
 }
