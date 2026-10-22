@@ -9,6 +9,12 @@ export type MembershipChange =
   | { kind: "remove"; memberId: string }
   | { kind: "leave" };
 
+const membershipTargetSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  status: z.enum(MEMBER_STATUSES),
+});
+
 const lockedMemberSchema = z.object({
   id: z.string(),
   user_id: z.string(),
@@ -36,23 +42,24 @@ export async function applyMembershipChange(
 ): Promise<{ memberId: string; userId: string; previousRole: OrganizationRole; changed: boolean }> {
   const { organizationId, actorUserId, change } = params;
 
-  const target =
+  const targetRow =
     change.kind === "leave"
       ? await tx
           .prepare(
             "SELECT id, user_id, status FROM organization_members WHERE organization_id = ? AND user_id = ?"
           )
           .bind(organizationId, actorUserId)
-          .first<{ id: string; user_id: string; status: string }>()
+          .first<Record<string, unknown>>()
       : await tx
           .prepare(
             "SELECT id, user_id, status FROM organization_members WHERE organization_id = ? AND id = ?"
           )
           .bind(organizationId, change.memberId)
-          .first<{ id: string; user_id: string; status: string }>();
-  if (!target) {
+          .first<Record<string, unknown>>();
+  if (!targetRow) {
     throw notFound("Member");
   }
+  const target = membershipTargetSchema.parse(targetRow);
 
   // Invitations lock before memberships, the order admission and organization
   // deletion take them. A pending invitation outliving a removal would readmit

@@ -1,5 +1,7 @@
+import { INVITATION_STATUSES } from "@sdp/types/organizations";
 import { normalizeOrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createOrganizationRepository } from "@/db/repositories/repository-factory";
@@ -31,6 +33,9 @@ function resolveActor(c: AppContext): { organizationId: string; userId: string }
   const clerk = requireHumanActor(c);
   return { organizationId: clerk.organizationId, userId: clerk.userId };
 }
+
+const seatCountSchema = z.object({ taken: z.coerce.number() });
+const invitationStatusSchema = z.object({ status: z.enum(INVITATION_STATUSES) });
 
 /** How long an invitation admits its address, in SDP and in Clerk's link alike. */
 const INVITATION_TTL_DAYS = 7;
@@ -392,8 +397,8 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
                     WHERE organization_id = ? AND status = 'pending' AND expires_at > ?) AS taken`
         )
         .bind(organizationId, organizationId, now.toISOString())
-        .first<{ taken: number }>();
-      if (Number(seats?.taken) >= MAX_ORGANIZATION_MEMBERS) {
+        .first<Record<string, unknown>>();
+      if (seatCountSchema.parse(seats).taken >= MAX_ORGANIZATION_MEMBERS) {
         throw conflict(
           `The organization has reached its limit of ${MAX_ORGANIZATION_MEMBERS} members, pending invitations included`
         );
@@ -449,9 +454,9 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   const recorded = await getDb(c.env)
     .prepare(
       `UPDATE invitations SET clerk_invitation_id = ?
-        WHERE id = ? AND status = 'pending' AND clerk_invitation_id IS NULL`
+        WHERE id = ? AND organization_id = ? AND status = 'pending' AND clerk_invitation_id IS NULL`
     )
-    .bind(clerkInvitation.id, invitationId)
+    .bind(clerkInvitation.id, invitationId, organizationId)
     .run();
   if (recorded === 0) {
     await clerk.revokeOrganizationInvitation({
@@ -660,15 +665,18 @@ export const revokeInvitation = async (c: AppContext) => {
   // so only that half runs again.
   const revokedNow = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const revoked = await tx
-      .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'")
-      .bind(invitation.id)
+      .prepare(
+        `UPDATE invitations SET status = 'revoked'
+          WHERE id = ? AND organization_id = ? AND status = 'pending'`
+      )
+      .bind(invitation.id, organizationId)
       .run();
     if (revoked === 0) {
       const current = await tx
-        .prepare("SELECT status FROM invitations WHERE id = ?")
-        .bind(invitation.id)
-        .first<{ status: string }>();
-      if (current?.status !== "revoked") {
+        .prepare("SELECT status FROM invitations WHERE id = ? AND organization_id = ?")
+        .bind(invitation.id, organizationId)
+        .first<Record<string, unknown>>();
+      if (invitationStatusSchema.parse(current).status !== "revoked") {
         throw badRequest("Only a pending invitation can be revoked");
       }
       return { entry: null, result: false };
