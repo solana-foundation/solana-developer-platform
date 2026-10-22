@@ -2,7 +2,14 @@ import { getSponsoredTransaction, isSponsoredBlockhashValid } from "@sdp/fee-pay
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { assertIsBlockhash, assertIsSignature, type Blockhash } from "@solana/kit";
+import {
+  type Address,
+  address,
+  assertIsAddress,
+  assertIsBlockhash,
+  assertIsSignature,
+  type Blockhash,
+} from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   SPONSORSHIP_BREAKER_OPERATOR,
@@ -271,8 +278,29 @@ async function reconcileReservation(input: {
   }
 
   assertIsSignature(reservation.signature);
+  assertIsAddress(reservation.feePayer);
   const transaction = await input.getTransaction(reservation.signature);
   if (transaction) {
+    const transactionFeePayer = feePayerAddress(transaction.accountKeys);
+    if (transactionFeePayer !== reservation.feePayer) {
+      logEvent("error", {
+        event: "sdp_api_sponsorship_settlement_fee_payer_mismatch",
+        network: reservation.network,
+        reservation_id: reservation.id,
+        signature: reservation.signature,
+        reserved_fee_payer: reservation.feePayer,
+        transaction_fee_payer: transactionFeePayer,
+      });
+      await persistAmbiguousCharge({
+        reservation,
+        repository,
+        budgetRedis,
+        reason: "Finalized transaction names a different fee payer than the reservation",
+        breakerReason: "Fee-payer-mismatched reservation lost its durable transition",
+        lostTransitionError: "Failed to persist fee-payer-mismatched sponsorship outcome",
+      });
+      return "charged_unknown";
+    }
     const actualLamports = feePayerSpendLamports(transaction.preBalances, transaction.postBalances);
     if (actualLamports > reservation.reservedLamports) {
       await tripBreaker(
@@ -303,6 +331,21 @@ async function reconcileReservation(input: {
   return "charged_unknown";
 }
 
+/**
+ * The fee payer a landed transaction names: the first key of its message.
+ *
+ * @param accountKeys - The transaction's message account keys, in message order.
+ * @returns The fee payer's address.
+ * @throws Error when the read omitted the account keys; SolanaError when the key is not an address.
+ */
+function feePayerAddress(accountKeys: readonly string[] | undefined): Address {
+  const feePayer = accountKeys?.[0];
+  if (feePayer === undefined) {
+    throw new Error("Finalized transaction omitted its fee-payer account key");
+  }
+  return address(feePayer);
+}
+
 function feePayerSpendLamports(
   preBalances: readonly bigint[] | undefined,
   postBalances: readonly bigint[] | undefined
@@ -310,7 +353,7 @@ function feePayerSpendLamports(
   const before = preBalances?.[0];
   const after = postBalances?.[0];
   if (before === undefined || after === undefined) {
-    throw new Error("Confirmed transaction omitted fee-payer balance data");
+    throw new Error("Finalized transaction omitted fee-payer balance data");
   }
   const delta = before > after ? before - after : 0n;
   if (delta > BigInt(Number.MAX_SAFE_INTEGER)) {
