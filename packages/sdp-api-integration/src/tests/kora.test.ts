@@ -65,6 +65,7 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
         ? BigInt(env.KORA_PER_TRANSACTION_BUDGET_LAMPORTS)
         : 10_000_000n;
       const NETWORK_FEE_HEADROOM_LAMPORTS = 50_000n;
+      expect(configuration?.feePayerMayTransferLamports).toBe(true);
       expect(configuration?.maxAllowedLamports).toBeDefined();
       expect(
         (configuration?.maxAllowedLamports ?? 0n) + NETWORK_FEE_HEADROOM_LAMPORTS

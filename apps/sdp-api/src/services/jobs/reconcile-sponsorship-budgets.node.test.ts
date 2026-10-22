@@ -66,6 +66,7 @@ const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
 const PROVIDER_CONFIGURATION = {
   signerAddress: address("4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q"),
   maxAllowedLamports: 10n,
+  feePayerMayTransferLamports: false,
   feePayerPolicy: ZERO_OUTFLOW_FEE_PAYER_POLICY,
 };
 
