@@ -109,7 +109,7 @@ test("not_confirmed when the RPC has no status for the signature", async () => {
   assert.deepEqual(result, { ok: false, reason: "not_confirmed" });
 });
 
-test("not_confirmed when the transaction errored on-chain", async () => {
+test("failed when the transaction errored on-chain", async () => {
   const result = await verifyTransactionLanded(
     fakeRpc({
       status: signatureStatus({
@@ -121,7 +121,7 @@ test("not_confirmed when the transaction errored on-chain", async () => {
     }),
     SIG
   );
-  assert.deepEqual(result, { ok: false, reason: "not_confirmed" });
+  assert.deepEqual(result, { ok: false, reason: "failed" });
 });
 
 test("not_confirmed when the status is processed-only", async () => {

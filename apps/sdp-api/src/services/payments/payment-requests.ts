@@ -23,7 +23,7 @@ import {
   createTransactionalPaymentRequestsRepository,
   createTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, internalError, nullOnExpected, rateLimited } from "@/lib/errors";
+import { AppError, internalError, rateLimited } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -32,6 +32,7 @@ const SIGNATURE_PAGE_SIZE = 1000;
 const MAX_SIGNATURE_PAGES = 5;
 const VERIFY_BUDGET = 25;
 const PAYMENT_SEARCH_RETRY_AFTER_SECONDS = 5;
+const RETRYABLE_TRANSFER_CHECK_ERRORS: ReadonlySet<string> = new Set(["not found", "missing meta"]);
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
@@ -47,6 +48,11 @@ type PaymentSearchResult =
   | { kind: "paid"; found: FoundPayment }
   | { kind: "pending" }
   | { kind: "none" };
+
+type CandidateVerdict =
+  | { kind: "paid"; found: FoundPayment }
+  | { kind: "rejected" }
+  | { kind: "retry" };
 
 interface PaymentRequestKey {
   requestId: string;
@@ -205,54 +211,64 @@ async function evaluateOldestFirst(
   let cursor: Signature | null = null;
   let contiguous = true;
   let verified = 0;
-  const markDefinitive = (candidate: SignatureInfo) => {
-    if (contiguous) {
+  for (const candidate of oldestFirst) {
+    let verdict: CandidateVerdict = { kind: "rejected" };
+    if (candidate.err === null) {
+      if (verified >= VERIFY_BUDGET) {
+        return { cursor, exhausted: false, found: null };
+      }
+      verified++;
+      verdict = await judgeCandidate(rpc, row, reference, candidate);
+    }
+    if (verdict.kind === "paid") {
+      return { cursor, exhausted: false, found: verdict.found };
+    }
+    if (verdict.kind === "retry") {
+      contiguous = false;
+    } else if (contiguous) {
       cursor = candidate.signature;
     }
-  };
-  for (const candidate of oldestFirst) {
-    if (candidate.err !== null) {
-      markDefinitive(candidate);
-      continue;
-    }
-    if (verified >= VERIFY_BUDGET) {
-      return { cursor, exhausted: false, found: null };
-    }
-    verified++;
-    const landed = await verifyTransactionLanded(rpc, candidate.signature, {
-      searchTransactionHistory: true,
-    });
-    if (!landed.ok) {
-      if (landed.reason === "not_indexed") {
-        contiguous = false;
-      } else {
-        markDefinitive(candidate);
-      }
-      continue;
-    }
-    const validated = await nullOnExpected(
-      validateTransfer(rpc, candidate.signature, {
-        recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-        amount: toNumberAmount(row.amount),
-        reference,
-        ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
-      }),
-      ValidateTransferError
-    );
-    if (validated !== null) {
-      return {
-        cursor,
-        exhausted: false,
-        found: {
-          signature: candidate.signature,
-          slot: candidate.slot,
-          blockTime: candidate.blockTime ?? landed.transaction.blockTime ?? null,
-        },
-      };
-    }
-    markDefinitive(candidate);
   }
   return { cursor, exhausted: contiguous, found: null };
+}
+
+async function judgeCandidate(
+  rpc: SolanaRpc,
+  row: PaymentRequestRow,
+  reference: Address,
+  candidate: SignatureInfo
+): Promise<CandidateVerdict> {
+  const landed = await verifyTransactionLanded(rpc, candidate.signature, {
+    searchTransactionHistory: true,
+  });
+  if (!landed.ok) {
+    return landed.reason === "failed" || landed.reason === "account_missing"
+      ? { kind: "rejected" }
+      : { kind: "retry" };
+  }
+  try {
+    await validateTransfer(rpc, candidate.signature, {
+      recipient: assertValidAddress(row.destination_address, "destinationAddress"),
+      amount: toNumberAmount(row.amount),
+      reference,
+      splToken: row.token === SOL_MINT ? undefined : assertValidAddress(row.token, "token"),
+    });
+  } catch (err) {
+    if (!(err instanceof ValidateTransferError)) {
+      throw err;
+    }
+    return RETRYABLE_TRANSFER_CHECK_ERRORS.has(err.message)
+      ? { kind: "retry" }
+      : { kind: "rejected" };
+  }
+  return {
+    kind: "paid",
+    found: {
+      signature: candidate.signature,
+      slot: candidate.slot,
+      blockTime: candidate.blockTime ?? landed.transaction.blockTime ?? null,
+    },
+  };
 }
 
 async function advanceSignatureScan(
