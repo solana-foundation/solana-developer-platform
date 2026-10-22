@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
-import { clerkHeaders } from "@/test/helpers/clerk";
+import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
@@ -149,6 +149,20 @@ describe("organization membership rules", () => {
     expect(await membership(MEMBER)).toEqual({ role: "member", status: "removed" });
     expect(await projectMemberships(MEMBER)).toEqual([]);
     expect(await readInvitationStatus(getDb(env), "inv_rules_member")).toBe("revoked");
+  });
+
+  it("lets a member with no project access leave without a project", async () => {
+    await getDb(env).execute("DELETE FROM project_members WHERE user_id = ?", [MEMBER.userId]);
+    const token = await signSeededClerkMember(env, getDb(env), MEMBER.userId, ORGANIZATION.id);
+
+    const response = await app.request(
+      "/v1/members/me",
+      { method: "DELETE", headers: clerkHeadersWithoutProject(token) },
+      env
+    );
+
+    expect(response.status).toBe(204);
+    expect(await membership(MEMBER)).toEqual({ role: "member", status: "removed" });
   });
 
   it("refuses an admin removing themselves", async () => {
