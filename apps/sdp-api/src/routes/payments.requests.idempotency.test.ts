@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -74,8 +75,9 @@ describe("Payments routes — payment request access before the key", () => {
 
     expect(first.status).toBe(201);
     expect(retry.status).toBe(201);
-    const created = (await first.json()) as { data: { id: string } };
-    const replayed = (await retry.json()) as { data: { id: string } };
+    const createdSchema = z.object({ data: z.object({ id: z.string() }) });
+    const created = createdSchema.parse(await first.json());
+    const replayed = createdSchema.parse(await retry.json());
     expect(replayed.data.id).toBe(created.data.id);
   });
 });

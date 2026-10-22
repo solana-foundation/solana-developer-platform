@@ -24,14 +24,8 @@ import { PLAYGROUND_PROXY_PREFIX, playgroundResponseHeaders } from "@/lib/api-pl
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import {
-  answerRetiresKey,
-  apiErrorCode,
-  canonicalJson,
-  IDEMPOTENCY_KEY_HEADER,
-  parseJsonValue,
-  storageFingerprint,
-} from "@/lib/idempotency";
+import { canonicalJson } from "@sdp/types/idempotency";
+import { answerRetiresKey, apiErrorCode, canonicalizeAmounts, IDEMPOTENCY_KEY_HEADER, parseJsonValue, storageFingerprint } from "@/lib/idempotency";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import { setNestedValue } from "@/lib/set-nested-value";
 import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
@@ -562,11 +556,16 @@ async function executePlaygroundRequest({
     hasRequestBody(activeEndpoint.method) && requestBody !== null
       ? JSON.stringify(requestBody)
       : undefined;
+  // On a money route the amounts are keyed canonically too ("100.00" and "100"
+  // move the same), as the API fingerprints them; the body still goes out as typed.
+  const keyedBody = sentBody === undefined ? null : parseJsonValue(sentBody);
   const sendRequest = canonicalJson([
     projectId,
     activeEndpoint.method,
     resolvedPath,
-    sentBody === undefined ? null : parseJsonValue(sentBody),
+    keyedBody !== null && isMoneyRouteRequest(activeEndpoint.method, resolvedPath)
+      ? canonicalizeAmounts(keyedBody)
+      : keyedBody,
   ]);
   const claimed = hasRequestBody(activeEndpoint.method) ? keyForSend(sendRequest) : undefined;
   if (

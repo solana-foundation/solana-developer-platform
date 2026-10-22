@@ -16,12 +16,8 @@ import {
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, internalError } from "@/lib/errors";
-import {
-  canonicalJson,
-  deriveProviderRequestId,
-  type JsonValue,
-  jsonValueSchema,
-} from "@/lib/idempotency";
+import { canonicalJson } from "@sdp/types/idempotency";
+import { deriveProviderRequestId, type JsonValue, jsonValueSchema } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";

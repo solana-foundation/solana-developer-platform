@@ -1,5 +1,6 @@
 import type { z } from "zod";
-import { canonicalizeDecimalFields, canonicalJson, type JsonValue } from "@/lib/idempotency";
+import { canonicalJson } from "@sdp/types/idempotency";
+import { canonicalizeDecimalFields, type JsonValue } from "@/lib/idempotency";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import type { transferBatchOptionsSchema } from "./schemas";
 import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";

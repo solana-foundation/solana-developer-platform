@@ -1,4 +1,5 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -230,7 +231,7 @@ describe("Payments routes — transfer idempotency", () => {
     const first = await postTransfer({ ...body, token: "SOL" }, { idempotencyKey: "xfer-alias" });
     expect(first.status).toBe(200);
     const aliased = await postTransfer(
-      { ...body, token: "So11111111111111111111111111111111111111112" },
+      { ...body, token: SOL_MINT },
       { idempotencyKey: "xfer-alias" }
     );
 

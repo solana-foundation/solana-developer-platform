@@ -36,6 +36,16 @@ function makePendingRpc(signature: Signature): {
 }
 
 /**
+ * A fake RPC that answers `getSignatureStatuses` from `send` and nothing else,
+ * enough for `confirmTransaction`.
+ */
+function statusesRpc(send: ReturnType<typeof vi.fn>): SolanaRpc {
+  // SAFETY: confirmTransaction calls only getSignatureStatuses(...).send(), which this
+  // object provides; the rest of the SolanaRpc surface is never reached.
+  return { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
+}
+
+/**
  * Await a promise that is expected to reject and hand back the rejection value.
  */
 async function captureRejection(promise: Promise<unknown>): Promise<unknown> {
@@ -73,7 +83,7 @@ describe("confirmTransaction", () => {
       .mockResolvedValueOnce({
         value: [{ confirmationStatus: "confirmed", slot: 42n, err: null }],
       });
-    const rpc = { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
+    const rpc = statusesRpc(send);
 
     const confirmation = await confirmTransaction(rpc, TEST_SIGNATURE, {
       pollIntervalMs: 1,
@@ -89,7 +99,7 @@ describe("confirmTransaction", () => {
     const send = vi
       .fn()
       .mockResolvedValue({ value: [{ confirmationStatus: "confirmed", slot: 42n, err: failure }] });
-    const rpc = { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
+    const rpc = statusesRpc(send);
 
     const confirmation = await confirmTransaction(rpc, TEST_SIGNATURE, {
       pollIntervalMs: 1,

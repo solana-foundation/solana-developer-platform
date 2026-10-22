@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
-import { canonicalJson, normalizeDecimalString } from "@sdp/types/idempotency";
+import { normalizeDecimalString } from "@sdp/types/idempotency";
 import { z } from "zod";
 import { conflict } from "@/lib/errors";
-
-export { canonicalJson, normalizeDecimalString };
 
 /**
  * Turn a caller's `Idempotency-Key` into the stable request id a provider

@@ -58,7 +58,7 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
-import { normalizeDecimalString } from "@/lib/idempotency";
+import { normalizeDecimalString } from "@sdp/types/idempotency";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";

@@ -1,9 +1,5 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import {
-  canonicalJson,
-  isIdempotencyKeyOutcomeUnknown,
-  normalizeDecimalString,
-} from "@sdp/types/idempotency";
+import { isIdempotencyKeyOutcomeUnknown, normalizeDecimalString } from "@sdp/types/idempotency";
 import {
   isMoneyMovementInFlight,
   isMoneyMovementStatus,
@@ -254,9 +250,34 @@ const jsonValueSchema = z.json();
 /** A JSON value as `JSON.parse` returns it. */
 export type JsonValue = z.infer<typeof jsonValueSchema>;
 
+/**
+ * A JSON value with every `amount` decimal string at any depth spelled by
+ * {@link canonicalDecimalAmount}, so a batch's recipient amounts are covered too.
+ * Keys a money request's retry the way the API fingerprints it: `"100.00"` and
+ * `"100"` are one payment.
+ *
+ * @param value - The parsed request body.
+ * @returns The same value with its amounts canonical; nothing else changes.
+ */
+export function canonicalizeAmounts(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeAmounts);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, member]) => [
+      key,
+      key === "amount" && typeof member === "string"
+        ? canonicalDecimalAmount(member)
+        : canonicalizeAmounts(member),
+    ])
+  );
+}
+
 /** Parses JSON text into a {@link JsonValue}; throws on text that is not JSON. */
 export function parseJsonValue(text: string): JsonValue {
   return jsonValueSchema.parse(JSON.parse(text));
 }
 
-export { canonicalJson };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canonicalDecimalAmount, canonicalJson } from "./idempotency";
+import { canonicalJson } from "@sdp/types/idempotency";
+import { canonicalDecimalAmount, canonicalizeAmounts } from "./idempotency";
 
 describe("canonicalDecimalAmount", () => {
   it("spells one amount one way, as the API fingerprints it", () => {
@@ -33,5 +34,34 @@ describe("canonicalJson", () => {
 
   it("orders keys by UTF-16 code unit, not locale", () => {
     expect(canonicalJson({ b: 1, B: 2, "10": 0, "9": 0 })).toBe('{"10":0,"9":0,"B":2,"b":1}');
+  });
+});
+
+describe("canonicalizeAmounts", () => {
+  it("spells every amount canonically at any depth and leaves the rest as sent", () => {
+    expect(
+      canonicalizeAmounts({
+        amount: "100.00",
+        token: "USDC",
+        memo: "1.0",
+        recipients: [{ counterpartyAccountId: "cpa_1", amount: "01.50" }, { amount: "2" }],
+      })
+    ).toEqual({
+      amount: "100",
+      token: "USDC",
+      memo: "1.0",
+      recipients: [{ counterpartyAccountId: "cpa_1", amount: "1.5" }, { amount: "2" }],
+    });
+  });
+
+  it("keys a re-spelled payment as the same request and a different amount as a new one", () => {
+    const key = (amount: string) => canonicalJson(canonicalizeAmounts({ amount }));
+    expect(key("100")).toBe(key("100.00"));
+    expect(key("100.01")).not.toBe(key("100"));
+  });
+
+  it("leaves an amount that is not a decimal string as typed", () => {
+    expect(canonicalizeAmounts({ amount: "" })).toEqual({ amount: "" });
+    expect(canonicalizeAmounts({ amount: 5 })).toEqual({ amount: 5 });
   });
 });

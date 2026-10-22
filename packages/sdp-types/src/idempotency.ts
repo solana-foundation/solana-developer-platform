@@ -58,6 +58,10 @@ export function isIdempotencyKeyOutcomeUnknown(status: number, code: string | nu
   return status === 409 && code === "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";
 }
 
+function isAsciiDigit(character: string | undefined): boolean {
+  return character !== undefined && character >= "0" && character <= "9";
+}
+
 /**
  * A decimal string's canonical spelling, without rounding or passing through a
  * float: no leading integer zeroes, no trailing fraction zeroes, no bare point.
@@ -67,8 +71,14 @@ export function isIdempotencyKeyOutcomeUnknown(status: number, code: string | nu
  */
 export function normalizeDecimalString(value: string): string {
   const [integer = "0", fraction = ""] = value.split(".");
-  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
-  const normalizedFraction = fraction.replace(/0+$/, "");
+  // Index scans, not regular expressions: linear in the input whatever it holds.
+  let start = 0;
+  // A leading zero goes only while a digit follows it, so "0" and "0x" keep theirs.
+  while (integer[start] === "0" && isAsciiDigit(integer[start + 1])) start += 1;
+  let end = fraction.length;
+  while (end > 0 && fraction[end - 1] === "0") end -= 1;
+  const normalizedInteger = integer.slice(start) || "0";
+  const normalizedFraction = fraction.slice(0, end);
   return normalizedFraction === ""
     ? normalizedInteger
     : `${normalizedInteger}.${normalizedFraction}`;
