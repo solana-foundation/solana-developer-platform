@@ -312,8 +312,8 @@ async function seedOrganizationAdminMembership(): Promise<void> {
     .run();
   await db
     .prepare(
-      `INSERT INTO project_members (id, project_id, user_id, role)
-       VALUES (?, ?, ?, 'admin')
+      `INSERT INTO project_members (id, project_id, user_id)
+       VALUES (?, ?, ?)
        ON CONFLICT (project_id, user_id) DO NOTHING`
     )
     .bind(`pm_integration_${TEST_USER.id}`, TEST_PROJECT.id, TEST_USER.id)

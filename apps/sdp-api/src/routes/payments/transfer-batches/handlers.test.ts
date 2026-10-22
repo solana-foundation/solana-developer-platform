@@ -379,8 +379,8 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
       .bind("om_batch_payment_approver", TEST_ORG.id, approverUserId),
     getDb(env)
       .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')`
+        `INSERT INTO project_members (id, project_id, user_id)
+         VALUES (?, ?, ?)`
       )
       .bind("pm_batch_payment_approver", TEST_PROJECT.id, approverUserId),
   ]);

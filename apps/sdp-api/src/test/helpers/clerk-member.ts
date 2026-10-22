@@ -67,8 +67,8 @@ export async function clerkAdminHeaders(
       .bind(`om_admin_${input.userId}`, input.organizationId, input.userId),
     db
       .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')
+        `INSERT INTO project_members (id, project_id, user_id)
+         VALUES (?, ?, ?)
          ON CONFLICT DO NOTHING`
       )
       .bind(`pm_admin_${input.projectId}_${input.userId}`, input.projectId, input.userId),
