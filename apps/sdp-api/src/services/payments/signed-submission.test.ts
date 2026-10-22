@@ -1,3 +1,5 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Signature,
@@ -8,7 +10,11 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
-import { submitSponsoredTransaction } from "@/services/sponsorship-submission";
+import {
+  SubmissionNotStartedError,
+  submitSponsoredTransaction,
+} from "@/services/sponsorship-submission";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { createTransferSignedSubmissionStore } from "./signed-submission";
 
 const SIGNATURE =
@@ -338,6 +344,51 @@ describe("submitSponsoredTransaction", () => {
     expect(send).toHaveBeenCalledTimes(4);
     expect(send.mock.calls.every(([, bytes]) => bytes === signedTransaction)).toBe(true);
     expect(store.clearSigned).not.toHaveBeenCalled();
+  });
+
+  describe("when the start marker write fails", () => {
+    const rpcStub = installClusterRpcStub();
+
+    it("reports a definite never-started submission without sending", async () => {
+      const markerError = new Error("marker response lost");
+      const feePayment: SponsorshipFeePayment = {
+        providerId: "kora",
+        getFeePayer: vi.fn(),
+        signAsFeePayer: vi.fn(),
+        getSponsorshipConfiguration: vi.fn(),
+        prepareOwnedSubmission: async (_transaction, lifecycle) => {
+          await lifecycle.markStarted();
+          return {
+            signedTransaction: new Uint8Array([1, 2, 3]),
+            signature: SIGNATURE,
+            releaseDefinitelyUnbroadcast: vi.fn(),
+          };
+        },
+      };
+      const store = {
+        persistSigned: vi.fn(),
+        markStarted: vi.fn().mockRejectedValue(markerError),
+        hasStarted: vi.fn(),
+        clearSigned: vi.fn(),
+      };
+
+      const outcome = submitSponsoredTransaction({
+        feePayment,
+        rpc: runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+          createClusterRpc()
+        ),
+        transaction: new Uint8Array([9]),
+        lastValidBlockHeight: 123n,
+        store,
+      });
+
+      await expect(outcome).rejects.toBeInstanceOf(SubmissionNotStartedError);
+      await expect(outcome).rejects.toMatchObject({
+        code: "SERVICE_UNAVAILABLE",
+        cause: markerError,
+      });
+      expect(rpcStub.calls).toEqual([]);
+    });
   });
 });
 
