@@ -33,6 +33,8 @@ export function normalizeKey(key: string): string {
 
 const CREDENTIAL_KEYS = new Set([
   "apikey",
+  // `__clerk_ticket`: a Clerk invitation ticket signs its holder in.
+  "clerkticket",
   "authorization",
   "cookie",
   "cookies",
