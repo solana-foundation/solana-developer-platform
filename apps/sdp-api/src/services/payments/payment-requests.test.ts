@@ -157,8 +157,12 @@ function onSandbox<T>(fn: () => Promise<T>) {
   return runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, fn);
 }
 
-function reconcileOnSandbox(row: PaymentRequestRow) {
-  return onSandbox(() => reconcilePaymentRequest(env, row));
+function reconcileOnSandbox(row: PaymentRequestRow, setRetryAfter = (_seconds: number) => {}) {
+  return onSandbox(() => reconcilePaymentRequest(env, row, setRetryAfter));
+}
+
+function checkOnSandbox(row: PaymentRequestRow) {
+  return onSandbox(() => checkAwaitingPaymentRequest(env, row));
 }
 
 async function listInboundTransfers() {
@@ -327,27 +331,47 @@ describe("reconcilePaymentRequest", () => {
     expect(await listInboundTransfers()).toMatchObject([{ custody_wallet_id: null }]);
   });
 
-  it("does not settle when the signature fails the independent confirmation check", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
-    verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_confirmed" });
-    validateTransferSpy.mockResolvedValue(validatedTransfer());
+  it.for(["not_indexed"] as const)(
+    "asks the payer to retry instead of answering payable while a candidate is %s",
+    async (reason) => {
+      mockSignatures(signatureInfo(SIGNATURE));
+      verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason });
+      validateTransferSpy.mockResolvedValue(validatedTransfer());
+      const setRetryAfter = vi.fn();
+      const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null })
+      await expect(reconcileOnSandbox(request, setRetryAfter)).rejects.toMatchObject({
+        code: "RATE_LIMITED",
+        statusCode: 429,
+      });
+
+      expect(setRetryAfter).toHaveBeenCalledWith(expect.any(Number));
+      expect(setRetryAfter.mock.calls[0]?.[0]).toBeGreaterThan(0);
+      expect(validateTransferSpy).not.toHaveBeenCalled();
+      expect(await listInboundTransfers()).toHaveLength(0);
+      expect(await readStored(request.id)).toMatchObject({ status: "awaiting_payment" });
+    }
+  );
+
+  it("asks the payer to retry while the verify budget leaves candidates unchecked", async () => {
+    mockSignatures(
+      ...Array.from({ length: 30 }, (_, index) =>
+        signatureInfo(signature(getBase58Decoder().decode(new Uint8Array(64).fill(index + 10))))
+      )
     );
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
 
-    expect(result.status).toBe("awaiting_payment");
-    expect(validateTransferSpy).not.toHaveBeenCalled();
-    expect(await listInboundTransfers()).toHaveLength(0);
+    await expect(
+      reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }))
+    ).rejects.toMatchObject({ code: "RATE_LIMITED" });
   });
 
-  it("does not settle while the transaction is confirmed but not yet indexed", async () => {
+  it("does not settle in a background check while a candidate is not indexed yet", async () => {
     mockSignatures(signatureInfo(SIGNATURE));
     verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
 
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null })
-    );
+    const result = await checkOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
 
     expect(result.status).toBe("awaiting_payment");
     expect(validateTransferSpy).not.toHaveBeenCalled();
@@ -802,9 +826,7 @@ describe("payment search", () => {
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
 
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null })
-    );
+    const result = await checkOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
 
     expect(result.status).toBe("awaiting_payment");
     expect(validateTransferSpy).toHaveBeenCalledTimes(25);
@@ -929,7 +951,7 @@ describe("signature scan cursor", () => {
     mockOnlyValid(REAL);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
-    const first = await reconcileOnSandbox(request);
+    const first = await checkOnSandbox(request);
 
     expect(first.status).toBe("awaiting_payment");
     expect(validatedSignatures()).toEqual(junk.slice(0, 25));
@@ -937,7 +959,7 @@ describe("signature scan cursor", () => {
     expect(stored.signature_scan_cursor).toBe(junk[24]);
 
     validateTransferSpy.mockClear();
-    const second = await reconcileOnSandbox(stored);
+    const second = await checkOnSandbox(stored);
 
     expect(second.status).toBe("paid");
     expect(validatedSignatures()).toEqual([...junk.slice(25), REAL]);
@@ -1048,7 +1070,7 @@ describe("signature scan cursor", () => {
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     await storeScanPosition(request, { cursor: junk[27] ?? null, before: null });
 
-    await reconcileOnSandbox(request);
+    await checkOnSandbox(request);
 
     expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: junk[27] });
   });

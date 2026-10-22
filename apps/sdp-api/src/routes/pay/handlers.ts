@@ -76,7 +76,9 @@ export async function createSponsoredTransaction(
 ) {
   const { token } = c.req.param();
   const existing = await findPaymentRequest(c.env, token);
-  const request = await reconcilePaymentRequest(c.env, existing);
+  const request = await reconcilePaymentRequest(c.env, existing, (seconds) =>
+    c.header("Retry-After", String(seconds))
+  );
   if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
     throw badRequest("Payment request is no longer payable");
   }

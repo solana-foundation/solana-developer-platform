@@ -23,7 +23,7 @@ import {
   createTransactionalPaymentRequestsRepository,
   createTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, internalError, nullOnExpected } from "@/lib/errors";
+import { AppError, internalError, nullOnExpected, rateLimited } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -31,6 +31,7 @@ import type { Env } from "@/types/env";
 const SIGNATURE_PAGE_SIZE = 1000;
 const MAX_SIGNATURE_PAGES = 5;
 const VERIFY_BUDGET = 25;
+const PAYMENT_SEARCH_RETRY_AFTER_SECONDS = 5;
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
@@ -55,7 +56,8 @@ interface PaymentRequestKey {
 
 export async function reconcilePaymentRequest(
   env: Env,
-  row: PaymentRequestRow
+  row: PaymentRequestRow,
+  setRetryAfter: (seconds: number) => void
 ): Promise<PaymentRequestRow> {
   if (row.status !== "awaiting_payment" || isPaymentRequestExpired(row.expires_at)) {
     return row;
@@ -63,7 +65,15 @@ export async function reconcilePaymentRequest(
   if (row.custody_wallet_id === null) {
     throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
   }
-  return checkAwaitingPaymentRequest(env, row);
+  const result = await findValidPayment(env, createClusterRpc(), row);
+  if (result.kind === "pending") {
+    setRetryAfter(PAYMENT_SEARCH_RETRY_AFTER_SECONDS);
+    throw rateLimited("A payment to this request may still be confirming; retry shortly");
+  }
+  if (result.kind === "none") {
+    return row;
+  }
+  return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
 }
 
 export async function checkAwaitingPaymentRequest(

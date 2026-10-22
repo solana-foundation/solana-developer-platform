@@ -1,3 +1,4 @@
+import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -13,10 +14,11 @@ import {
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import {
@@ -416,6 +418,32 @@ describe("Public payment request routes", () => {
       );
       expect(other.status).toBe(429);
       expect(Number(other.headers.get("Retry-After"))).toBeGreaterThan(0);
+    });
+
+    it("answers 429 with Retry-After instead of a new transaction while a payment is still confirming", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      getSignaturesForAddressMock.mockResolvedValueOnce([
+        {
+          signature: signature(getBase58Decoder().decode(new Uint8Array(64).fill(5))),
+          slot: 1n,
+          blockTime: null,
+          err: null,
+          confirmationStatus: "confirmed",
+        },
+      ]);
+      const verify = vi
+        .spyOn(verifiedConfirmation, "verifyTransactionLanded")
+        .mockResolvedValue({ ok: false, reason: "not_indexed" });
+      onTestFinished(() => verify.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(429);
+      expect(Number(response.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(verify).toHaveBeenCalledTimes(1);
+      expect(sponsorship).not.toHaveBeenCalled();
     });
 
     it("lets a new account claim after the window expires", async () => {
