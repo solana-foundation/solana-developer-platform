@@ -15,11 +15,12 @@
  */
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import type { Account, Address } from "@solana/kit";
-import { fetchEncodedAccount } from "@solana/kit";
+import { capabilityRefusals } from "@sdp/solana/token-movement";
+import { type Account, type Address, fetchEncodedAccounts } from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { decodeMint, type Mint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { BLOCKED_MINT_EXTENSIONS, UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
+import { decodeDvpLegMint } from "./mints";
 
 export interface DvpMintInspection {
   mint: string;
@@ -61,10 +62,11 @@ export async function inspectDvpMint(
   rpc: SolanaRpc,
   mint: Address
 ): Promise<DvpMintInspection | null> {
-  // One read, and a failed one throws. An RPC error says nothing about the mint,
-  // so it is neither "nothing at that address" nor "unreadable": either answer
-  // would turn a transient outage into a verdict on a valid token.
-  const account = await fetchEncodedAccount(rpc, mint);
+  // One read (the mint and the Clock its terms are decoded at), and a failed
+  // one throws. An RPC error says nothing about the mint, so it is neither
+  // "nothing at that address" nor "unreadable": either answer would turn a
+  // transient outage into a verdict on a valid token.
+  const [account, clock] = await fetchEncodedAccounts(rpc, [mint, SYSVAR_CLOCK_ADDRESS]);
   if (!account.exists) {
     return null;
   }
@@ -103,11 +105,12 @@ export async function inspectDvpMint(
       ? decoded.data.extensions.value
       : [];
 
+  // The same decision create makes: the first refusal of the `dvp` row.
+  const legMint = decodeDvpLegMint(account, clock, { mint, tokenProgram: owner });
   const blockedBy =
-    extensions
-      .map((extension) => extension.__kind)
-      .find((kind) => BLOCKED_MINT_EXTENSIONS.has(kind) || UNSUPPORTED_MINT_EXTENSIONS.has(kind)) ??
-    null;
+    legMint.kind === "read"
+      ? (capabilityRefusals(legMint.terms, "dvp")[0]?.extension ?? null)
+      : UNREADABLE_MINT_REASON;
 
   const metadata = extensions.find((extension) => extension.__kind === "TokenMetadata");
   const name =

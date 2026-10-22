@@ -12,16 +12,25 @@
  */
 
 import { SwapDvpVerificationError } from "@sdp/dvp";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import {
+  address,
   getSignatureFromTransaction,
   getTransactionDecoder,
+  lamports,
   none,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SolanaError,
   some,
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
+import {
+  AccountState,
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
+  getTokenEncoder,
+  getTransferCheckedInstructionDataDecoder,
+} from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { type AppError, conflict } from "@/lib/errors";
@@ -33,6 +42,8 @@ import {
   DVP_TEST_T22,
 } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
+import { required } from "@/test/helpers/required";
+import { mintTermsAt, sentInstructions } from "@/test/helpers/token-movement";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
@@ -40,7 +51,7 @@ const readEscrowState = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
 const verifySwapDvpAccount = vi.hoisted(() => vi.fn());
 const decodeSwapDvpChecked = vi.hoisted(() => vi.fn());
-const readMintDecimals = vi.hoisted(() => vi.fn());
+const readDvpFundingAccounts = vi.hoisted(() => vi.fn());
 const claimFunding = vi.hoisted(() => vi.fn());
 const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
@@ -49,7 +60,6 @@ const hasClaim = vi.hoisted(() => vi.fn());
 const resolveProjectSponsorshipScope = vi.fn();
 const createSponsorshipFeePayment = vi.fn();
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
-const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
 let sponsor: Awaited<ReturnType<typeof createTestSponsor>>;
 
@@ -75,11 +85,7 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
     recordFundingTx,
   }),
 }));
-vi.mock("./mints", () => ({ readMintDecimals }));
-vi.mock("@solana-program/token-2022", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
-  fetchMaybeToken,
-}));
+vi.mock("./mints", () => ({ readDvpFundingAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -92,6 +98,49 @@ vi.mock("@sdp/rpc/solana", () => ({
 const { fundDvpTradeLeg } = await import("./fund");
 
 const _T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+/** The funding wallet's token account of a leg's mint, holding `amount` base units. */
+function sourceTokenAccount(at: string, mint: string, owner: string, amount: bigint) {
+  return {
+    address: address(at),
+    exists: true,
+    data: new Uint8Array(
+      getTokenEncoder().encode({
+        mint: address(mint),
+        owner: address(owner),
+        amount,
+        delegate: null,
+        state: AccountState.Initialized,
+        isNative: null,
+        delegatedAmount: 0n,
+        closeAuthority: null,
+        extensions: null,
+      })
+    ),
+    executable: false,
+    lamports: lamports(1n),
+    programAddress: address(_T22),
+    space: 165n,
+  };
+}
+
+/** Answers the funding read: the leg's mint at 6 decimals and `balance` in the source. */
+function answerFundingRead(
+  balance: bigint,
+  extensions: Parameters<typeof mintTermsAt>[2]["extensions"]
+) {
+  readDvpFundingAccounts.mockImplementation(
+    async (_rpc: SolanaRpc, leg: { mint: string }, source: string) => ({
+      mint: {
+        kind: "read",
+        terms: mintTermsAt(leg.mint, "token-2022", { decimals: 6, extensions }),
+      },
+      source: sourceTokenAccount(source, leg.mint, signerAddress, balance),
+    })
+  );
+}
+
+let signerAddress: string;
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
   return buildDvpTradeRow({ id: "dvp_fund_test", ...overrides });
@@ -114,7 +163,9 @@ describe("fundDvpTradeLeg", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     sponsor = await createTestSponsor();
-    createOrgSignerForCustodyWallet.mockResolvedValue(await generateKeyPairSigner());
+    const fundingSigner = await generateKeyPairSigner();
+    signerAddress = fundingSigner.address;
+    createOrgSignerForCustodyWallet.mockResolvedValue(fundingSigner);
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
     readDvpAccounts.mockImplementation(async () => {
       const state = await readEscrowState();
@@ -141,8 +192,7 @@ describe("fundDvpTradeLeg", () => {
         earliestSettlementTimestamp: none(),
       },
     }));
-    readMintDecimals.mockResolvedValue(6);
-    fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
+    answerFundingRead(10_000n, []);
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
     vi.spyOn(sponsorshipService, "resolveProjectSponsorshipScope").mockImplementation(
       resolveProjectSponsorshipScope
@@ -445,8 +495,51 @@ describe("fundDvpTradeLeg", () => {
     expect(rebindSignature).toHaveBeenCalledTimes(1);
   });
 
+  it("builds the funding through the token movement builder: the escrow's create, then TransferChecked", async () => {
+    await fundDvpTradeLeg(context, trade(), FUNDER_A);
+
+    const [, wire] = required(sendTransaction.mock.calls[0]);
+    const programs = sentInstructions(wire).map((instruction) => instruction.programAddress);
+    expect(programs).toEqual([ASSOCIATED_TOKEN_PROGRAM_ADDRESS, _T22]);
+    const transfer = required(sentInstructions(wire)[1]);
+    expect(
+      getTransferCheckedInstructionDataDecoder().decode(required(transfer.data))
+    ).toMatchObject({ amount: 1000n, decimals: 6 });
+    expect(transfer.accounts[2]).toBe(trade().escrowA);
+  });
+
+  it("refuses a leg whose mint the DvP row now refuses, before claiming", async () => {
+    answerFundingRead(10_000n, [
+      {
+        __kind: "PausableConfig",
+        authority: address(trade().userA),
+        paused: true,
+      },
+    ]);
+
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      details: { reason: DVP_LEG_REFUSAL.mintUnsupported },
+    });
+    answerFundingRead(10_000n, [
+      {
+        __kind: "TransferHook",
+        authority: address(trade().userA),
+        programId: address(trade().userB),
+      },
+    ]);
+    await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
+      details: { reason: DVP_LEG_REFUSAL.mintUnsupported },
+    });
+    expect(claimFunding).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
   it("refuses when the mint cannot be read", async () => {
-    readMintDecimals.mockResolvedValue(null);
+    readDvpFundingAccounts.mockResolvedValue({
+      mint: { kind: "unreadable" },
+      source: { address: address(_T22), exists: false },
+    });
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/could not be read/),
@@ -458,7 +551,13 @@ describe("fundDvpTradeLeg", () => {
   it("refuses before claiming when the funding wallet has no source token account", async () => {
     const signer = await generateKeyPairSigner();
     createOrgSignerForCustodyWallet.mockResolvedValue(signer);
-    fetchMaybeToken.mockResolvedValue({ address: signer.address, exists: false });
+    readDvpFundingAccounts.mockImplementation(async (_rpc: SolanaRpc, leg: { mint: string }) => ({
+      mint: {
+        kind: "read",
+        terms: mintTermsAt(leg.mint, "token-2022", { decimals: 6, extensions: [] }),
+      },
+      source: { address: signer.address, exists: false },
+    }));
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       code: "BAD_REQUEST",
@@ -472,7 +571,7 @@ describe("fundDvpTradeLeg", () => {
   });
 
   it("refuses before claiming when the source balance is below the shortfall", async () => {
-    fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 250n } });
+    answerFundingRead(250n, []);
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toMatchObject({
       code: "BAD_REQUEST",

@@ -60,6 +60,10 @@ const { loadProjectRpcClient } = vi.hoisted(() => {
 });
 vi.mock("@/services/private-channels/project-rpc", () => ({ loadProjectRpcClient }));
 
+// The mint's live terms: a classic six-decimal mint, as devnet USDC is.
+const { fetchTokenTerms } = vi.hoisted(() => ({ fetchTokenTerms: vi.fn() }));
+vi.mock("@sdp/solana/read-token-terms", () => ({ fetchTokenTerms }));
+
 // Deterministic ATA derivation: an owner's ATA is `ata:<owner>`.
 const { findAssociatedTokenPda } = vi.hoisted(() => ({
   findAssociatedTokenPda: vi.fn(async ({ owner }: { owner: string }) => [`ata:${owner}`, 255]),
@@ -72,6 +76,7 @@ vi.mock("@solana-program/token", () => ({
 const { emitWithdrawalEvent } = vi.hoisted(() => ({ emitWithdrawalEvent: vi.fn() }));
 vi.mock("@/services/private-channels/withdraw-events", () => ({ emitWithdrawalEvent }));
 
+import { mintTermsAt } from "@/test/helpers/token-movement";
 import { trackPendingWithdrawals } from "./track-pending-withdrawals";
 
 // Valid base58 addresses (the reconciler runs `address()` on these fixtures).
@@ -126,6 +131,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(new Date(NOW_ISO));
+  fetchTokenTerms.mockResolvedValue(
+    mintTermsAt(MINT, "spl-token", { decimals: 6, extensions: null })
+  );
   withdrawalRepo.updateWithdrawal.mockImplementation(async (input: Record<string, unknown>) => ({
     ...withdrawalRow({}),
     ...input,

@@ -15,6 +15,7 @@ import { mapPrivateChannelWithdrawalRow } from "@/db/repositories/private-channe
 import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { env } from "@/test/helpers/env";
+import { privateChannelWriteRpc } from "@/test/helpers/private-channels-rpc";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createChannelDeposit, listChannelDeposits } from "./deposit";
@@ -45,23 +46,7 @@ beforeEach(async () => {
   projectRpc = {
     cluster: "devnet",
     probe: async () => ({ ok: true, latencyMs: 0, version: "test" }),
-    rpc: solanaRpc.createRpcFromTransport(
-      vi.fn().mockResolvedValue({
-        jsonrpc: "2.0",
-        id: "pc-execution",
-        result: {
-          context: { slot: 0 },
-          value: {
-            owner: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
-            data: ["", "base64"],
-            executable: false,
-            lamports: 0,
-            rentEpoch: 0,
-            space: 0,
-          },
-        },
-      })
-    ),
+    rpc: privateChannelWriteRpc(null),
   };
   const db = getDb(env);
   await db.batch([

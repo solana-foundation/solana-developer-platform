@@ -550,6 +550,7 @@
       "fundRefusedBalanceShort": "Esta Wallet não tem {symbol} suficiente para financiar esta perna. Nada foi enviado.",
       "fundRefusedBalanceShortUnnamed": "Esta Wallet não tem Token suficiente para financiar esta perna. Nada foi enviado.",
       "fundRefusedFrozen": "O escrow desta perna está congelado, então uma transferência para ele seria recusada. O emissor do Token precisa descongelá-lo primeiro.",
+      "fundRefusedMintUnsupported": "O token desta perna não pode mais ser financiado: o mint agora está em um estado que a liquidação DvP recusa, como uma taxa de transferência, uma pausa ou um transfer hook. Nada foi enviado.",
       "fundRefusedInProgress": "Esta perna já está em andamento. Verifique novamente em instantes.",
       "fundRefusedNoToken": "Esta Wallet ainda não tem {symbol}. Envie um pouco para ela e depois faça o funding da perna.",
       "fundRefusedNoTokenUnnamed": "Esta Wallet ainda não tem este Token. Envie um pouco para ela e depois faça o funding da perna.",
