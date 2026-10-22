@@ -423,6 +423,22 @@ export const TRANSFER_CHAIN_VERDICT_STATUSES = [
 
 export type TransferChainVerdictStatus = (typeof TRANSFER_CHAIN_VERDICT_STATUSES)[number];
 
+/** The commitment a transfer's in-request wait reaches, which is also the status it lands on. */
+export type TransferLandingStatus = Exclude<TransferChainVerdictStatus, "failed">;
+
+/**
+ * The commitment a transfer request waits for before it answers. A wallet send
+ * reports success only once the cluster finalizes it; a funded off-ramp
+ * deposit still settles at confirmed, since the provider's payout decides its
+ * outcome.
+ *
+ * @param type - The transfer's type.
+ * @returns The status the transfer lands on when its wait succeeds.
+ */
+export function transferLandingStatus(type: PaymentTransferType): TransferLandingStatus {
+  return isRampTransferType(type) ? "confirmed" : "finalized";
+}
+
 export const PAYMENT_TRANSFER_STATUS_TONES = ["success", "pending", "danger", "neutral"] as const;
 
 export type PaymentTransferStatusTone = (typeof PAYMENT_TRANSFER_STATUS_TONES)[number];

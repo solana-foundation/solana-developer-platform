@@ -17,9 +17,10 @@ import {
   PAYMENT_TRANSFER_TYPES,
   RAMP_TRANSFER_TYPES,
   TRANSFER_CHAIN_VERDICT_STATUSES,
-  type TransferChainVerdictStatus,
+  type TransferLandingStatus,
   type PaymentTransferStatus as TransferStatus,
   type PaymentTransferType as TransferType,
+  transferLandingStatus,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
 import {
@@ -522,6 +523,16 @@ async function updateTransferRecord(
   if (updated) {
     return { outcome: "updated", row: updated };
   }
+  if (!isRampTransferType(transfer.type) && patch.status === "finalized") {
+    const upgraded = await repository.updateTransfer({
+      ...change,
+      expectedStatus: "confirmed",
+      status: "finalized",
+    });
+    if (upgraded) {
+      return { outcome: "updated", row: upgraded };
+    }
+  }
 
   const current = await repository.getTransferById({
     transferId: transfer.id,
@@ -543,22 +554,6 @@ function resolveTransferUpdateResult(
     return result.row;
   }
   throw conflict("Payment transfer was concurrently updated without a chain verdict");
-}
-
-/** The commitment a transfer's in-request wait reaches, which is also the status it lands on. */
-type TransferLandingStatus = Exclude<TransferChainVerdictStatus, "failed">;
-
-/**
- * The commitment the request waits for before it answers. A wallet send
- * reports success only once the cluster finalizes it (APE-419); a funded
- * off-ramp deposit still settles at confirmed, since the provider's payout
- * decides its outcome.
- *
- * @param type - The transfer's type.
- * @returns The status the transfer lands on when its wait succeeds.
- */
-function transferLandingStatus(type: TransferType): TransferLandingStatus {
-  return isRampTransferType(type) ? "confirmed" : "finalized";
 }
 
 /** A chain verdict or preflight simulation proves this exact transaction cannot land. */
