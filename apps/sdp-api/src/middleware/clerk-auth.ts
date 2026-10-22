@@ -246,7 +246,7 @@ async function ensureMembership(
 ): Promise<OrganizationRole> {
   const db = getDb(c.env);
   const existing = await resolveOrgMembership(db, params.userId, params.organizationId);
-  if (existing && existing.status !== "active" && existing.status !== "removed") {
+  if (existing?.status === "suspended") {
     throw unauthorized("Organization membership is inactive");
   }
   if (existing?.status === "active") {

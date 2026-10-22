@@ -1,4 +1,3 @@
-import { hashString } from "@sdp/payments/hash";
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
@@ -76,32 +75,6 @@ function resolveInviteRedirectUrl(env: Env): string | undefined {
   // Members live on the settings page. /members only redirects there, so
   // pointing at it made every accepted invite take an extra hop.
   return `${base}/dashboard/settings`;
-}
-
-function randomBase64Url(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-
-  const globalWithBuffer = globalThis as {
-    Buffer?: {
-      from: (input: Uint8Array) => { toString: (encoding: "base64") => string };
-    };
-  };
-
-  if (globalWithBuffer.Buffer) {
-    return globalWithBuffer.Buffer.from(bytes)
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, "");
-  }
-
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 /**
@@ -437,8 +410,6 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
 
   // Create local invitation record for role mapping
   const invitationId = `inv_${crypto.randomUUID()}`;
-  const token = randomBase64Url(32);
-  const tokenHash = await hashString(token);
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
 
   // Clerk's invitation id is stored, not just audited. It is the only key that
@@ -456,7 +427,9 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       normalizedEmail,
       role,
       userId,
-      tokenHash,
+      // Nothing redeems a token since the accept route went; the NOT NULL
+      // UNIQUE column takes the invitation id until the cleanup migration drops it.
+      invitationId,
       expiresAt,
       clerkInvitation.id
     )

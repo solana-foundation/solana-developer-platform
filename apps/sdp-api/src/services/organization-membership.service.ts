@@ -147,7 +147,8 @@ export async function applyMembershipChange(
 
 /**
  * Revokes the person's pending invitations to the organization, matched on
- * every email SDP holds for them, since admission matches any of them.
+ * every email SDP holds for them, since any of them could become the verified
+ * email a later sign-in is admitted on.
  *
  * @param tx - The open transaction.
  * @param organizationId - The organization the invitations are for.

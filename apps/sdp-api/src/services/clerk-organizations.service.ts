@@ -76,10 +76,6 @@ export class ClerkOrganizationsService {
     })) as T;
   }
 
-  async getOrganization(organizationId: string): Promise<ClerkOrganization> {
-    return this.request<ClerkOrganization>(`/organizations/${organizationId}`);
-  }
-
   async createOrganizationInvitation(params: {
     organizationId: string;
     inviterUserId: string;
