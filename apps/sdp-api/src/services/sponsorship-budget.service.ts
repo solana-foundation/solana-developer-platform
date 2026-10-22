@@ -160,6 +160,17 @@ function canonicalJson(value: unknown): string {
   throw new Error("Unsupported sponsorship provider configuration value");
 }
 
+/**
+ * The message digest a sponsorship reservation is keyed by, so a caller can bind an audit record
+ * to the reservation `signAsFeePayer` will admit before it signs.
+ *
+ * @param messageBytes - The compiled message of the transaction to sponsor.
+ * @returns The hex SHA-256 digest of the message bytes.
+ */
+export function sponsoredMessageDigest(messageBytes: Transaction["messageBytes"]): string {
+  return createHash("sha256").update(new Uint8Array(messageBytes)).digest("hex");
+}
+
 /** Stable digest of every provider setting that can increase fee-payer outflow. */
 export function sponsorshipProviderConfigFingerprint(
   configuration: SponsorshipProviderConfiguration
@@ -485,10 +496,10 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         error instanceof Error ? error : undefined
       );
     }
-    const providerOutflow = providerConfig.feePayerMayTransferLamports
-      ? providerConfig.maxAllowedLamports
-      : 0n;
-    const ceiling = price.networkFee + providerOutflow;
+    // The policy read is not bound to the signature Kora returns, so the
+    // reservation assumes the worst outflow Kora allows; reconciliation settles
+    // the actual lamports from the chain.
+    const ceiling = price.networkFee + providerConfig.maxAllowedLamports;
     if (ceiling < 0n || ceiling > MAX_SAFE_LAMPORTS) {
       throw new FeePaymentError(
         "Sponsored transaction cost cannot be represented safely",
@@ -499,9 +510,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const providerConfigFingerprint = sponsorshipProviderConfigFingerprint(providerConfig);
     const decodedTransaction = getTransactionDecoder().decode(transaction);
     const recentBlockhash = getRecentBlockhash(transaction);
-    const transactionDigest = createHash("sha256")
-      .update(new Uint8Array(decodedTransaction.messageBytes))
-      .digest("hex");
+    const transactionDigest = sponsoredMessageDigest(decodedTransaction.messageBytes);
     const id = `sbr_${createHash("sha256")
       .update(
         JSON.stringify({

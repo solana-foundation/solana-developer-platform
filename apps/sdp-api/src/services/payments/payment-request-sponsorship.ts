@@ -38,6 +38,7 @@ import {
   resolveProjectSponsorshipScope,
   type SponsorshipFeePayment,
 } from "@/services/sponsorship.service";
+import { sponsoredMessageDigest } from "@/services/sponsorship-budget.service";
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
@@ -133,25 +134,42 @@ export async function issuePaymentRequestTransaction(
   const signAndStore = async (unsignedBase64: string): Promise<SponsoredPaymentTransaction> => {
     const feePayment = await getFeePayment();
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
-    const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
-    // /pay bytes are partially signed by design: the payer signs client-side.
-    const signature = getSignatureFromTransaction(getTransactionDecoder().decode(sponsored));
-    const signedBase64 = getBase64Decoder().decode(sponsored);
-    await new AuditService(getDb(c.env)).log(c, {
+    // The intent is durable before signAsFeePayer reserves budget and Kora
+    // signs, so no reservation can exist without its audit record.
+    const auditService = new AuditService(getDb(c.env));
+    const auditIntent = await auditService.beginCritical(c, {
       organizationId: request.organization_id,
       action: "sign",
       resourceType: "payment_request",
       resourceId: request.id,
       metadata: {
+        organizationId: request.organization_id,
+        projectId: request.project_id,
         sponsoredAccount: payer,
         amount: request.amount,
         token: request.token,
         destination: request.destination_address,
         walletId: request.wallet_id,
-        signature,
+        transactionDigest: sponsoredMessageDigest(
+          getTransactionDecoder().decode(unsignedBytes).messageBytes
+        ),
         claimHash: await hashString(unsignedBase64),
       },
     });
+    let sponsored: Uint8Array;
+    try {
+      sponsored = await feePayment.signAsFeePayer(unsignedBytes);
+    } catch (error) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        metadata: { error: error instanceof Error ? error.message : "Unknown sponsorship error" },
+      });
+      throw error;
+    }
+    // /pay bytes are partially signed by design: the payer signs client-side.
+    const signature = getSignatureFromTransaction(getTransactionDecoder().decode(sponsored));
+    const signedBase64 = getBase64Decoder().decode(sponsored);
+    await auditService.completeCritical(c, auditIntent, { metadata: { signature } });
     const stored = await repository.storeSponsoredTransactionSignature({
       requestId: request.id,
       account: payer,

@@ -55,7 +55,7 @@ Kora simulates against its own Solana RPC (`KORA_<CLUSTER>_RPC_URL`); the budget
 **Sponsorship budget** (`apps/sdp-api/src/services/sponsorship-budget.service.ts`): every sponsored signature is admitted against lamport limits before Kora signs.
 
 - **Policies** exist per network (devnet, mainnet) at three scopes (global, organization, project), each with per-transaction, hourly and daily lamport limits. All three must allow the spend.
-- **The ceiling** is the message's network fee, priced on Kora's upstream, plus Kora's `max_allowed_lamports` when its policy lets the fee payer transfer lamports.
+- **The ceiling** is the message's network fee, priced on Kora's upstream, plus Kora's `max_allowed_lamports`, always: the policy read is not bound to the signature, so the reservation assumes the worst outflow Kora allows and reconciliation settles the actual lamports.
 - **A reservation** (a Postgres ledger row plus Redis window counters) moves `reserved → signed → submitted → committed`. It is `released` when the send is provably refused or the transaction provably never landed (the `finalized` block height passed the reservation's last valid block height and its signature is absent from history), and `charged_unknown` when the outcome can't be proven: counted, never refunded.
 - **The reconciler cron** settles actual lamports from the chain through the chain reads. A ledger or Redis failure trips the network's breaker, which refuses sponsorship until it recovers. A reservation pins Kora's signer and policy fingerprint; a mismatch fails closed.
 
