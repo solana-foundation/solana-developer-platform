@@ -253,13 +253,20 @@ export function createRpcForSdk<TSdkRpc>(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Get a recent blockhash for transaction construction
+ * Get a recent blockhash for transaction construction.
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param commitment - The commitment whose bank supplies the blockhash.
+ * @param minContextSlot - The lowest slot the answering node may be at; a node behind it errors
+ * instead of answering.
+ * @returns The latest blockhash and its last valid block height.
  */
 export async function getRecentBlockhash(
   rpc: SolanaRpc,
-  commitment: Commitment = "confirmed"
+  commitment: Commitment = "confirmed",
+  minContextSlot?: Slot
 ): Promise<BlockhashWithExpiry> {
-  const response = await rpc.getLatestBlockhash({ commitment }).send();
+  const response = await rpc.getLatestBlockhash({ commitment, minContextSlot }).send();
 
   return {
     blockhash: response.value.blockhash,
@@ -268,37 +275,44 @@ export async function getRecentBlockhash(
 }
 
 /**
- * Whether a blockhash is still valid at a commitment, with the slot the node answered at, so a
- * follow-up read can demand a node at least that current (`minContextSlot`).
+ * The chain's block height and slot as of the highest bank at a commitment, read together from
+ * one bank so a follow-up read can demand a node at least that current (`minContextSlot`).
  *
  * @param rpc - The Solana RPC to ask.
- * @param blockhash - The blockhash to check.
- * @param commitment - The commitment whose bank decides validity.
- * @returns The validity and the response's context slot.
+ * @param commitment - The commitment whose bank answers.
+ * @returns The bank's block height and absolute slot.
  */
-export async function getBlockhashValidity(
+export async function getChainHeight(
   rpc: SolanaRpc,
-  blockhash: Blockhash,
   commitment: Commitment
-): Promise<{ valid: boolean; contextSlot: Slot }> {
-  const response = await rpc.isBlockhashValid(blockhash, { commitment }).send();
+): Promise<{ blockHeight: bigint; absoluteSlot: Slot }> {
+  const epochInfo = await rpc.getEpochInfo({ commitment }).send();
 
-  return { valid: response.value, contextSlot: response.context.slot };
+  return { blockHeight: epochInfo.blockHeight, absoluteSlot: epochInfo.absoluteSlot };
 }
 
-/** Estimate only the Solana network fee from the exact compiled message. */
+/**
+ * Estimate only the Solana network fee from the exact compiled message.
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param transaction - The wire transaction to price.
+ * @param commitment - The commitment whose bank prices the message.
+ * @returns The fee in lamports and the slot of the bank that priced it.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the bank cannot price the message (its blockhash is
+ * unknown there).
+ */
 export async function getTransactionNetworkFee(
   rpc: SolanaRpc,
   transaction: Uint8Array,
-  commitment: Commitment = "confirmed"
-): Promise<bigint> {
+  commitment: Commitment
+): Promise<{ fee: bigint; contextSlot: Slot }> {
   const { messageBytes } = getTransactionDecoder().decode(transaction);
   const message = getBase64Decoder().decode(messageBytes) as TransactionMessageBytesBase64;
   const response = await rpc.getFeeForMessage(message, { commitment }).send();
   if (response.value === null) {
     throw solanaRpcError("Solana RPC could not price the transaction message");
   }
-  return response.value;
+  return { fee: response.value, contextSlot: response.context.slot };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

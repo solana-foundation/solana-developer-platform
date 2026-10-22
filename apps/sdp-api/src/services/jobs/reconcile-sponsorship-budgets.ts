@@ -1,12 +1,12 @@
 import {
   getSponsoredSignatureStatus,
   getSponsoredTransaction,
-  sponsoredBlockhashValidity,
+  sponsoredFinalizedHeight,
 } from "@sdp/fee-payment/chain-reads";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { address, assertIsAddress, assertIsBlockhash, assertIsSignature } from "@solana/kit";
+import { address, assertIsAddress, assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   SPONSORSHIP_BREAKER_OPERATOR,
@@ -66,7 +66,6 @@ type ReconciliationOutcome =
   | "committed"
   | "charged_unknown"
   | "still_valid"
-  | "awaiting_expiry"
   | "awaiting_finality"
   | "released";
 
@@ -74,7 +73,7 @@ export interface SponsorshipReconciliationDependencies {
   repository?: ReconciliationRepository;
   budgetRedis?: ReconciliationRedis;
   getTransaction?: typeof getSponsoredTransaction;
-  blockhashValidity?: typeof sponsoredBlockhashValidity;
+  finalizedHeight?: typeof sponsoredFinalizedHeight;
   getSignatureStatus?: typeof getSponsoredSignatureStatus;
   getProviderConfiguration?: () => Promise<SponsorshipProviderConfiguration>;
   now?: () => Date;
@@ -116,13 +115,13 @@ async function reconcileSponsorshipNetwork(
   // NOTE: settlement reads Kora's upstream while track-pending-transfers settles the same
   // transaction's payment row on the managed pool. Kept apart on purpose: sponsorship bookkeeping
   // stays off the customer pool. Both are nodes on one genesis-checked cluster, so outcomes
-  // converge. A reservation is released only on proof it never landed: its blockhash expired at
-  // finalized and its signature is absent from history. Every difference that proof cannot settle
-  // (slot lag, an early "not found") still resolves toward charged_unknown, which over-counts and
-  // never refunds a transaction that landed. Each read resolves the endpoint when called, so a
-  // network with nothing outstanding needs none.
+  // converge. A reservation is released only on proof it never landed: the finalized block height
+  // is past its stored last valid block height and its signature is absent from history. Every
+  // difference that proof cannot settle (slot lag, an early "not found") still resolves toward
+  // charged_unknown, which over-counts and never refunds a transaction that landed. Each read
+  // resolves the endpoint when called, so a network with nothing outstanding needs none.
   const getTransaction = dependencies.getTransaction ?? getSponsoredTransaction;
-  const blockhashValidity = dependencies.blockhashValidity ?? sponsoredBlockhashValidity;
+  const finalizedHeight = dependencies.finalizedHeight ?? sponsoredFinalizedHeight;
   const getSignatureStatus = dependencies.getSignatureStatus ?? getSponsoredSignatureStatus;
   const now = dependencies.now?.() ?? new Date();
   const sleep =
@@ -140,7 +139,6 @@ async function reconcileSponsorshipNetwork(
     committed: 0,
     charged_unknown: 0,
     still_valid: 0,
-    awaiting_expiry: 0,
     awaiting_finality: 0,
     released: 0,
   };
@@ -227,7 +225,7 @@ async function reconcileSponsorshipNetwork(
         repository,
         budgetRedis,
         getTransaction,
-        blockhashValidity,
+        finalizedHeight,
         getSignatureStatus,
       });
       outcomes[outcome] += 1;
@@ -263,7 +261,7 @@ async function reconcileReservation(input: {
   repository: ReconciliationRepository;
   budgetRedis: ReconciliationRedis;
   getTransaction: SponsorshipReconciliationDependencies["getTransaction"] & {};
-  blockhashValidity: SponsorshipReconciliationDependencies["blockhashValidity"] & {};
+  finalizedHeight: SponsorshipReconciliationDependencies["finalizedHeight"] & {};
   getSignatureStatus: SponsorshipReconciliationDependencies["getSignatureStatus"] & {};
 }): Promise<ReconciliationOutcome> {
   const { reservation, repository, budgetRedis } = input;
@@ -323,18 +321,27 @@ async function reconcileReservation(input: {
     return "committed";
   }
 
-  assertIsBlockhash(reservation.recentBlockhash);
-  const expiry = await input.blockhashValidity(reservation.recentBlockhash);
-  if (expiry.valid) return "still_valid";
-  if (reservation.missCount === 0) {
-    await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
-    return "awaiting_expiry";
+  // The NULL arm exists only until the contract migration deletes rows admitted before 0159.
+  if (reservation.lastValidBlockHeight === null) {
+    await persistAmbiguousCharge({
+      reservation,
+      repository,
+      budgetRedis,
+      reason: "Reservation predates the stored last valid block height",
+      breakerReason: "Pre-height reservation lost its durable transition",
+      lostTransitionError: "Failed to retain pre-height sponsorship charge",
+    });
+    return "charged_unknown";
   }
-  // The status is read from a node at least as current as the expiry proof (minContextSlot), and
-  // assumes Kora's upstream keeps ledger history at least back to the reservation's blockhash,
-  // which holds because reconciliation runs minutes after expiry: an absent status is then proof
-  // the transaction never landed, not a lagging or pruned record of one that did.
-  const status = await input.getSignatureStatus(reservation.signature, expiry.contextSlot);
+  const height = await input.finalizedHeight();
+  if (height.blockHeight <= reservation.lastValidBlockHeight) return "still_valid";
+  // Expiry is proven by the finalized block height passing the reservation's stored upper bound on
+  // the transaction's last valid block height. The status is read from a node at least as current
+  // as that height read (minContextSlot), and assumes Kora's upstream keeps ledger history at
+  // least back to the transaction's blockhash, which holds because reconciliation runs minutes
+  // after expiry: an absent status is then proof the transaction never landed, not a lagging or
+  // pruned record of one that did.
+  const status = await input.getSignatureStatus(reservation.signature, height.absoluteSlot);
   if (status !== null) {
     if (reservation.missCount >= FINALITY_WAIT_PASSES) {
       await persistAmbiguousCharge({
@@ -360,7 +367,7 @@ async function reconcileReservation(input: {
     reservation,
     "released",
     0,
-    "Blockhash expired at finalized and the signature is absent from history"
+    "Finalized block height passed the last valid block height and the signature is absent from history"
   );
   return "released";
 }

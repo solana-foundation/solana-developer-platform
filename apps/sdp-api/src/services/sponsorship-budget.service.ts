@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { sponsoredNetworkFee } from "@sdp/fee-payment/chain-reads";
+import { priceSponsoredTransaction } from "@sdp/fee-payment/chain-reads";
 import {
   FeePaymentError,
   type FeePaymentPort,
@@ -81,7 +81,7 @@ type BudgetRedis = Pick<SponsorshipBudgetRedis, "reserve" | "cancel" | "settle" 
 export interface BudgetedFeePaymentDependencies {
   repository?: BudgetRepository;
   budgetRedis?: BudgetRedis;
-  getNetworkFee?: (transaction: Uint8Array) => Promise<bigint>;
+  priceTransaction?: typeof priceSponsoredTransaction;
   now?: () => Date;
 }
 
@@ -108,6 +108,7 @@ type AdmissionContext = {
   feePayer: string;
   providerConfigFingerprint: string;
   recentBlockhash: string;
+  lastValidBlockHeight: bigint;
   hourBucket: string;
   dayBucket: string;
 };
@@ -181,7 +182,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private readonly network: SponsorshipNetwork;
   private readonly repository: BudgetRepository;
   private readonly budgetRedis: BudgetRedis;
-  private readonly getNetworkFee: (transaction: Uint8Array) => Promise<bigint>;
+  private readonly priceTransaction: typeof priceSponsoredTransaction;
   private readonly now: () => Date;
 
   constructor(
@@ -196,7 +197,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     this.network = sponsorshipNetworkForCluster(cluster);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
-    this.getNetworkFee = dependencies.getNetworkFee ?? sponsoredNetworkFee;
+    this.priceTransaction = dependencies.priceTransaction ?? priceSponsoredTransaction;
     this.now = dependencies.now ?? (() => new Date());
   }
 
@@ -471,11 +472,11 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
     const network = this.network;
     let providerConfig: Awaited<ReturnType<FeePaymentPort["getSponsorshipConfiguration"]>>;
-    let networkFee: bigint;
+    let price: Awaited<ReturnType<typeof priceSponsoredTransaction>>;
     try {
-      [providerConfig, networkFee] = await Promise.all([
+      [providerConfig, price] = await Promise.all([
         this.provider.getSponsorshipConfiguration(),
-        this.getNetworkFee(transaction),
+        this.priceTransaction(transaction),
       ]);
     } catch (error) {
       throw new FeePaymentError(
@@ -487,7 +488,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const providerOutflow = providerConfig.feePayerMayTransferLamports
       ? providerConfig.maxAllowedLamports
       : 0n;
-    const ceiling = networkFee + providerOutflow;
+    const ceiling = price.networkFee + providerOutflow;
     if (ceiling < 0n || ceiling > MAX_SAFE_LAMPORTS) {
       throw new FeePaymentError(
         "Sponsored transaction cost cannot be represented safely",
@@ -524,6 +525,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       feePayer: providerConfig.signerAddress,
       providerConfigFingerprint,
       recentBlockhash,
+      lastValidBlockHeight: price.lastValidBlockHeight,
       hourBucket: buckets.hour,
       dayBucket: buckets.day,
     };
@@ -703,6 +705,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       feePayer: context.feePayer,
       providerConfigFingerprint: context.providerConfigFingerprint,
       recentBlockhash: context.recentBlockhash,
+      lastValidBlockHeight: context.lastValidBlockHeight,
       reservedLamports: context.amount,
       hourBucket: context.hourBucket,
       dayBucket: context.dayBucket,

@@ -7,24 +7,39 @@
 // biome-ignore lint/style/noRestrictedImports: the Fee Payer's chain reads are the one caller of its Kora upstream door
 import { createKoraUpstreamRpc } from "@sdp/rpc/factory";
 import {
-  getBlockhashValidity,
+  getChainHeight,
+  getRecentBlockhash,
   getSignatureStatuses,
   getTransaction,
   getTransactionNetworkFee,
   type ParsedTransaction,
   type SignatureStatusInfo,
 } from "@sdp/rpc/solana";
-import type { Blockhash, Signature, Slot } from "@solana/kit";
+import type { Signature, Slot } from "@solana/kit";
 
 /**
- * The network fee of the exact compiled message, priced on Kora's upstream.
+ * A sponsored transaction's admission price on Kora's upstream: the network fee of the exact
+ * compiled message at `confirmed` (a freshly fetched blockhash must price), and an upper bound on
+ * the transaction's last valid block height.
+ *
+ * The bound is the latest blockhash's last valid block height from a bank at or past the slot
+ * that priced the message. That bank's latest blockhash is at least as recent as the
+ * transaction's, so the bound is never below the transaction's real last valid block height:
+ * a release proven against it can only come late, never early. A node behind that slot errors on
+ * `minContextSlot` instead of answering.
  *
  * @param transaction - The wire transaction to price.
- * @returns The fee in lamports.
+ * @returns The fee in lamports and the last valid block height bound.
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Kora upstream.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the upstream cannot price the message.
  */
-export function sponsoredNetworkFee(transaction: Uint8Array): Promise<bigint> {
-  return getTransactionNetworkFee(createKoraUpstreamRpc(), transaction);
+export async function priceSponsoredTransaction(
+  transaction: Uint8Array
+): Promise<{ networkFee: bigint; lastValidBlockHeight: bigint }> {
+  const rpc = createKoraUpstreamRpc();
+  const priced = await getTransactionNetworkFee(rpc, transaction, "confirmed");
+  const { lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed", priced.contextSlot);
+  return { networkFee: priced.fee, lastValidBlockHeight };
 }
 
 /**
@@ -40,18 +55,15 @@ export function getSponsoredTransaction(signature: Signature): Promise<ParsedTra
 }
 
 /**
- * Whether a sponsored transaction's blockhash can still land, per Kora's upstream's `finalized`
- * bank. Once the finalized bank says the blockhash is invalid, every future block descends from a
- * block past the transaction's last valid block height, so the transaction can never land.
+ * Kora's upstream's `finalized` block height and slot, for budget reconciliation. Once the
+ * finalized block height is past a transaction's last valid block height, every future block
+ * descends from a block that can no longer include it, so the transaction can never land.
  *
- * @param blockhash - The transaction's recent blockhash.
- * @returns Whether the blockhash is valid at `finalized`, and the slot that answer was read at.
+ * @returns The finalized bank's block height and absolute slot.
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Kora upstream.
  */
-export function sponsoredBlockhashValidity(
-  blockhash: Blockhash
-): Promise<{ valid: boolean; contextSlot: Slot }> {
-  return getBlockhashValidity(createKoraUpstreamRpc(), blockhash, "finalized");
+export function sponsoredFinalizedHeight(): Promise<{ blockHeight: bigint; absoluteSlot: Slot }> {
+  return getChainHeight(createKoraUpstreamRpc(), "finalized");
 }
 
 /**

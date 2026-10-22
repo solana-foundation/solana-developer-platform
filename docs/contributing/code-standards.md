@@ -35,7 +35,7 @@ Every on-chain path reads its cluster from the open cluster scope (`currentClust
 | Wallet signature history | `createClusterHistoryRpc()`, observed transfers only | Reordering the pool anywhere else |
 | Helius DAS | `services/helius-das.service.ts` | A direct Helius call |
 | Open a scope | Project middleware, `/pay` context, the cron runner (`runInClusterScope`; tests may too) | Opening a scope in a service |
-| The Fee Payer's chain reads (fee price, settlement) | `sponsoredNetworkFee`, `getSponsoredTransaction`, `sponsoredBlockhashValidity`, `getSponsoredSignatureStatus` (`@sdp/fee-payment/chain-reads`) | `createKoraUpstreamRpc()` outside `@sdp/fee-payment`; the managed pool for budget reads |
+| The Fee Payer's chain reads (fee price, settlement) | `priceSponsoredTransaction`, `getSponsoredTransaction`, `sponsoredFinalizedHeight`, `getSponsoredSignatureStatus` (`@sdp/fee-payment/chain-reads`) | `createKoraUpstreamRpc()` outside `@sdp/fee-payment`; the managed pool for budget reads |
 | A sponsor that signs | `createSponsorshipFeePayment(env, scope, movement)`, with `resolveRequestSponsorshipScope(c)` or `resolveProjectSponsorshipScope(env, owner)` (refuses a project from another environment) | `createKoraAdapter`, `KoraAdapter`, `KoraClient` (`pnpm check:value-movement` pins them) |
 | Only the fee-payer address | `resolveSponsoredFeePayer(env, scope)` | Building a sponsor to read its address |
 | Send a sponsored transaction | `submitSponsoredTransaction({ feePayment, rpc: createClusterRpc(), transaction, lastValidBlockHeight, store })` | Kora's `signAndSendTransaction`; `signAsFeePayer` followed by your own send |
@@ -56,7 +56,7 @@ Kora simulates against its own Solana RPC (`KORA_<CLUSTER>_RPC_URL`); the budget
 
 - **Policies** exist per network (devnet, mainnet) at three scopes (global, organization, project), each with per-transaction, hourly and daily lamport limits. All three must allow the spend.
 - **The ceiling** is the message's network fee, priced on Kora's upstream, plus Kora's `max_allowed_lamports` when its policy lets the fee payer transfer lamports.
-- **A reservation** (a Postgres ledger row plus Redis window counters) moves `reserved → signed → submitted → committed`. It is `released` when the send is provably refused or the transaction provably never landed (its blockhash expired at `finalized` and its signature is absent from history), and `charged_unknown` when the outcome can't be proven: counted, never refunded.
+- **A reservation** (a Postgres ledger row plus Redis window counters) moves `reserved → signed → submitted → committed`. It is `released` when the send is provably refused or the transaction provably never landed (the `finalized` block height passed the reservation's last valid block height and its signature is absent from history), and `charged_unknown` when the outcome can't be proven: counted, never refunded.
 - **The reconciler cron** settles actual lamports from the chain through the chain reads. A ledger or Redis failure trips the network's breaker, which refuses sponsorship until it recovers. A reservation pins Kora's signer and policy fingerprint; a mismatch fails closed.
 
 ## Platform obligations
