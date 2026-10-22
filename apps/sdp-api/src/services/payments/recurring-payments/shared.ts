@@ -603,6 +603,12 @@ export async function readSavedSend(
   );
   const [status] = statuses.value;
   if (status) {
+    // Seen only at "processed", the verdict may be on a fork the cluster drops: a failure
+    // there does not stop the same send landing, so resending it could collect twice
+    // (APE SOLA9-708).
+    if (status.confirmationStatus === null || status.confirmationStatus === "processed") {
+      return "pending";
+    }
     return status.err === null ? "succeeded" : "failed";
   }
   if (savedSend.lastValidBlockHeight === null) {
