@@ -1334,6 +1334,83 @@ describe("Payments routes — recurring", () => {
     expect(event?.after_values.amount).toBe("30.50");
   });
 
+  it("refuses changing a reset activation's plan terms, which a retry would reuse as they landed", async () => {
+    const created = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const otherAccountId = `counterparty_account_${crypto.randomUUID()}`;
+    const planId = `psp_${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_accounts (
+           id, organization_id, project_id, counterparty_id, account_kind, label,
+           details, provider_account_data, status, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'crypto_wallet', 'Second wallet', ?, '{}', 'active', ?, ?)`
+      )
+      .bind(
+        otherAccountId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        created.counterpartyId,
+        JSON.stringify({ network: "solana", address: TEST_SOLANA_ADDRESSES.wallet3 }),
+        now,
+        now
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_plans (
+           id, organization_id, project_id, owner_wallet_id, owner_address, token,
+           amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, '25.00', 24, '1001', 'active', ?, ?, ?)`
+      )
+      .bind(
+        planId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_WALLET_ID,
+        recurringExecution.sourceSigner().address,
+        DEVNET_USDC_MINT,
+        TEST_USER.id,
+        now,
+        now
+      )
+      .run();
+    // The plan landed, then the subscription was refused and the activation reset.
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_payments
+            SET plan_id = ?, plan_pda = ?, plan_created_at = '1770000000',
+                plan_creation_signature = ?
+          WHERE id = ?`
+      )
+      .bind(planId, TEST_SOLANA_ADDRESSES.wallet3, testSignature(1), created.id)
+      .run();
+    const before = await getDb(env)
+      .prepare("SELECT destination_address, amount FROM payment_recurring_payments WHERE id = ?")
+      .bind(created.id)
+      .first<{ destination_address: string; amount: string }>();
+    const patch = (body: Record<string, unknown>) =>
+      app.request(
+        `/v1/payments/recurring-payments/${created.id}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify(body) },
+        env
+      );
+
+    expect((await patch({ counterpartyAccountId: otherAccountId })).status).toBe(409);
+    expect((await patch({ amount: "30.00" })).status).toBe(409);
+    expect(
+      await getDb(env)
+        .prepare("SELECT destination_address, amount FROM payment_recurring_payments WHERE id = ?")
+        .bind(created.id)
+        .first()
+    ).toEqual(before);
+    // A term the plan does not carry still changes.
+    expect((await patch({ firstCollectionAt: null })).status).toBe(200);
+  });
+
   it("treats a respelled amount on an active schedule as no change, broadcasting nothing", async () => {
     const activated = await activateRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
@@ -7782,6 +7859,71 @@ describe("Payments routes — recurring", () => {
         });
         // Subscribe and the old subscription's cancel; the plan is not sent again.
         expect(sent).toHaveBeenCalledTimes(2);
+      });
+
+      it("refuses a stale same-key retry whose counterparty account now resolves to another address than its replacement plan", async () => {
+        const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+        const accountId = `counterparty_account_${crypto.randomUUID()}`;
+        const now = new Date().toISOString();
+        await getDb(env)
+          .prepare(
+            `INSERT INTO counterparty_accounts (
+               id, organization_id, project_id, counterparty_id, account_kind, label,
+               details, provider_account_data, status, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, 'crypto_wallet', 'Second wallet', ?, '{}', 'active', ?, ?)`
+          )
+          .bind(
+            accountId,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            activated.counterpartyId,
+            JSON.stringify({ network: "solana", address: TEST_SOLANA_ADDRESSES.wallet3 }),
+            now,
+            now
+          )
+          .run();
+        sendTransactionMock.mockRejectedValueOnce(new Error("process died after broadcast"));
+        const key = crypto.randomUUID();
+        const request = () =>
+          app.request(
+            actionPath(activated.id),
+            {
+              method: "PATCH",
+              headers: keyed(key),
+              body: JSON.stringify({ counterpartyAccountId: accountId }),
+            },
+            env
+          );
+        expect((await request()).status).toBe(500);
+        await leaveUpdateCrashedAt(activated.id, key);
+        // The replacement plan landed whitelisting wallet3; the account now names wallet1.
+        delegationsBesideActiveOld(required(activated.subscriptionPda), {
+          exists: false,
+          address: address(TEST_SOLANA_ADDRESSES.wallet2),
+        });
+        await getDb(env)
+          .prepare("UPDATE counterparty_accounts SET details = ? WHERE id = ?")
+          .bind(
+            JSON.stringify({ network: "solana", address: TEST_SOLANA_ADDRESSES.wallet1 }),
+            accountId
+          )
+          .run();
+        const sent = sends();
+
+        const retry = await request();
+
+        expect(retry.status).toBe(409);
+        expect(sent).not.toHaveBeenCalled();
+        const row = await getDb(env)
+          .prepare(
+            "SELECT destination_address, plan_id FROM payment_recurring_payments WHERE id = ?"
+          )
+          .bind(activated.id)
+          .first<{ destination_address: string; plan_id: string }>();
+        expect(row).toEqual({
+          destination_address: DEFAULT_RECURRING_FIXTURE.destinationAddress,
+          plan_id: activated.planId,
+        });
       });
 
       it("finishes an update whose replacement subscription landed without sending it again", async () => {

@@ -177,6 +177,12 @@ const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>(
   "periodHours",
 ]);
 
+/** Fields a subscription plan carries on chain: its owner, destination, token, amount, period and metadata. */
+const PLAN_TERM_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>([
+  ...REPLACEMENT_UPDATE_FIELDS,
+  "metadataUri",
+]);
+
 function parsePlanStatus(status: subscriptionsProgram.PlanStatus): subscriptionsProgram.PlanStatus {
   switch (status) {
     case subscriptionsProgram.PlanStatus.Sunset:
@@ -522,6 +528,17 @@ async function updatePendingRecurringPayment(input: {
       ranAttemptKey: null,
     });
     return input.recurringPayment;
+  }
+
+  // An activation reset keeps the schedule's plan, which a retry reuses as it
+  // is (on chain it may have landed), so its terms are fixed once it exists.
+  if (
+    (input.recurringPayment.plan_id !== null || input.recurringPayment.plan_pda !== null) &&
+    input.resolved.changedFields.some((field) => PLAN_TERM_FIELDS.has(field))
+  ) {
+    throw conflict(
+      "Recurring payment terms cannot change once its plan was created; cancel it and create a new recurring payment"
+    );
   }
 
   const changedDestinationOrToken =
@@ -1160,6 +1177,13 @@ async function getOrCreateReplacementPlan(input: {
       projectId: input.projectId,
     });
     if (existing) {
+      // The attempt's saved values name the counterparty account, not its address, and the
+      // address resolves again on every run. The plan row records the destination the attempt
+      // built on chain, so a run that resolves another address is not this attempt: finishing
+      // it would save one destination while the plan whitelists another.
+      if (existing.destination_address !== input.resolved.destinationAddress) {
+        throw conflict("Recurring payment update recovery must retry the same update");
+      }
       return existing;
     }
   }
