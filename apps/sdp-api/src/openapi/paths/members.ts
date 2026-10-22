@@ -6,12 +6,12 @@ import {
   memberIdParamSchema,
 } from "@/openapi/schemas/base";
 import {
-  acceptInvitationRequestSchema,
   inviteMemberRequestSchema,
   listMembersQuerySchema,
+  updateMemberRoleRequestSchema,
 } from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
-import { actionSuccessResponse, inviteMemberResponse, listMembersResponse } from "./responses";
+import { inviteMemberResponse, listMembersResponse, memberRoleResponse } from "./responses";
 
 export function registerMemberPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -24,13 +24,30 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       "Lists members of the authenticated organization, followed by any pending invitations the caller is permitted to see. The two page as one sequence. Invitations require `members.manage`, because each carries a shareable acceptance link.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
       query: listMembersQuerySchema,
     },
     responses: {
       200: {
         description: "Members list",
         content: jsonContent(listMembersResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/members/me",
+    tags: ["Members"],
+    summary: "Get current member",
+    operationId: "getCurrentMember",
+    description:
+      "Returns the caller's own membership in the authenticated organization. The role is SDP's, never Clerk's, and is what every permission check uses.",
+    security: [{ clerkBearerAuth: [] }],
+    responses: {
+      200: {
+        description: "Current member",
+        content: jsonContent(memberRoleResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 500]),
     },
@@ -61,31 +78,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "post",
-    path: "/v1/members/accept",
-    tags: ["Members"],
-    summary: "Accept invitation",
-    operationId: "acceptInvitation",
-    description:
-      "Accepts an invitation token and activates membership. The caller must be signed in as the invited user: the token identifies the invitation, and the authenticated account's email address is what binds it to a person. An API key cannot accept an invitation, and the membership is always granted in the organization that issued it rather than the one the caller is currently scoped to.",
-    security: [{ clerkBearerAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(acceptInvitationRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Invitation accepted",
-        content: jsonContent(actionSuccessResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
     method: "delete",
     path: "/v1/members/invitations/{invitationId}",
     tags: ["Members"],
@@ -110,12 +102,60 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
+    path: "/v1/members/me",
+    tags: ["Members"],
+    summary: "Leave organization",
+    operationId: "leaveOrganization",
+    description:
+      "Ends the caller's own membership, their project memberships in the organization and their pending invitations to it. An admin cannot leave (409); another admin removes them instead.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+    },
+    responses: {
+      204: {
+        description: "Left the organization",
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "patch",
+    path: "/v1/members/{memberId}",
+    tags: ["Members"],
+    summary: "Change member role",
+    operationId: "updateMemberRole",
+    description:
+      "Changes another member's Organization Role. An admin cannot change their own role, and the last active admin cannot be demoted (409). Takes effect on the member's next request.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({
+        memberId: memberIdParamSchema,
+      }),
+      body: {
+        required: true,
+        content: jsonContent(updateMemberRoleRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "Member role",
+        content: jsonContent(memberRoleResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "delete",
     path: "/v1/members/{memberId}",
     tags: ["Members"],
     summary: "Remove member",
     operationId: "removeMember",
     description:
-      "Removes a member from the organization and revokes their pending invitations, so an unspent invitation token cannot reinstate them. Re-inviting the removed member issues a fresh invitation that works normally.",
+      "Removes another member from the organization, along with their project memberships in it and their pending invitations, so an unspent invitation cannot readmit them. The last active admin cannot be removed, and nobody can remove themselves (409). Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -127,7 +167,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       204: {
         description: "Member removed",
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
     },
   });
 }

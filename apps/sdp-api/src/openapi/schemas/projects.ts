@@ -6,7 +6,6 @@ import {
 import { z } from "zod";
 import {
   addMemberSchema as addMemberSchemaBase,
-  updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
 } from "@/routes/projects/schemas";
 import { apiKeyListItemSchema } from "./api-keys";
@@ -77,9 +76,6 @@ export const projectMemberSchema = z
     id: projectMemberIdSchema,
     projectId: projectIdParamSchema,
     userId: userIdSchema,
-    role: z
-      .enum(["admin", "developer", "viewer"])
-      .openapi({ description: "Project member role.", example: "developer" }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Membership creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",
@@ -92,9 +88,6 @@ export const projectMemberWithUserSchema = z
     id: projectMemberIdSchema,
     projectId: projectIdParamSchema,
     userId: userIdSchema,
-    role: z
-      .enum(["admin", "developer", "viewer"])
-      .openapi({ description: "Project member role.", example: "developer" }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Membership creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",
@@ -217,18 +210,5 @@ export const addProjectMemberRequestSchema = addMemberSchemaBase
       description: "User identifier to add to the project.",
       example: "usr_example",
     }),
-    role: withOpenApi(addMemberSchemaBase.shape.role, {
-      description: "Role for the project member.",
-      example: "developer",
-    }),
   })
   .openapi({ description: "Add project member request body." });
-
-export const updateProjectMemberRequestSchema = updateMemberSchemaBase
-  .extend({
-    role: withOpenApi(updateMemberSchemaBase.shape.role, {
-      description: "Updated project member role.",
-      example: "admin",
-    }),
-  })
-  .openapi({ description: "Update project member request body." });

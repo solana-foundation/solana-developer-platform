@@ -79,8 +79,8 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       .bind(mapping.organization_id),
     // A pending invitation is a way back in: accepting one re-activates a
     // removed membership in this organization. Invitations lock before
-    // memberships, the same order acceptInvitation takes them, so a
-    // concurrent acceptance cannot deadlock the deletion.
+    // memberships, the same order sign-in admission takes them, so a
+    // concurrent admission cannot deadlock the deletion.
     db
       .prepare(
         "UPDATE invitations SET status = 'revoked' WHERE organization_id = ? AND status = 'pending'"

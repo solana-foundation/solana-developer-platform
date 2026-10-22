@@ -11,7 +11,6 @@ import type {
   ProjectMember,
   ProjectSettings,
 } from "@sdp/types/projects";
-import type { ProjectRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { badRequest, internalError, notFound } from "@/lib/errors";
@@ -266,8 +265,8 @@ export class ProjectService {
 
     await this.db
       .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
-         VALUES ('pm_' || gen_random_uuid(), ?, ?, 'admin', sdp_datetime_now())
+        `INSERT INTO project_members (id, project_id, user_id, created_at)
+         VALUES ('pm_' || gen_random_uuid(), ?, ?, sdp_datetime_now())
          ON CONFLICT (project_id, user_id) DO NOTHING`
       )
       .bind(project.id, createdBy)
@@ -283,7 +282,7 @@ export class ProjectService {
   /**
    * Add a member to a project
    */
-  async addMember(projectId: string, userId: string, role: ProjectRole): Promise<ProjectMember> {
+  async addMember(projectId: string, userId: string): Promise<ProjectMember> {
     // Check if already a member
     const existing = await this.getMembership(projectId, userId);
     if (existing) {
@@ -297,29 +296,18 @@ export class ProjectService {
       id,
       projectId,
       userId,
-      role,
       createdAt: now,
     };
 
     await this.db
       .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO project_members (id, project_id, user_id, created_at)
+         VALUES (?, ?, ?, ?)`
       )
-      .bind(member.id, member.projectId, member.userId, member.role, member.createdAt)
+      .bind(member.id, member.projectId, member.userId, member.createdAt)
       .run();
 
     return member;
-  }
-
-  /**
-   * Update a member's role
-   */
-  async updateMemberRole(projectId: string, userId: string, role: ProjectRole): Promise<void> {
-    await this.db
-      .prepare("UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?")
-      .bind(role, projectId, userId)
-      .run();
   }
 
   /**
@@ -338,7 +326,7 @@ export class ProjectService {
   async getMembership(projectId: string, userId: string): Promise<ProjectMember | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, project_id, user_id, role, created_at
+        `SELECT id, project_id, user_id, created_at
          FROM project_members
          WHERE project_id = ? AND user_id = ?`
       )
@@ -347,7 +335,6 @@ export class ProjectService {
         id: string;
         project_id: string;
         user_id: string;
-        role: string;
         created_at: string;
       }>();
 
@@ -359,7 +346,6 @@ export class ProjectService {
       id: row.id,
       projectId: row.project_id,
       userId: row.user_id,
-      role: row.role as ProjectRole,
       createdAt: row.created_at,
     };
   }
@@ -372,7 +358,7 @@ export class ProjectService {
   ): Promise<Array<ProjectMember & { user: { id: string; email: string; name: string | null } }>> {
     const result = await this.db
       .prepare(
-        `SELECT pm.id, pm.project_id, pm.user_id, pm.role, pm.created_at,
+        `SELECT pm.id, pm.project_id, pm.user_id, pm.created_at,
                 u.email, u.name
          FROM project_members pm
          JOIN users u ON u.id = pm.user_id
@@ -384,7 +370,6 @@ export class ProjectService {
         id: string;
         project_id: string;
         user_id: string;
-        role: string;
         created_at: string;
         email: string;
         name: string | null;
@@ -394,7 +379,6 @@ export class ProjectService {
       id: row.id,
       projectId: row.project_id,
       userId: row.user_id,
-      role: row.role as ProjectRole,
       createdAt: row.created_at,
       user: {
         id: row.user_id,

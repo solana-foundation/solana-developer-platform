@@ -22,8 +22,3 @@ export function normalizeOrganizationRole(
 
   return "member";
 }
-
-// Project member roles. Project membership does not authorize routes (HOO-1972).
-export const PROJECT_ROLES = ["admin", "developer", "viewer"] as const;
-
-export type ProjectRole = (typeof PROJECT_ROLES)[number];

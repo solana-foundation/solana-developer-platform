@@ -1,8 +1,9 @@
 import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
+import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
 import {
-  acceptSchema as acceptSchemaBase,
   inviteSchema as inviteSchemaBase,
+  updateMemberRoleSchema as updateMemberRoleSchemaBase,
 } from "@/routes/members/schemas";
 import { updateOrgSchema as updateOrgSchemaBase } from "@/routes/organizations/schemas";
 import {
@@ -107,6 +108,27 @@ export const organizationMemberSchema = z
     user: userSchema.openapi({ description: "User associated with the membership." }),
   })
   .openapi({ description: "Organization member record." });
+
+export const memberRoleSchema = z
+  .object({
+    memberId: memberIdParamSchema,
+    userId: userIdSchema,
+    organizationId: orgIdParamSchema,
+    role: z.enum(ORGANIZATION_ROLES).openapi({
+      description: "The Organization Role, held only by SDP and read on every request.",
+      example: "member",
+    }),
+  })
+  .openapi({ description: "A membership in the authenticated organization and its role." });
+
+export const updateMemberRoleRequestSchema = updateMemberRoleSchemaBase
+  .extend({
+    role: withOpenApi(updateMemberRoleSchemaBase.shape.role, {
+      description: "The member's new Organization Role.",
+      example: "admin",
+    }),
+  })
+  .openapi({ description: "Update member role request body." });
 
 export const invitationSchema = z
   .object({
@@ -232,16 +254,3 @@ export const inviteMemberRequestSchema = inviteSchemaBase
     }),
   })
   .openapi({ description: "Invite member request body." });
-
-export const acceptInvitationRequestSchema = acceptSchemaBase
-  .extend({
-    token: withOpenApi(acceptSchemaBase.shape.token, {
-      description: "Invitation token from email.",
-      example: "invitation_token",
-    }),
-    name: withOpenApi(acceptSchemaBase.shape.name, {
-      description: "Optional name to set for the user.",
-      example: "Example User",
-    }),
-  })
-  .openapi({ description: "Accept invitation request body." });

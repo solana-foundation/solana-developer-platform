@@ -9,7 +9,6 @@ import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/rol
 import type { Context, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
-import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import {
   type ClerkJwtPayload,
   extractBearerToken,
@@ -18,21 +17,15 @@ import {
   resolveClerkOrganizationClaims,
   verifyClerkSessionToken,
 } from "@/lib/clerk-token";
-import { AppError, unauthorized } from "@/lib/errors";
-import { invitationWasRevoked } from "@/lib/invitations";
+import { AppError, internalError, unauthorized } from "@/lib/errors";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { organizationNotActive, readActiveOrganizationSettings } from "@/lib/organization-access";
-import {
-  loadOrganizationEntitlements,
-  recordOrganizationEntitlements,
-} from "@/lib/production-entitlement";
-import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
-import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
+import { AuditService } from "@/services/audit.service";
 import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
-import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
@@ -89,25 +82,7 @@ async function resolveExistingClerkContext(
          u.email AS user_email,
          aoi.organization_id,
          COALESCE(aoi.slug, ?) AS org_slug,
-         om.role,
-         EXISTS (
-           SELECT 1
-           FROM projects p
-           JOIN project_members pm
-             ON pm.project_id = p.id AND pm.user_id = aui.user_id
-           WHERE p.organization_id = aoi.organization_id
-             AND p.slug = 'default-sandbox'
-             AND p.status = 'active'
-         ) AS has_default_sandbox,
-         EXISTS (
-           SELECT 1
-           FROM projects p
-           JOIN project_members pm
-             ON pm.project_id = p.id AND pm.user_id = aui.user_id
-           WHERE p.organization_id = aoi.organization_id
-             AND p.slug = 'default-production'
-             AND p.status = 'active'
-         ) AS has_default_production
+         om.role
        FROM auth_organization_identities aoi
        LEFT JOIN auth_user_identities aui
          ON aui.provider = 'clerk' AND aui.provider_user_id = ?
@@ -128,8 +103,6 @@ async function resolveExistingClerkContext(
       organization_id: string;
       org_slug: string | null;
       role: string | null;
-      has_default_sandbox: boolean | number;
-      has_default_production: boolean | number;
     }>();
 }
 
@@ -247,7 +220,7 @@ async function ensureClerkUser(
   }
 
   if (!user) {
-    throw new AppError("INTERNAL_ERROR", "Unable to resolve Clerk user");
+    throw internalError("Unable to resolve Clerk user");
   }
 
   await db
@@ -264,19 +237,19 @@ async function ensureClerkUser(
 }
 
 async function ensureMembership(
-  db: DatabaseClient,
+  c: Context<{ Bindings: Env }>,
   params: {
     organizationId: string;
     userId: string;
     email: string;
-    clerkRole?: string | null;
   }
 ): Promise<OrganizationRole> {
+  const db = getDb(c.env);
   const existing = await resolveOrgMembership(db, params.userId, params.organizationId);
-  if (existing && existing.status !== "active") {
+  if (existing && existing.status !== "active" && existing.status !== "removed") {
     throw unauthorized("Organization membership is inactive");
   }
-  if (existing) {
+  if (existing?.status === "active") {
     const normalizedRole = normalizeOrganizationRole(existing.role);
     if (normalizedRole !== existing.role) {
       await db
@@ -302,28 +275,29 @@ async function ensureMembership(
     .bind(params.organizationId, params.email.toLowerCase())
     .first<{ id: string; role: string; expires_at: string }>();
 
-  let invitedRole: OrganizationRole | null = null;
-
-  if (pendingInvite) {
-    if (new Date(pendingInvite.expires_at) >= new Date()) {
-      invitedRole = normalizeOrganizationRole(pendingInvite.role);
-    } else {
-      await db
-        .prepare("UPDATE invitations SET status = 'expired' WHERE id = ?")
-        .bind(pendingInvite.id)
-        .run();
-    }
+  // Admission comes only from an SDP invitation (ADR 0012): the Clerk
+  // membership that let this token name the organization grants nothing.
+  if (!pendingInvite) {
+    throw unauthorized("No pending invitation to this organization");
+  }
+  if (new Date(pendingInvite.expires_at) < new Date()) {
+    await db
+      .prepare("UPDATE invitations SET status = 'expired' WHERE id = ? AND status = 'pending'")
+      .bind(pendingInvite.id)
+      .run();
+    throw unauthorized("Invitation to this organization has expired");
   }
 
-  const role = invitedRole ?? mapClerkRoleToOrgRole(params.clerkRole);
+  const role = normalizeOrganizationRole(pendingInvite.role);
   const memberId = `mem_${crypto.randomUUID()}`;
 
   try {
-    // The claim and the membership insert have to commit together. Claiming
-    // first alone would let a failing insert consume the invitation without
-    // granting access, and inserting first would let a concurrent revocation
-    // win the invitation transition after access was already persisted.
-    await db.transaction(async (tx) => {
+    // The claim, the membership, its project memberships and the audit record
+    // commit together. Claiming first alone would let a failing insert consume
+    // the invitation without granting access, and inserting first would let a
+    // concurrent revocation win the invitation transition after access was
+    // persisted. Admission grants authority, so it never commits unaudited.
+    await new AuditService(db).logWithin(c, async (tx) => {
       // The organization was active when this request passed its door, but a
       // deletion can commit after that read. Holding a share lock on the row
       // here makes the deletion either finish first (and this refuses) or
@@ -338,63 +312,77 @@ async function ensureMembership(
         throw organizationNotActive();
       }
 
-      // Reached only when the caller holds no membership row at all — an
-      // existing member returned above — so this declines a join and never
-      // revokes access someone already has.
-      //
-      // Without it, revoking an invitation stopped the local token while
-      // Clerk's acceptance link stayed live: signing in through that link fell
-      // through to the Clerk role and provisioned the membership anyway. Inside
-      // the transaction and holding the invitation locks, so a revocation
-      // cannot land between this check and the insert below.
-      if (
-        !invitedRole &&
-        (await invitationWasRevoked(tx, params.organizationId, params.email, { lock: true }))
-      ) {
-        throw unauthorized("Invitation to this organization was revoked");
+      // Role normalization folds in here, so there is one transition rather
+      // than a read, a role fixup and a later accept.
+      const claimed = await tx
+        .prepare(
+          `UPDATE invitations
+              SET status = 'accepted', accepted_at = datetime('now'), role = ?
+            WHERE id = ? AND status = 'pending'`
+        )
+        .bind(role, pendingInvite.id)
+        .run();
+
+      // Zero rows means it stopped being pending between the read and here.
+      // Revocation is the case that matters, and granting access off a
+      // just-revoked invitation is the failure worth refusing.
+      if (claimed === 0) {
+        throw unauthorized("Invitation is no longer valid");
       }
 
-      if (pendingInvite && invitedRole) {
-        // Role normalization folds in here, so there is one transition rather
-        // than a read, a role fixup and a later accept.
-        const claimed = await tx
-          .prepare(
-            `UPDATE invitations
-                SET status = 'accepted', accepted_at = datetime('now'), role = ?
-              WHERE id = ? AND status = 'pending'`
-          )
-          .bind(invitedRole, pendingInvite.id)
-          .run();
-
-        // Zero rows means it stopped being pending between the read and here.
-        // Revocation is the case that matters, and granting access off a
-        // just-revoked invitation is the failure worth refusing.
-        if (claimed === 0) {
-          throw unauthorized("Invitation is no longer valid");
-        }
-      }
-
-      await tx
+      // A removed member is reactivated at the invitation's role; any other
+      // existing row (a concurrent admission, a suspension) is left alone and
+      // rolls the claim back.
+      const admitted = await tx
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-             VALUES (?, ?, ?, ?, 'active')`
+             VALUES (?, ?, ?, ?, 'active')
+           ON CONFLICT (organization_id, user_id) DO UPDATE
+             SET role = EXCLUDED.role, status = 'active'
+             WHERE organization_members.status = 'removed'`
         )
         .bind(memberId, params.organizationId, params.userId, role)
         .run();
+      if (admitted === 0) {
+        throw unauthorized("Organization membership is inactive");
+      }
+
+      const projects = await tx
+        .prepare("SELECT id FROM projects WHERE organization_id = ? AND status = 'active'")
+        .bind(params.organizationId)
+        .all<{ id: string }>();
+      if (projects.results.length === 0) {
+        throw internalError("Organization has no active projects");
+      }
+      for (const project of projects.results) {
+        await tx
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id)
+             VALUES ('pm_' || gen_random_uuid(), ?, ?)
+             ON CONFLICT (project_id, user_id) DO NOTHING`
+          )
+          .bind(project.id, params.userId)
+          .run();
+      }
+
+      return {
+        entry: {
+          action: "accept_invite",
+          resourceType: "invitation",
+          resourceId: pendingInvite.id,
+          metadata: { email: params.email.toLowerCase(), userId: params.userId, role },
+          organizationId: params.organizationId,
+          userId: params.userId,
+        },
+        result: undefined,
+      };
     });
   } catch (error) {
-    // A concurrent sign-in may have created the membership first; the rollback
+    // A concurrent sign-in may have admitted this person first; the rollback
     // released our claim, so deferring to the row that won is correct.
-    const existingAfterInsert = await resolveOrgMembership(
-      db,
-      params.userId,
-      params.organizationId
-    );
-    if (existingAfterInsert?.status === "active") {
-      return normalizeOrganizationRole(existingAfterInsert.role);
-    }
-    if (existingAfterInsert) {
-      throw unauthorized("Organization membership is inactive");
+    const winner = await resolveOrgMembership(db, params.userId, params.organizationId);
+    if (winner?.status === "active") {
+      return normalizeOrganizationRole(winner.role);
     }
     throw error;
   }
@@ -402,50 +390,36 @@ async function ensureMembership(
   return role;
 }
 
-async function ensureDefaultProjects(
-  db: DatabaseClient,
-  organizationId: string,
-  userId: string
-): Promise<void> {
-  const projectService = new ProjectService(db);
-  await Promise.all([
-    projectService.findOrCreateDefault(organizationId, "sandbox", userId),
-    projectService.findOrCreateDefault(organizationId, "production", userId),
-  ]);
-}
-
 async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJwtPayload) {
   const email = resolveClerkEmail(payload);
   if (!email) {
-    throw new AppError(
-      "UNAUTHORIZED",
+    throw unauthorized(
       "Clerk token has no usable email claim. Check the session token customization: an invalid shortcode is passed through unsubstituted rather than resolved."
     );
   }
 
   const organizationClaims = resolveClerkOrganizationClaims(payload);
   if (!organizationClaims.organizationId) {
-    throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
+    throw unauthorized("Clerk token missing organization");
   }
 
-  // Everything below writes — user provisioning, membership, default projects,
-  // email repair — so organization access gates entry here rather than the
-  // response after: a deleted organization must not leave state behind. The
-  // organization's IP allowlist is not checked: it governs API keys only. A Clerk organization outlives an SDP deletion, so without
-  // this a member could sign back into a deleted organization and be given a
-  // fresh active membership. Only an organization that already exists can be
-  // deleted; one first provisioned by this request
-  // cannot, so the callers need no second check.
+  // Organizations are created only by SDP (ADR 0012), so a Clerk organization
+  // with no mapping has no one SDP admitted. Everything below writes — user
+  // provisioning, membership, email repair — so organization access gates
+  // entry here: a Clerk organization outlives an SDP deletion, and without
+  // this a member could sign back into a deleted organization. The
+  // organization's IP allowlist is not checked: it governs API keys only.
   const knownOrganization = await resolveClerkOrganization(
     getDb(c.env),
     organizationClaims.organizationId
   );
-  if (knownOrganization) {
-    recordOrganizationEntitlements(
-      c,
-      await readActiveOrganizationSettings(c.env, knownOrganization.organization_id)
-    );
+  if (!knownOrganization) {
+    throw unauthorized("Organization is not provisioned in SDP");
   }
+  recordOrganizationEntitlements(
+    c,
+    await readActiveOrganizationSettings(c.env, knownOrganization.organization_id)
+  );
 
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
     clerkUserId: payload.sub as string,
@@ -465,14 +439,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
         )
         .bind(role, existingContext.user_id, existingContext.organization_id)
         .run();
-    }
-
-    if (!existingContext.has_default_sandbox || !existingContext.has_default_production) {
-      await ensureDefaultProjects(
-        getDb(c.env),
-        existingContext.organization_id,
-        existingContext.user_id
-      );
     }
 
     const resolvedEmail =
@@ -504,62 +470,32 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     };
   }
 
-  const [userIdentity, orgIdentity] = await Promise.all([
-    ensureClerkUser(c.env, getDb(c.env), payload.sub as string, email),
-    resolveClerkOrganization(getDb(c.env), organizationClaims.organizationId),
-  ]);
+  const userIdentity = await ensureClerkUser(c.env, getDb(c.env), payload.sub as string, email);
 
-  let resolvedOrgIdentity = orgIdentity;
-  if (!resolvedOrgIdentity) {
-    const clerkOrganization = await new ClerkOrganizationsService(c.env).getOrganization(
-      organizationClaims.organizationId
-    );
-    const mapping = await ensureClerkOrganizationMapping({
-      env: c.env,
-      db: getDb(c.env),
-      organization: clerkOrganization,
-    });
-    resolvedOrgIdentity = {
-      organization_id: mapping.organizationId,
-      slug: mapping.slug,
-    };
-  }
-
-  const role = await ensureMembership(getDb(c.env), {
-    organizationId: resolvedOrgIdentity.organization_id,
+  const role = await ensureMembership(c, {
+    organizationId: knownOrganization.organization_id,
     userId: userIdentity.userId,
     email: userIdentity.email,
-    clerkRole: organizationClaims.organizationRole,
   });
-  await ensureDefaultProjects(
-    getDb(c.env),
-    resolvedOrgIdentity.organization_id,
-    userIdentity.userId
-  );
-
-  if (!knownOrganization) {
-    // First provisioned by this request: no allowlist read recorded them yet.
-    await loadOrganizationEntitlements(c, resolvedOrgIdentity.organization_id);
-  }
 
   return {
     userId: userIdentity.userId,
-    organizationId: resolvedOrgIdentity.organization_id,
+    organizationId: knownOrganization.organization_id,
     role,
     clerkUserId: payload.sub as string,
     clerkOrgId: organizationClaims.organizationId,
     email: userIdentity.email,
-    orgSlug: organizationClaims.organizationSlug ?? resolvedOrgIdentity.slug,
+    orgSlug: organizationClaims.organizationSlug ?? knownOrganization.slug,
     orgRole: organizationClaims.organizationRole,
   };
 }
 
 function assertClerkTenantClaims(payload: ClerkJwtPayload): void {
   if (!payload.sub) {
-    throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
+    throw unauthorized("Clerk token missing subject");
   }
   if (!resolveClerkOrganizationClaims(payload).organizationId) {
-    throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
+    throw unauthorized("Clerk token missing organization");
   }
 }
 

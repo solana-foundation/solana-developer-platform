@@ -1,3 +1,4 @@
+import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
 
 export const inviteSchema = z.object({
@@ -5,7 +6,6 @@ export const inviteSchema = z.object({
   role: z.enum(["admin", "member"]),
 });
 
-export const acceptSchema = z.object({
-  token: z.string().min(1),
-  name: z.string().min(1).max(100).optional(),
+export const updateMemberRoleSchema = z.object({
+  role: z.enum(ORGANIZATION_ROLES),
 });

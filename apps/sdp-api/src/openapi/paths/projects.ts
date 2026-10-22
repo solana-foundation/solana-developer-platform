@@ -9,7 +9,6 @@ import {
 } from "@/openapi/schemas/base";
 import {
   addProjectMemberRequestSchema,
-  updateProjectMemberRequestSchema,
   updateProjectRequestSchema,
 } from "@/openapi/schemas/projects";
 import { errorResponses, jsonContent } from "./helpers";
@@ -175,32 +174,6 @@ export function registerProjectAdministrationPaths(registry: OpenAPIRegistry) {
       201: {
         description: "Project member added",
         content: jsonContent(projectMemberResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "patch",
-    path: "/v1/projects/{projectId}/members/{memberId}",
-    tags: ["Projects"],
-    summary: "Update project member",
-    operationId: "updateProjectMember",
-    description: "Updates a project member role.",
-    security: [{ clerkBearerAuth: [] }],
-    request: {
-      params: z.object({
-        projectId: projectIdParamSchema,
-        memberId: memberIdParamSchema,
-      }),
-      body: {
-        required: true,
-        content: jsonContent(updateProjectMemberRequestSchema),
-      },
-    },
-    responses: {
-      204: {
-        description: "Project member updated",
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },

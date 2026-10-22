@@ -5,9 +5,9 @@ import type { DatabaseExecutor } from "@/db/client";
  * since issued a live one.
  *
  * Clerk mints the acceptance link for an invitation and we cannot expire it, so
- * revoking locally does not take the link out of circulation. Both places that
- * provision a membership from Clerk — the webhook sync and the login path —
- * consult this so a withdrawn invitation cannot still be redeemed.
+ * revoking locally does not take the link out of circulation. The webhook
+ * sync, the one place left that provisions a membership from Clerk, consults
+ * this so a withdrawn invitation cannot still be redeemed.
  *
  * Three cases deliberately do not count as a refusal:
  *

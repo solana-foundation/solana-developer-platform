@@ -26,8 +26,6 @@ export type ErrorCode =
   | "REVOKED_API_KEY"
   | "INSUFFICIENT_PERMISSIONS"
   | "OPERATION_NOT_ALLOWED"
-  | "INVALID_INVITATION"
-  | "EXPIRED_INVITATION"
   | "INVALID_TOKEN"
   // Token issuance errors
   | "TOKEN_NOT_FOUND"
@@ -89,8 +87,6 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   REVOKED_API_KEY: 401,
   INSUFFICIENT_PERMISSIONS: 403,
   OPERATION_NOT_ALLOWED: 403,
-  INVALID_INVITATION: 400,
-  EXPIRED_INVITATION: 400,
   INVALID_TOKEN: 401,
   // Token issuance errors
   TOKEN_NOT_FOUND: 404,
@@ -152,8 +148,6 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   REVOKED_API_KEY: "API key has been revoked",
   INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this action",
   OPERATION_NOT_ALLOWED: "Operation not allowed for this API key",
-  INVALID_INVITATION: "Invalid invitation token",
-  EXPIRED_INVITATION: "Invitation has expired",
   INVALID_TOKEN: "Invalid or expired token",
   // Token issuance errors
   TOKEN_NOT_FOUND: "Token not found",

@@ -1,12 +1,11 @@
 import type { ListProjectMembersResponse, ProjectMemberResponse } from "@sdp/types/projects";
-import type { ProjectRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import type { addMemberSchema, updateMemberSchema } from "@/routes/projects/schemas";
+import type { addMemberSchema } from "@/routes/projects/schemas";
 import { AuditService } from "@/services/audit.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
@@ -57,11 +56,7 @@ export const addProjectMember = async (c: ValidatedBodyContext<typeof addMemberS
     throw badRequest("User is not a member of this organization");
   }
 
-  const member = await projectService.addMember(
-    projectId,
-    body.userId,
-    (body.role ?? "developer") as ProjectRole
-  );
+  const member = await projectService.addMember(projectId, body.userId);
 
   // Get user details
   const user = await getDb(c.env)
@@ -75,7 +70,7 @@ export const addProjectMember = async (c: ValidatedBodyContext<typeof addMemberS
     action: "create",
     resourceType: "project_member",
     resourceId: member.id,
-    metadata: { projectId, userId: body.userId, role: member.role },
+    metadata: { projectId, userId: body.userId },
   });
 
   const response: ProjectMemberResponse = {
@@ -85,44 +80,6 @@ export const addProjectMember = async (c: ValidatedBodyContext<typeof addMemberS
     },
   };
   return created(c, response);
-};
-
-export const updateProjectMember = async (c: ValidatedBodyContext<typeof updateMemberSchema>) => {
-  const { projectId, memberId } = c.req.param();
-  const auth = getAuth(c);
-
-  const body = c.req.valid("json");
-
-  const projectService = new ProjectService(getDb(c.env));
-
-  // Verify project belongs to org
-  const project = await projectService.getProject(projectId);
-  if (!project || project.organizationId !== auth.organizationId) {
-    throw notFound("Project");
-  }
-
-  // Get member to find userId
-  const memberRow = await getDb(c.env)
-    .prepare("SELECT user_id FROM project_members WHERE id = ? AND project_id = ?")
-    .bind(memberId, projectId)
-    .first<{ user_id: string }>();
-
-  if (!memberRow) {
-    throw notFound("Project member");
-  }
-
-  await projectService.updateMemberRole(projectId, memberRow.user_id, body.role as ProjectRole);
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "update",
-    resourceType: "project_member",
-    resourceId: memberId,
-    metadata: { role: body.role },
-  });
-
-  return noContent(c);
 };
 
 export const removeProjectMember = async (c: AppContext) => {

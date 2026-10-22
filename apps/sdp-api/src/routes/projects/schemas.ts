@@ -14,9 +14,4 @@ export const updateProjectSchema = z.object({
 
 export const addMemberSchema = z.object({
   userId: z.string(),
-  role: z.enum(["admin", "developer", "viewer"]).optional(),
-});
-
-export const updateMemberSchema = z.object({
-  role: z.enum(["admin", "developer", "viewer"]),
 });

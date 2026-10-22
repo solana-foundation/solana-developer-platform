@@ -154,10 +154,11 @@ exports[`route actions > pins each route's action 1`] = `
   "members.manage DELETE /v1/members/:memberId",
   "members.manage DELETE /v1/members/invitations/:invitationId",
   "members.manage DELETE /v1/projects/:projectId/members/:memberId",
-  "members.manage PATCH /v1/projects/:projectId/members/:memberId",
+  "members.manage PATCH /v1/members/:memberId",
   "members.manage POST /v1/members/invite",
   "members.manage POST /v1/projects/:projectId/members",
   "members.read GET /v1/members",
+  "members.read GET /v1/members/me",
   "members.read GET /v1/projects/:projectId/members",
   "offramp.execute POST /v1/payments/ramps/offramp/quote",
   "offramp.read GET /v1/payments/ramps/offramp/currency",
@@ -274,6 +275,7 @@ exports[`route actions > pins each route's action 1`] = `
 exports[`route actions > pins every route without an action, with its reason 1`] = `
 [
   "DELETE /admin/allowlist/:id: operator: ALLOWLIST_ADMIN_KEY or a platform administrator, not a tenant grant",
+  "DELETE /v1/members/me: signed-in members only: leaving acts on the caller's own membership, which any member may end",
   "GET /: root: redirects to the health check",
   "GET /admin/allowlist: operator: ALLOWLIST_ADMIN_KEY or a platform administrator, not a tenant grant",
   "GET /docs: API reference page",
@@ -288,7 +290,6 @@ exports[`route actions > pins every route without an action, with its reason 1`]
   "GET /v1/onboarding/status: onboarding: a Clerk session before its organization is provisioned",
   "POST /admin/allowlist: operator: ALLOWLIST_ADMIN_KEY or a platform administrator, not a tenant grant",
   "POST /pay/:token/tx: payment link: the link's public token is the credential",
-  "POST /v1/members/accept: invitation accept: the invitation token authorizes a signed-in invitee who is not a member yet",
   "POST /webhooks/clerk/link-orgs: signed webhook: Clerk's signature authenticates it",
   "POST /webhooks/payments/ramps/production/:provider: signed webhook: the ramp provider's signature authenticates it",
   "POST /webhooks/payments/ramps/sandbox/:provider: signed webhook: the ramp provider's signature authenticates it",

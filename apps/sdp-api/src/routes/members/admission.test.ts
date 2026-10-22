@@ -1,0 +1,217 @@
+import assert from "node:assert/strict";
+import type { MemberStatus } from "@sdp/types/organizations";
+import type { OrganizationRole } from "@sdp/types/roles";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getDb } from "@/db/client";
+import { app } from "@/index";
+import {
+  clerkHeadersWithoutProject,
+  ensureTestClerkIssuer,
+  seedClerkIdentity,
+  signTestClerkJwt,
+} from "@/test/helpers/clerk";
+import { env } from "@/test/helpers/env";
+import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
+import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
+import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";
+import { seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
+
+const ORGANIZATION = { id: "org_admission", slug: "admission" };
+const CLERK_ORG_ID = "clerk_org_admission";
+const INVITATION_ID = "inv_admission";
+const ADMIN = organizationMember("admission_admin", "admin");
+const INVITEE = organizationMember("admission_invitee", "member");
+let projects: SeededDefaultProjects;
+
+async function signIn(orgRole: "admin" | "member", clerkOrgId: string): Promise<Response> {
+  const token = await signTestClerkJwt({
+    clerkUserId: `clerk_${INVITEE.userId}`,
+    clerkOrgId,
+    orgRole,
+    orgSlug: ORGANIZATION.slug,
+    email: INVITEE.email,
+    expiresInSeconds: 300,
+  });
+  return app.request("/v1/members/me", { headers: clerkHeadersWithoutProject(token) }, env);
+}
+
+function invite(role: OrganizationRole, expiresInDays: number) {
+  return seedInvitation(getDb(env), {
+    id: INVITATION_ID,
+    organizationId: ORGANIZATION.id,
+    email: INVITEE.email,
+    role,
+    invitedBy: ADMIN.userId,
+    status: "pending",
+    expiresInDays,
+  });
+}
+
+async function setInviteeMembership(
+  state: { status: MemberStatus; role: OrganizationRole } | null
+): Promise<void> {
+  if (state === null) {
+    await getDb(env).execute("DELETE FROM organization_members WHERE user_id = ?", [
+      INVITEE.userId,
+    ]);
+    return;
+  }
+  await getDb(env).execute(
+    "UPDATE organization_members SET status = ?, role = ? WHERE user_id = ?",
+    [state.status, state.role, INVITEE.userId]
+  );
+}
+
+function inviteeMembership() {
+  return getDb(env).queryOne<{ id: string; role: string; status: string }>(
+    "SELECT id, role, status FROM organization_members WHERE user_id = ?",
+    [INVITEE.userId]
+  );
+}
+
+async function inviteeProjectIds(): Promise<string[]> {
+  const rows = await getDb(env).queryMany<{ project_id: string }>(
+    "SELECT project_id FROM project_members WHERE user_id = ? ORDER BY project_id",
+    [INVITEE.userId]
+  );
+  return rows.map((row) => row.project_id);
+}
+
+async function expectUnauthorized(response: Response, message: string): Promise<void> {
+  expect(response.status).toBe(401);
+  expect(await response.json()).toMatchObject({ error: { code: "UNAUTHORIZED", message } });
+}
+
+describe("sign-in admission", () => {
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await ensureTestClerkIssuer(env);
+    const db = getDb(env);
+    await seedOrganizationMembers(db, { organization: ORGANIZATION, members: [ADMIN] });
+    await db.execute(
+      "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')",
+      [INVITEE.userId, INVITEE.email]
+    );
+    await seedClerkIdentity(db, {
+      userId: INVITEE.userId,
+      email: INVITEE.email,
+      clerkUserId: `clerk_${INVITEE.userId}`,
+      organizationId: ORGANIZATION.id,
+      clerkOrgId: CLERK_ORG_ID,
+      orgSlug: ORGANIZATION.slug,
+      role: "member",
+    });
+    projects = await seedDefaultProjects(db, {
+      organizationId: ORGANIZATION.id,
+      createdBy: ADMIN.userId,
+      members: [ADMIN.userId],
+    });
+  });
+
+  afterEach(async () => {
+    await clearKVStores(env);
+  });
+
+  it("refuses a Clerk admin of a mapped organization who holds no invitation", async () => {
+    await setInviteeMembership(null);
+
+    await expectUnauthorized(
+      await signIn("admin", CLERK_ORG_ID),
+      "No pending invitation to this organization"
+    );
+    expect(await inviteeMembership()).toBeNull();
+  });
+
+  it("expires an invitation past its expiry instead of admitting", async () => {
+    await setInviteeMembership(null);
+    await invite("member", -1);
+
+    await expectUnauthorized(
+      await signIn("member", CLERK_ORG_ID),
+      "Invitation to this organization has expired"
+    );
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("expired");
+    expect(await inviteeMembership()).toBeNull();
+  });
+
+  it("admits at the invitation's role, never the Clerk role, into every project, audited", async () => {
+    await setInviteeMembership(null);
+    await invite("admin", 7);
+
+    const response = await signIn("member", CLERK_ORG_ID);
+
+    expect(response.status).toBe(200);
+    const membership = await inviteeMembership();
+    assert(membership);
+    expect(await response.json()).toEqual({
+      data: {
+        memberId: membership.id,
+        userId: INVITEE.userId,
+        organizationId: ORGANIZATION.id,
+        role: "admin",
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
+    expect(await inviteeProjectIds()).toEqual([projects.production.id, projects.sandbox.id]);
+    expect(
+      await getDb(env).queryMany(
+        "SELECT resource_type, resource_id, user_id FROM audit_logs WHERE organization_id = ? AND action = 'accept_invite'",
+        [ORGANIZATION.id]
+      )
+    ).toEqual([
+      { resource_type: "invitation", resource_id: INVITATION_ID, user_id: INVITEE.userId },
+    ]);
+  });
+
+  it("reactivates a removed membership at the new invitation's role", async () => {
+    await setInviteeMembership({ status: "removed", role: "admin" });
+    const removed = await inviteeMembership();
+    assert(removed);
+    await invite("member", 7);
+
+    expect((await signIn("member", CLERK_ORG_ID)).status).toBe(200);
+    expect(await inviteeMembership()).toEqual({ id: removed.id, role: "member", status: "active" });
+  });
+
+  it("refuses a suspended member and leaves their invitation pending", async () => {
+    await setInviteeMembership({ status: "suspended", role: "member" });
+    await invite("member", 7);
+
+    await expectUnauthorized(
+      await signIn("member", CLERK_ORG_ID),
+      "Organization membership is inactive"
+    );
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("pending");
+  });
+
+  it("refuses a Clerk organization SDP never created, creating none", async () => {
+    await expectUnauthorized(
+      await signIn("admin", "clerk_org_unmapped"),
+      "Organization is not provisioned in SDP"
+    );
+    expect(await getDb(env).queryMany("SELECT id FROM organizations")).toEqual([
+      { id: ORGANIZATION.id },
+    ]);
+  });
+
+  it("does not restore an established member's missing project memberships", async () => {
+    expect((await signIn("member", CLERK_ORG_ID)).status).toBe(200);
+    expect(await inviteeProjectIds()).toEqual([]);
+  });
+
+  it("admits concurrent first sign-ins on one invitation once, answering both", async () => {
+    await setInviteeMembership(null);
+    await invite("member", 7);
+
+    const responses = await Promise.all([
+      signIn("member", CLERK_ORG_ID),
+      signIn("member", CLERK_ORG_ID),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(await inviteeMembership()).toMatchObject({ role: "member", status: "active" });
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
+  });
+});
