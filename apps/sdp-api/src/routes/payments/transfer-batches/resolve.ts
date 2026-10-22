@@ -143,8 +143,6 @@ function resolveRecipients(params: {
       throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
     }
 
-    // `amount` stays the requested UI amount in canonical form; an interest-bearing
-    // or scaled mint moves `amountBaseUnits` away from its static scaling.
     const amountBaseUnits = parseRecipientAmount(recipient.amount, toBaseUnits);
     return {
       index,
@@ -152,7 +150,7 @@ function resolveRecipients(params: {
       counterpartyId: account.counterparty_id,
       counterpartyAccountId: recipient.counterpartyAccountId,
       destinationAddress: readCryptoWalletAddress(account, index),
-      amount: formatDecimalAmount(parseTokenAmount(recipient.amount, decimals), decimals),
+      amount: formatDecimalAmount(amountBaseUnits, decimals),
       amountBaseUnits,
     };
   });

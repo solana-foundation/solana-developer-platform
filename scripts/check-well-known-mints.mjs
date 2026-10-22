@@ -18,9 +18,9 @@
 // distinguishes them; a wrong `decimals` silently misscales every amount shown
 // for that token.
 //
-// Deliberately not wired into CI: it needs public RPC, and a rate-limited
-// endpoint would make the pipeline flaky for no safety gain. Run it by hand
-// whenever you add or change a catalogue entry.
+// CI runs it only on pull requests that touch the catalogue or this script
+// (`.github/workflows/well-known-mints.yml`): it needs public RPC, and a
+// rate-limited endpoint would make every pipeline flaky for no safety gain.
 //
 // Run it through the root script, not with bare `node`. It imports the
 // catalogue straight from TypeScript source, and `engines.node` here is
