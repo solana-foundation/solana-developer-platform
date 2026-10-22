@@ -19,12 +19,19 @@ import {
   generatePaymentRequestReference,
 } from "./payment-requests.repository";
 
+function nullableText(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
 function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
+  if (typeof row.project_id !== "string") {
+    throw internalError("payment request row is missing its project");
+  }
   return {
     id: row.id as string,
     public_token: row.public_token as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string,
+    project_id: row.project_id,
     custody_wallet_id: parseNullableCustodyWalletId(row.custody_wallet_id),
     wallet_id: row.wallet_id as string,
     destination_address: row.destination_address as string,
@@ -39,10 +46,10 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
-    last_checked_at: row.last_checked_at as string | null,
+    last_checked_at: nullableText(row.last_checked_at),
     paid_late: row.paid_late === true,
-    signature_scan_cursor: (row.signature_scan_cursor as string | null) ?? null,
-    signature_scan_before: (row.signature_scan_before as string | null) ?? null,
+    signature_scan_cursor: nullableText(row.signature_scan_cursor),
+    signature_scan_before: nullableText(row.signature_scan_before),
   };
 }
 

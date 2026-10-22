@@ -1099,8 +1099,8 @@ function mockOnlyValid(paid: Signature) {
   });
 }
 
-function validatedSignatures(): Signature[] {
-  return validateTransferSpy.mock.calls.map((call) => call[1] as Signature);
+function validatedSignatures() {
+  return validateTransferSpy.mock.calls.map((call) => call[1]);
 }
 
 async function storeScanPosition(
