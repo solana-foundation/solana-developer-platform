@@ -20,6 +20,10 @@
  * - a hook mint: + one read of the hook's validation account for the whole
  *   movement, + one per distinct account whose data an extra account's
  *   address or seeds read, shared by every destination.
+ * - a frozen-by-default Token ACL mint with a destination to create: + one
+ *   read of its Token ACL config and one of its gate's thaw account list for
+ *   the whole movement (concurrent with the hook reads), + one per extra
+ *   account whose address comes from account data. None otherwise.
  * - native SOL: none → none.
  */
 
@@ -31,6 +35,7 @@ import { parseTokenAmount } from "@sdp/solana/token-amount";
 import {
   assertMovementBuildable,
   buildTokenMovement,
+  resolveTokenAclThaws,
   resolveTransferHookAccounts,
   support,
   type TokenMovementAccounts,
@@ -182,17 +187,21 @@ export async function planTokenMovement(input: {
   const quotes = input.destinations.map((destination) =>
     quoteDestination(terms, destination, input.basis)
   );
-  const hookAccounts = await refusedAsBadRequestAsync(() =>
-    resolveTransferHookAccounts(
-      createClusterRpc(),
-      terms,
-      read.destinations.map((destination, index) => ({
-        source: source.tokenAccount,
-        destination: destination.tokenAccount,
-        owner: input.source,
-        amount: quotes[index].debit,
-      }))
-    )
+  const rpc = createClusterRpc();
+  const [hookAccounts, thaws] = await refusedAsBadRequestAsync(() =>
+    Promise.all([
+      resolveTransferHookAccounts(
+        rpc,
+        terms,
+        read.destinations.map((destination, index) => ({
+          source: source.tokenAccount,
+          destination: destination.tokenAccount,
+          owner: input.source,
+          amount: quotes[index].debit,
+        }))
+      ),
+      resolveTokenAclThaws(rpc, terms, read.destinations, input.source),
+    ])
   );
   const legs = quotes.map((quote, index) => {
     const accounts: TokenMovementAccounts = {
@@ -200,6 +209,7 @@ export async function planTokenMovement(input: {
       source: source.tokenAccount,
       destination: read.destinations[index],
       hookAccounts: hookAccounts[index],
+      thaw: thaws[index],
     };
     refusedAsBadRequest(() =>
       assertMovementBuildable(terms, quote, { accounts, memo: input.memo })

@@ -37,8 +37,18 @@ import {
   type RpcSendOptions,
   type TransactionSigner,
 } from "@solana/kit";
+import {
+  findFlagAccountPda,
+  findMintConfigPda,
+  findThawExtraMetasAccountPda,
+  getMintConfigDecoder,
+  getThawPermissionlessIdempotentInstruction,
+  getThawPermissionlessIdempotentInstructionDataEncoder,
+  TOKEN_ACL_PROGRAM_ADDRESS,
+} from "@solana/token-acl-sdk";
 import { getTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import {
+  AccountState,
   decodeToken,
   deEscalateAccountMeta,
   findAssociatedTokenPda,
@@ -212,6 +222,21 @@ const pausedHolds: CapabilityRule = (terms) =>
       }
     : null;
 
+/**
+ * New accounts start frozen and no freeze authority can ever thaw them. A mint
+ * with one moves: a new account gets a Token ACL thaw (`resolveTokenAclThaws`,
+ * which refuses a freeze authority that is not the mint's Token ACL config),
+ * and an existing account moves once its freeze authority has thawed it.
+ */
+const unthawable: CapabilityRule = (terms) =>
+  terms.defaultAccountState === "frozen" && terms.freezeAuthority === null
+    ? notice(
+        TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
+        "DefaultAccountState",
+        "This token opens new token accounts frozen and has no freeze authority to thaw them"
+      )
+    : null;
+
 /** Any frozen-by-default mint, for an engine that cannot thaw the accounts it opens. */
 function frozenByDefault(engine: string): CapabilityRule {
   return (terms) =>
@@ -329,7 +354,7 @@ function hookSettable(engine: string): CapabilityRule {
  * | Hook | yes once its accounts resolve | yes | n/a | refused when a program is set | refused when it runs or can be set | refused when it runs or can be set | refused when a program is set |
  * | Paused | refused | held until unpaused | refused | refused | refused | refused | refused |
  * | Non-transferable | refused | refused | yes | refused | program refuses | refused | refused |
- * | Frozen by default | refused | refused | yes (Mosaic thaws Token ACL accounts) | yes (same) | yes (funding refuses a frozen escrow) | refused | refused |
+ * | Frozen by default | yes: a new account gets a Token ACL thaw, an existing one must be thawed; refused with no freeze authority | refused (the program's CPI cannot thaw) | yes (Mosaic thaws Token ACL accounts) | yes (same) | yes (funding refuses a frozen escrow) | refused | refused |
  * | Permanent delegate, confidential | yes | yes | yes | yes | yes | yes | yes |
  *
  * Every refusal is a `refuse` except the recurring row's paused mint, a
@@ -340,7 +365,7 @@ function hookSettable(engine: string): CapabilityRule {
  * `validate_mint_extensions` plus what SDP cannot settle, cancel or reclaim.
  */
 const CAPABILITY_ROWS = {
-  builder: [nonTransferable, paused, frozenByDefault("SDP")],
+  builder: [nonTransferable, paused, unthawable],
   recurring: [nonTransferable, frozenByDefault("a recurring pull"), pausedHolds],
   issuance: [paused],
   issuance_seize: [nonTransferable, paused, hookSet("Mosaic's force transfer")],
@@ -403,6 +428,8 @@ export type DestinationTokenAccount = Readonly<{
   exists: boolean;
   /** Its `MemoTransfer` extension requires a memo on every incoming transfer. */
   requiresMemo: boolean;
+  /** An existing account is frozen: nothing can credit it until its freeze authority thaws it. */
+  frozen: boolean;
 }>;
 
 /** The owner's associated token account for the mint, under the mint's program. */
@@ -460,7 +487,7 @@ export function decodeDestinationTokenAccount(
     !account.exists ||
     (account.programAddress === SYSTEM_PROGRAM_ADDRESS && account.data.length === 0);
   if (unopened) {
-    return { owner, tokenAccount, exists: false, requiresMemo: false };
+    return { owner, tokenAccount, exists: false, requiresMemo: false, frozen: false };
   }
   if (account.programAddress !== SPL_TOKEN_PROGRAMS[terms.asset.program]) {
     throw new Error(`Token account ${tokenAccount} is not owned by ${terms.asset.program}`);
@@ -473,7 +500,13 @@ export function decodeDestinationTokenAccount(
   const requiresMemo = extensions.some(
     (extension) => isExtension("MemoTransfer", extension) && extension.requireIncomingTransferMemos
   );
-  return { owner, tokenAccount, exists: true, requiresMemo };
+  return {
+    owner,
+    tokenAccount,
+    exists: true,
+    requiresMemo,
+    frozen: data.state === AccountState.Frozen,
+  };
 }
 
 /** What one recurring pull moves under its mandate, in base units. */
@@ -503,6 +536,8 @@ export function recurringPullFee(terms: MintTokenTerms, debit: BaseUnits): BaseU
  * the destination and the fee. Every outcome but a non-transferable or
  * frozen-by-default mint is a hold, which can pass on a later read.
  *
+ * - A frozen destination holds the pull until its freeze authority thaws it:
+ *   the program's `TransferChecked` would fail on chain.
  * - A destination that requires memos holds the pull: a CPI cannot put a memo
  *   first.
  * - A fee ({@link recurringPullFee}) above the mandate's tolerance holds it.
@@ -518,6 +553,12 @@ export function recurringPullSupport(
   const decision = support(terms, "recurring");
   if (!decision.supported) {
     return decision;
+  }
+  if (destination.exists && destination.frozen) {
+    return held(
+      TOKEN_MOVEMENT_REFUSALS.destinationFrozen,
+      `The destination token account ${destination.tokenAccount} is frozen; its freeze authority must thaw it first`
+    );
   }
   if (destination.requiresMemo) {
     return held(
@@ -685,6 +726,187 @@ export async function resolveTransferHookAccounts(
   );
 }
 
+/**
+ * A Token ACL (sRFC-37) permissionless thaw of a destination account the
+ * movement creates, for a mint whose new accounts open frozen and whose freeze
+ * authority is its Token ACL config. The config's gating program decides on
+ * chain whether the owner may hold the token, so a refused owner fails the
+ * whole transaction before anything moves. SDP issues such mints through
+ * Mosaic, whose own transfer adds the same thaw.
+ */
+export type TokenAclThaw = Readonly<{
+  /** Signs the thaw: the movement's authority, which signs the transfer too. */
+  authority: Address;
+  /** The mint's Token ACL config, its freeze authority. */
+  mintConfig: Address;
+  gatingProgram: Address;
+  /** The Token ACL flag account the gating program checks. */
+  flagAccount: Address;
+  /** The gating program's thaw account list, then each extra account it names, resolved. */
+  extraAccounts: readonly AccountMeta<Address>[];
+}>;
+
+function aclRefusal(message: string): TokenMovementError {
+  return new TokenMovementError(TOKEN_MOVEMENT_REFUSALS.defaultFrozen, message);
+}
+
+/**
+ * The Token ACL thaw each destination needs: one for every destination the
+ * movement creates under a frozen-by-default mint, null for every other. This
+ * is `createThawPermissionlessIdempotentInstructionWithExtraMetas` from
+ * `@solana/token-acl-sdk` (which Mosaic calls), resolved before the signer
+ * exists and with the config and account list read once for all of a batch's
+ * destinations.
+ *
+ * RPC budget: none when no destination needs a thaw; otherwise one
+ * `getAccountInfo` for the mint's Token ACL config, one for its gating
+ * program's thaw account list, and one per extra account whose address comes
+ * from another account's data. An extra account that reads the new token
+ * account's data (it does not exist yet) is refused.
+ *
+ * @param authority - The wallet that signs the movement.
+ * @returns One entry per destination, in order.
+ * @throws {TokenMovementError} (`default_frozen`) When the mint's freeze
+ * authority is not its Token ACL config, the config does not allow a
+ * permissionless thaw, the gating program publishes no thaw account list, or
+ * an extra account cannot be resolved or must sign.
+ */
+export async function resolveTokenAclThaws(
+  rpc: Rpc<GetAccountInfoApi>,
+  terms: MintTokenTerms,
+  destinations: readonly DestinationTokenAccount[],
+  authority: Address
+): Promise<(TokenAclThaw | null)[]> {
+  const opensFrozen = (destination: DestinationTokenAccount) =>
+    !destination.exists && terms.defaultAccountState === "frozen";
+  if (!destinations.some(opensFrozen)) {
+    return destinations.map(() => null);
+  }
+  const mint = terms.asset.mint;
+  const [mintConfig] = await findMintConfigPda(
+    { mint },
+    { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+  );
+  if (terms.freezeAuthority !== mintConfig) {
+    throw aclRefusal(
+      "This token opens new token accounts frozen, and its freeze authority is not a Token ACL config SDP can thaw through"
+    );
+  }
+  const configAccount = await fetchEncodedAccount(rpc, mintConfig, { commitment: "confirmed" });
+  if (!configAccount.exists || configAccount.programAddress !== TOKEN_ACL_PROGRAM_ADDRESS) {
+    throw aclRefusal(`This token's Token ACL config ${mintConfig} does not exist`);
+  }
+  const config = getMintConfigDecoder().decode(configAccount.data);
+  if (config.mint !== mint) {
+    throw new Error(`Token ACL config ${mintConfig} is not the config of ${mint}`);
+  }
+  if (!config.enablePermissionlessThaw) {
+    throw aclRefusal(
+      "This token opens new token accounts frozen, and its Token ACL config does not allow a permissionless thaw"
+    );
+  }
+  const gatingProgram = config.gatingProgram;
+  const [thawList] = await findThawExtraMetasAccountPda(
+    { mint },
+    { programAddress: gatingProgram }
+  );
+  const thawListAccount = await fetchEncodedAccount(rpc, thawList, { commitment: "confirmed" });
+  if (!thawListAccount.exists) {
+    throw aclRefusal(
+      `This token's Token ACL gating program ${gatingProgram} publishes no thaw account list`
+    );
+  }
+  const extraMetas = getExtraAccountMetasDecoder().decode(thawListAccount.data);
+  const instructionData = getThawPermissionlessIdempotentInstructionDataEncoder().encode({});
+
+  return Promise.all(
+    destinations.map(async (destination): Promise<TokenAclThaw | null> => {
+      if (!opensFrozen(destination)) {
+        return null;
+      }
+      const [flagAccount] = await findFlagAccountPda(
+        { tokenAccount: destination.tokenAccount },
+        { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+      );
+      // The accounts the gating program's `can thaw` sees, in its order.
+      const previousAddresses: Address[] = [
+        authority,
+        destination.tokenAccount,
+        mint,
+        destination.owner,
+        flagAccount,
+        thawList,
+      ];
+      const resolved: AccountMeta<Address>[] = [];
+      for (const extraMeta of extraMetas) {
+        let meta: Awaited<ReturnType<typeof resolveExtraAccountMeta>>;
+        try {
+          meta = await resolveExtraAccountMeta(
+            extraMeta,
+            previousAddresses,
+            instructionData,
+            gatingProgram,
+            rpc
+          );
+        } catch (cause) {
+          throw aclRefusal(
+            `This token's Token ACL thaw accounts cannot be resolved: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`
+          );
+        }
+        if (meta.isSigner && meta.address !== authority) {
+          throw aclRefusal(
+            `This token's Token ACL gate needs ${meta.address} to sign, which SDP cannot do`
+          );
+        }
+        resolved.push({ address: meta.address, role: accountRole(meta.isSigner, meta.isWritable) });
+        previousAddresses.push(meta.address);
+      }
+      return {
+        authority,
+        mintConfig,
+        gatingProgram,
+        flagAccount,
+        extraAccounts: [{ address: thawList, role: AccountRole.READONLY }, ...resolved],
+      };
+    })
+  );
+}
+
+/**
+ * The thaw instruction of a destination the movement creates, signed by the
+ * movement's authority.
+ *
+ * @throws {Error} When the thaw was resolved for another authority.
+ */
+function thawInstruction(
+  terms: MintTokenTerms,
+  destination: DestinationTokenAccount,
+  thaw: TokenAclThaw,
+  authority: TransactionSigner
+): Instruction {
+  if (authority.address !== thaw.authority) {
+    throw new Error("The Token ACL thaw was resolved for another authority");
+  }
+  return withTrailingAccounts(
+    getThawPermissionlessIdempotentInstruction(
+      {
+        authority,
+        mint: terms.asset.mint,
+        tokenAccount: destination.tokenAccount,
+        flagAccount: thaw.flagAccount,
+        tokenAccountOwner: destination.owner,
+        mintConfig: thaw.mintConfig,
+        tokenProgram: address(SPL_TOKEN_PROGRAMS[terms.asset.program]),
+        gatingProgram: thaw.gatingProgram,
+      },
+      { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+    ),
+    thaw.extraAccounts
+  );
+}
+
 /** The accounts a movement moves between. */
 export type TokenMovementAccounts =
   | Readonly<{ kind: "native"; destination: Address }>
@@ -695,6 +917,11 @@ export type TokenMovementAccounts =
       destination: DestinationTokenAccount;
       /** From `resolveTransferHookAccounts`; empty for a mint without a hook program. */
       hookAccounts: readonly AccountMeta<Address>[];
+      /**
+       * From `resolveTokenAclThaws`: the thaw of a destination the movement
+       * creates for a frozen-by-default mint; null for every other destination.
+       */
+      thaw: TokenAclThaw | null;
     }>;
 
 /** What a movement is built with, besides its terms and quote. */
@@ -739,8 +966,10 @@ function pairMovement(terms: TokenTerms, accounts: TokenMovementAccounts): Paire
 
 /**
  * Refuses a movement the builder will not build, before anything is signed:
- * the path's capability row, an unresolved hook, a destination that requires
- * a memo the movement does not carry, and a fee that leaves nothing to credit.
+ * the path's capability row, an unresolved hook, a frozen destination (an
+ * existing one, or a new one of a frozen-by-default mint without its Token ACL
+ * thaw), a destination that requires a memo the movement does not carry, and
+ * a fee that leaves nothing to credit.
  * `buildTokenMovement` asks it first; a caller asks it before it records the
  * movement, so a refusal costs nothing.
  *
@@ -769,7 +998,7 @@ export function assertMovementBuildable(
   if (paired.kind === "native") {
     return;
   }
-  const { hookAccounts, destination } = paired.accounts;
+  const { hookAccounts, destination, thaw } = paired.accounts;
   if (paired.terms.transferHookProgram === null && hookAccounts.length > 0) {
     throw new Error("Hook accounts were resolved for a mint without a hook program");
   }
@@ -778,6 +1007,22 @@ export function assertMovementBuildable(
       TOKEN_MOVEMENT_REFUSALS.hookUnresolved,
       "This token's transfer hook accounts were not resolved"
     );
+  }
+  if (destination.exists && destination.frozen) {
+    throw new TokenMovementError(
+      TOKEN_MOVEMENT_REFUSALS.destinationFrozen,
+      `The destination token account ${destination.tokenAccount} is frozen; its freeze authority must thaw it first`
+    );
+  }
+  const startsFrozen = !destination.exists && paired.terms.defaultAccountState === "frozen";
+  if (startsFrozen && thaw === null) {
+    throw new TokenMovementError(
+      TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
+      `The destination token account ${destination.tokenAccount} would open frozen, and its Token ACL thaw was not resolved`
+    );
+  }
+  if (!startsFrozen && thaw !== null) {
+    throw new Error("A Token ACL thaw was resolved for an account that does not open frozen");
   }
   if (destination.requiresMemo && movement.memo === null) {
     throw new TokenMovementError(
@@ -811,7 +1056,8 @@ function memoInstruction(memo: string): Instruction {
  * @param quote - Its debit is what the transfer moves; its fee is what a
  * `TransferCheckedWithFee` names.
  * @returns The instructions in order: the destination token account's
- * idempotent create, a memo when the destination requires one, the transfer.
+ * idempotent create, its Token ACL thaw when it opens frozen, a memo when the
+ * destination requires one, the transfer.
  * Native SOL is the system transfer alone.
  * @throws {TokenMovementError} When {@link assertMovementBuildable} refuses it.
  */
@@ -858,6 +1104,10 @@ export function buildTokenMovement(
           { programAddress }
         );
   const memo = destination.requiresMemo && ctx.memo !== null ? [memoInstruction(ctx.memo)] : [];
+  const thaw =
+    accounts.thaw === null
+      ? []
+      : [thawInstruction(mintTerms, destination, accounts.thaw, ctx.authority)];
 
   return [
     getCreateAssociatedTokenIdempotentInstruction({
@@ -867,6 +1117,7 @@ export function buildTokenMovement(
       mint,
       tokenProgram: programAddress,
     }),
+    ...thaw,
     ...memo,
     withTrailingAccounts(transfer, [...accounts.hookAccounts, ...reference]),
   ];

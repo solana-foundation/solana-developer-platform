@@ -275,7 +275,7 @@ describe("readMintMovementAccounts", () => {
 
     expect(terms.asset).toEqual(pyusd);
     expect(destinations).toEqual([
-      { owner, tokenAccount: destination, exists: true, requiresMemo: true },
+      { owner, tokenAccount: destination, exists: true, requiresMemo: true, frozen: false },
     ]);
     expect(reads().map((request) => request.params[0])).toEqual([
       [pyusd.mint, SYSVAR_CLOCK_ADDRESS, destination],
@@ -296,6 +296,7 @@ describe("readMintMovementAccounts", () => {
         tokenAccount: await ata(owner, UNKNOWN_MINT, "spl-token"),
         exists: false,
         requiresMemo: false,
+        frozen: false,
       },
     ]);
     expect(readSizes()).toEqual([4]);
