@@ -9,8 +9,9 @@
  *
  * - every movable profile debits, withholds and credits exactly the quote;
  * - a stale fee fails on chain instead of settling short;
- * - paused, frozen-by-default, scaled, interest-bearing and unresolved-hook
- *   mints are refused first;
+ * - paused and unresolved-hook mints are refused first, and so is a new
+ *   account of a frozen-by-default mint whose freeze authority is no Token
+ *   ACL config; an existing account its freeze authority thawed moves;
  * - a destination address someone sent lamports to before it was opened
  *   still opens;
  * - a memo-required destination gets its memo, which the program demands;
@@ -43,6 +44,7 @@ import {
   getReallocateInstruction,
   getSetTransferFeeInstruction,
   getSyncNativeInstruction,
+  getThawAccountInstruction,
 } from "@solana-program/token-2022";
 import { resolveAssetRequest } from "./asset-ref";
 import { type MovementQuote, quoteMovement } from "./movement-quote";
@@ -65,6 +67,7 @@ import {
   type DestinationTokenAccount,
   decodeDestinationTokenAccount,
   destinationTokenAccountAddress,
+  resolveTokenAclThaws,
   resolveTransferHookAccounts,
   support,
   TOKEN_MOVEMENT_REFUSALS,
@@ -154,11 +157,17 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
     return { terms, quote, source: movement.source, destination };
   }
 
-  /** What `buildTokenMovement` builds for a planned movement, hook accounts resolved. */
+  /** What `buildTokenMovement` builds for a planned movement, hook accounts and thaw resolved. */
   async function build(
     planned: PlannedMovement,
     extra: { memo: string | null; reference: Address | null; authority: TransactionSigner }
   ) {
+    const [thaw] = await resolveTokenAclThaws(
+      chain.rpc,
+      planned.terms,
+      [planned.destination],
+      extra.authority.address
+    );
     const [hookAccounts] = await resolveTransferHookAccounts(chain.rpc, planned.terms, [
       {
         source: planned.source,
@@ -175,6 +184,7 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
         source: planned.source,
         destination: planned.destination,
         hookAccounts,
+        thaw,
       },
       memo: extra.memo,
       reference: extra.reference,
@@ -227,19 +237,58 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
     }
   });
 
-  it("refuses paused, frozen-by-default, scaled, interest-bearing and unresolved-hook mints before building", async () => {
+  it("refuses paused and unresolved-hook mints, and an unthawable new frozen account, before building", async () => {
     await pauseMint(chain, matrix.paused);
-    for (const [profile, reason] of [
-      ["paused", TOKEN_MOVEMENT_REFUSALS.paused],
-      ["defaultFrozen", TOKEN_MOVEMENT_REFUSALS.defaultFrozen],
-      ["scaled", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
-      ["scaledSwitch", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
-      ["interestPositive", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
-      ["interestNegative", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
-    ] as const) {
-      const decision = support(await readMatrixTerms(chain, matrix[profile]), "builder");
-      assert.deepEqual(decision.supported === false && decision.refusal, reason, profile);
-    }
+    const paused = support(await readMatrixTerms(chain, matrix.paused), "builder");
+    assert.equal(paused.supported === false && paused.refusal, TOKEN_MOVEMENT_REFUSALS.paused);
+
+    // The matrix's frozen-by-default mint has a plain freeze authority, so a
+    // new account cannot get a Token ACL thaw; an account it thawed moves.
+    const frozen = matrix.defaultFrozen;
+    const frozenSource = await openTokenAccount(chain, frozen, chain.payer.address);
+    await sendInstructions(chain, [
+      getThawAccountInstruction(
+        { account: frozenSource, mint: frozen.mint, owner: chain.payer },
+        { programAddress: address(SPL_TOKEN_PROGRAMS[frozen.program]) }
+      ),
+    ]);
+    await mintTokens(chain, frozen, frozenSource, SOURCE_BALANCE);
+    const newRecipient = (await generateKeyPairSigner()).address;
+    const toNew = await plan(frozen, {
+      source: frozenSource,
+      recipient: newRecipient,
+      amount: "1",
+      basis: "debit",
+    });
+    assert.deepEqual(support(toNew.terms, "builder"), { supported: true });
+    await assert.rejects(build(toNew, unsigned()), refusal(TOKEN_MOVEMENT_REFUSALS.defaultFrozen));
+    const thawedRecipient = (await generateKeyPairSigner()).address;
+    const thawedAccount = await openTokenAccount(chain, frozen, thawedRecipient);
+    const toFrozen = await plan(frozen, {
+      source: frozenSource,
+      recipient: thawedRecipient,
+      amount: "1",
+      basis: "debit",
+    });
+    assert.equal(toFrozen.destination.frozen, true);
+    await assert.rejects(
+      build(toFrozen, unsigned()),
+      refusal(TOKEN_MOVEMENT_REFUSALS.destinationFrozen)
+    );
+    await sendInstructions(chain, [
+      getThawAccountInstruction(
+        { account: thawedAccount, mint: frozen.mint, owner: chain.payer },
+        { programAddress: address(SPL_TOKEN_PROGRAMS[frozen.program]) }
+      ),
+    ]);
+    const toThawed = await plan(frozen, {
+      source: frozenSource,
+      recipient: thawedRecipient,
+      amount: "1",
+      basis: "debit",
+    });
+    await sendInstructions(chain, await build(toThawed, unsigned()));
+    assert.equal((await holdings(chain, thawedAccount)).amount, toThawed.quote.credit);
 
     const hook = matrix.hook;
     const source = await fundedSource(hook);

@@ -69,7 +69,8 @@
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",
-    "@solana/sysvars": "catalog:"
+    "@solana/sysvars": "catalog:",
+    "@solana/token-acl-sdk": "catalog:"
   },
   "devDependencies": {
     "@solana/surfpool": "1.5.0",
