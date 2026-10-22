@@ -35,7 +35,7 @@ async function requestAs(
     `/v1/members/${memberId}`,
     {
       method,
-      headers: clerkHeadersWithoutProject(token),
+      headers: clerkHeaders(token, sandboxProjectId),
       body: body === null ? null : JSON.stringify(body),
     },
     env
@@ -179,6 +179,7 @@ describe("organization membership rules", () => {
     async (scenario) => {
       await getDb(env).execute("DELETE FROM project_members WHERE user_id = ?", [MEMBER.userId]);
       const token = await signSeededClerkMember(env, getDb(env), MEMBER.userId, ORGANIZATION.id);
+      clerk.answer({ status: 200, body: {} });
 
       const response = await app.request(
         "/v1/members/me",
