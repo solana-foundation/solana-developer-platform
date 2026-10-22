@@ -1,10 +1,13 @@
 import * as feePaymentChainReads from "@sdp/fee-payment/chain-reads";
-import { address } from "@solana/kit";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import * as solanaRpc from "@sdp/rpc/solana";
+import { address, signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipReconciliationReservation } from "@/db/repositories/sponsorship-budget.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { sponsorshipProviderConfigFingerprint } from "@/services/sponsorship-budget.service";
 import { env as testEnv } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
   reconcileSponsorshipBudgets,
@@ -133,6 +136,7 @@ function harness(candidate: SponsorshipReconciliationReservation) {
   };
   const getTransaction = vi.fn().mockResolvedValue({
     slot: 1n,
+    accountKeys: [PROVIDER_CONFIGURATION.signerAddress],
     err: null,
     fee: 1n,
     preBalances: [10n],
@@ -271,6 +275,7 @@ describe("reconcileSponsorshipBudgets", () => {
     const { repository, budgetRedis, getTransaction, run } = harness(reservation());
     getTransaction.mockResolvedValueOnce({
       slot: 1n,
+      accountKeys: [PROVIDER_CONFIGURATION.signerAddress],
       err: null,
       fee: 1n,
       preBalances: [20n],
@@ -299,6 +304,7 @@ describe("reconcileSponsorshipBudgets", () => {
     const { repository, getTransaction, run } = harness(reservation({ reservedLamports: 10 }));
     getTransaction.mockResolvedValueOnce({
       slot: 1n,
+      accountKeys: [PROVIDER_CONFIGURATION.signerAddress],
       err: { InstructionError: [0, "Custom"] },
       fee: 5n,
       preBalances: [20n],
@@ -312,6 +318,38 @@ describe("reconcileSponsorshipBudgets", () => {
       "committed",
       5,
       undefined
+    );
+  });
+
+  it("charges a finalized transaction naming another fee payer as unknown without settling it", async () => {
+    const { repository, budgetRedis, getTransaction, run } = harness(reservation());
+    getTransaction.mockResolvedValueOnce({
+      slot: 1n,
+      accountKeys: [syntheticAddress(1)],
+      err: null,
+      fee: 1n,
+      preBalances: [10n],
+      postBalances: [7n],
+      instructions: [],
+    });
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.markChargedUnknown).toHaveBeenCalledExactlyOnceWith(
+      "reservation_1",
+      1,
+      expect.stringContaining("different fee payer")
+    );
+    expect(repository.settleReservation).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_settlement_fee_payer_mismatch",
+        reservation_id: "reservation_1",
+        reserved_fee_payer: PROVIDER_CONFIGURATION.signerAddress,
+        transaction_fee_payer: syntheticAddress(1),
+      })
     );
   });
 
@@ -569,6 +607,7 @@ describe("reconcileSponsorshipBudgets", () => {
     budgetRedis.syncPolicy.mockRejectedValue(new Error("redis offline"));
     getTransaction.mockResolvedValueOnce({
       slot: 1n,
+      accountKeys: [PROVIDER_CONFIGURATION.signerAddress],
       err: null,
       fee: 1n,
       preBalances: [20n],
@@ -682,5 +721,27 @@ describe("reconcileSponsorshipBudgets", () => {
 
     expect(repository.resumeGlobalBreaker).toHaveBeenCalledOnce();
     expect(repository.markRedisSettled).toHaveBeenCalled();
+  });
+});
+
+describe("getSponsoredTransaction", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("reads the transaction from Kora's upstream at finalized", async () => {
+    vi.stubEnv("KORA_DEVNET_RPC_URL", "https://kora-devnet-rpc.sdp.test");
+    const getTransaction = vi.spyOn(solanaRpc, "getTransaction").mockResolvedValueOnce(null);
+
+    await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      feePaymentChainReads.getSponsoredTransaction(signature(TEST_SIGNATURE))
+    );
+
+    expect(getTransaction).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      TEST_SIGNATURE,
+      "finalized"
+    );
   });
 });
