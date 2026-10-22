@@ -697,7 +697,7 @@ export interface ParsedTransaction {
   /** Unix seconds the cluster stamped on the block; absent or null when the RPC didn't report it. */
   blockTime?: bigint | null;
   /** Message account order, needed to attribute native SOL balance changes. */
-  accountKeys?: readonly string[];
+  accountKeys: readonly string[];
   /** Whether metadata establishes success or failure; absent metadata is unknown. */
   executionResultKnown: boolean;
   err: unknown | null;

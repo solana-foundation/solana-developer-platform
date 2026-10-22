@@ -3,7 +3,6 @@ import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
-  type Address,
   address,
   assertIsAddress,
   assertIsBlockhash,
@@ -281,7 +280,7 @@ async function reconcileReservation(input: {
   assertIsAddress(reservation.feePayer);
   const transaction = await input.getTransaction(reservation.signature);
   if (transaction) {
-    const transactionFeePayer = feePayerAddress(transaction.accountKeys);
+    const transactionFeePayer = address(transaction.accountKeys[0]);
     if (transactionFeePayer !== reservation.feePayer) {
       logEvent("error", {
         event: "sdp_api_sponsorship_settlement_fee_payer_mismatch",
@@ -329,21 +328,6 @@ async function reconcileReservation(input: {
     lostTransitionError: "Failed to retain ambiguous unconfirmed sponsorship charge",
   });
   return "charged_unknown";
-}
-
-/**
- * The fee payer a landed transaction names: the first key of its message.
- *
- * @param accountKeys - The transaction's message account keys, in message order.
- * @returns The fee payer's address.
- * @throws Error when the read omitted the account keys; SolanaError when the key is not an address.
- */
-function feePayerAddress(accountKeys: readonly string[] | undefined): Address {
-  const feePayer = accountKeys?.[0];
-  if (feePayer === undefined) {
-    throw new Error("Finalized transaction omitted its fee-payer account key");
-  }
-  return address(feePayer);
 }
 
 function feePayerSpendLamports(
