@@ -9,8 +9,10 @@ import {
   appendTransactionMessageInstructions,
   blockhash,
   compileTransaction,
+  compressTransactionMessageUsingAddressLookupTables,
   createNoopSigner,
   createTransactionMessage,
+  decodeTransactionFromRpcResponse,
   getBase58Decoder,
   getBase64EncodedWireTransaction,
   getCompiledTransactionMessageDecoder,
@@ -98,7 +100,8 @@ function foundSignature(): Awaited<ReturnType<typeof solanaPay.findReference>> {
 async function validatedTransfer(
   token = SOL_MINT,
   rawAmount = token === SOL_MINT ? 1_500_000_000n : 1_500_000n,
-  reference?: Address
+  reference?: Address,
+  lookupTable?: Address
 ): Promise<Awaited<ReturnType<typeof solanaPay.validateTransfer>>> {
   const owner = address(TEST_CUSTODY_PUBLIC_KEY);
   const source = createNoopSigner(syntheticAddress(332));
@@ -130,23 +133,30 @@ async function validatedTransfer(
           ...instruction,
           accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
         };
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (message) => setTransactionMessageFeePayer(source.address, message),
+    (message) =>
+      setTransactionMessageLifetimeUsingBlockhash(
+        {
+          blockhash: blockhash(getBase58Decoder().decode(new Uint8Array(32).fill(7))),
+          lastValidBlockHeight: 1n,
+        },
+        message
+      ),
+    (message) => appendTransactionMessageInstructions([referenced], message)
+  );
   const transaction = compileTransaction(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayer(source.address, message),
-      (message) =>
-        setTransactionMessageLifetimeUsingBlockhash(
-          {
-            blockhash: blockhash(getBase58Decoder().decode(new Uint8Array(32).fill(7))),
-            lastValidBlockHeight: 1n,
-          },
-          message
-        ),
-      (message) => appendTransactionMessageInstructions([referenced], message)
-    )
+    lookupTable === undefined
+      ? message
+      : compressTransactionMessageUsingAddressLookupTables(message, {
+          [lookupTable]: [destination],
+        })
   );
   const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-  const accountIndex = compiled.staticAccounts.indexOf(destination);
+  const loadedWritable = lookupTable === undefined ? [] : [destination];
+  const accountKeys = [...compiled.staticAccounts, ...loadedWritable];
+  const accountIndex = accountKeys.indexOf(destination);
   const tokenBalance = (amount: bigint) => ({
     accountIndex,
     mint: address(token),
@@ -167,15 +177,15 @@ async function validatedTransfer(
       err: null,
       fee: lamports(5_000n),
       logMessages: [],
-      preBalances: compiled.staticAccounts.map(() => lamports(0n)),
-      postBalances: compiled.staticAccounts.map((account) =>
+      preBalances: accountKeys.map(() => lamports(0n)),
+      postBalances: accountKeys.map((account) =>
         lamports(token === SOL_MINT && account === destination ? rawAmount : 0n)
       ),
       preTokenBalances: token === SOL_MINT ? [] : [tokenBalance(0n)],
       postTokenBalances: token === SOL_MINT ? [] : [tokenBalance(rawAmount)],
       rewards: [],
       status: { Ok: null },
-      loadedAddresses: { readonly: [], writable: [] },
+      loadedAddresses: { readonly: [], writable: loadedWritable },
     },
     transaction: [getBase64EncodedWireTransaction(transaction), "base64"],
   };
@@ -318,7 +328,7 @@ describe("reconcilePaymentRequest", () => {
     );
 
     expect(settled.status).toBe("paid");
-    const fields = validateTransferSpy.mock.calls[0][2];
+    const fields = validateTransferSpy.mock.calls[0][1];
     expect(fields.splToken).toBe(DEVNET_USDC_MINT);
   });
 
@@ -439,6 +449,35 @@ describe("reconcilePaymentRequest", () => {
       expect(await listInboundTransfers()).toHaveLength(0);
     }
   );
+
+  it("settles an SPL payment whose recipient ATA loads from an address lookup table", async () => {
+    const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
+    findReferenceSpy.mockResolvedValue(foundSignature());
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    validateTransferSpy.mockImplementation(validateExactTransfer);
+    const response = await validatedTransfer(
+      DEVNET_USDC_MINT,
+      1_500_000n,
+      address(request.reference),
+      syntheticAddress(335)
+    );
+    const [recipientAta] = await findAssociatedTokenPda({
+      owner: address(TEST_CUSTODY_PUBLIC_KEY),
+      mint: address(DEVNET_USDC_MINT),
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    const { compiledMessage, loadedAddresses } = decodeTransactionFromRpcResponse(response);
+    expect(compiledMessage.staticAccounts).not.toContain(recipientAta);
+    expect(loadedAddresses).toEqual({ readonly: [], writable: [recipientAta] });
+    rpc.answer(
+      "getTransaction",
+      JSON.parse(
+        JSON.stringify(response, (_, value) => (typeof value === "bigint" ? Number(value) : value))
+      )
+    );
+    expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
 
   it("still rejects a transfer whose reference does not match the request", async () => {
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });

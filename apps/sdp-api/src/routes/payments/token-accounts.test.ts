@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
@@ -118,7 +117,7 @@ describe("buildSplTransferInstructions", () => {
       );
 
       const result = runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-        buildSplTransferInstructions(createClusterRpc(), {
+        buildSplTransferInstructions({
           authority: createNoopSigner(syntheticAddress(13)),
           destination: syntheticAddress(14),
           mint,
