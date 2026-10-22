@@ -167,6 +167,65 @@ describe("reconcilePaymentRequests", () => {
     );
   });
 
+  it("summarises each run with a warning when any check failed", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    await createRequest({ token: SOL_MINT, expiresAt: null });
+    await createRequest({ token: SOL_MINT, expiresAt: null });
+    vi.spyOn(solanaRpc, "getSignaturesForAddress")
+      .mockRejectedValueOnce(new Error("rpc down"))
+      .mockResolvedValueOnce([]);
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    expect(log).toHaveBeenCalledWith("warn", {
+      event: "payment_requests.lane_run",
+      environment: "sandbox",
+      lane: "sweep",
+      checked: 2,
+      failed: 1,
+      settled: 0,
+    });
+  });
+
+  it("summarises a clean run at info level", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    expect(log).toHaveBeenCalledWith("info", {
+      event: "payment_requests.lane_run",
+      environment: "sandbox",
+      lane: "sweep",
+      checked: 1,
+      failed: 0,
+      settled: 0,
+    });
+  });
+
+  it("checks rows in parallel with bounded concurrency", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockImplementation(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return [];
+    });
+    const requests = await Promise.all(
+      Array.from({ length: 12 }, () => createRequest({ token: SOL_MINT, expiresAt: null }))
+    );
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    expect(peak).toBe(8);
+    for (const request of requests) {
+      expect((await getRow(request.id)).last_checked_at).not.toBeNull();
+    }
+  });
+
   it("logs the stale backlog when awaiting rows go unchecked", async () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
@@ -242,9 +301,19 @@ describe("expirePaymentRequests", () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+
     await onSandbox(() => expirePaymentRequests(env));
 
     expect((await getRow(request.id)).status).toBe("expired");
+    expect(log).toHaveBeenCalledWith("info", {
+      event: "payment_requests.lane_run",
+      environment: "sandbox",
+      lane: "expiry",
+      checked: 1,
+      failed: 0,
+      settled: 1,
+    });
   });
 
   it("leaves a lapsed request open while its sponsored transaction can still land", async () => {

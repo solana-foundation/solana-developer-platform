@@ -1,5 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -10,10 +11,11 @@ import {
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 
-const HOT_BATCH_SIZE = 32;
-const SWEEP_BATCH_SIZE = 64;
-const EXPIRY_BATCH_SIZE = 64;
-const LATE_CHECK_BATCH_SIZE = 32;
+const HOT_BATCH_SIZE = 64;
+const SWEEP_BATCH_SIZE = 256;
+const EXPIRY_BATCH_SIZE = 128;
+const LATE_CHECK_BATCH_SIZE = 128;
+const CHECK_CONCURRENCY = 8;
 const SWEEP_MIN_RECHECK_MS = 45_000;
 const SWEEP_AGED_RECHECK_MS = 10 * 60_000;
 const SWEEP_AGED_AFTER_MS = 24 * 60 * 60_000;
@@ -25,6 +27,7 @@ const STALE_AFTER_MS = 2 * SWEEP_AGED_RECHECK_MS;
 const LATE_PAYMENT_STALE_AFTER_MS = 2 * LATE_PAYMENT_RECHECK_MS;
 
 type RowCheck = (env: Env, row: PaymentRequestRow) => Promise<PaymentRequestRow>;
+type Lane = "hot" | "sweep" | "expiry" | "late_watch";
 
 export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
@@ -34,7 +37,7 @@ export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
     minLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
     limit: HOT_BATCH_SIZE,
   });
-  await checkEach(env, rows, checkAwaitingPaymentRequest, "hot");
+  await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "hot");
 }
 
 export async function reconcilePaymentRequests(env: Env): Promise<void> {
@@ -56,7 +59,7 @@ export async function reconcilePaymentRequests(env: Env): Promise<void> {
     agedCreatedBefore: new Date(now - SWEEP_AGED_AFTER_MS).toISOString(),
     limit: SWEEP_BATCH_SIZE,
   });
-  await checkEach(env, rows, checkAwaitingPaymentRequest, "sweep");
+  await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "sweep");
 }
 
 export async function expirePaymentRequests(env: Env): Promise<void> {
@@ -69,7 +72,7 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
     liveClaimMinLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
     limit: EXPIRY_BATCH_SIZE,
   });
-  await checkEach(env, lapsed, closeLapsedPaymentRequest, "expiry");
+  await checkEach(env, environment, lapsed, closeLapsedPaymentRequest, "expiry");
 
   const now = Date.now();
   const expiredSince = new Date(now - LATE_PAYMENT_WATCH_MS).toISOString();
@@ -88,22 +91,29 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
     checkedBefore: new Date(now - LATE_PAYMENT_RECHECK_MS).toISOString(),
     limit: LATE_CHECK_BATCH_SIZE,
   });
-  await checkEach(env, watched, checkExpiredPaymentRequestForLatePayment, "late_watch");
+  await checkEach(
+    env,
+    environment,
+    watched,
+    checkExpiredPaymentRequestForLatePayment,
+    "late_watch"
+  );
 }
 
 async function checkEach(
   env: Env,
+  environment: SdpEnvironment,
   rows: readonly PaymentRequestRow[],
   check: RowCheck,
-  lane: string
+  lane: Lane
 ): Promise<void> {
-  if (rows.length === 0) {
-    return;
-  }
-  for (const row of rows) {
+  let failed = 0;
+  let settled = 0;
+  await forEachConcurrently(rows, CHECK_CONCURRENCY, async (row) => {
     try {
       const after = await check(env, row);
       if (after.status !== row.status) {
+        settled += 1;
         logEvent("info", {
           event: "payment_requests.settled",
           lane,
@@ -114,6 +124,7 @@ async function checkEach(
         });
       }
     } catch (error) {
+      failed += 1;
       logEvent("error", {
         event: "payment_requests.check_failed",
         lane,
@@ -121,8 +132,32 @@ async function checkEach(
         ...describeError(error),
       });
     }
+  });
+  if (rows.length > 0) {
+    await createSystemPaymentRequestsRepository(env).markPaymentRequestsChecked(
+      rows.map((row) => row.id)
+    );
   }
-  await createSystemPaymentRequestsRepository(env).markPaymentRequestsChecked(
-    rows.map((row) => row.id)
-  );
+  logEvent(failed > 0 ? "warn" : "info", {
+    event: "payment_requests.lane_run",
+    environment,
+    lane,
+    checked: rows.length,
+    failed,
+    settled,
+  });
+}
+
+async function forEachConcurrently<T>(
+  items: readonly T[],
+  concurrency: number,
+  run: (item: T) => Promise<void>
+): Promise<void> {
+  const queue = items.values();
+  const worker = async () => {
+    for (const item of queue) {
+      await run(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
