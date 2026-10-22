@@ -9,7 +9,7 @@ import {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 
@@ -56,10 +56,10 @@ export function resolveCounterpartyAccountDestination(params: {
 }): Address {
   const { account, field } = params;
   if (account.status !== "active") {
-    throw conflict(`${field} references an archived counterparty account`);
+    throw notFound(`${field} references an archived counterparty account`);
   }
   if (account.counterparty_status !== "active") {
-    throw conflict(`${field} belongs to an archived counterparty`);
+    throw notFound(`${field} belongs to an archived counterparty`);
   }
   if (account.account_kind !== "crypto_wallet") {
     throw badRequest(`${field} must be a crypto wallet account`);

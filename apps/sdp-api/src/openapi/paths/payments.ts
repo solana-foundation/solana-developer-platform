@@ -130,7 +130,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. Pass `counterpartyAccountId` to pay a saved counterparty account: the transfer records its counterparty, and the request is refused with 404 when the account is not in the project, 409 when the account or its counterparty is archived or its address differs from `destination`, and 400 when it is not a Solana wallet account.",
+      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. Pass `counterpartyAccountId` to pay a saved counterparty account: the transfer records its counterparty, and the request is refused with 404 when the account is not in the project or it or its counterparty is archived, 409 when its address differs from `destination`, and 400 when it is not a Solana wallet account.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
