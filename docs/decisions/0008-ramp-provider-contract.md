@@ -1,9 +1,9 @@
 # ADR 0008: Ramp provider contract v2
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Deciders:** SDP engineering
-- **Related:** HOO-2031, HOO-2026; `packages/sdp-payments/src/ramps`; ADR 0002 (Earn provider pluggability), ADR 0005 (release channels), ADR 0007 (cluster scope); PRO-2065, PRO-2057, PRO-2058; HOO-2032, HOO-2038, HOO-2040
+- **Related:** HOO-2031, HOO-2086, HOO-2026; `packages/sdp-payments/src/ramps`; ADR 0002 (Earn provider pluggability), ADR 0005 (release channels), ADR 0007 (cluster scope); PRO-2065, PRO-2057, PRO-2058; HOO-2032, HOO-2038, HOO-2040
 
 ## Context
 
@@ -40,17 +40,21 @@ stateful providers fit the model at all.
     presence, so an onramp-only provider stops carrying an offramp method that
     throws.
   - `RampRuntimeContext` is `{ mode, cluster, credentials }`. Adapters never see
-    the process environment. Credentials resolve per project for the resolved
-    mode (HOO-2032); the cluster comes from the cluster scope (ADR 0007).
+    the process environment. Credentials are the account's public and secret
+    keys, resolved by the API for the project's mode
+    (`apps/sdp-api/src/services/ramps/runtime.ts`: SDP's managed sandbox keys
+    until projects bring their own, HOO-2032). Each adapter's
+    `checkCredentials` refuses keys whose format names the other mode. The
+    cluster is the one the mode picks, as the cluster scope derives it (ADR 0007).
   - `RampQuoteRequest` and `RampQuoteResult` are provider-neutral and build on
     PRO-2065's `quoteDetails` and `paymentInstructions`. Core types import no
     provider module and name no provider field.
   - `RampQuoteResult` carries the terms the provider reported. One shared
     assertion checks them against the request (Lightspark's quote-matches-request
     check, generalized).
-  - Optional members: `webhook` (signature descriptor, `eventId`, a pure `parse`;
-    HOO-2038), `fetchTransferStatus` (HOO-2040) and `checkConnection`
-    (HOO-1942, HOO-1943).
+  - `fetchTransferStatus` is required (HOO-2040). Optional members: `webhook`
+    (signature descriptor, `eventId`, a pure `parse`; HOO-2038) and
+    `checkConnection` (HOO-1942, HOO-1943).
 - **The registry is typed as the contract:**
   `Readonly<Record<LiveRampProviderId, RampProvider>>`.
   `resolveRampProviderClient` answers 503 for any id that is not live, retired
@@ -80,8 +84,11 @@ stateful providers fit the model at all.
   quote shape per delivery mode, mode selection and a response that fails
   closed. Webhook verify and parse join with HOO-2038, idempotent replay with
   PRO-2058.
-- **Boundary tests:** nothing outside the package imports a provider module,
-  only `services/ramps` writes ramp rows, and `@sdp/payments` never sees `Env`.
+- **Boundary tests:** outside the package, only a provider's webhook processor
+  imports its modules, and only its status mapping, and `@sdp/payments` never
+  sees the process environment (`packages/sdp-payments/src/ramps/boundaries.test.ts`).
+  Every ramp status writer is listed in the writer inventory
+  (`apps/sdp-api/src/services/payments/ramp-transfer-transitions.test.ts`).
 - **Headless providers re-enter through this contract**, not a second extension
   point. A stateful provider needs four things, each an
   optional member or port:
@@ -119,8 +126,9 @@ stateful providers fit the model at all.
   1. This ADR, the error split and the diagnostics log.
   2. Response schemas and the contract suite.
   3. The contract reshaping and registry typing, after the non-launch providers are
-     removed and the cluster-scope stack lands. Credentials land with HOO-2032,
-     the webhook member with HOO-2038, status pull with HOO-2040.
+     removed and the cluster-scope stack lands (HOO-2086). Still open: quote
+     results that carry the provider's terms and the one shared assertion over
+     them (Stripe checks its session terms itself), and `checkConnection`.
 - Provider failures lose the provider's wording in API error bodies. Callers get
   the code, the provider status in `details` and an SDP message; operators read
   the provider's wording from `error_diagnostics` in the logs.

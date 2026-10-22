@@ -544,7 +544,6 @@ describe("requests and schedules", () => {
       custodyWalletId: "demo_cwlt_treasury",
       token: USDC,
       amount: "75.00",
-      counterpartyId: null,
       expiresAt: null,
     });
     expect(created.status).toBe(201);

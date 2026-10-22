@@ -5,6 +5,7 @@ import type {
   PaymentTransferStatus,
   PaymentTransferSummary,
 } from "@sdp/types/payments";
+import { ThemeScopeContext } from "@sdp/ui/theme-scope";
 import { address } from "@solana/kit";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -107,6 +108,7 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     handlePrimary: asyncNoop,
     handleSecondary: noop,
     finish: noop,
+    startOver: noop,
     handlePairChange: noop,
     handleCounterpartyCreated: noop,
     summaryDetails: [],
@@ -118,6 +120,7 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     canSendOnchain: true,
     onchainSendLoading: false,
     onchainSendResult: null,
+    onchainSendError: null,
     sendCryptoToDeposit: asyncNoop,
     ...overrides,
   };
@@ -196,5 +199,36 @@ describe("OfframpRail final step before the quote lands", () => {
     );
 
     expect(screen.getByRole("button", { name: "Previous" })).toHaveProperty("disabled", false);
+  });
+});
+
+describe("OfframpRail cancel on refresh surfaces", () => {
+  function renderRefreshRail(wizard: OfframpWizard) {
+    mocks.wizard = wizard;
+    return render(
+      <ThemeScopeContext.Provider value="refresh">
+        <OfframpRail {...railProps} />
+      </ThemeScopeContext.Provider>,
+      { wrapper }
+    );
+  }
+
+  it("holds Cancel payout while a cancel is in flight", () => {
+    renderRefreshRail(offrampWizard({ isCanceling: true }));
+
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", true);
+  });
+
+  it("keeps Cancel payout while the provider has not named a deposit address", () => {
+    renderRefreshRail(offrampWizard({ depositTarget: null, hasCryptoDepositInstruction: false }));
+
+    expect(screen.queryByRole("button", { name: /^Send/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", false);
+  });
+
+  it("offers Cancel payout while the sale is open", () => {
+    renderRefreshRail(offrampWizard({}));
+
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", false);
   });
 });

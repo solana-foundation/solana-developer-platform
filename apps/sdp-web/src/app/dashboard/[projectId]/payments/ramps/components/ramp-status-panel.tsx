@@ -3,113 +3,59 @@
 import type { PaymentTransferSummary, RampDirection } from "@sdp/types/payments";
 import { cn } from "@sdp/ui/cn";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
-import { CheckCircle2Icon, InfoIcon, Loader2Icon, XCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  CircleDotIcon,
+  InfoIcon,
+  Loader2Icon,
+  TriangleAlertIcon,
+  XCircleIcon,
+} from "lucide-react";
+import {
+  type RampPhaseCopy,
+  type RampPhaseTone,
+  rampPhaseCopy,
+} from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
-
-interface TransferStatusCopy {
-  title: string;
-  description: string;
-  state: "loading" | "success" | "error";
-}
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-function transferStatusCopy(
+/** The transfer's phase in words, or the preparing copy before the first poll answers. */
+function statusCopy(
   t: Translate,
   direction: RampDirection,
-  status: string,
-  hosted: boolean
-): TransferStatusCopy {
-  const onramp = direction === "onramp";
-  switch (status) {
-    case "pending":
-    case "awaiting_payment":
-      if (hosted) {
-        return {
-          title: t("DashboardPayments.ramps.status.waitingForPayment"),
-          description: t("DashboardPayments.ramps.status.waitingForPaymentHostedDescription"),
-          state: "loading",
-        };
-      }
-      return {
-        title: onramp
-          ? t("DashboardPayments.ramps.status.waitingForFunding")
-          : t("DashboardPayments.ramps.status.waitingToSend"),
-        description: onramp
-          ? t("DashboardPayments.ramps.status.waitingForFundingDescription")
-          : t("DashboardPayments.ramps.status.waitingToSendDescription"),
-        state: "loading",
-      };
-    case "processing":
-    case "settling":
-      return {
-        title: onramp
-          ? t("DashboardPayments.ramps.status.depositReceived")
-          : t("DashboardPayments.ramps.status.sendingPayout"),
-        description: onramp
-          ? t("DashboardPayments.ramps.status.depositReceivedDescription")
-          : t("DashboardPayments.ramps.status.sendingPayoutDescription"),
-        state: "loading",
-      };
-    case "completed":
-      return {
-        title: onramp
-          ? t("DashboardPayments.ramps.status.transferComplete")
-          : t("DashboardPayments.ramps.status.payoutSent"),
-        description: onramp
-          ? t("DashboardPayments.ramps.status.transferCompleteDescription")
-          : t("DashboardPayments.ramps.status.payoutSentDescription"),
-        state: "success",
-      };
-    case "failed":
-      return {
-        title: onramp
-          ? t("DashboardPayments.ramps.status.transferFailed")
-          : t("DashboardPayments.ramps.status.payoutFailed"),
-        description: onramp
-          ? t("DashboardPayments.ramps.status.transferFailedDescription")
-          : t("DashboardPayments.ramps.status.payoutFailedDescription"),
-        state: "error",
-      };
-    case "expired":
-      return {
-        title: t("DashboardPayments.ramps.status.quoteExpired"),
-        description: onramp
-          ? t("DashboardPayments.ramps.status.quoteExpiredFundingDescription")
-          : t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
-        state: "error",
-      };
-    // SDP cancels locally; the provider never reports this status.
-    case "canceled":
-      return {
-        title: t("DashboardPayments.ramps.status.canceled"),
-        description: onramp
-          ? t("DashboardPayments.ramps.status.canceledFundingDescription")
-          : t("DashboardPayments.ramps.status.canceledPayoutDescription"),
-        state: "error",
-      };
-    default:
-      return {
-        title: t("DashboardPayments.ramps.status.updated"),
-        description: t("DashboardPayments.ramps.status.currentProviderStatus", { status }),
-        state: "loading",
-      };
+  transfer: PaymentTransferSummary | null | undefined,
+  hosted: boolean,
+  locale: string
+): Pick<RampPhaseCopy, "title" | "description" | "tone"> {
+  if (!transfer) {
+    return {
+      title: t("DashboardPayments.ramps.status.preparing"),
+      description: t("DashboardPayments.ramps.status.preparingDescription"),
+      tone: "progress",
+    };
   }
+  return rampPhaseCopy(t, { ...transfer, type: direction }, { hosted, locale });
 }
 
-function statusIcon(state: TransferStatusCopy["state"], sizeClassName = "size-5") {
-  switch (state) {
+function statusIcon(tone: RampPhaseTone, sizeClassName = "size-5") {
+  switch (tone) {
     case "success":
       return <CheckCircle2Icon className={cn(sizeClassName, "text-success")} />;
     case "error":
       return <XCircleIcon className={cn(sizeClassName, "text-error")} />;
-    case "loading":
+    case "attention":
+      return <TriangleAlertIcon className={cn(sizeClassName, "text-warning")} />;
+    // The next move is the customer's, so nothing spins while they decide.
+    case "action":
+      return <CircleDotIcon className={cn(sizeClassName, "text-secondary")} />;
+    case "progress":
       return <Loader2Icon className={cn(sizeClassName, "animate-spin text-secondary")} />;
     default: {
-      const exhaustive: never = state;
-      throw new Error(`Unhandled transfer status state: ${exhaustive}`);
+      const exhaustive: never = tone;
+      throw new Error(`Unhandled transfer status tone: ${exhaustive}`);
     }
   }
 }
@@ -133,16 +79,11 @@ export function RampStatusInline({
   hosted?: boolean;
 }) {
   const t = useTranslations();
-  const copy: TransferStatusCopy = transfer
-    ? transferStatusCopy(t, direction, transfer.status, hosted)
-    : {
-        title: t("DashboardPayments.ramps.status.preparing"),
-        description: t("DashboardPayments.ramps.status.preparingDescription"),
-        state: "loading",
-      };
+  const locale = useLocale();
+  const copy = statusCopy(t, direction, transfer, hosted, locale);
   return (
     <span className="inline-flex items-center gap-2 rounded-full bg-fill-subtle px-3 py-1.5 text-sm font-medium text-secondary">
-      {statusIcon(copy.state, "size-4")}
+      {statusIcon(copy.tone, "size-4")}
       {copy.title}
       <TooltipProvider>
         <Tooltip>
@@ -169,16 +110,11 @@ export function RampStatusPanel({
   hosted?: boolean;
 }) {
   const t = useTranslations();
-  const copy: TransferStatusCopy = transfer
-    ? transferStatusCopy(t, direction, transfer.status, hosted)
-    : {
-        title: t("DashboardPayments.ramps.status.preparing"),
-        description: t("DashboardPayments.ramps.status.preparingDescription"),
-        state: "loading",
-      };
+  const locale = useLocale();
+  const copy = statusCopy(t, direction, transfer, hosted, locale);
   return (
     <div className="flex items-start gap-3">
-      <span className="mt-0.5 shrink-0">{statusIcon(copy.state)}</span>
+      <span className="mt-0.5 shrink-0">{statusIcon(copy.tone)}</span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-primary">{copy.title}</p>
         <p className="mt-1 text-sm leading-relaxed text-tertiary">{copy.description}</p>

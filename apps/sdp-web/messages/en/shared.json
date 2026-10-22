@@ -467,7 +467,6 @@
       "range30d": "30D",
       "range90d": "90D",
       "range1y": "1Y",
-      "changeOver": "over {range}",
       "chartReading": "{value} on {date}",
       "source": "solana.com/data",
       "stablecoinSupply": "Stablecoin supply",

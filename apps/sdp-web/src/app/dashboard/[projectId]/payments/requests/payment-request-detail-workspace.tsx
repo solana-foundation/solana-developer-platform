@@ -216,8 +216,6 @@ interface PaymentRequestDetailWorkspaceProps {
    * requests: the token is a bearer credential (APE-849).
    */
   publicToken: string | null;
-  /** The contact the request names, when it names one and the contact could be read. */
-  contactName: string | null;
   /** The destination wallet's label, when it has one. */
   walletName: string | null;
   /** Set when the requests could not be read; the page says so and offers a retry. */
@@ -226,12 +224,11 @@ interface PaymentRequestDetailWorkspaceProps {
 
 /**
  * One payment request as the design's record: its state and why, the amount asked, the link
- * to copy, who may pay it and where it lands, its reference, expiry and creation.
+ * to copy, where it lands, its reference, expiry and creation.
  */
 export function PaymentRequestDetailWorkspace({
   request,
   publicToken,
-  contactName,
   walletName,
   error,
 }: PaymentRequestDetailWorkspaceProps) {
@@ -250,12 +247,7 @@ export function PaymentRequestDetailWorkspace({
     );
   }
   return (
-    <PaymentRequestRecord
-      request={request}
-      publicToken={publicToken}
-      contactName={contactName}
-      walletName={walletName}
-    />
+    <PaymentRequestRecord request={request} publicToken={publicToken} walletName={walletName} />
   );
 }
 
@@ -263,12 +255,10 @@ export function PaymentRequestDetailWorkspace({
 function PaymentRequestRecord({
   request,
   publicToken,
-  contactName,
   walletName,
 }: {
   request: PaymentRequest;
   publicToken: string | null;
-  contactName: string | null;
   walletName: string | null;
 }) {
   const t = useTranslations();
@@ -323,11 +313,6 @@ function PaymentRequestRecord({
         <div className="pt-2">
           <RecordColumns>
             <RecordList>
-              <RecordRow label={t("DashboardPayments.requests.from")}>
-                {contactName ??
-                  request.counterpartyId ??
-                  t("DashboardPayments.requests.anyoneWithLink")}
-              </RecordRow>
               <RecordRow label={t("DashboardPayments.requests.to")}>
                 {walletName ? (
                   <>

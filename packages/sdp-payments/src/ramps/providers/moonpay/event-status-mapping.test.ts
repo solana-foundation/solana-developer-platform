@@ -177,6 +177,28 @@ describe("moonpaySellTransactionSettlementEvent", () => {
     });
   });
 
+  it("names the payout currency MoonPay reports with the fiat received", () => {
+    const event = moonpaySellTransactionSettlementEvent(
+      parseSell({
+        ...waitingForDepositPayload,
+        status: "completed",
+        quoteCurrency: { code: "usd", type: "fiat" },
+      })
+    );
+    assert.equal(event.kind, "settled");
+    assert.equal(event.kind === "settled" ? event.receivedAmount : null, "16.31");
+    assert.equal(event.kind === "settled" ? event.receivedCurrency : null, "USD");
+  });
+
+  it("settles without a payout currency when MoonPay's is malformed", () => {
+    const event = moonpaySellTransactionSettlementEvent(
+      parseSell({ ...waitingForDepositPayload, status: "completed", quoteCurrency: { code: 1 } })
+    );
+    assert.equal(event.kind, "settled");
+    assert.equal(event.kind === "settled" ? event.receivedAmount : null, "16.31");
+    assert.equal(event.kind === "settled" ? event.receivedCurrency : null, undefined);
+  });
+
   it("maps failed to failed with the failure reason", () => {
     const event = moonpaySellTransactionSettlementEvent(
       parseSell({ ...waitingForDepositPayload, status: "failed", failureReason: "Deposit timeout" })

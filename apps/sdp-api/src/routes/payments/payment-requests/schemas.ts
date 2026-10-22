@@ -5,7 +5,6 @@ export const createPaymentRequestSchema = z.strictObject({
   custodyWalletId: z.string().min(1).regex(/^\S+$/, "Wallet ID must not contain whitespace"),
   token: solanaAddressSchema("token"),
   amount: paymentAmountSchema,
-  counterpartyId: z.string().min(1).nullable().default(null),
   expiresAt: z.iso.datetime().nullable().default(null),
 });
 

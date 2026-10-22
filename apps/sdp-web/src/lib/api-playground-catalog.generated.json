@@ -588,6 +588,7 @@
               "serializedTx": "base64_tx_example",
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
               "fee": 5000,
               "error": "Signature failed",
               "initiatedBy": {
@@ -620,6 +621,17 @@
                 "networkFeeAmount": 1,
                 "areFeesIncluded": false,
                 "usdRate": 1
+              },
+              "fiatPayout": {
+                "amount": "20.82",
+                "currency": "USD",
+                "reportedAt": "2025-01-02T00:00:00.000Z"
+              },
+              "deliveryMismatch": {
+                "reason": "amount_mismatch",
+                "checkedAt": "2025-01-02T00:00:00.000Z",
+                "reportedAmount": "20",
+                "observedAmount": "0.5"
               },
               "risk": {
                 "provider": "trm",
@@ -859,6 +871,7 @@
               "serializedTx": "base64_tx_example",
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
               "fee": 5000,
               "error": "Signature failed",
               "initiatedBy": {
@@ -891,6 +904,17 @@
                 "networkFeeAmount": 1,
                 "areFeesIncluded": false,
                 "usdRate": 1
+              },
+              "fiatPayout": {
+                "amount": "20.82",
+                "currency": "USD",
+                "reportedAt": "2025-01-02T00:00:00.000Z"
+              },
+              "deliveryMismatch": {
+                "reason": "amount_mismatch",
+                "checkedAt": "2025-01-02T00:00:00.000Z",
+                "reportedAmount": "20",
+                "observedAmount": "0.5"
               },
               "risk": {
                 "provider": "trm",
@@ -945,6 +969,7 @@
               "serializedTx": "base64_tx_example",
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
               "fee": 5000,
               "error": "Signature failed",
               "initiatedBy": {
@@ -977,6 +1002,17 @@
                 "networkFeeAmount": 1,
                 "areFeesIncluded": false,
                 "usdRate": 1
+              },
+              "fiatPayout": {
+                "amount": "20.82",
+                "currency": "USD",
+                "reportedAt": "2025-01-02T00:00:00.000Z"
+              },
+              "deliveryMismatch": {
+                "reason": "amount_mismatch",
+                "checkedAt": "2025-01-02T00:00:00.000Z",
+                "reportedAmount": "20",
+                "observedAmount": "0.5"
               },
               "risk": {
                 "provider": "trm",
@@ -1102,6 +1138,7 @@
                 "serializedTx": "base64_tx_example",
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
                 "fee": 5000,
                 "error": "Signature failed",
                 "initiatedBy": {
@@ -1134,6 +1171,17 @@
                   "networkFeeAmount": 1,
                   "areFeesIncluded": false,
                   "usdRate": 1
+                },
+                "fiatPayout": {
+                  "amount": "20.82",
+                  "currency": "USD",
+                  "reportedAt": "2025-01-02T00:00:00.000Z"
+                },
+                "deliveryMismatch": {
+                  "reason": "amount_mismatch",
+                  "checkedAt": "2025-01-02T00:00:00.000Z",
+                  "reportedAmount": "20",
+                  "observedAmount": "0.5"
                 },
                 "risk": {
                   "provider": "trm",
@@ -1329,6 +1377,7 @@
                 "serializedTx": "base64_tx_example",
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
                 "fee": 5000,
                 "error": "Signature failed",
                 "initiatedBy": {
@@ -1361,6 +1410,17 @@
                   "networkFeeAmount": 1,
                   "areFeesIncluded": false,
                   "usdRate": 1
+                },
+                "fiatPayout": {
+                  "amount": "20.82",
+                  "currency": "USD",
+                  "reportedAt": "2025-01-02T00:00:00.000Z"
+                },
+                "deliveryMismatch": {
+                  "reason": "amount_mismatch",
+                  "checkedAt": "2025-01-02T00:00:00.000Z",
+                  "reportedAmount": "20",
+                  "observedAmount": "0.5"
                 },
                 "risk": {
                   "provider": "trm",
@@ -1883,6 +1943,7 @@
               "serializedTx": "base64_tx_example",
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
+              "confirmedAt": "2025-01-01T00:00:00.000Z",
               "fee": 5000,
               "error": "Signature failed",
               "initiatedBy": {
@@ -1915,6 +1976,17 @@
                 "networkFeeAmount": 1,
                 "areFeesIncluded": false,
                 "usdRate": 1
+              },
+              "fiatPayout": {
+                "amount": "20.82",
+                "currency": "USD",
+                "reportedAt": "2025-01-02T00:00:00.000Z"
+              },
+              "deliveryMismatch": {
+                "reason": "amount_mismatch",
+                "checkedAt": "2025-01-02T00:00:00.000Z",
+                "reportedAmount": "20",
+                "observedAmount": "0.5"
               },
               "risk": {
                 "provider": "trm",

@@ -118,7 +118,8 @@ A change that triggers one of these must handle it.
   lookup) and has a status-pull entry and an abandonment horizon in
   `apps/sdp-api/src/services/jobs/sweep-ramp-transfer-statuses.ts`;
   typecheck fails until it does.
-- Provider instances come only from `RAMP_PROVIDER_CLIENTS`. A second instance breaks the webhook tests' `vi.spyOn` mocks.
+- Provider instances come only from `RAMP_PROVIDER_CLIENTS`, typed as the contract; a caller narrows to a direction with `rampClientFor`. A second instance breaks the webhook tests' `vi.spyOn` mocks.
+- Adapters get `RampRuntimeContext` (`{ mode, cluster, credentials }`) and never the process env. The API resolves the keys once (`apps/sdp-api/src/services/ramps/runtime.ts`) for every call, availability check and discovery run. Outside the package, only a provider's webhook processor imports its modules, and only its status mapping (`packages/sdp-payments/src/ramps/boundaries.test.ts`).
 - Provider clients never access the database. Route handlers and background jobs access it through repositories.
 
 ## Dashboard (`apps/sdp-web`)

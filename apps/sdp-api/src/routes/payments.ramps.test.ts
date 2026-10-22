@@ -20,6 +20,7 @@ import {
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { stubOfframpQuoteReads } from "@/test/helpers/offramp-quote";
 import {
   installPaymentsRouteTestHooks,
   seedCachedKey,
@@ -478,8 +479,6 @@ describe("Payments routes — ramps", () => {
             amount: "12500000",
             uiAmount: "12.5",
             decimals: 6,
-            usdPrice: 1,
-            usdValue: 12.5,
           },
         ]);
         expect(balanceReadConfigs()).toEqual([
@@ -686,6 +685,7 @@ describe("Payments routes — ramps", () => {
     expect(hostedUrl.searchParams.get("currencyCode")).toBe("sol");
     expect(hostedUrl.searchParams.get("walletAddress")).toBe(TEST_SOLANA_ADDRESSES.wallet1);
     expect(hostedUrl.searchParams.get("lockAmount")).toBe("true");
+    expect(hostedUrl.searchParams.get("paymentMethod")).toBe("credit_debit_card");
     expect(hostedUrl.searchParams.get(MOONPAY_PARAM_EXTERNAL_CUSTOMER_ID)).toBe(counterpartyId);
     expect(hostedUrl.searchParams.get("externalTransactionId")).toBe(body.data.transferId);
     assertMoonPaySignature(hostedUrl);
@@ -722,6 +722,7 @@ describe("Payments routes — ramps", () => {
 
   it("creates a hosted MoonPay off-ramp quote with the transfer id", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_offramp_quote" });
+    stubOfframpQuoteReads();
 
     const response = await app.request(
       "/v1/payments/ramps/offramp/quote",
@@ -787,6 +788,7 @@ describe("Payments routes — ramps", () => {
 
   it("quotes MoonPay USDC on Solana in both directions", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_usdc_quotes" });
+    stubOfframpQuoteReads();
     const hostedQuoteSchema = z.object({
       data: z.object({ quote: z.object({ hostedUrl: z.string() }) }),
     });

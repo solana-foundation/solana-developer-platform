@@ -18,30 +18,18 @@ export type NetworkMetricFormat = "usdCompact" | "countCompact" | "percent" | "u
 export interface NetworkMetricDisplay {
   format: NetworkMetricFormat;
   unit: "usd" | "count" | "percent";
-  /** A rising supply is good news; a rising cost per transaction is not. */
-  higherIsBetter: boolean;
   /**
    * Drawn as a 7-day average. Daily transfers swing 30% or more with the weekday, so a daily
-   * change would hinge on which day a range starts; supply moves slowly and reads daily.
+   * headline would hinge on which weekday it lands on; supply moves slowly and reads daily.
    */
   averaged: boolean;
 }
 
 export const NETWORK_METRIC_DISPLAY = {
-  stablecoinSupply: { format: "usdCompact", unit: "usd", higherIsBetter: true, averaged: false },
-  stablecoinTransfers: {
-    format: "countCompact",
-    unit: "count",
-    higherIsBetter: true,
-    averaged: true,
-  },
-  stablecoinShare: { format: "percent", unit: "percent", higherIsBetter: true, averaged: true },
-  costPerTransaction: {
-    format: "usdPrecise",
-    unit: "usd",
-    higherIsBetter: false,
-    averaged: true,
-  },
+  stablecoinSupply: { format: "usdCompact", unit: "usd", averaged: false },
+  stablecoinTransfers: { format: "countCompact", unit: "count", averaged: true },
+  stablecoinShare: { format: "percent", unit: "percent", averaged: true },
+  costPerTransaction: { format: "usdPrecise", unit: "usd", averaged: true },
 } as const satisfies Record<NetworkMetricId, NetworkMetricDisplay>;
 
 const DAY_MS = 86_400_000;
@@ -52,7 +40,7 @@ const dateOfDay = (day: number) => new Date(day * DAY_MS).toISOString().slice(0,
 
 /**
  * The days a range covers, ending on the latest point. Cut by date, not by count, so a missing
- * day never stretches a range past its days or moves its change onto a longer period.
+ * day never stretches a range past its days.
  */
 export function sliceNetworkRange(
   points: readonly NetworkPoint[],
@@ -101,8 +89,8 @@ export function weeklyAverages(points: readonly NetworkPoint[]): NetworkPoint[] 
 
 /**
  * What a figure draws over a range. A daily metric shows its days; an averaged one shows each
- * day's 7-day average on 30D and 90D, and one point a week on 1Y. The headline and the change
- * read these same points, so the number, the end of the line and the % always agree.
+ * day's 7-day average on 30D and 90D, and one point a week on 1Y. The headline reads these same
+ * points, so the number and the end of the line always agree.
  */
 export function networkRangePoints(
   points: readonly NetworkPoint[],
@@ -113,14 +101,6 @@ export function networkRangePoints(
   return range === "1y"
     ? weeklyAverages(points)
     : sliceNetworkRange(sevenDayAverages(points), range);
-}
-
-/** The change from the first point to the last as a ratio (0.297 for +29.7%), or null. */
-export function networkChange(points: readonly NetworkPoint[]): number | null {
-  const first = points[0]?.value;
-  const last = points.at(-1)?.value;
-  if (first === undefined || last === undefined || first === 0) return null;
-  return (last - first) / first;
 }
 
 const TICK_STEPS = [1, 2, 2.5, 5] as const;
@@ -291,24 +271,4 @@ export function formatNetworkTicks(
     if (new Set(labels).size === labels.length) break;
   }
   return labels;
-}
-
-/** "+29.7%", "−63.6%": signed, one decimal, with a true minus sign. */
-export function formatNetworkChange(ratio: number, locale: string): string {
-  return new Intl.NumberFormat(locale, {
-    style: "percent",
-    maximumFractionDigits: 1,
-    signDisplay: "exceptZero",
-  })
-    .format(ratio)
-    .replace("-", "−");
-}
-
-/** Whether a change is good news for this metric; a flat change is neither. */
-export function networkChangeTone(
-  ratio: number,
-  higherIsBetter: boolean
-): "positive" | "critical" | "neutral" {
-  if (ratio === 0) return "neutral";
-  return ratio > 0 === higherIsBetter ? "positive" : "critical";
 }

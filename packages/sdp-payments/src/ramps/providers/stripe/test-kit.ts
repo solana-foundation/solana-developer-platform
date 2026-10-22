@@ -121,16 +121,10 @@ export function stripeSessionLookupExchange(
   };
 }
 
-/**
- * Stripe's contract kit. Stripe runs onramp only, and SDP holds sandbox keys
- * only: production projects bring their own, so production fails closed.
- */
+/** Stripe's contract kit. Stripe runs onramp only. */
 export const STRIPE_TEST_KIT: RampProviderTestKit = {
-  env: {
-    STRIPE_SANDBOX_SECRET_KEY: SECRET_KEY,
-    STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_contract",
-  },
-  managedModes: ["sandbox"],
+  credentials: { publicKey: "pk_test_contract", secretKey: SECRET_KEY },
+  liveCredentials: { publicKey: "pk_live_contract", secretKey: "sk_live_contract" },
   onramp: {
     estimate: {
       input: { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: FIAT_AMOUNT },
@@ -183,7 +177,7 @@ export const STRIPE_TEST_KIT: RampProviderTestKit = {
       events: [{ provider: "stripe", kind: "awaiting_payment", reference: "cos_contract" }],
     },
   },
-  usesModeCredential: (request) =>
+  usesCredentials: (request) =>
     request.headers.get("Authorization") === basicAuthHeader(SECRET_KEY, ""),
   malformedEstimate: {
     direction: "onramp",

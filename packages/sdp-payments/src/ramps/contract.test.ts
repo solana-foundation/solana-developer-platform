@@ -16,9 +16,16 @@ import {
   type RampProviderTestKit,
   type RecordedExchange,
   type Replay,
+  rampTestRuntime,
   replayExchanges,
 } from "./test-kit";
-import type { RampProvider, RampSettlementEvent, RampTransferLookup } from "./types";
+import {
+  RAMP_DIRECTION_MEMBERS,
+  type RampProvider,
+  type RampProviderCredentials,
+  type RampRuntimeContext,
+  supportsRampDirection,
+} from "./types";
 
 /**
  * Every registered provider has a kit. A provider on its way out names the
@@ -59,23 +66,38 @@ async function replayed<T>(
   return { result: settled.result, replay };
 }
 
+function isProviderNotConfigured(cause: unknown): boolean {
+  assert.ok(cause instanceof SdpPaymentsError);
+  assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
+  return true;
+}
+
 /** The kit's cases for `direction`, or undefined when the provider does not run it. */
 function casesFor(kit: RampProviderTestKit, direction: RampDirection) {
   return direction === "onramp" ? kit.onramp : kit.offramp;
+}
+
+/** The kit's keys for the other mode, which every call in `mode` refuses. */
+function otherModeCredentials(
+  kit: RampProviderTestKit,
+  mode: SdpEnvironment
+): RampProviderCredentials {
+  return mode === "sandbox" ? kit.liveCredentials : kit.credentials;
 }
 
 async function runEstimate(
   client: RampProvider,
   kit: RampProviderTestKit,
   direction: RampDirection,
-  mode: SdpEnvironment
+  ctx: RampRuntimeContext
 ): Promise<PaymentRampEstimate> {
-  const ctx = { env: kit.env, mode };
   if (direction === "onramp") {
     assert.ok(kit.onramp, "the kit records an onramp");
+    assert.ok(supportsRampDirection(client, "onramp"), "a provider with onramp cases runs onramp");
     return client.estimateOnramp(ctx, kit.onramp.estimate.input);
   }
   assert.ok(kit.offramp, "the kit records an offramp");
+  assert.ok(supportsRampDirection(client, "offramp"), "a provider with offramp cases runs offramp");
   return client.estimateOfframp(ctx, kit.offramp.estimate.input);
 }
 
@@ -83,26 +105,16 @@ async function runQuote(
   client: RampProvider,
   kit: RampProviderTestKit,
   direction: RampDirection,
-  mode: SdpEnvironment
+  ctx: RampRuntimeContext
 ): Promise<PaymentRampQuote> {
-  const ctx = { env: kit.env, mode };
   if (direction === "onramp") {
     assert.ok(kit.onramp, "the kit records an onramp");
-    assert.ok(client.createOnrampQuote, "a provider that runs onramp can quote it");
+    assert.ok(supportsRampDirection(client, "onramp"), "a provider with onramp cases runs onramp");
     return client.createOnrampQuote(ctx, kit.onramp.quote.input);
   }
   assert.ok(kit.offramp, "the kit records an offramp");
+  assert.ok(supportsRampDirection(client, "offramp"), "a provider with offramp cases runs offramp");
   return client.createOfframpQuote(ctx, kit.offramp.quote.input);
-}
-
-async function runTransferStatus(
-  client: RampProvider,
-  kit: RampProviderTestKit,
-  lookup: RampTransferLookup,
-  mode: SdpEnvironment
-): Promise<readonly RampSettlementEvent[]> {
-  assert.ok(client.fetchTransferStatus, "a provider with status cases can look a transfer up");
-  return client.fetchTransferStatus({ env: kit.env, mode }, lookup);
 }
 
 function assertEstimateContract(
@@ -142,32 +154,24 @@ function assertQuoteContract(quote: PaymentRampQuote, provider: RampProviderId):
   }
 }
 
-function assertRequestCredentials(
-  kit: RampProviderTestKit,
-  replay: Replay,
-  mode: SdpEnvironment
-): void {
+function assertRequestCredentials(kit: RampProviderTestKit, replay: Replay): void {
   for (const request of replay.requests) {
-    assert.ok(
-      kit.usesModeCredential(request, mode),
-      `${request.method} ${request.url} carries the ${mode} credential`
-    );
+    assert.ok(kit.usesCredentials(request), `${request.method} ${request.url} carries the keys`);
   }
 }
 
 function assertQuoteCredentials(
   kit: RampProviderTestKit,
   replay: Replay,
-  quote: PaymentRampQuote,
-  mode: SdpEnvironment
+  quote: PaymentRampQuote
 ): void {
-  assertRequestCredentials(kit, replay, mode);
-  const { quoteUsesModeCredential } = kit;
-  if (quoteUsesModeCredential === undefined) {
+  assertRequestCredentials(kit, replay);
+  const { quoteUsesCredentials } = kit;
+  if (quoteUsesCredentials === undefined) {
     assert.ok(replay.requests.length > 0, "a quote built without a request needs a quote check");
     return;
   }
-  assert.ok(quoteUsesModeCredential(quote, mode), `the quote carries the ${mode} credential`);
+  assert.ok(quoteUsesCredentials(quote), "the quote carries the keys");
 }
 
 describe("ramp provider contract", () => {
@@ -178,84 +182,119 @@ describe("ramp provider contract", () => {
   for (const provider of RAMP_PROVIDERS) {
     const kit = KITS[provider];
     const client: RampProvider = RAMP_PROVIDER_CLIENTS[provider];
+    const sandbox = rampTestRuntime("sandbox", kit.credentials);
 
     describe(provider, () => {
+      it("has every member of a direction or none", () => {
+        for (const direction of RAMP_DIRECTIONS) {
+          const present = RAMP_DIRECTION_MEMBERS[direction].filter(
+            (member) => client[member] !== undefined
+          );
+          assert.ok(
+            present.length === 0 || present.length === RAMP_DIRECTION_MEMBERS[direction].length,
+            `${direction} members: ${present.join(", ")}`
+          );
+        }
+      });
+
+      it("records a direction exactly when it runs it", () => {
+        for (const direction of RAMP_DIRECTIONS) {
+          assert.equal(
+            casesFor(kit, direction) !== undefined,
+            supportsRampDirection(client, direction),
+            direction
+          );
+        }
+      });
+
+      it("accepts keys only in the mode they name", () => {
+        const { credentials, liveCredentials } = kit;
+        assert.equal(client.checkCredentials(credentials, "sandbox"), null);
+        assert.equal(client.checkCredentials(liveCredentials, "production"), null);
+        assert.equal(
+          client.checkCredentials(liveCredentials, "sandbox"),
+          `${client.label} sandbox keys must be test-mode keys.`
+        );
+        assert.equal(
+          client.checkCredentials(credentials, "production"),
+          `${client.label} production keys must be live-mode keys.`
+        );
+        for (const mixed of [
+          { ...credentials, publicKey: liveCredentials.publicKey },
+          { ...credentials, secretKey: liveCredentials.secretKey },
+        ]) {
+          for (const mode of SDP_ENVIRONMENTS) {
+            assert.notEqual(client.checkCredentials(mixed, mode), null, `mixed keys in ${mode}`);
+          }
+        }
+      });
+
       for (const direction of RAMP_DIRECTIONS) {
         const cases = casesFor(kit, direction);
         if (cases === undefined) {
           continue;
         }
+
         for (const mode of SDP_ENVIRONMENTS) {
-          if (!kit.managedModes.includes(mode)) {
-            it(`refuses an ${direction} in ${mode} before any request`, async () => {
-              const runs: ReadonlyArray<() => Promise<PaymentRampEstimate | PaymentRampQuote>> = [
-                () => runEstimate(client, kit, direction, mode),
-                () => runQuote(client, kit, direction, mode),
-              ];
-              for (const run of runs) {
-                await assert.rejects(replayed([], run), (cause: unknown) => {
-                  assert.ok(cause instanceof SdpPaymentsError);
-                  assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
-                  return true;
-                });
-              }
-            });
-            continue;
-          }
-
-          it(`estimates an ${direction} in ${mode} to the contract`, async () => {
-            const { result, replay } = await replayed(cases.estimate.exchanges, () =>
-              runEstimate(client, kit, direction, mode)
+          it(`refuses an ${direction} in ${mode} on the other mode's keys before any request`, async () => {
+            const ctx = rampTestRuntime(mode, otherModeCredentials(kit, mode));
+            await assert.rejects(
+              replayed([], () => runEstimate(client, kit, direction, ctx)),
+              isProviderNotConfigured
             );
-            assertEstimateContract(result, provider, direction, cases.estimate.input);
-            assertRequestCredentials(kit, replay, mode);
-          });
-
-          it(`quotes an ${direction} in ${mode} for its delivery mode`, async () => {
-            const { result, replay } = await replayed(cases.quote.exchanges, () =>
-              runQuote(client, kit, direction, mode)
+            await assert.rejects(
+              replayed([], () => runQuote(client, kit, direction, ctx)),
+              isProviderNotConfigured
             );
-            assertQuoteContract(result, provider);
-            assertQuoteCredentials(kit, replay, result, mode);
           });
         }
+
+        it(`estimates an ${direction} to the contract`, async () => {
+          const { result, replay } = await replayed(cases.estimate.exchanges, () =>
+            runEstimate(client, kit, direction, sandbox)
+          );
+          assertEstimateContract(result, provider, direction, cases.estimate.input);
+          assertRequestCredentials(kit, replay);
+        });
+
+        it(`quotes an ${direction} for its delivery mode`, async () => {
+          const { result, replay } = await replayed(cases.quote.exchanges, () =>
+            runQuote(client, kit, direction, sandbox)
+          );
+          assertQuoteContract(result, provider);
+          assertQuoteCredentials(kit, replay, result);
+        });
       }
 
-      it("records status lookups exactly when it can look a transfer up", () => {
-        assert.equal(kit.transferStatus !== undefined, client.fetchTransferStatus !== undefined);
+      it("records at least one status lookup", () => {
+        assert.ok(Object.keys(kit.transferStatus).length > 0);
       });
 
-      for (const [name, statusCase] of Object.entries(kit.transferStatus ?? {})) {
+      for (const [name, statusCase] of Object.entries(kit.transferStatus)) {
         for (const mode of SDP_ENVIRONMENTS) {
-          if (!kit.managedModes.includes(mode)) {
-            it(`refuses to look up ${name} in ${mode} before any request`, async () => {
-              await assert.rejects(
-                replayed([], () => runTransferStatus(client, kit, statusCase.input, mode)),
-                (cause: unknown) => {
-                  assert.ok(cause instanceof SdpPaymentsError);
-                  assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
-                  return true;
-                }
-              );
-            });
-            continue;
-          }
-
-          it(`looks up ${name} in ${mode} with one request`, async () => {
-            const { result, replay } = await replayed(statusCase.exchanges, () =>
-              runTransferStatus(client, kit, statusCase.input, mode)
+          it(`refuses to look up ${name} in ${mode} on the other mode's keys before any request`, async () => {
+            const ctx = rampTestRuntime(mode, otherModeCredentials(kit, mode));
+            await assert.rejects(
+              replayed([], () => client.fetchTransferStatus(ctx, statusCase.input)),
+              isProviderNotConfigured
             );
-            assert.equal(replay.requests.length, 1, "a status lookup makes one request");
-            assertRequestCredentials(kit, replay, mode);
-            assert.deepEqual(result, statusCase.events);
           });
         }
+
+        it(`looks up ${name} with one request`, async () => {
+          const { result, replay } = await replayed(statusCase.exchanges, () =>
+            client.fetchTransferStatus(sandbox, statusCase.input)
+          );
+          assert.equal(replay.requests.length, 1, "a status lookup makes one request");
+          assertRequestCredentials(kit, replay);
+          assert.deepEqual(result, statusCase.events);
+        });
       }
 
       it("fails closed on a response it cannot read", async () => {
         const { direction, exchange } = kit.malformedEstimate;
         replayExchanges([exchange]);
-        await assert.rejects(runEstimate(client, kit, direction, "sandbox"), (cause: unknown) => {
+        await assert.rejects(runEstimate(client, kit, direction, sandbox), (cause: unknown) => {
           assert.ok(cause instanceof SdpPaymentsError);
           assert.equal(cause.code, "PROVIDER_RESPONSE_INVALID");
           assert.equal(cause.message, `${provider} returned an unexpected response`);

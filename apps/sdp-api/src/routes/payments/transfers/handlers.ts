@@ -70,6 +70,7 @@ import {
   getIdempotencyRecordKey,
   markIdempotencyCommitted,
   markIdempotencyRecordMismatch,
+  markIdempotencyReleased,
 } from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
@@ -93,7 +94,7 @@ import {
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
-import { logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
@@ -565,9 +566,39 @@ function logSubmittedUnconfirmed(transfer: TransferRow, signature: string | null
 }
 
 /**
+ * An off-ramp deposit that failed before SDP recorded signed bytes moved
+ * nothing, so its sale goes back to awaiting the deposit instead of failing.
+ * False when the row holds anything a broadcast could have used.
+ */
+async function releaseUnsentRampDeposit(
+  c: AppContext,
+  transfer: TransferRow,
+  cause: unknown
+): Promise<boolean> {
+  if (transfer.type !== "offramp") return false;
+  const released = await getPaymentsRepository(c).releaseOfframpDepositClaim({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    updatedAt: new Date().toISOString(),
+  });
+  if (released === null) return false;
+  markIdempotencyReleased(c);
+  logEvent("warn", {
+    event: "sdp_api_ramp_deposit_released",
+    provider: transfer.provider,
+    organization_id: transfer.organization_id,
+    project_id: transfer.project_id,
+    transfer_id: transfer.id,
+    ...describeError(cause),
+  });
+  return true;
+}
+
+/**
  * A failure after the durable start marker remains processing for chain
  * reconciliation. Before that marker, no broadcast was possible and the
- * transfer can fail normally.
+ * transfer can fail normally; an unsigned off-ramp deposit is released.
  */
 async function settleTransferExecutionFailure(
   c: AppContext,
@@ -584,6 +615,9 @@ async function settleTransferExecutionFailure(
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const answer = mapTransferExecutionError(error);
+  if (submitted === null && (await releaseUnsentRampDeposit(c, transfer, error))) {
+    throw answer;
+  }
   const settled = resolveTransferUpdateResult(
     await updateTransferRecord(c, transfer, {
       status: "failed",
@@ -898,7 +932,9 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   } catch (error) {
     // Nothing was broadcast, but the processing row is already durable and an
     // idempotent retry would replay it as if it had executed. Settle it failed
-    // so the ledger refusal cannot mint an unaudited, replayable transfer.
+    // so the ledger refusal cannot mint an unaudited, replayable transfer; an
+    // off-ramp deposit goes back to awaiting it instead.
+    if (await releaseUnsentRampDeposit(c, transfer, error)) throw error;
     await updateTransferRecord(c, transfer, {
       status: "failed",
       error: "Audit ledger admission failed before execution",

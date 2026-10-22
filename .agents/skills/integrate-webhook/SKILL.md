@@ -30,8 +30,9 @@ The same typed processor handles the background apply and replay.
 
 ## verify
 
-`verify(context: RampWebhookValidationContext): Promise<string>`. `context` =
-`{ env, environment, headers, rawBody, requestUrl? }`. Read the mode-keyed
+`verify(context: RampWebhookValidationContext): Promise<string>` (defined beside
+`WebhookProcessor` in `apps/sdp-api/src/services/ramps/webhooks/processor.ts`).
+`context` = `{ env, environment, headers, rawBody, requestUrl? }`. Read the mode-keyed
 verification key, verify the signature over the **raw** body, and return that
 body. Throw `UNAUTHORIZED` on a missing or invalid signature. Use
 `apps/sdp-api/src/lib/webhook-signature.ts` with the provider-signed timestamp.

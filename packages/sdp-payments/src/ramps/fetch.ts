@@ -282,8 +282,23 @@ export async function providerFetchJson<TSchema extends z.ZodType, TBody = never
   init: ProviderRequestInit<TBody>,
   schema: TSchema
 ): Promise<z.output<TSchema>> {
-  const { response, parsed } = await providerFetch(provider, url, init);
+  return readProviderJson(provider, await providerFetch(provider, url, init), schema);
+}
 
+/**
+ * Reads an answer `providerFetch` returned, as `providerFetchJson` does, for an
+ * adapter that first checks a refusal it can read more precisely.
+ *
+ * @param provider - Ramp provider id, used in errors and telemetry.
+ * @param answer - The provider's response and its parsed JSON body.
+ * @param schema - The fields the adapter reads from the response.
+ * @returns The validated response body.
+ */
+export function readProviderJson<TSchema extends z.ZodType>(
+  provider: RampProviderId,
+  { response, parsed }: Pick<ProviderResponse, "response" | "parsed">,
+  schema: TSchema
+): z.output<TSchema> {
   if (!response.ok) {
     // The provider's own wording is for operators, never for the caller: it
     // rides in diagnostics, which are logged and not serialized.

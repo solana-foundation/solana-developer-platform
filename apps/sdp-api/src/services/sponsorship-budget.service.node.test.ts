@@ -458,57 +458,49 @@ describe("BudgetedFeePayment", () => {
     );
   });
 
-  it("releases an owned submission when marker persistence is proven absent", async () => {
+  it("releases the reservation and rethrows when the start marker write fails", async () => {
     const { feePayment, repository, budgetRedis } = harness();
+    const markerError = new Error("marker response lost");
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
-      markStarted: vi.fn().mockRejectedValue(new Error("marker write failed")),
-      hasStarted: vi.fn().mockResolvedValue(false),
+      markStarted: vi.fn().mockRejectedValue(markerError),
     };
 
-    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
-      "marker write failed"
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toBe(
+      markerError
     );
 
-    expect(lifecycle.markStarted).toHaveBeenCalledOnce();
-    expect(lifecycle.hasStarted).toHaveBeenCalledOnce();
-    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "marker response lost"
+    );
     expect(budgetRedis.settle).toHaveBeenCalledWith(
       expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
     );
+    expect(repository.markSubmitted).not.toHaveBeenCalled();
   });
 
-  it("does not release an owned submission when marker persistence is confirmed", async () => {
-    const { feePayment, repository, budgetRedis } = harness();
+  it("rethrows the marker error when releasing the unstarted reservation fails", async () => {
+    const { feePayment, repository } = harness();
+    repository.markReleased.mockRejectedValueOnce(new Error("release write failed"));
+    const markerError = new Error("marker response lost");
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
-      markStarted: vi.fn().mockRejectedValue(new Error("marker response lost")),
-      hasStarted: vi.fn().mockResolvedValue(true),
+      markStarted: vi.fn().mockRejectedValue(markerError),
     };
 
-    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
-      "marker response lost"
+    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toBe(
+      markerError
     );
 
-    expect(lifecycle.hasStarted).toHaveBeenCalledOnce();
-    expect(repository.markReleased).not.toHaveBeenCalled();
-    expect(budgetRedis.settle).not.toHaveBeenCalled();
-  });
-
-  it("does not release an owned submission when marker persistence is unknown", async () => {
-    const { feePayment, repository, budgetRedis } = harness();
-    const lifecycle = {
-      persistSigned: vi.fn().mockResolvedValue(undefined),
-      markStarted: vi.fn().mockRejectedValue(new Error("marker response lost")),
-      hasStarted: vi.fn().mockRejectedValue(new Error("marker read failed")),
-    };
-
-    await expect(feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle)).rejects.toThrow(
-      "marker response lost"
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_sponsorship_unstarted_release_failed",
+        reservation_id: expect.any(String),
+      })
     );
-
-    expect(repository.markReleased).not.toHaveBeenCalled();
-    expect(budgetRedis.settle).not.toHaveBeenCalled();
   });
 
   it("persists submitted accounting only after the owned marker is durable", async () => {

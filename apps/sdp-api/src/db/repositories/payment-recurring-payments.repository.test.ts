@@ -262,8 +262,18 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         planCreationSignature: null,
         authorizationSignature: null,
         error: null,
-        metadata: { authorizationSetupSignature: testSignature(3) },
+        metadata: {},
         createdAt,
+        updatedAt: createdAt,
+      })
+    );
+    required(
+      await repo.updateActivationAttempt({
+        attemptId: attempt.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        authorizationSetupSignature: testSignature(3),
+        lastValidBlockHeight: "1000",
         updatedAt: createdAt,
       })
     );
@@ -277,7 +287,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     };
     const setupSlot: RecurringPaymentStepSignatureSlot = {
       row: "activation_attempt",
-      column: "metadata.authorizationSetupSignature",
+      column: "authorization_setup_signature",
     };
     const clear = (input: {
       slot: RecurringPaymentStepSignatureSlot;
@@ -294,13 +304,18 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       getDb(env)
         .prepare(
           `SELECT rp.plan_creation_signature,
-                  a.metadata ->> 'authorizationSetupSignature' AS setup_signature
+                  a.authorization_setup_signature AS setup_signature,
+                  a.last_valid_block_height
              FROM payment_recurring_payments rp
              JOIN payment_recurring_payment_activation_attempts a ON a.recurring_payment_id = rp.id
             WHERE rp.id = ?`
         )
         .bind(created.id)
-        .first<{ plan_creation_signature: string | null; setup_signature: string | null }>();
+        .first<{
+          plan_creation_signature: string | null;
+          setup_signature: string | null;
+          last_valid_block_height: string | null;
+        }>();
 
     const planHeld = { slot: planSlot, id: created.id, projectId: TEST_PROJECT_ID };
     const setupHeld = { slot: setupSlot, id: attempt.id, projectId: TEST_PROJECT_ID };
@@ -316,13 +331,20 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     expect(await savedSignatures()).toEqual({
       plan_creation_signature: testSignature(1),
       setup_signature: testSignature(3),
+      last_valid_block_height: "1000",
     });
 
     expect(await clear({ ...planHeld, signature: testSignature(1) })).toBe(true);
+    expect(await savedSignatures()).toEqual({
+      plan_creation_signature: null,
+      setup_signature: testSignature(3),
+      last_valid_block_height: "1000",
+    });
     expect(await clear({ ...setupHeld, signature: testSignature(3) })).toBe(true);
     expect(await savedSignatures()).toEqual({
       plan_creation_signature: null,
       setup_signature: null,
+      last_valid_block_height: null,
     });
   });
 });

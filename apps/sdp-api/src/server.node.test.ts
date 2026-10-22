@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 import { assertRequiredEnv } from "./server";
 
@@ -16,6 +17,8 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
 }
 
 describe("server boot checks", () => {
+  installClusterRpcStub();
+
   it("runs the release channel boot check", () => {
     expect(() => assertRequiredEnv(makeEnv())).not.toThrow();
     expect(() => assertRequiredEnv(makeEnv({ SDP_RELEASE_CHANNEL: "" }))).toThrow(

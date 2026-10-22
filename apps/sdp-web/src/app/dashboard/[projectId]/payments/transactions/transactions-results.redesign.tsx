@@ -60,7 +60,7 @@ export function TransactionsResults({
   return (
     <section className="flex min-w-0 flex-1 flex-col" aria-busy={pending}>
       <div className="overflow-x-auto refresh:-mx-3">
-        <Table className="min-w-[760px] rounded-none border-0">
+        <Table className="rounded-none border-0 md:min-w-[47.5rem]">
           <TableHeader>
             <TableRow>
               <TableHead className={PAYMENTS_TABLE_HEAD}>
@@ -72,13 +72,13 @@ export function TransactionsResults({
               <TableHead className={cn(PAYMENTS_TABLE_HEAD, "text-right")}>
                 {t("DashboardPayments.transactions.amount")}
               </TableHead>
-              <TableHead className={PAYMENTS_TABLE_HEAD}>
+              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "hidden md:table-cell")}>
                 {t("DashboardPayments.transactions.contact")}
               </TableHead>
-              <TableHead className={PAYMENTS_TABLE_HEAD}>
+              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "hidden md:table-cell")}>
                 {t("DashboardPayments.transactions.wallet")}
               </TableHead>
-              <TableHead className={PAYMENTS_TABLE_HEAD}>
+              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "hidden md:table-cell")}>
                 {t("DashboardPayments.transactions.created")}
               </TableHead>
             </TableRow>
@@ -118,8 +118,21 @@ export function TransactionsResults({
                       {status.label}
                     </StatusText>
                   </TableCell>
-                  <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-secondary")}>
+                  <TableCell
+                    className={cn(
+                      PAYMENTS_TABLE_CELL,
+                      "whitespace-normal text-secondary md:whitespace-nowrap"
+                    )}
+                  >
                     {kindLabel(t, transaction)}
+                    {/* On a phone the contact and date sit here, so twin rows still differ, and
+                        they wrap so the amount stays on screen. */}
+                    {contact ? (
+                      <span className="block text-meta text-tertiary md:hidden">{contact}</span>
+                    ) : null}
+                    <span className="block text-meta text-tertiary md:hidden">
+                      {formatDateTime(transaction.createdAt, locale)}
+                    </span>
                   </TableCell>
                   <TableCell
                     className={cn(PAYMENTS_TABLE_CELL, "text-right whitespace-nowrap tabular-nums")}
@@ -136,19 +149,28 @@ export function TransactionsResults({
                     )}
                   </TableCell>
                   <TableCell
-                    className={cn(PAYMENTS_TABLE_CELL, "max-w-48 truncate text-primary")}
+                    className={cn(
+                      PAYMENTS_TABLE_CELL,
+                      "hidden max-w-48 truncate text-primary md:table-cell"
+                    )}
                     title={contact ?? undefined}
                   >
                     {contact ?? <span className="text-tertiary">—</span>}
                   </TableCell>
                   <TableCell
-                    className={cn(PAYMENTS_TABLE_CELL, "max-w-44 truncate text-secondary")}
+                    className={cn(
+                      PAYMENTS_TABLE_CELL,
+                      "hidden max-w-44 truncate text-secondary md:table-cell"
+                    )}
                     title={wallet ?? undefined}
                   >
                     {wallet ?? <span className="text-tertiary">—</span>}
                   </TableCell>
                   <TableCell
-                    className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary")}
+                    className={cn(
+                      PAYMENTS_TABLE_CELL,
+                      "hidden whitespace-nowrap text-secondary md:table-cell"
+                    )}
                   >
                     {formatDateTime(transaction.createdAt, locale)}
                   </TableCell>

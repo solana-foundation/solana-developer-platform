@@ -15,6 +15,8 @@ interface UseRampEstimateArgs {
   selectedPair: SelectedRampPair;
   amount: string;
   enabled: boolean;
+  /** Show the estimate already read for this amount, as on a review, instead of re-reading it. */
+  reuseCached?: boolean;
 }
 
 interface UseRampEstimateResult {
@@ -27,6 +29,7 @@ export function useRampEstimate({
   selectedPair,
   amount,
   enabled,
+  reuseCached = false,
 }: UseRampEstimateArgs): UseRampEstimateResult {
   const t = useTranslations();
   const currentAmount = amount.trim();
@@ -53,7 +56,9 @@ export function useRampEstimate({
         },
         t
       ),
-    { keepPreviousData: false }
+    reuseCached
+      ? { keepPreviousData: false, revalidateIfStale: false, revalidateOnFocus: false }
+      : { keepPreviousData: false }
   );
 
   const estimatesByProvider = useMemo(() => {

@@ -1,20 +1,31 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Counterparty } from "@sdp/types/counterparties";
 import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
-import type { CryptoRailId, RampCurrencyLimit } from "@sdp/types/payment-rails";
+import {
+  type CryptoRailId,
+  getCryptoRailAssetLabel,
+  type RampCurrencyLimit,
+} from "@sdp/types/payment-rails";
 import type { PaymentRampEstimate, PaymentRampQuote, RampTransferType } from "@sdp/types/payments";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@solana/kit";
 import { z } from "zod";
-import { compareDecimalAmounts, sumDecimalAmounts } from "#/decimal";
-import { providerNotConfigured, SdpPaymentsError } from "#/errors";
-import { providerFetchJson } from "#/ramps/fetch";
+import { compareDecimalAmounts, decimalStringFromNumber, sumDecimalAmounts } from "#/decimal";
+import { providerNotConfigured, rampAmountOutOfRange, SdpPaymentsError } from "#/errors";
+import {
+  classifyProviderFailure,
+  providerFetch,
+  providerFetchJson,
+  readProviderJson,
+} from "#/ramps/fetch";
 import { readyCounterparty } from "#/ramps/requirements";
 import {
+  checkRampKeyFormats,
   isActiveIso4217CurrencyCode,
   isIso3166Alpha2CountryCode,
   RAMP_RAIL_DUMPS,
-  requireEnv,
+  type RampKeyFormats,
+  rampCredentials,
   unreportedCurrencyLimit,
 } from "#/ramps/shared";
 import type {
@@ -26,33 +37,51 @@ import type {
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
+  RampProviderCancelOutcome,
+  RampProviderCredentials,
   RampRuntimeContext,
   RampTransferLookup,
   ValidateCounterpartyOptions,
 } from "#/ramps/types";
 import {
+  isMoonpayCryptoCode,
+  MOONPAY_CRYPTO_CODE_TO_RAIL,
+  MOONPAY_CRYPTO_CODES,
+  type MoonpayCryptoCode,
   type MoonpaySettlementEvent,
   moonpayBuyTransactionSchema,
   moonpaySellTransactionSchema,
   moonpaySellTransactionSettlementEvent,
   moonpayTransactionSettlementEvent,
+  withMoonpaySettledAsset,
 } from "./event-status-mapping";
 
 const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
-const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
-const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
+
+/** The widget hosts each mode's keys open. */
+const MOONPAY_WIDGET_URLS = {
+  sandbox: {
+    onramp: "https://buy-sandbox.moonpay.com",
+    offramp: "https://sell-sandbox.moonpay.com",
+  },
+  production: { onramp: "https://buy.moonpay.com", offramp: "https://sell.moonpay.com" },
+} as const satisfies Record<SdpEnvironment, Record<RampTransferType, string>>;
+
+const MOONPAY_KEY_FORMATS = {
+  sandbox: { publicKey: /^pk_test_/, secretKey: /^sk_test_/ },
+  production: { publicKey: /^pk_live_/, secretKey: /^sk_live_/ },
+} as const satisfies RampKeyFormats;
+
+/**
+ * The buy widget opens on card and spends the amount it is given, fees
+ * included; buy quotes ask on the same terms so an estimate matches the charge.
+ */
+const MOONPAY_ONRAMP_PAYMENT_METHOD = "credit_debit_card";
 
 export const MOONPAY_DECLARED_RAIL_SUPPORT = {
   onramp: { entityTypes: ["individual"] },
   offramp: { entityTypes: ["individual"] },
 } as const satisfies ProviderDeclaredRailSupport;
-
-interface MoonpayConfig {
-  apiKey: string;
-  secretKey: string;
-  onrampUrl: string;
-  offrampUrl: string;
-}
 
 /** The fields `estimateOnramp` reads from a MoonPay buy quote. */
 const moonpayBuyQuoteSchema = z.object({
@@ -62,6 +91,7 @@ const moonpayBuyQuoteSchema = z.object({
   feeAmount: z.number(),
   networkFeeAmount: z.number(),
   extraFeeAmount: z.number(),
+  totalAmount: z.number().optional(),
 });
 
 /** The fields `estimateOfframp` reads from a MoonPay sell quote. */
@@ -71,73 +101,17 @@ const moonpaySellQuoteSchema = z.object({
   baseCurrencyPrice: z.number(),
   feeAmount: z.number(),
   extraFeeAmount: z.number(),
+  // MoonPay quotes a sale over its maximum, so SDP reads the bound itself.
+  baseCurrency: z.object({ maxSellAmount: z.number().nullish() }).optional(),
 });
 
-/** The env keys SDP's managed MoonPay credentials and widget overrides live under. */
-interface MoonpayManagedEnv {
-  readonly MOONPAY_SANDBOX_API_KEY?: string;
-  readonly MOONPAY_SANDBOX_SECRET_KEY?: string;
-  readonly MOONPAY_ONRAMP_URL?: string;
-  readonly MOONPAY_OFFRAMP_URL?: string;
-}
-
-const MOONPAY_TEST_API_KEY = /^pk_test_/;
-const MOONPAY_TEST_SECRET_KEY = /^sk_test_/;
-
-/**
- * The managed MoonPay keys for `mode`, or why SDP can't use them. SDP holds
- * sandbox keys only; a production project brings its own (HOO-1942), so
- * production fails closed until it can. Both keys must be test-mode keys, so
- * a live key mounted under the sandbox names can never reach MoonPay.
- */
-function readMoonpayManagedKeys(
-  env: MoonpayManagedEnv,
-  mode: SdpEnvironment
-): { ok: true; apiKey: string; secretKey: string } | { ok: false; reason: string } {
-  if (mode === "production") {
-    return { ok: false, reason: "MoonPay is not configured for production projects." };
-  }
-  const apiKey = env.MOONPAY_SANDBOX_API_KEY?.trim();
-  const secretKey = env.MOONPAY_SANDBOX_SECRET_KEY?.trim();
-  if (!apiKey || !secretKey) {
-    return {
-      ok: false,
-      reason:
-        "MoonPay sandbox is not configured. Set MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_SECRET_KEY.",
-    };
-  }
-  if (!MOONPAY_TEST_API_KEY.test(apiKey) || !MOONPAY_TEST_SECRET_KEY.test(secretKey)) {
-    return { ok: false, reason: "MoonPay sandbox keys must be test-mode keys." };
-  }
-  return { ok: true, apiKey, secretKey };
-}
-
-/**
- * Whether SDP's managed MoonPay keys can serve `mode`: the same check every
- * MoonPay call makes before its first request, so availability never disagrees.
- */
-export function hasMoonpayManagedKeys(env: MoonpayManagedEnv, mode: SdpEnvironment): boolean {
-  return readMoonpayManagedKeys(env, mode).ok;
-}
-
-function readMoonpayConfig(env: MoonpayManagedEnv, mode: SdpEnvironment): MoonpayConfig {
-  const keys = readMoonpayManagedKeys(env, mode);
-  if (!keys.ok) {
-    throw providerNotConfigured(keys.reason);
-  }
-
-  const onrampUrl = env.MOONPAY_ONRAMP_URL ?? MOONPAY_SANDBOX_ONRAMP_URL;
-  const offrampUrl = env.MOONPAY_OFFRAMP_URL ?? MOONPAY_SANDBOX_OFFRAMP_URL;
-
-  try {
-    new URL(onrampUrl);
-    new URL(offrampUrl);
-  } catch {
-    throw new SdpPaymentsError("INTERNAL_ERROR", "MoonPay URL configuration is invalid.");
-  }
-
-  return { apiKey: keys.apiKey, secretKey: keys.secretKey, onrampUrl, offrampUrl };
-}
+/** The minimum, in the crypto sold, that MoonPay names when it refuses a sale under it. */
+const moonpaySellMinimumSchema = z
+  .object({ errors: z.array(z.object({ property: z.string(), message: z.string() })) })
+  .transform(
+    (body) => body.errors.find((entry) => entry.property === "minSellCryptoAmount")?.message
+  )
+  .pipe(z.string().regex(/^\d+(\.\d+)?$/));
 
 function requireMoonpayTransferId(paymentTransferId: string | undefined): string {
   if (!paymentTransferId) {
@@ -178,26 +152,6 @@ async function buildSignedMoonpayWidgetUrl(
   return url.toString();
 }
 
-const MOONPAY_CRYPTO_CODES = ["sol", "usdc_sol", "usdt_sol", "usdg_sol", "pyusd_sol"] as const;
-type MoonpayCryptoCode = (typeof MOONPAY_CRYPTO_CODES)[number];
-
-const MOONPAY_CRYPTO_CODE_TO_RAIL = {
-  sol: "sol.solana",
-  usdc_sol: "usdc.solana",
-  usdt_sol: "usdt.solana",
-  usdg_sol: "usdg.solana",
-  pyusd_sol: "pyusd.solana",
-} as const satisfies Record<MoonpayCryptoCode, CryptoRailId>;
-
-function isMoonpayCryptoCode(value: string): value is MoonpayCryptoCode {
-  return (MOONPAY_CRYPTO_CODES as readonly string[]).includes(value);
-}
-
-/** The rail a MoonPay crypto code settles on, or null for an asset SDP has no rail for. */
-export function moonpayCryptoRail(code: string): CryptoRailId | null {
-  return isMoonpayCryptoCode(code) ? MOONPAY_CRYPTO_CODE_TO_RAIL[code] : null;
-}
-
 const MOONPAY_RAIL_TO_CODE: ReadonlyMap<CryptoRailId, MoonpayCryptoCode> = new Map(
   MOONPAY_CRYPTO_CODES.map((code): [CryptoRailId, MoonpayCryptoCode] => [
     MOONPAY_CRYPTO_CODE_TO_RAIL[code],
@@ -217,12 +171,16 @@ const MOONPAY_ONRAMP_LIMITS: ReadonlyMap<string, RampCurrencyLimit> = new Map(
   Object.entries(RAMP_PROVIDER_SUPPORT_DETAILS.moonpay.onramp.currencies)
 );
 
-function compareMoonpayFiatAmount(fiatAmount: string, bound: string): number {
+function compareMoonpayAmount(
+  field: "fiatAmount" | "cryptoAmount",
+  amount: string,
+  bound: string
+): number {
   try {
-    return compareDecimalAmounts(fiatAmount, bound);
+    return compareDecimalAmounts(amount, bound);
   } catch (error) {
     if (isSolanaError(error, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE)) {
-      throw new SdpPaymentsError("BAD_REQUEST", "fiatAmount is out of range");
+      throw new SdpPaymentsError("BAD_REQUEST", `${field} is out of range`);
     }
     throw error;
   }
@@ -233,13 +191,13 @@ function assertMoonpayOnrampAmount(fiatCurrency: RampFiatCurrency, fiatAmount: s
   if (limit === undefined) {
     throw new SdpPaymentsError("BAD_REQUEST", `MoonPay on-ramp does not support ${fiatCurrency}`);
   }
-  if (limit.min !== null && compareMoonpayFiatAmount(fiatAmount, limit.min) < 0) {
+  if (limit.min !== null && compareMoonpayAmount("fiatAmount", fiatAmount, limit.min) < 0) {
     throw new SdpPaymentsError(
       "BAD_REQUEST",
       `MoonPay on-ramp requires fiatAmount to be at least ${limit.min} ${fiatCurrency}`
     );
   }
-  if (limit.max !== null && compareMoonpayFiatAmount(fiatAmount, limit.max) > 0) {
+  if (limit.max !== null && compareMoonpayAmount("fiatAmount", fiatAmount, limit.max) > 0) {
     throw new SdpPaymentsError(
       "BAD_REQUEST",
       `MoonPay on-ramp requires fiatAmount to be at most ${limit.max} ${fiatCurrency}`
@@ -458,9 +416,8 @@ async function lookUpMoonpayTransactions<TTransaction extends MoonpayLookupTrans
 }
 
 /**
- * A completed transaction names the crypto it moved, so settlement can refuse
- * another asset, as the webhook path does. A completed one without it cannot
- * be redelivered like a webhook, so it is unreadable.
+ * A looked-up transaction with the crypto it moved. A completed one without it
+ * cannot be redelivered like a webhook, so it is unreadable.
  *
  * @param event - The transaction's settlement event.
  * @param cryptoCode - The MoonPay code of the crypto the transaction moved.
@@ -471,22 +428,25 @@ function withSettledMoonpayAsset(
   event: MoonpaySettlementEvent,
   cryptoCode: string | undefined
 ): MoonpaySettlementEvent {
-  if (event.kind !== "settled") {
-    return event;
-  }
-  if (cryptoCode === undefined) {
+  const withAsset = withMoonpaySettledAsset(event, cryptoCode);
+  if (withAsset === null) {
     throw new SdpPaymentsError(
       "PROVIDER_RESPONSE_INVALID",
       "moonpay returned a completed transaction without its crypto",
       { provider: "moonpay", outcome: "unknown" }
     );
   }
-  return { ...event, deliveredAssetRail: moonpayCryptoRail(cryptoCode) };
+  return withAsset;
 }
 
-export class MoonpayRampClient implements RampProvider {
+export class MoonpayRampClient implements RampProvider<MoonpaySettlementEvent> {
   readonly id = "moonpay";
+  readonly label = "MoonPay";
   readonly declaredRailSupport = MOONPAY_DECLARED_RAIL_SUPPORT;
+
+  checkCredentials(credentials: RampProviderCredentials, mode: SdpEnvironment): string | null {
+    return checkRampKeyFormats(this.label, MOONPAY_KEY_FORMATS, credentials, mode);
+  }
 
   validateCounterparty(
     _counterparty: Counterparty,
@@ -499,21 +459,21 @@ export class MoonpayRampClient implements RampProvider {
     context: RampDiscoveryContext
   ): Promise<ProviderRailSupportDistillation> {
     if (!context.offline) {
-      const { env, fetchJson, writeDump } = context;
-      const apiKey = requireEnv(env, "MOONPAY_SANDBOX_API_KEY");
-      const base = "https://api.moonpay.com";
-
+      const { credentials, fetchJson, writeDump } = context;
+      if (!credentials.ok) {
+        throw providerNotConfigured(credentials.reason);
+      }
       await writeDump(
         RAMP_RAIL_DUMPS.moonpay.currencies.name,
         await fetchJson(
           this.id,
           "GET /v3/currencies?show=all",
-          `${base}/v3/currencies?show=all&apiKey=${apiKey}`
+          `${MOONPAY_API_BASE_URL}/v3/currencies?show=all&apiKey=${credentials.credentials.publicKey}`
         )
       );
       await writeDump(
         RAMP_RAIL_DUMPS.moonpay.countries.name,
-        await fetchJson(this.id, "GET /v3/countries", `${base}/v3/countries`)
+        await fetchJson(this.id, "GET /v3/countries", `${MOONPAY_API_BASE_URL}/v3/countries`)
       );
     }
     const [currencies, countries] = await Promise.all([
@@ -524,15 +484,17 @@ export class MoonpayRampClient implements RampProvider {
   }
 
   async estimateOnramp(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    const config = readMoonpayConfig(env, mode);
+    const { publicKey } = rampCredentials(this, ctx);
     const currencyCode = moonpayCryptoCode(input.assetRail);
     const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/buy_quote`);
-    url.searchParams.set("apiKey", config.apiKey);
+    url.searchParams.set("apiKey", publicKey);
     url.searchParams.set("baseCurrencyCode", input.fiatCurrency.toLowerCase());
     url.searchParams.set("baseCurrencyAmount", input.fiatAmount);
+    url.searchParams.set("areFeesIncluded", "true");
+    url.searchParams.set("paymentMethod", MOONPAY_ONRAMP_PAYMENT_METHOD);
     const quote = await providerFetchJson(
       this.id,
       url.toString(),
@@ -547,6 +509,16 @@ export class MoonpayRampClient implements RampProvider {
       fiatAmount: String(quote.baseCurrencyAmount),
       cryptoAmount: String(quote.quoteCurrencyAmount),
       exchangeRate: String(quote.quoteCurrencyPrice),
+      // The fees come out of what the customer gave: the base is what buys the crypto.
+      totalFiatAmount:
+        quote.totalAmount === undefined
+          ? sumDecimalAmounts([
+              String(quote.baseCurrencyAmount),
+              String(quote.feeAmount),
+              String(quote.networkFeeAmount),
+              String(quote.extraFeeAmount),
+            ])
+          : decimalStringFromNumber(quote.totalAmount),
       fees: {
         currency: input.fiatCurrency,
         total: sumDecimalAmounts([
@@ -561,21 +533,38 @@ export class MoonpayRampClient implements RampProvider {
   }
 
   async estimateOfframp(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     input: RampEstimateOfframpInput
   ): Promise<PaymentRampEstimate> {
-    const config = readMoonpayConfig(env, mode);
+    const { publicKey } = rampCredentials(this, ctx);
     const currencyCode = moonpayCryptoCode(input.assetRail);
     const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/sell_quote`);
-    url.searchParams.set("apiKey", config.apiKey);
+    url.searchParams.set("apiKey", publicKey);
     url.searchParams.set("quoteCurrencyCode", input.fiatCurrency.toLowerCase());
     url.searchParams.set("baseCurrencyAmount", input.cryptoAmount);
-    const quote = await providerFetchJson(
-      this.id,
-      url.toString(),
-      { method: "GET" },
-      moonpaySellQuoteSchema
-    );
+    const answer = await providerFetch(this.id, url.toString(), { method: "GET" });
+    const asset = getCryptoRailAssetLabel(input.assetRail);
+    if (answer.response.status === 400) {
+      const minimum = moonpaySellMinimumSchema.safeParse(answer.parsed);
+      if (minimum.success) {
+        throw rampAmountOutOfRange("amount_below_minimum", {
+          amount: minimum.data,
+          currency: asset,
+        });
+      }
+    }
+    const quote = readProviderJson(this.id, answer, moonpaySellQuoteSchema);
+    const maximum = quote.baseCurrency?.maxSellAmount;
+    if (
+      maximum !== undefined &&
+      maximum !== null &&
+      compareMoonpayAmount("cryptoAmount", input.cryptoAmount, decimalStringFromNumber(maximum)) > 0
+    ) {
+      throw rampAmountOutOfRange("amount_above_maximum", {
+        amount: decimalStringFromNumber(maximum),
+        currency: asset,
+      });
+    }
     return {
       provider: this.id,
       direction: "offramp",
@@ -593,21 +582,23 @@ export class MoonpayRampClient implements RampProvider {
   }
 
   async createOnrampQuote(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
     const fiatCurrency = input.fiatCurrency ?? "USD";
     assertMoonpayOnrampAmount(fiatCurrency, input.fiatAmount);
 
-    const config = readMoonpayConfig(env, mode);
+    const { publicKey, secretKey } = rampCredentials(this, ctx);
     const quoteId = requireMoonpayTransferId(input.paymentTransferId);
-    const hostedUrl = await buildSignedMoonpayWidgetUrl(config.onrampUrl, config.secretKey, {
-      apiKey: config.apiKey,
+    const widgetUrl = MOONPAY_WIDGET_URLS[ctx.mode].onramp;
+    const hostedUrl = await buildSignedMoonpayWidgetUrl(widgetUrl, secretKey, {
+      apiKey: publicKey,
       baseCurrencyCode: fiatCurrency.toLowerCase(),
       baseCurrencyAmount: input.fiatAmount,
       currencyCode: moonpayCryptoCode(input.assetRail),
       walletAddress: input.destinationWalletAddress,
       lockAmount: "true",
+      paymentMethod: MOONPAY_ONRAMP_PAYMENT_METHOD,
       externalCustomerId: input.externalCustomerId,
       externalTransactionId: quoteId,
     });
@@ -622,13 +613,14 @@ export class MoonpayRampClient implements RampProvider {
   }
 
   async createOfframpQuote(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
-    const config = readMoonpayConfig(env, mode);
+    const { publicKey, secretKey } = rampCredentials(this, ctx);
     const quoteId = requireMoonpayTransferId(input.paymentTransferId);
-    const hostedUrl = await buildSignedMoonpayWidgetUrl(config.offrampUrl, config.secretKey, {
-      apiKey: config.apiKey,
+    const widgetUrl = MOONPAY_WIDGET_URLS[ctx.mode].offramp;
+    const hostedUrl = await buildSignedMoonpayWidgetUrl(widgetUrl, secretKey, {
+      apiKey: publicKey,
       baseCurrencyCode: moonpayCryptoCode(input.assetRail),
       baseCurrencyAmount: input.cryptoAmount,
       quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
@@ -647,19 +639,43 @@ export class MoonpayRampClient implements RampProvider {
     };
   }
 
+  /** One request, authorized by the secret key: MoonPay's cancel of the sale held under SDP's id. */
+  async cancelOfframpSale(
+    ctx: RampRuntimeContext,
+    transferId: string,
+    signal?: AbortSignal
+  ): Promise<RampProviderCancelOutcome> {
+    const { secretKey } = rampCredentials(this, ctx);
+    const url = `${MOONPAY_API_BASE_URL}${MOONPAY_TRANSFER_LOOKUP_PATHS.offramp}/${encodeURIComponent(transferId)}`;
+    const { response } = await providerFetch(this.id, url, {
+      method: "DELETE",
+      headers: { Authorization: `Api-Key ${secretKey}` },
+      signal,
+    });
+    if (response.ok) return "canceled";
+    if (response.status === 404) return "not_found";
+    if (response.status === 409) return "not_cancelable";
+    const { code, outcome } = classifyProviderFailure(response.status);
+    throw new SdpPaymentsError(code, `${this.id} request failed with status ${response.status}`, {
+      provider: this.id,
+      providerStatus: response.status,
+      outcome,
+    });
+  }
+
   /**
    * One request: every transaction MoonPay holds under the transfer's id,
    * mapped as the webhook maps it. A retried checkout leaves one transaction
    * per attempt, and the settlement guard orders each only against itself.
    */
   async fetchTransferStatus(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     lookup: RampTransferLookup
   ): Promise<readonly MoonpaySettlementEvent[]> {
-    const config = readMoonpayConfig(env, mode);
+    const { publicKey } = rampCredentials(this, ctx);
     const path = MOONPAY_TRANSFER_LOOKUP_PATHS[lookup.rampType];
     const url = new URL(`${MOONPAY_API_BASE_URL}${path}/${encodeURIComponent(lookup.transferId)}`);
-    url.searchParams.set("apiKey", config.apiKey);
+    url.searchParams.set("apiKey", publicKey);
     if (lookup.rampType === "onramp") {
       const buys = await lookUpMoonpayTransactions(url, lookup.transferId, moonpayBuyLookupSchema);
       return buys.map((buy) =>
