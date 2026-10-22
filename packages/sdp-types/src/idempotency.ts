@@ -73,3 +73,34 @@ export function normalizeDecimalString(value: string): string {
     ? normalizedInteger
     : `${normalizedInteger}.${normalizedFraction}`;
 }
+
+/** A JSON value as `JSON.parse` returns it. */
+export type CanonicalJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | CanonicalJsonValue[]
+  | { [key: string]: CanonicalJsonValue };
+
+/**
+ * Serializes a JSON value with object keys sorted by UTF-16 code unit and array
+ * order kept (RFC 8785's ordering; numbers use ECMAScript's canonical form), so
+ * equal values always produce equal text whatever the runtime's locale. The
+ * API's Idempotency-Key fingerprints and the dashboard's browser keys both use
+ * it, so a body that only reorders keys is one request on either side.
+ */
+export function canonicalJson(value: CanonicalJsonValue): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  const members = Object.keys(value)
+    // With no comparator, sort orders strings by UTF-16 code unit: RFC 8785's order.
+    .sort()
+    // SAFETY: every key comes from Object.keys(value), so the member is present.
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] as CanonicalJsonValue)}`);
+  return `{${members.join(",")}}`;
+}

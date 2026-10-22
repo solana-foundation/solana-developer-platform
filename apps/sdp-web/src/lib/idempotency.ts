@@ -1,5 +1,9 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import { isIdempotencyKeyOutcomeUnknown, normalizeDecimalString } from "@sdp/types/idempotency";
+import {
+  canonicalJson,
+  isIdempotencyKeyOutcomeUnknown,
+  normalizeDecimalString,
+} from "@sdp/types/idempotency";
 import {
   isMoneyMovementInFlight,
   isMoneyMovementStatus,
@@ -255,21 +259,4 @@ export function parseJsonValue(text: string): JsonValue {
   return jsonValueSchema.parse(JSON.parse(text));
 }
 
-/**
- * Serializes a JSON value with object keys sorted by UTF-16 code unit and
- * array order kept, so two bodies that differ only in key order produce the
- * same text, as they produce the same fingerprint in sdp-api (`canonicalJson`).
- */
-export function canonicalJson(value: JsonValue): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  // Keys compare by UTF-16 code unit, as RFC 8785 orders them.
-  const members = Object.entries(value)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, member]) => `${JSON.stringify(key)}:${canonicalJson(member)}`);
-  return `{${members.join(",")}}`;
-}
+export { canonicalJson };
