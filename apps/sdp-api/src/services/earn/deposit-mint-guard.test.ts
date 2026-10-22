@@ -6,10 +6,15 @@ import {
   SOLANA_CLUSTERS,
   SPL_TOKEN_PROGRAMS,
 } from "@sdp/types/well-known-tokens";
+import { address, type EncodedAccount, getBase64Encoder, lamports } from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
+import type { ExtensionArgs } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
+import { type JsonRpcResult, parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
+import { CLOCK_RPC_ACCOUNT, mintRpcAccount } from "@/test/helpers/token-movement";
 import type { Env } from "@/types/env";
+import type { ObservedMintState } from "./deposit-mint-guard";
 
 const mocks = vi.hoisted(() => ({
   logEvent: vi.fn(),
@@ -44,40 +49,90 @@ const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const PYUSD_MAINNET = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
 const PAXOS = "2apBGMsS6ti9RyF5TwQTDswXBWskiJP2LD4cUEDqYJjk";
 
-/** A jsonParsed mint account as the RPC returns it, with the extensions that matter. */
-function mintAccount(overrides: {
-  owner?: string;
-  hookProgram?: string | null;
-  hookAuthority?: string | null;
-  delegate?: string | null;
-  dropHook?: boolean;
-}) {
-  const extensions: unknown[] = [
-    { extension: "mintCloseAuthority", state: { closeAuthority: null } },
-    { extension: "permanentDelegate", state: { delegate: overrides.delegate ?? PAXOS } },
-    { extension: "tokenMetadata", state: { name: "PayPal USD", symbol: "PYUSD" } },
+const UNSET = "11111111111111111111111111111111";
+
+/** What a test mint varies: null is an unset authority or program. */
+interface TestMintOptions {
+  hookProgram: string | null;
+  hookAuthority: string | null;
+  delegate: string | null;
+  dropHook: boolean;
+  feeBasisPoints: number;
+}
+
+/** PYUSD as mainnet holds it: Paxos's authorities, no hook program, no fee. */
+const PYUSD_LIKE: TestMintOptions = {
+  hookProgram: null,
+  hookAuthority: PAXOS,
+  delegate: PAXOS,
+  dropHook: false,
+  feeBasisPoints: 0,
+};
+
+/** A base64 PYUSD-like mint as one read returns it, with the extensions that matter. */
+function mintAccount(overrides: Partial<TestMintOptions>) {
+  const mint: TestMintOptions = { ...PYUSD_LIKE, ...overrides };
+  const fee = {
+    epoch: 0n,
+    maximumFee: 1_000_000n,
+    transferFeeBasisPoints: mint.feeBasisPoints,
+  };
+  const extensions: ExtensionArgs[] = [
+    {
+      __kind: "TransferFeeConfig",
+      transferFeeConfigAuthority: address(PAXOS),
+      withdrawWithheldAuthority: address(PAXOS),
+      withheldAmount: 0n,
+      olderTransferFee: fee,
+      newerTransferFee: fee,
+    },
+    { __kind: "MintCloseAuthority", closeAuthority: address(UNSET) },
+    {
+      __kind: "PermanentDelegate",
+      delegate: address(mint.delegate === null ? UNSET : mint.delegate),
+    },
   ];
-  if (!overrides.dropHook) {
+  if (!mint.dropHook) {
     extensions.push({
-      extension: "transferHook",
-      state: {
-        authority: overrides.hookAuthority === undefined ? PAXOS : overrides.hookAuthority,
-        programId: overrides.hookProgram ?? null,
-      },
+      __kind: "TransferHook",
+      authority: address(mint.hookAuthority === null ? UNSET : mint.hookAuthority),
+      programId: address(mint.hookProgram === null ? UNSET : mint.hookProgram),
     });
   }
+  return mintRpcAccount("token-2022", { decimals: 6, extensions });
+}
+
+/** The encoded accounts `observeMintState` takes, from wire-format accounts. */
+function encoded(at: string, account: JsonRpcResult): EncodedAccount {
+  const parsed = z
+    .object({ data: z.tuple([z.string(), z.literal("base64")]), owner: z.string() })
+    .parse(account);
+  const data = new Uint8Array(getBase64Encoder().encode(parsed.data[0]));
   return {
-    owner: overrides.owner ?? TOKEN_2022,
-    lamports: 1,
-    data: { program: "spl-token-2022", parsed: { type: "mint", info: { extensions } } },
+    address: address(at),
+    data,
+    executable: false,
+    lamports: lamports(1n),
+    programAddress: address(parsed.owner),
+    space: BigInt(data.length),
   };
 }
+
+const CLOCK = encoded(SYSVAR_CLOCK_ADDRESS, CLOCK_RPC_ACCOUNT);
+
+/** The observed state a pinned mint shows, for the pure drift rules. */
+const MATCHING: ObservedMintState = {
+  owner: TOKEN_2022,
+  transferHook: { programId: null, authority: PAXOS },
+  permanentDelegate: PAXOS,
+  earnRefusal: null,
+};
 
 let poolSequence = 0;
 /** Every request of the current test, by endpoint and method, in arrival order. */
 const requests: { url: string; method: string }[] = [];
-/** The jsonParsed account each mint answers with; null is an absent account. */
-const accountFor = vi.fn<(mint: string) => unknown>();
+/** The base64 account each mint answers with; null is an absent account. */
+const accountFor = vi.fn<(mint: string) => JsonRpcResult | null>();
 /** Set to make the next `getMultipleAccounts` answer an HTTP error. */
 let failNextRead = false;
 
@@ -126,7 +181,9 @@ beforeEach(() => {
       id,
       result: {
         context: { slot: 1 },
-        value: multipleAccountsParamsSchema.parse(params)[0].map((mint) => accountFor(mint)),
+        value: multipleAccountsParamsSchema
+          .parse(params)[0]
+          .map((at) => (at === SYSVAR_CLOCK_ADDRESS ? CLOCK_RPC_ACCOUNT : accountFor(at))),
       },
     });
   });
@@ -157,21 +214,39 @@ describe("pins", () => {
 });
 
 describe("observeMintState", () => {
-  it("reduces a parsed mint to owner, hook and delegate", () => {
-    expect(observeMintState(mintAccount({}))).toEqual({
-      owner: TOKEN_2022,
-      transferHook: { programId: null, authority: PAXOS },
-      permanentDelegate: PAXOS,
-    });
+  it("reduces a mint to owner, hook, delegate and the Earn row's answer", () => {
+    expect(observeMintState(encoded(PYUSD_MAINNET, mintAccount({})), CLOCK)).toEqual(MATCHING);
   });
 
   it("reports a missing hook extension as undefined rather than null fields", () => {
-    expect(observeMintState(mintAccount({ dropHook: true }))?.transferHook).toBeUndefined();
+    expect(
+      observeMintState(encoded(PYUSD_MAINNET, mintAccount({ dropHook: true })), CLOCK)?.transferHook
+    ).toBeUndefined();
   });
 
-  it("answers null for anything that is not a parsed mint", () => {
-    expect(observeMintState(null)).toBeNull();
-    expect(observeMintState({ owner: TOKEN_2022, data: ["AAAA", "base64"] })).toBeNull();
+  it("asks the Earn row: a charged fee or a hook program set is refused", () => {
+    expect(
+      observeMintState(encoded(PYUSD_MAINNET, mintAccount({ feeBasisPoints: 25 })), CLOCK)
+        ?.earnRefusal
+    ).toBe("transfer_fee");
+    expect(
+      observeMintState(
+        encoded(
+          PYUSD_MAINNET,
+          mintAccount({ hookProgram: "Hook111111111111111111111111111111111111111" })
+        ),
+        CLOCK
+      )?.earnRefusal
+    ).toBe("transfer_hook");
+  });
+
+  it("answers null for anything that is not a mint", () => {
+    expect(
+      observeMintState(
+        encoded(PYUSD_MAINNET, { data: ["AAAA", "base64"], owner: TOKEN_2022 }),
+        CLOCK
+      )
+    ).toBeNull();
   });
 });
 
@@ -179,15 +254,19 @@ describe("detectMintDrift", () => {
   const pinned = PINNED_TOKEN_2022_DEPOSIT_MINTS[PYUSD_MAINNET];
 
   it("is silent when every pinned field matches", () => {
-    const observed = observeMintState(mintAccount({}));
-    expect(observed && detectMintDrift(pinned, observed)).toEqual([]);
+    expect(detectMintDrift(pinned, MATCHING)).toEqual([]);
   });
 
   it("flags a hook program appearing where none was pinned", () => {
-    const observed = observeMintState(
-      mintAccount({ hookProgram: "Hook111111111111111111111111111111111111111" })
-    );
-    expect(observed && detectMintDrift(pinned, observed)).toEqual([
+    expect(
+      detectMintDrift(pinned, {
+        ...MATCHING,
+        transferHook: {
+          programId: "Hook111111111111111111111111111111111111111",
+          authority: PAXOS,
+        },
+      })
+    ).toEqual([
       {
         field: "transfer_hook_program",
         expected: null,
@@ -197,25 +276,33 @@ describe("detectMintDrift", () => {
   });
 
   it("flags an authority change, including the hook going immutable", () => {
-    const observed = observeMintState(mintAccount({ hookAuthority: null }));
-    expect(observed && detectMintDrift(pinned, observed)).toEqual([
-      { field: "transfer_hook_authority", expected: PAXOS, actual: null },
-    ]);
+    expect(
+      detectMintDrift(pinned, { ...MATCHING, transferHook: { programId: null, authority: null } })
+    ).toEqual([{ field: "transfer_hook_authority", expected: PAXOS, actual: null }]);
   });
 
   it("flags a delegate change and a missing hook extension independently", () => {
-    const observed = observeMintState(
-      mintAccount({ dropHook: true, delegate: "Some1111111111111111111111111111111111111111" })
-    );
-    expect(observed && detectMintDrift(pinned, observed).map((d) => d.field)).toEqual([
-      "transfer_hook_extension",
-      "permanent_delegate",
-    ]);
+    expect(
+      detectMintDrift(pinned, {
+        ...MATCHING,
+        transferHook: undefined,
+        permanentDelegate: "Some1111111111111111111111111111111111111111",
+      }).map((d) => d.field)
+    ).toEqual(["transfer_hook_extension", "permanent_delegate"]);
   });
 
   it("flags a mint that is no longer owned by Token-2022", () => {
-    const observed = observeMintState(mintAccount({ owner: SPL_TOKEN_PROGRAMS["spl-token"] }));
-    expect(observed && detectMintDrift(pinned, observed).map((d) => d.field)).toEqual(["owner"]);
+    expect(
+      detectMintDrift(pinned, { ...MATCHING, owner: SPL_TOKEN_PROGRAMS["spl-token"] }).map(
+        (d) => d.field
+      )
+    ).toEqual(["owner"]);
+  });
+
+  it("flags a mint the Earn row refuses", () => {
+    expect(detectMintDrift(pinned, { ...MATCHING, earnRefusal: "paused" })).toEqual([
+      { field: "earn_support", expected: "supported", actual: "paused" },
+    ]);
   });
 });
 
@@ -255,9 +342,10 @@ describe("guardDepositMints", () => {
         : mintAccount({})
     );
 
-    await expect(guardIn("production", env)).resolves.toBe(1);
+    // The pin and the Earn row both see the hook program.
+    await expect(guardIn("production", env)).resolves.toBe(2);
 
-    expect(mocks.logEvent).toHaveBeenCalledTimes(1);
+    expect(mocks.logEvent).toHaveBeenCalledTimes(2);
     expect(mocks.logEvent).toHaveBeenCalledWith("error", {
       event: EARN_DEPOSIT_MINT_DRIFT_EVENT,
       cluster: "mainnet-beta",
@@ -266,6 +354,15 @@ describe("guardDepositMints", () => {
       field: "transfer_hook_program",
       expected: null,
       actual: "Hook111111111111111111111111111111111111111",
+    });
+    expect(mocks.logEvent).toHaveBeenCalledWith("error", {
+      event: EARN_DEPOSIT_MINT_DRIFT_EVENT,
+      cluster: "mainnet-beta",
+      symbol: "PYUSD",
+      mint: PYUSD_MAINNET,
+      field: "earn_support",
+      expected: "supported",
+      actual: "transfer_hook",
     });
   });
 

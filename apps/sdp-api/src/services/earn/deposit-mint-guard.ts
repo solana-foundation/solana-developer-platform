@@ -14,6 +14,14 @@
  * pinned below. Any difference is an alertable event
  * (`sdp-infra/kora/alert-rules/sdp-earn-deposit-mint-drift*.json`).
  *
+ * The same read answers the Earn row of the capability table (ADR 0012,
+ * `support(terms, "earn")` in `@sdp/solana/token-movement`): a deposit mint
+ * whose Token Terms Earn's provider builders cannot move (a fee that is
+ * charged, a hook program set, paused, frozen by default, non-transferable)
+ * is reported as `earn_support` drift. Earn's deposit builders read no
+ * deposit mint, so gating each build would add a mint read to every deposit;
+ * this guard is where the decision is made instead.
+ *
  * Report-only, like the catalogue anomaly check: nothing here blocks a deposit
  * or an exit. A hook that appears on PYUSD is either Paxos shipping something
  * (re-pin after reading it) or an issuer-key compromise, and both need a human
@@ -30,14 +38,22 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
+import { support, type TokenMovementRefusal } from "@sdp/solana/token-movement";
+import { decodeTokenTerms, TokenTermsError } from "@sdp/solana/token-terms";
 import { EARN_DEPOSIT_TOKEN_SYMBOLS, type EarnDepositTokenSymbol } from "@sdp/types/earn";
 import {
   type SolanaCluster,
   SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types/well-known-tokens";
-import { address } from "@solana/kit";
-import { z } from "zod";
+import {
+  address,
+  assertAccountExists,
+  type EncodedAccount,
+  fetchEncodedAccounts,
+} from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
+import { decodeMint, isExtension, type Mint } from "@solana-program/token-2022";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -121,7 +137,8 @@ type MintDriftField =
   | "transfer_hook_extension"
   | "transfer_hook_program"
   | "transfer_hook_authority"
-  | "permanent_delegate";
+  | "permanent_delegate"
+  | "earn_support";
 
 export interface MintDrift {
   field: MintDriftField;
@@ -129,55 +146,50 @@ export interface MintDrift {
   actual: string | null;
 }
 
-/** What `getAccountInfo(jsonParsed)` returns for a Token-2022 mint, reduced to the fields pinned. */
+/** A deposit mint as one read saw it, reduced to the fields pinned and the Earn row's answer. */
 export interface ObservedMintState {
   owner: string;
   /** Undefined when the mint has no transferHook extension at all. */
   transferHook?: { programId: string | null; authority: string | null };
   permanentDelegate: string | null;
+  /** The Earn row's first refusal under the mint's Token Terms; null when Earn moves it. */
+  earnRefusal: TokenMovementRefusal | null;
 }
 
-const optionalKey = z.string().nullable().optional();
-
-const parsedMintSchema = z.object({
-  owner: z.string(),
-  data: z.object({
-    parsed: z.object({
-      type: z.literal("mint"),
-      info: z.object({
-        extensions: z
-          .array(
-            z.object({
-              extension: z.string(),
-              state: z
-                .object({
-                  programId: optionalKey,
-                  authority: optionalKey,
-                  delegate: optionalKey,
-                })
-                .passthrough()
-                .optional(),
-            })
-          )
-          .optional(),
-      }),
-    }),
-  }),
-});
-
-/** Reduce a jsonParsed mint account to the pinned fields; null when it does not parse as a mint. */
-export function observeMintState(accountValue: unknown): ObservedMintState | null {
-  const parsed = parsedMintSchema.safeParse(accountValue);
-  if (!parsed.success) return null;
-  const extensions = parsed.data.data.parsed.info.extensions ?? [];
-  const hook = extensions.find((ext) => ext.extension === "transferHook");
-  const delegate = extensions.find((ext) => ext.extension === "permanentDelegate");
+/**
+ * Reduce a base64 mint account, read with the Clock, to the pinned fields and
+ * the Earn row's answer; null when it does not decode as a mint SDP can move.
+ */
+export function observeMintState(
+  mint: EncodedAccount,
+  clock: EncodedAccount
+): ObservedMintState | null {
+  let decoded: Mint;
+  try {
+    decoded = decodeMint(mint).data;
+  } catch {
+    return null;
+  }
+  let terms: ReturnType<typeof decodeTokenTerms>;
+  try {
+    terms = decodeTokenTerms({ kind: "mint", mint: mint.address }, { mint, clock });
+  } catch (error) {
+    if (error instanceof TokenTermsError) {
+      return null;
+    }
+    throw error;
+  }
+  // A mint without extensions has no TLV region.
+  const extensions = decoded.extensions.__option === "Some" ? decoded.extensions.value : [];
+  const hasHook = extensions.some((extension) => isExtension("TransferHook", extension));
+  const decision = support(terms, "earn");
   return {
-    owner: parsed.data.owner,
-    transferHook: hook
-      ? { programId: hook.state?.programId ?? null, authority: hook.state?.authority ?? null }
+    owner: mint.programAddress,
+    transferHook: hasHook
+      ? { programId: terms.transferHookProgram, authority: terms.transferHookAuthority }
       : undefined,
-    permanentDelegate: delegate?.state?.delegate ?? null,
+    permanentDelegate: terms.permanentDelegate,
+    earnRefusal: decision.supported ? null : decision.refusal,
   };
 }
 
@@ -215,6 +227,9 @@ export function detectMintDrift(
       expected: pinned.permanentDelegate,
       actual: observed.permanentDelegate,
     });
+  }
+  if (observed.earnRefusal !== null) {
+    drift.push({ field: "earn_support", expected: "supported", actual: observed.earnRefusal });
   }
   return drift;
 }
@@ -271,15 +286,15 @@ export async function guardDepositMints(env: Env): Promise<number> {
     return 0;
   }
 
-  let accounts: readonly unknown[];
+  // One read for every deposit mint of the cluster and the Clock their terms
+  // are decoded at.
+  let accounts: Awaited<ReturnType<typeof fetchEncodedAccounts>>;
   try {
-    const response = await rpc
-      .getMultipleAccounts(
-        mints.map(({ mint }) => address(mint)),
-        { encoding: "jsonParsed" }
-      )
-      .send({ abortSignal: AbortSignal.timeout(DEPOSIT_MINT_READ_TIMEOUT_MS) });
-    accounts = response.value;
+    accounts = await fetchEncodedAccounts(
+      rpc,
+      [...mints.map(({ mint }) => address(mint)), SYSVAR_CLOCK_ADDRESS],
+      { abortSignal: AbortSignal.timeout(DEPOSIT_MINT_READ_TIMEOUT_MS) }
+    );
   } catch (err) {
     getLogger().warn(
       { cluster, error: err instanceof Error ? err.message : String(err) },
@@ -287,10 +302,14 @@ export async function guardDepositMints(env: Env): Promise<number> {
     );
     return 0;
   }
+  const clock = accounts[mints.length];
+  // The Clock sysvar always exists; a node answering otherwise fails like any read.
+  assertAccountExists(clock);
 
   let emitted = 0;
   for (const [index, { symbol, mint, pinned }] of mints.entries()) {
-    const observed: ObservedMintState | null = observeMintState(accounts[index]);
+    const account = accounts[index];
+    const observed = account.exists ? observeMintState(account, clock) : null;
     if (!observed) {
       getLogger().warn(
         { cluster, symbol, mint },

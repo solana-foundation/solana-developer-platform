@@ -1675,12 +1675,17 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   Kora co-signs PYUSD and USDG movements under `transfer_hook_policy =
   "allow_all"` (both mints keep a mutable Paxos hook authority), so each
   environment's metrics refresh ends by reading its cluster's Token-2022
-  deposit mints in one `getMultipleAccounts` through `createClusterRpc()` and
-  emitting `sdp_api_earn_deposit_mint_drift` when the hook program, hook
-  authority or permanent delegate differs from the pins in
-  `services/earn/deposit-mint-guard.ts`. A cluster with no pool cannot be
-  watched, so its skip is `sdp_api_earn_deposit_mint_guard_skipped` at error
-  wherever Earn is enabled, never a quiet info line. Report-only. Adding a Token-2022
+  deposit mints with the Clock in one `getMultipleAccounts` through
+  `createClusterRpc()` and emitting `sdp_api_earn_deposit_mint_drift` when the
+  hook program, hook authority or permanent delegate differs from the pins in
+  `services/earn/deposit-mint-guard.ts`, or when the `earn` row of the token
+  movement capability table (`support(terms, "earn")`, ADR 0012) refuses the
+  mint's live Token Terms (field `earn_support`: a charged fee, a hook program
+  set, paused, frozen by default, non-transferable). Earn's deposit builders
+  read no deposit mint, so this is where that decision is made. A cluster with
+  no pool cannot be watched, so its skip is
+  `sdp_api_earn_deposit_mint_guard_skipped` at error wherever Earn is enabled,
+  never a quiet info line. Report-only. Adding a Token-2022
   stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
   guard's unit suite; adding any deposit token without its devnet mint in
   `infra/kora/kora.toml` `allowed_tokens` fails
