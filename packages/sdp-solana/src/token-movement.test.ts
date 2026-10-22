@@ -41,16 +41,20 @@ import {
   assertMovementBuildable,
   associatedTokenAccountSize,
   buildTokenMovement,
+  capabilityRefusals,
   type DestinationTokenAccount,
   decodeDestinationTokenAccount,
   recurringPullFee,
   recurringPullSupport,
   resolveTransferHookAccounts,
   support,
+  TOKEN_MOVEMENT_PATHS,
   TOKEN_MOVEMENT_REFUSALS,
   type TokenMovementAccounts,
   type TokenMovementContext,
   TokenMovementError,
+  type TokenMovementPath,
+  type TokenMovementRefusal,
 } from "./token-movement";
 import {
   decodeTokenTerms,
@@ -299,6 +303,319 @@ describe("recurring support (ADR 0012)", () => {
     assert.equal(recurringPullFee(rising, PULL.debit), 10_000n);
     const held = recurringPullSupport(rising, PULL, DESTINATION);
     assert.equal(held.supported === false && held.refusal, "fee_above_tolerance");
+  });
+});
+
+describe("the capability table", () => {
+  const UNSET = address("11111111111111111111111111111111");
+  const charging = (current: number, newer: number): ExtensionArgs => ({
+    __kind: "TransferFeeConfig",
+    transferFeeConfigAuthority: AUTHORITY,
+    withdrawWithheldAuthority: AUTHORITY,
+    withheldAmount: 0n,
+    olderTransferFee: { epoch: 0n, maximumFee: 5_000n, transferFeeBasisPoints: current },
+    // The newer entry applies from epoch 701; the read is at 700.
+    newerTransferFee: { epoch: 701n, maximumFee: 5_000n, transferFeeBasisPoints: newer },
+  });
+  const scaled: ExtensionArgs = {
+    __kind: "ScaledUiAmountConfig",
+    authority: AUTHORITY,
+    multiplier: 1.5,
+    newMultiplierEffectiveTimestamp: 0n,
+    newMultiplier: 1.5,
+  };
+  const interest: ExtensionArgs = {
+    __kind: "InterestBearingConfig",
+    rateAuthority: AUTHORITY,
+    initializationTimestamp: 1_700_000_000n,
+    preUpdateAverageRate: 500,
+    lastUpdateTimestamp: 1_700_000_000n,
+    currentRate: 500,
+  };
+  const hook = (authority: Address, programId: Address): ExtensionArgs => ({
+    __kind: "TransferHook",
+    authority,
+    programId,
+  });
+
+  /** Each mint state, and what each path refuses under it, in the row's order. */
+  const STATES: readonly [
+    string,
+    TokenTerms,
+    Record<TokenMovementPath, readonly TokenMovementRefusal[]>,
+  ][] = [
+    [
+      "native SOL",
+      NATIVE_TOKEN_TERMS,
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: [],
+        private_channels: [],
+        earn: [],
+      },
+    ],
+    [
+      "classic",
+      CLASSIC,
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: [],
+        private_channels: [],
+        earn: [],
+      },
+    ],
+    [
+      "fee config at 0 bps",
+      FEE_ZERO,
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: ["transfer_fee"],
+        private_channels: ["transfer_fee"],
+        earn: [],
+      },
+    ],
+    [
+      "fee charged now",
+      terms(TOKEN_2022, [charging(50, 50)]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: ["transfer_fee"],
+        private_channels: ["transfer_fee"],
+        earn: ["transfer_fee"],
+      },
+    ],
+    [
+      "fee set to be charged from the next epoch",
+      terms(TOKEN_2022, [charging(0, 50)]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: ["transfer_fee"],
+        private_channels: ["transfer_fee"],
+        earn: ["transfer_fee"],
+      },
+    ],
+    [
+      "scaled UI amount",
+      terms(TOKEN_2022, [scaled]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: ["display_rule"],
+        private_channels: [],
+        earn: [],
+      },
+    ],
+    [
+      "interest-bearing",
+      terms(TOKEN_2022, [interest]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: ["display_rule"],
+        private_channels: [],
+        earn: [],
+      },
+    ],
+    [
+      "hook program set",
+      HOOKED,
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: ["transfer_hook"],
+        dvp: ["transfer_hook"],
+        private_channels: ["transfer_hook"],
+        earn: ["transfer_hook"],
+      },
+    ],
+    [
+      "no hook program, a mutable hook authority (PYUSD, USDG)",
+      terms(TOKEN_2022, [hook(AUTHORITY, UNSET)]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: ["transfer_hook"],
+        private_channels: ["transfer_hook"],
+        earn: [],
+      },
+    ],
+    [
+      "an immutable hook with no program",
+      terms(TOKEN_2022, [hook(UNSET, UNSET)]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: [],
+        private_channels: [],
+        earn: [],
+      },
+    ],
+    [
+      "paused",
+      terms(TOKEN_2022, [{ __kind: "PausableConfig", authority: AUTHORITY, paused: true }]),
+      {
+        builder: ["paused"],
+        recurring: ["paused"],
+        issuance: ["paused"],
+        issuance_seize: ["paused"],
+        dvp: ["paused"],
+        private_channels: ["paused"],
+        earn: ["paused"],
+      },
+    ],
+    [
+      "pausable, not paused",
+      terms(TOKEN_2022, [{ __kind: "PausableConfig", authority: AUTHORITY, paused: false }]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: [],
+        private_channels: [],
+        earn: [],
+      },
+    ],
+    [
+      "non-transferable",
+      terms(TOKEN_2022, [{ __kind: "NonTransferable" }]),
+      {
+        builder: ["non_transferable"],
+        recurring: ["non_transferable"],
+        issuance: [],
+        issuance_seize: ["non_transferable"],
+        dvp: ["non_transferable"],
+        private_channels: ["non_transferable"],
+        earn: ["non_transferable"],
+      },
+    ],
+    [
+      "frozen by default",
+      terms(TOKEN_2022, [{ __kind: "DefaultAccountState", state: AccountState.Frozen }]),
+      {
+        builder: ["default_frozen"],
+        recurring: ["default_frozen"],
+        issuance: [],
+        issuance_seize: [],
+        dvp: [],
+        private_channels: ["default_frozen"],
+        earn: ["default_frozen"],
+      },
+    ],
+    [
+      "permanent delegate, confidential transfers and a close authority",
+      terms(TOKEN_2022, [
+        { __kind: "PermanentDelegate", delegate: AUTHORITY },
+        {
+          __kind: "ConfidentialTransferMint",
+          authority: AUTHORITY,
+          autoApproveNewAccounts: false,
+          auditorElgamalPubkey: null,
+        },
+        { __kind: "MintCloseAuthority", closeAuthority: AUTHORITY },
+      ]),
+      {
+        builder: [],
+        recurring: [],
+        issuance: [],
+        issuance_seize: [],
+        dvp: [],
+        private_channels: [],
+        earn: [],
+      },
+    ],
+    [
+      "a fee config, a mutable hook and paused at once, in the row's order",
+      terms(TOKEN_2022, [
+        fee(0, 0n),
+        hook(AUTHORITY, HOOK_PROGRAM),
+        { __kind: "PausableConfig", authority: AUTHORITY, paused: true },
+      ]),
+      {
+        builder: ["paused"],
+        recurring: ["paused"],
+        issuance: ["paused"],
+        issuance_seize: ["paused", "transfer_hook"],
+        dvp: ["transfer_fee", "transfer_hook", "paused"],
+        private_channels: ["paused", "transfer_fee", "transfer_hook"],
+        earn: ["paused", "transfer_hook"],
+      },
+    ],
+  ];
+
+  it("has a row for every path, and every state is decided on every path", () => {
+    for (const [label, stateTerms, expected] of STATES) {
+      assert.deepEqual(Object.keys(expected).sort(), [...TOKEN_MOVEMENT_PATHS].sort(), label);
+      for (const path of TOKEN_MOVEMENT_PATHS) {
+        const refusals = capabilityRefusals(stateTerms, path);
+        assert.deepEqual(
+          refusals.map((refusal) => refusal.refusal),
+          expected[path],
+          `${label} on ${path}`
+        );
+        // Every refusal is a `refuse`, except the recurring row's paused mint.
+        assert.deepEqual(
+          refusals.map((refusal) => refusal.disposition),
+          expected[path].map((reason) =>
+            path === "recurring" && reason === "paused" ? "hold" : "refuse"
+          ),
+          `${label} on ${path}`
+        );
+        const [first] = refusals;
+        assert.deepEqual(
+          support(stateTerms, path),
+          first === undefined
+            ? { supported: true }
+            : {
+                supported: false,
+                refusal: first.refusal,
+                message: first.message,
+                disposition: first.disposition,
+              },
+          `${label} on ${path}`
+        );
+      }
+    }
+  });
+
+  it("names the extension each refusal comes from", () => {
+    const refusals = capabilityRefusals(
+      terms(TOKEN_2022, [
+        fee(0, 0n),
+        interest,
+        hook(AUTHORITY, UNSET),
+        { __kind: "NonTransferable" },
+      ]),
+      "dvp"
+    );
+    assert.deepEqual(
+      refusals.map((refusal) => refusal.extension),
+      ["TransferFeeConfig", "InterestBearingConfig", "NonTransferable", "TransferHook"]
+    );
   });
 });
 
