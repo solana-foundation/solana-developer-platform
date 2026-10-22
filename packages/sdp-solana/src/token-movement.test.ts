@@ -36,13 +36,15 @@ import {
   resolveExtraAccountMetasForExecute,
 } from "@solana-program/token-2022";
 import { quoteMovement } from "./movement-quote";
-import { parseTokenAmount } from "./token-amount";
+import { baseUnits, parseTokenAmount } from "./token-amount";
 import {
   assertMovementBuildable,
   associatedTokenAccountSize,
   buildTokenMovement,
   type DestinationTokenAccount,
   decodeDestinationTokenAccount,
+  recurringPullFee,
+  recurringPullSupport,
   resolveTransferHookAccounts,
   support,
   TOKEN_MOVEMENT_REFUSALS,
@@ -206,6 +208,72 @@ describe("support", () => {
       { __kind: "PausableConfig", authority: AUTHORITY, paused: false },
     ]);
     assert.deepEqual(support(pausable, "builder"), { supported: true });
+  });
+});
+
+describe("recurring support (ADR 0012)", () => {
+  const PULL = { debit: baseUnits(1_000_000n), maxFeePerPull: baseUnits(0n) };
+
+  it("moves classic, fee and hook mints, and holds a paused mint instead of refusing it", () => {
+    for (const movable of [CLASSIC, FEE_ZERO, FEE_CAPPED, HOOKED]) {
+      assert.deepEqual(support(movable, "recurring"), { supported: true });
+    }
+    const paused = support(
+      terms(TOKEN_2022, [{ __kind: "PausableConfig", authority: AUTHORITY, paused: true }]),
+      "recurring"
+    );
+    assert.equal(paused.supported === false && paused.disposition, "hold");
+    assert.equal(paused.supported === false && paused.refusal, "paused");
+    const builderPaused = support(
+      terms(TOKEN_2022, [{ __kind: "PausableConfig", authority: AUTHORITY, paused: true }]),
+      "builder"
+    );
+    assert.equal(builderPaused.supported === false && builderPaused.disposition, "refuse");
+  });
+
+  it("refuses a non-transferable or frozen-by-default mint", () => {
+    for (const extensions of [
+      [{ __kind: "NonTransferable" }],
+      [{ __kind: "DefaultAccountState", state: AccountState.Frozen }],
+    ] satisfies ExtensionArgs[][]) {
+      const decision = support(terms(TOKEN_2022, extensions), "recurring");
+      assert.equal(decision.supported === false && decision.disposition, "refuse");
+    }
+  });
+
+  it("holds a pull to a destination that requires memos, which a CPI cannot send", () => {
+    const decision = recurringPullSupport(CLASSIC, PULL, { ...DESTINATION, requiresMemo: true });
+    assert.equal(decision.supported === false && decision.refusal, "memo_required");
+    assert.equal(decision.supported === false && decision.disposition, "hold");
+  });
+
+  it("holds a pull whose fee is above the mandate's tolerance, and makes one within it", () => {
+    // 50 bps of 1 token is 0.005, under the 0.005 cap.
+    assert.equal(recurringPullFee(FEE_CAPPED, PULL.debit), 5_000n);
+    const held = recurringPullSupport(FEE_CAPPED, PULL, DESTINATION);
+    assert.equal(held.supported === false && held.refusal, "fee_above_tolerance");
+    assert.deepEqual(
+      recurringPullSupport(FEE_CAPPED, { ...PULL, maxFeePerPull: baseUnits(5_000n) }, DESTINATION),
+      { supported: true }
+    );
+    assert.deepEqual(recurringPullSupport(FEE_ZERO, PULL, DESTINATION), { supported: true });
+  });
+
+  it("prices the fee at the larger of this epoch's and the next epoch's entry", () => {
+    // The newer entry, 100 bps, takes effect in the epoch after the read (epoch 700).
+    const rising = terms(TOKEN_2022, [
+      {
+        __kind: "TransferFeeConfig",
+        transferFeeConfigAuthority: AUTHORITY,
+        withdrawWithheldAuthority: AUTHORITY,
+        withheldAmount: 0n,
+        olderTransferFee: { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 },
+        newerTransferFee: { epoch: 701n, maximumFee: 1_000_000n, transferFeeBasisPoints: 100 },
+      },
+    ]);
+    assert.equal(recurringPullFee(rising, PULL.debit), 10_000n);
+    const held = recurringPullSupport(rising, PULL, DESTINATION);
+    assert.equal(held.supported === false && held.refusal, "fee_above_tolerance");
   });
 });
 

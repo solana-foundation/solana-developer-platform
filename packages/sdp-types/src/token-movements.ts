@@ -35,6 +35,24 @@ export type TokenMovementLegStatus = (typeof TOKEN_MOVEMENT_LEG_STATUSES)[number
 export const DEFAULT_TOKEN_MOVEMENT_BASIS = "debit" satisfies TokenMovementBasis;
 
 /**
+ * Why SDP will not make a movement now (`@sdp/solana/token-movement`). A
+ * builder path refuses it with a 400; a recurring pull is held with it, and
+ * the collection attempt reports it.
+ */
+export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
+  "non_transferable",
+  "paused",
+  "default_frozen",
+  "hook_unresolved",
+  "memo_required",
+  "nothing_credited",
+  /** A recurring pull's transfer fee is above the fee tolerance its mandate recorded. */
+  "fee_above_tolerance",
+] as const;
+
+export type TokenMovementRefusalReason = (typeof TOKEN_MOVEMENT_REFUSAL_REASONS)[number];
+
+/**
  * Whether SDP has checked what a movement moved against its quote. It is
  * separate from the transfer status, which never changes for it.
  */
@@ -55,6 +73,14 @@ export const AMOUNT_VERIFICATION_REASONS = [
   "sdp_built_transfer_landed",
   /** The movement failed, or was released, before it moved anything. */
   "movement_not_executed",
+  /**
+   * A movement SDP did not build itself (a program's CPI pull) landed, and the
+   * chain shows it moved exactly the quote: the instruction's debit, and the
+   * destination's raw token-balance delta as the credit.
+   */
+  "chain_delta_matched",
+  /** The chain shows the movement moved other amounts than the quote, or none SDP can read. */
+  "chain_delta_mismatch",
 ] as const;
 
 export type AmountVerificationReason = (typeof AMOUNT_VERIFICATION_REASONS)[number];
@@ -159,6 +185,27 @@ export interface TokenMovementDisplay {
   /** The chain time the display values were computed at (ISO 8601). */
   asOf: string;
 }
+
+/**
+ * What an expectation or a mandate fixes before any movement exists, in token
+ * units. A payment request fixes the credit its payment must deliver; the
+ * payer's debit and the fee are quoted when the payment is built. A recurring
+ * mandate fixes the debit of each pull; the fee, and so the credit, depend on
+ * the epoch the pull runs in, up to `maxFeePerPull`.
+ */
+export type TokenMovementExpectation =
+  | {
+      basis: "credit";
+      credit: string;
+      decimals: number;
+    }
+  | {
+      basis: "debit";
+      debit: string;
+      decimals: number;
+      /** The largest transfer fee one pull may pay; a pull that would pay more is held. */
+      maxFeePerPull: string;
+    };
 
 /**
  * What a movement moves, in token units. `debit = credit + fee`; the fee is
