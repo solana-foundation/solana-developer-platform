@@ -166,6 +166,34 @@ describe("Payments routes — signed submission", () => {
       expect(row).toMatchObject({ status: "finalized", slot: 200 });
     });
 
+    it("upgrades a transfer reconciliation confirmed during the finalized wait to finalized", async () => {
+      await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+        await settleProcessingTransfer(signature, { status: "confirmed", slot: 150 });
+        return {
+          signature,
+          slot: 100n,
+          confirmationStatus: "finalized",
+          err: null,
+        };
+      });
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBe(200);
+      const json = await readTransferResponse(res);
+      expect(json.data.transfer).toMatchObject({ status: "finalized", slot: 100 });
+      expect(await readTransferRow(json.data.transfer.id)).toMatchObject({ status: "finalized" });
+      expect(
+        await new AuditService(getDb(env)).findCriticalOutcome({
+          organizationId: TEST_ORG.id,
+          action: "transfer",
+          resourceType: "payment_transfer",
+          resourceId: json.data.transfer.id,
+        })
+      ).toMatchObject({ status: "success", metadata: { slot: "100" } });
+    });
+
     it("answers an ambiguous confirmation failure with the row reconciliation already finalized", async () => {
       await mockSignedSubmissionAdapter();
       confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
