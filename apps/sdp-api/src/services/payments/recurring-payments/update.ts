@@ -87,6 +87,7 @@ import {
   readRecurringPaymentStep,
   readRecurringPaymentStepIfResumed,
   recurringPaymentErrorMessage,
+  refuseWhileSubscriptionAuthorityRevokes,
   requireUpdatedAttempt,
   requireUpdatedPlan,
   requireUpdatedSubscription,
@@ -2020,6 +2021,12 @@ async function claimActiveRecurringPaymentUpdate(input: {
       movement: "recurring.update",
       recurringPaymentId: input.recurringPayment.id,
       // Moving the mandate signs with the wallet it leaves and the one it joins.
+      custodyWalletIds: input.newSourceCustodyWalletId
+        ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
+        : [input.sourceWallet.id],
+    });
+    await refuseWhileSubscriptionAuthorityRevokes(tx, {
+      projectId: input.projectId,
       custodyWalletIds: input.newSourceCustodyWalletId
         ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
         : [input.sourceWallet.id],

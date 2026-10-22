@@ -50,6 +50,7 @@ import {
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  refuseWhileSubscriptionAuthorityRevokes,
   type SubscriptionStep,
   savedStepSend,
   sendSubscriptionInstructions,
@@ -526,6 +527,13 @@ async function runRecurringPaymentLifecycle(
       recurringPaymentId: collectionState.recurringPayment.id,
       custodyWalletIds: [input.sourceWallet.id],
     });
+    // A cancel never touches the authority, and an exit is never held up.
+    if (input.operation === "resume") {
+      await refuseWhileSubscriptionAuthorityRevokes(tx, {
+        projectId: input.projectId,
+        custodyWalletIds: [input.sourceWallet.id],
+      });
+    }
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentLifecycle({
       recurringPaymentId: collectionState.recurringPayment.id,

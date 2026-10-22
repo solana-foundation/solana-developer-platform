@@ -921,6 +921,51 @@ export const RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY = [
   "processing",
   "confirmed",
 ] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+/**
+ * A revoke of a wallet's per-mint Subscriptions authority (HOO-2210): the
+ * revoke-subscription-authorities cron's row (migration 0153).
+ */
+export const SUBSCRIPTION_AUTHORITY_REVOCATION_STATUSES = [
+  "processing",
+  "confirmed",
+  "failed",
+] as const;
+export type SubscriptionAuthorityRevocationStatus =
+  (typeof SUBSCRIPTION_AUTHORITY_REVOCATION_STATUSES)[number];
+/** A revoke in these holds the wallet: activation, update and resume wait for it. */
+export const SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES = [
+  "processing",
+] as const satisfies readonly SubscriptionAuthorityRevocationStatus[];
+/**
+ * A recurring payment in these no longer needs its authority once its last
+ * billing period is over; every other status does, or may again.
+ */
+export const RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY = [
+  "canceled",
+  "expired",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+/** A subscription in these no longer needs its authority once its last billing period is over. */
+export const PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY = [
+  "canceled",
+  "expired",
+] as const satisfies readonly PaymentSubscriptionStatus[];
+/**
+ * A subscription in these was recorded before its authorization was sent. It stops holding its
+ * authority once nothing can still authorize it: no live recurring payment names it and no update
+ * in flight is creating it (a failed attempt has proven its authorization never landed).
+ */
+export const PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION = [
+  "pending_authorization",
+] as const satisfies readonly PaymentSubscriptionStatus[];
+/**
+ * A recurring payment in these may be about to use its wallet's authority before it records the
+ * authority on its row, so nothing on that wallet is revoked meanwhile.
+ */
+export const RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY = [
+  "activating",
+  "updating",
+  "resuming",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isInFlightRecurringPaymentAttemptStatus(
   status: PaymentRecurringPaymentAttemptStatus
 ): boolean {

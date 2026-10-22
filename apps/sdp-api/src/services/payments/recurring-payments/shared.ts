@@ -2,7 +2,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
 import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -36,6 +36,7 @@ import type {
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
 import { createTokenRepository } from "@/db/repositories/repository-factory";
+import { createPostgresSubscriptionAuthorityRevocationsRepository } from "@/db/repositories/subscription-authority-revocations.repository";
 import type { ApiKeyLifecycleColumns } from "@/lib/api-key-rotation";
 import {
   AppError,
@@ -715,5 +716,43 @@ export async function lockLiveActivatingKey(
       { custodyWalletId }
     );
     assertMovementAdmitted(decision, context);
+  }
+}
+
+/**
+ * Inside a claim that may use a wallet's Subscriptions authorities (activation, update, resume),
+ * waits out and then refuses a revoke of them in flight (HOO-2210). The revoke cron claims under
+ * the same per-wallet lock and skips a wallet with one of these in flight, so a subscription never
+ * lands on an authority that is being closed. A refused claim commits nothing and answers 409.
+ *
+ * @param tx - The claim's transaction.
+ * @param input - The project and every custody wallet the claimed operation signs with.
+ * @returns Resolves once no revoke holds the wallets' authorities.
+ * @throws AppError `CONFLICT` while a revoke on one of the wallets is in flight.
+ */
+export async function refuseWhileSubscriptionAuthorityRevokes(
+  tx: DatabaseExecutor,
+  input: { projectId: string; custodyWalletIds: readonly string[] }
+): Promise<void> {
+  const wallets = await tx.queryMany<{ public_key: string; environment: SdpEnvironment }>(
+    `SELECT DISTINCT w.public_key, p.environment
+       FROM custody_wallets w, projects p
+      WHERE w.id = ANY(?::text[]) AND p.id = ?
+      ORDER BY w.public_key`,
+    [[...input.custodyWalletIds], input.projectId]
+  );
+  const revocations = createPostgresSubscriptionAuthorityRevocationsRepository(tx);
+  for (const wallet of wallets) {
+    await revocations.lockWalletAuthorities(wallet.public_key);
+    if (
+      await revocations.hasRevocationHolding({
+        environment: wallet.environment,
+        walletAddress: wallet.public_key,
+      })
+    ) {
+      throw conflict(
+        "This wallet's recurring payment authorization is being cleaned up; retry in a minute"
+      );
+    }
   }
 }
