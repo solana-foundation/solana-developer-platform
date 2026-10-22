@@ -2249,6 +2249,7 @@ describe("payment transfer batches", () => {
                 { __kind: "ImmutableOwner" },
                 { __kind: "TransferFeeAmount", withheldAmount: 0n },
               ],
+              frozen: false,
             }),
           ],
         ])

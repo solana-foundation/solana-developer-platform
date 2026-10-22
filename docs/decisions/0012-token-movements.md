@@ -2,7 +2,8 @@
 
 Date: 2026-10-22
 Status: Accepted. PR 1 lands the foundations (types, Token Terms, quote, checks) and changes no
-call site. PRs 2–5 move every path onto them (Rollout).
+call site. PRs 2–4 move every path onto them, and PR 5 adds display and turns enforcement on
+(Rollout). Sign-offs still open are listed under "Open decisions".
 
 ## Context
 
@@ -112,8 +113,7 @@ them in one place, not adding special cases to every flow.
 - **No casts.** `pnpm check:value-movement` fails any `as` or `<T>` assertion to `BaseUnits`,
   `TokenAmount`, `DisplayAmount`, `MovementQuote`, `MovementIntent` or `AssetRef` outside the
   type's own module and tests, in the API, the dashboard and every package. It lands now because
-  nothing uses the types yet. The pins on transfer builders and conversion helpers land in PR 5,
-  with no allowlist of offenders: each PR moves its paths first.
+  nothing uses the types yet. The pins on transfer builders and conversion helpers land in PR 5.
 - **Target RPC budget.** A classic-mint transfer keeps its two reads; the mint read now brings the Clock
   with it. The reader is one request, native none.
 - **Ledger (PR 2).** `token_movement_legs` holds one row per (movement, destination): its asset,
@@ -188,9 +188,10 @@ them in one place, not adding special cases to every flow.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
-  0), or when a hook program is set. While Payments still refuses display-changing mints, it
-  also fails on an interest-bearing, scaled or non-transferable catalogue mint. CI runs it only on
-  pull requests that touch the catalogue or the script, because it uses public RPC.
+  0), or when a hook program is set or the mint is non-transferable. Once every payment path
+  reads terms live (PR 3), PR 5 drops the stopgap's refusal of interest-bearing and scaled
+  catalogue mints. CI runs it on pull requests that touch the catalogue, the decoder or the
+  script, because it uses public RPC, and PR 5 runs it daily (below).
 - **Mint matrix.** `packages/sdp-solana/src/test/mint-matrix.ts` creates one mint per profile
   on an embedded offline surfnet: classic, Token-2022 plain, fee 0 bps, fee 50 bps with a cap,
   scaled 1.5×, a scaled multiplier switch, interest ±5%, a hook program set, paused, and frozen
@@ -200,6 +201,65 @@ them in one place, not adding special cases to every flow.
   refused. It needs no network or secret but is not in CI yet. Surfpool 1.5.0's RPC leaves the
   interest rate out of `uiAmountString` and keeps an old multiplier after a time travel, so the
   program's own instruction is the display reference there.
+- **Display values stop at the RPC layer (PR 5).** `@sdp/rpc/solana`'s `SolanaRpc` type replaces
+  kit's token reads: `getTokenAccountsByOwner` and `getTokenAccountBalance` return `RpcTokenAmount`
+  (base units and decimals) and the token reads SDP does not make are left off, so a use of
+  `uiAmount` or `uiAmountString` fails typecheck. The local copies that named them (Private
+  Channels' gateway, Helius DAS) are gone, and `check:value-movement` refuses any reference to the
+  two fields of kit's `TokenAmount` outside `packages/sdp-rpc/src/` (a transaction's
+  `uiTokenAmount` included). The issuance supply refresh reads the supply from the mint account
+  instead of `getTokenSupply`.
+- **Balances in three units (PR 5).** Every balance carries `amount` (base units summed over the
+  wallet's accounts of the mint), `tokenAmount` (exact token units) and `displayAmount`,
+  `displayAsOf` and `displayRule`, computed from the summed base units under the mint's terms
+  (`services/token-movement/balance-display.ts`). This fixes a wallet with several accounts of one
+  mint showing its first account's RPC value. A classic SPL mint or native SOL shows its token
+  amount with no read. Every Token-2022 mint a balance request holds, across all its wallets, is
+  read in one `getMultipleAccounts` with the Clock (99 mints per request, pages in parallel); none
+  is cached, because interest accrues every second. A Token-2022 holding whose mint does not
+  decode, or whose display overflows the program's f64 math, is left out and logged: anyone can
+  send a wallet such a token. An aggregate sums base units per asset, native SOL and wrapped SOL
+  apart, and shows the display of the sum. `usdValue` prices `displayAmount`. The old `uiAmount`
+  field is removed, not kept beside the new ones, which is acceptable only before launch.
+  Private Channels balances report `tokenAmount` (SPC accounts are classic); Earn's share
+  reconciliation compares base units and makes no terms read.
+- **Terms and quote routes (PR 5).** `GET /v1/tokens/{mint}/terms` reports decimals, program, the
+  fee entries in force this epoch and next, the display rule, the flags, and every movement path
+  the deployment runs with its refusals (`capabilityRefusals`; Earn's path stays out while
+  PRO-2038 holds it). `POST /v1/tokens/{mint}/quote` takes `amount` (token units) or
+  `displayAmount` and a basis, and returns the token amount, `amounts` and `expiresAt`: 60 seconds
+  after the read, never later than a pending multiplier switch. A display debit converts with
+  `fromDisplay(atMost)`, a display credit with `atLeast`. Both are Payments reads under
+  `transfers.read`, metered as `token-terms` (60/min per credential, 240/min per organization),
+  one `getMultipleAccounts` each; the quote is a POST that stores nothing and takes no
+  Idempotency-Key.
+- **Dashboard (PR 5).** Balance checks and every "Max" use `tokenAmount`; screens show
+  `displayAmount`, with "≈" and its time for an interest-bearing mint. The single send and the
+  payment request form let a scaled or interest-bearing mint's amount be typed in display units,
+  quote it, show the token amount, fee and credit, and submit token units; a fee mint shows its
+  fee and credit preview.
+- **Unified view (PR 5).** A Payments row's amount comes from its legs when it has them (outbound:
+  the quoted debit; inbound and off-ramp: the credit; a batch chunk: its recipients' debits);
+  a row without a leg keeps its stored text. A verified on-ramp delivery's transfer `amount` is
+  its leg's credit too.
+- **Generic math and token conversion are apart (PR 5).** `@sdp/solana/amount` is generic
+  fixed-point math (`parseFixedDecimal`, `formatFixedDecimal`); base units ↔ token units go
+  through `@sdp/solana/token-amount` only.
+- **Enforcement (PR 5).** The `token-movement-*` capabilities in `check:value-movement` pin every
+  token-program transfer builder (both programs, `WithFee`, the hook variant, the
+  transfer-to-ATA plans and the client plugins), `@solana/pay`'s `createTransfer`, the unchecked
+  `Transfer` and SPC's transfer builder, Mosaic's mint, burn, force-burn, force-transfer,
+  transfer and fund-lock builders and `decimalAmountToRaw`, the subscriptions program's pull and
+  mandate builders, and the Token-2022 client's display math, to the builder and the registered
+  adapters, each with its reason in the script. They scan the dashboard too. Adding an entry is a
+  security-reviewed change. `MosaicService.transfer` and `prepareTransfer` are deleted.
+- **Recurring activation (PR 5)** refuses a destination whose token account is frozen
+  (`destination_frozen`), as it refuses one that requires memos.
+- **Validated constraints (PR 5).** Migration 0165 validates the CHECKs 0162–0164 added
+  `NOT VALID`.
+- **Mint watch schedule (PR 5).** `.github/workflows/well-known-mints-watch.yml` runs
+  `pnpm check:well-known-mints` daily; a failure (a fee charged, a hook set, or an unreadable
+  mint) fails the run and posts to the alert Slack channel. It never gates a pull request.
 - A client at `@solana-program/token-2022` 0.20.0 or later matches the program's display math.
   When the catalogue moves to it, `toDisplay` may call it; the program's test vectors in
   `token-terms.test.ts` guard that change.
@@ -218,16 +278,24 @@ Each PR ships alone.
 4. **Adapters:** issuance, the DvP, Private Channels and Earn refusal rows, the capability table
    with its Kora CI test, observed inbound transfers, on-ramp.
 5. **Display and finish:** balances, the terms and quote routes, `uiAmount` stripped at the RPC
-   boundary, the generic amount helper split from token conversion, the check-script pins, and
-   validated constraints.
+   boundary, the generic amount helper split from token conversion, the check-script pins,
+   validated constraints and the scheduled mint watch. Merge it only after PR 3's migrations
+   (0162–0164) are in production past their rollback window, since 0165 validates their CHECKs.
 
 ## Open decisions
 
-1. **Stable docs wording.** "UI units" becomes "token units (base units ÷ 10^decimals); see
-   `amounts.display` for wallet display" in PR 2. This is a stable-surface change and needs
-   sign-off. For classic mints, and for every movement SDP has made so far, the values do not
-   change.
-2. **Mint watch schedule:** where it runs and who gets the alert.
+1. **Sign-offs before PR 5 merges.** Each is a stable-surface or security-reviewed change:
+   - the stable docs' "UI units" wording becomes "token units (base units ÷ 10^decimals)"
+     (PR 2 started it; PR 5 finishes the balance, issuance and concepts pages). For classic
+     mints, and for every movement SDP has made so far, the values do not change;
+   - the balance responses' `uiAmount` is removed for `tokenAmount`, `displayAmount`,
+     `displayAsOf` and `displayRule` (a breaking change to a stable response, acceptable only
+     before launch);
+   - `GET /v1/tokens/{mint}/terms` and `POST /v1/tokens/{mint}/quote` join the public OpenAPI
+     document (AGENTS.md: a named security sign-off);
+   - every `token-movement-*` allowlist entry in `scripts/check-value-movement.mjs`.
+2. **Mint watch alerts:** decided in PR 5 (daily, Slack on failure). Open: whether a fee or hook
+   finding should also hold the affected token's flows automatically.
 3. **Credit-basis recurring mandates**, after v1.
 4. **When the DvP, Private Channels and Earn refusals lift:** when those programs support
    `TransferCheckedWithFee` and hooks.
@@ -236,3 +304,7 @@ Each PR ships alone.
    the gate allows.
 6. **Issuer operations** (update a multiplier or fee, harvest withheld fees) are out of scope;
    Token Terms can support them later.
+7. **The subscription collect route** (`POST /v1/payments/subscriptions/{id}/prepare-collection`)
+   builds an unsigned pull of the stored debit for the puller to sign without the job's pre-pull
+   terms read and fee-tolerance hold. It is registered as a recurring adapter; whether it should
+   share the job's hold is open.

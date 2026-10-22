@@ -129,8 +129,10 @@ export function rowMandate(row: MandateRow, terms: MintTokenTerms): RecurringMan
 
 /**
  * Refuses activating a mandate the recurring path cannot pull: a mint the
- * recurring row refuses, or a destination that requires memos (the
- * subscriptions program's CPI cannot put a memo first).
+ * recurring row refuses, a destination that requires memos (the
+ * subscriptions program's CPI cannot put a memo first), or a destination
+ * whose existing token account is frozen (the program cannot thaw it, so
+ * every pull would be held as `destination_frozen`).
  *
  * @throws AppError (400) with the refusal's `reason`.
  */
@@ -146,6 +148,12 @@ export function assertMandateActivatable(
     throw badRequest(
       `The destination token account ${destination.tokenAccount} requires a memo on incoming transfers, which a recurring pull cannot send`,
       { reason: TOKEN_MOVEMENT_REFUSALS.memoRequired }
+    );
+  }
+  if (destination.frozen) {
+    throw badRequest(
+      `The destination token account ${destination.tokenAccount} is frozen; its freeze authority must thaw it before a recurring pull can credit it`,
+      { reason: TOKEN_MOVEMENT_REFUSALS.destinationFrozen }
     );
   }
 }

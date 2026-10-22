@@ -58,7 +58,13 @@ async function classicMintAccounts(
     for (const owner of owners) {
       accounts.set(
         await associatedTokenAccount("spl-token", mint, owner),
-        tokenRpcAccount("spl-token", { mint, owner, amount: 1_000_000_000n, extensions: null })
+        tokenRpcAccount("spl-token", {
+          mint,
+          owner,
+          amount: 1_000_000_000n,
+          extensions: null,
+          frozen: false,
+        })
       );
     }
   }

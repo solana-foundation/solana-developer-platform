@@ -381,6 +381,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
               { __kind: "ImmutableOwner" },
               { __kind: "MemoTransfer", requireIncomingTransferMemos: true },
             ],
+            frozen: false,
           }),
         ],
       ])
