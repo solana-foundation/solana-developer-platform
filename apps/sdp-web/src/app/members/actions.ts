@@ -185,7 +185,7 @@ export type InviteMemberResult =
   | { status: "error"; message: string; answer?: ApiAnswer };
 
 const inviteFormSchema = z.object({
-  email: z.string().trim().min(1),
+  email: z.string().trim().toLowerCase().min(1),
   role: z.enum(ORGANIZATION_ROLES),
   idempotencyKey: idempotencyKeySchema,
 });

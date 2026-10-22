@@ -147,8 +147,8 @@ export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolea
                   }
                   // Accepted: the invitation becomes a membership, so a failed
                   // switch leaves it to pick from the list rather than accept again.
-                  await Promise.all([userInvitations.revalidate(), userMemberships.revalidate()]);
                   try {
+                    await Promise.all([userInvitations.revalidate(), userMemberships.revalidate()]);
                     await setActive({ organization: organization.id });
                     router.refresh();
                   } catch {
