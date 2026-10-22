@@ -533,8 +533,9 @@ describe("Public payment request routes", () => {
       expect(outcome.status).toBe("failure");
       expect(JSON.parse(outcome.metadata)).toMatchObject({
         auditPhase: "outcome",
-        error: "kora refused",
+        errorCode: "UNCLASSIFIED_ERROR",
       });
+      expect(outcome.metadata).not.toContain("kora refused");
     });
 
     it("refuses and does not store the grant when its audit entry cannot be persisted", async () => {
