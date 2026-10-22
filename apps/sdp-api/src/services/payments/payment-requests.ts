@@ -6,6 +6,7 @@ import { toNumberAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, type Signature, signature } from "@solana/kit";
 import { ValidateTransferError, validateTransfer } from "@solana/pay";
+import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
@@ -39,21 +40,26 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
 }
 
-interface FoundPayment {
-  signature: Signature;
-  slot: bigint;
-  blockTime: bigint | null;
-}
+const foundPaymentSchema = z.object({
+  signature: z.custom<Signature>(),
+  slot: z.bigint(),
+  blockTime: z.bigint().nullable(),
+});
+type FoundPayment = z.infer<typeof foundPaymentSchema>;
 
-type PaymentSearchResult =
-  | { kind: "paid"; found: FoundPayment }
-  | { kind: "pending" }
-  | { kind: "none" };
+const paymentSearchResultSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("paid"), found: foundPaymentSchema }),
+  z.object({ kind: z.literal("pending") }),
+  z.object({ kind: z.literal("none") }),
+]);
+type PaymentSearchResult = z.infer<typeof paymentSearchResultSchema>;
 
-type CandidateVerdict =
-  | { kind: "paid"; found: FoundPayment }
-  | { kind: "rejected" }
-  | { kind: "retry"; reason: string };
+const candidateVerdictSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("paid"), found: foundPaymentSchema }),
+  z.object({ kind: z.literal("rejected") }),
+  z.object({ kind: z.literal("retry"), reason: z.string() }),
+]);
+type CandidateVerdict = z.infer<typeof candidateVerdictSchema>;
 
 interface PaymentRequestKey {
   requestId: string;
