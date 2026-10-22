@@ -1,5 +1,8 @@
+import { Context } from "hono";
 import { describe, expect, it, vi } from "vitest";
+import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
 import type { KVStore } from "@/runtime/kv";
+import type { Env } from "@/types/env";
 import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditPersistenceError, AuditService } from "./audit.service";
 
 function createMemoryCheckpointStore(): KVStore {
@@ -99,6 +102,39 @@ function createAuditWriter(
     ),
   };
   return { db, queryOne, execute, checkpoint: createMemoryCheckpointStore() };
+}
+
+function unsupportedLedgerRead(): never {
+  throw new Error("The audit ledger writes through queryOne and execute only");
+}
+
+function criticalIntentAudit() {
+  const writer = createAuditWriter();
+  const tx: DatabaseExecutor = {
+    prepare: unsupportedLedgerRead,
+    queryOne: async <T>(query: string, params?: readonly unknown[]) => {
+      const row = await writer.queryOne(query, params);
+      // SAFETY: the ledger write reads only the head and inserted-row columns createAuditWriter returns.
+      return row as T | null;
+    },
+    queryMany: unsupportedLedgerRead,
+    execute: writer.execute,
+  };
+  const db: DatabaseClient = {
+    ...tx,
+    batch: unsupportedLedgerRead,
+    transaction: unsupportedLedgerRead,
+    lockedTransactionWithPostCommit: async (_lockKey, callback, afterCommit) => {
+      const result = await callback(tx);
+      await afterCommit(result);
+      return result;
+    },
+  };
+  return {
+    queryOne: writer.queryOne,
+    audit: new AuditService(db, writer.checkpoint),
+    context: new Context<{ Bindings: Env }>(new Request("https://audit.test/")),
+  };
 }
 
 function insertedCalls(queryOne: ReturnType<typeof vi.fn>) {
@@ -440,15 +476,18 @@ describe("AuditService", () => {
   });
 
   it("refuses a critical intent naming another organization than the authenticated caller's", async () => {
-    const { db, queryOne, checkpoint } = createAuditWriter();
-    const context = {
-      get: (key: string) =>
-        key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
-      req: { header: () => null },
-    };
+    const { audit, context, queryOne } = criticalIntentAudit();
+    context.set("apiKey", {
+      id: "ak_123",
+      organizationId: "org_123",
+      projectId: "project_123",
+      grants: [],
+      environment: "sandbox",
+      walletAccess: { scope: "all" },
+    });
 
     await expect(
-      new AuditService(db as never, checkpoint).beginCritical(context as never, {
+      audit.beginCritical(context, {
         organizationId: "org_other",
         action: "sign",
         resourceType: "payment_request",
@@ -460,13 +499,9 @@ describe("AuditService", () => {
   });
 
   it("files an unauthenticated caller's critical intent under the entry's organization", async () => {
-    const { db, queryOne, checkpoint } = createAuditWriter();
-    const context = {
-      get: () => null,
-      req: { header: () => null },
-    };
+    const { audit, context, queryOne } = criticalIntentAudit();
 
-    await new AuditService(db as never, checkpoint).beginCritical(context as never, {
+    await audit.beginCritical(context, {
       organizationId: "org_pay",
       action: "sign",
       resourceType: "payment_request",
