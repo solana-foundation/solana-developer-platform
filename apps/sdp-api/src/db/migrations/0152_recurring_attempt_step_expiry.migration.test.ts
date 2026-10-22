@@ -127,7 +127,7 @@ beforeEach(async () => {
        DROP CONSTRAINT payment_recurring_lifecycle_attempts_expiry_signature_check,
        DROP COLUMN last_valid_block_height`
   );
-  // Later migrations use the domain too (0153, 0159, 0185); rolled back with the rest.
+  // Later migrations use the domain too (0153, 0159, 0183, 0162, 0163); rolled back with the rest.
   await client.query(
     `ALTER TABLE payment_subscription_authority_revocations
        DROP COLUMN last_valid_block_height`
@@ -137,6 +137,23 @@ beforeEach(async () => {
        DROP COLUMN last_valid_block_height`
   );
   await client.query("DROP TABLE token_movement_legs");
+  await client.query("DROP TABLE payment_request_transactions");
+  await client.query(
+    `ALTER TABLE payment_requests
+       DROP CONSTRAINT payment_requests_expectation_shape,
+       DROP COLUMN expected_credit`
+  );
+  for (const [table, constraint] of [
+    ["payment_recurring_payments", "payment_recurring_payments_mandate_shape"],
+    ["payment_subscription_plans", "payment_subscription_plans_mandate_shape"],
+  ]) {
+    await client.query(
+      `ALTER TABLE ${table}
+         DROP CONSTRAINT ${constraint},
+         DROP COLUMN mandate_debit,
+         DROP COLUMN max_fee_per_pull`
+    );
+  }
   await client.query("DROP DOMAIN sdp_u64");
 
   tenant = await seedOrgProject(client, "0152");
